@@ -14,16 +14,17 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea"; // Assuming Textarea might be useful for description in future
+// import { Textarea } from "@/components/ui/textarea"; // Assuming Textarea might be useful for description in future
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { stockItemSchema, type StockItemFormValues } from "@/types/item";
 import { Loader2, Save } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
-import { getFirestore, doc, setDoc, addDoc, collection, serverTimestamp, Timestamp } from "firebase/firestore";
+import { getFirestore, doc, setDoc, addDoc, collection } from "firebase/firestore";
 import { firebaseConfig } from "@/lib/firebaseConfig";
 import { getApps, initializeApp } from "firebase/app";
 import type { StockItem } from "@/types";
+import { useState } from "react"; // Added useState import
 
 if (!getApps().length) {
   try {
@@ -69,27 +70,30 @@ export default function ItemForm({ initialData, itemId }: ItemFormProps) {
   async function onSubmit(values: StockItemFormValues) {
     setIsSubmitting(true);
     try {
-      const itemData = {
+      const itemDataToSave = {
         ...values,
-        lastUpdated: new Date().toISOString(), // Or use Firestore serverTimestamp for more accuracy
+        price: Number(values.price), // Ensure price is a number
+        quantity: Number(values.quantity), // Ensure quantity is a number
+        lowStockThreshold: Number(values.lowStockThreshold), // Ensure threshold is a number
+        lastUpdated: new Date().toISOString(),
       };
 
       if (isEditMode && itemId) {
         const itemRef = doc(db, "stockItems", itemId);
-        await setDoc(itemRef, itemData, { merge: true }); // Use setDoc with merge for updates
+        await setDoc(itemRef, itemDataToSave, { merge: true });
         toast({
           title: "Item Updated",
           description: `${values.name} has been successfully updated.`,
         });
       } else {
-        await addDoc(collection(db, "stockItems"), itemData);
+        await addDoc(collection(db, "stockItems"), itemDataToSave);
         toast({
           title: "Item Added",
           description: `${values.name} has been successfully added to stock.`,
         });
       }
-      router.push("/items"); // Redirect to items list
-      router.refresh(); // Refresh server components if any
+      router.push("/items");
+      router.refresh(); 
     } catch (error: any) {
       console.error("Error saving item:", error);
       toast({
@@ -146,7 +150,7 @@ export default function ItemForm({ initialData, itemId }: ItemFormProps) {
                   <FormItem>
                     <FormLabel>Quantity</FormLabel>
                     <FormControl>
-                      <Input type="number" placeholder="0" {...field} disabled={isSubmitting} className="bg-input"/>
+                      <Input type="number" placeholder="0" {...field} onChange={e => field.onChange(parseInt(e.target.value, 10) || 0)} disabled={isSubmitting} className="bg-input"/>
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -174,7 +178,7 @@ export default function ItemForm({ initialData, itemId }: ItemFormProps) {
                   <FormItem>
                     <FormLabel>Price per Unit ($)</FormLabel>
                     <FormControl>
-                      <Input type="number" step="0.01" placeholder="0.00" {...field} disabled={isSubmitting} className="bg-input"/>
+                      <Input type="number" step="0.01" placeholder="0.00" {...field} onChange={e => field.onChange(parseFloat(e.target.value) || 0)} disabled={isSubmitting} className="bg-input"/>
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -187,7 +191,7 @@ export default function ItemForm({ initialData, itemId }: ItemFormProps) {
                   <FormItem>
                     <FormLabel>Low Stock Threshold</FormLabel>
                     <FormControl>
-                      <Input type="number" placeholder="10" {...field} disabled={isSubmitting} className="bg-input"/>
+                      <Input type="number" placeholder="10" {...field} onChange={e => field.onChange(parseInt(e.target.value, 10) || 0)} disabled={isSubmitting} className="bg-input"/>
                     </FormControl>
                     <FormMessage />
                   </FormItem>
