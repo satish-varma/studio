@@ -26,7 +26,16 @@ import type { StockItem, SoldItem } from "@/types";
 import { PlusCircle, Trash2, DollarSign, Loader2 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { getFirestore, collection, onSnapshot, addDoc, Timestamp, doc, writeBatch, getDoc, DocumentData, QuerySnapshot } from "firebase/firestore";
+import { 
+  getFirestore, 
+  collection, 
+  onSnapshot, 
+  doc, 
+  runTransaction, 
+  Timestamp,
+  QuerySnapshot,
+  DocumentData 
+} from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
@@ -44,7 +53,7 @@ const db = getFirestore();
 const saleItemSchema = z.object({
   itemId: z.string().min(1, "Please select an item."),
   quantity: z.coerce.number().min(1, "Quantity must be at least 1."),
-  pricePerUnit: z.coerce.number().positive("Price must be positive."), // Price now comes from item data
+  pricePerUnit: z.coerce.number().positive("Price must be positive."),
   name: z.string(), // To store item name for the transaction
 });
 
@@ -76,7 +85,6 @@ export default function RecordSaleForm() {
 
   useEffect(() => {
     // Fetch available stock items from Firestore
-    // TODO: Secure this with Firebase Security Rules
     const itemsCollectionRef = collection(db, "stockItems");
     const unsubscribe = onSnapshot(itemsCollectionRef, 
       (snapshot: QuerySnapshot<DocumentData>) => {
@@ -84,7 +92,7 @@ export default function RecordSaleForm() {
           id: doc.id,
           ...doc.data()
         } as StockItem));
-        // Filter out items with 0 quantity
+        // Filter out items with 0 quantity, though ideally form validation should prevent this too
         setAvailableItems(fetchedItems.filter(item => item.quantity > 0));
         setLoadingItems(false);
       },
@@ -112,83 +120,79 @@ export default function RecordSaleForm() {
   async function onSubmit(values: RecordSaleFormValues) {
     if (!user) {
       toast({ title: "Authentication Error", description: "You must be logged in to record a sale.", variant: "destructive"});
+      setIsSubmitting(false);
       return;
     }
     setIsSubmitting(true);
 
-    // TODO: Implement this entire operation as a Firebase Transaction
-    // This ensures that either all stock updates and the sale record are created, or none are.
-    // This is CRITICAL for data consistency in production.
-    // For now, using a batch write for item updates, but sale creation is separate.
-
-    const batch = writeBatch(db);
-    const soldItemsForTransaction: SoldItem[] = [];
-    let canProceed = true;
-
-    // Validate stock and prepare batch updates
-    for (const item of values.items) {
-      const stockItemRef = doc(db, "stockItems", item.itemId);
-      try {
-        const stockItemSnap = await getDoc(stockItemRef);
-        if (!stockItemSnap.exists()) {
-          toast({ title: "Item Error", description: `Item ${item.name} not found.`, variant: "destructive" });
-          canProceed = false;
-          break;
-        }
-        const currentStockData = stockItemSnap.data() as StockItem;
-        if (currentStockData.quantity < item.quantity) {
-          toast({ title: "Stock Error", description: `Not enough stock for ${item.name}. Available: ${currentStockData.quantity}`, variant: "destructive" });
-          canProceed = false;
-          break;
-        }
-        batch.update(stockItemRef, { quantity: currentStockData.quantity - item.quantity });
-        soldItemsForTransaction.push({
-          itemId: item.itemId,
-          name: item.name, // Name is already in the form item
-          quantity: item.quantity,
-          pricePerUnit: item.pricePerUnit, // Price is already in the form item
-          totalPrice: item.quantity * item.pricePerUnit,
-        });
-      } catch (error) {
-        console.error("Error checking stock or preparing batch:", error);
-        toast({ title: "Transaction Error", description: "Could not verify stock. Please try again.", variant: "destructive"});
-        canProceed = false;
-        break;
-      }
-    }
-
-    if (!canProceed) {
-      setIsSubmitting(false);
-      return;
-    }
-
     try {
-      // Add sale transaction
-      const salesCollectionRef = collection(db, "salesTransactions");
-      await addDoc(salesCollectionRef, {
-        items: soldItemsForTransaction,
-        totalAmount: totalSaleAmount,
-        transactionDate: Timestamp.now(),
-        staffId: user.uid,
-        staffName: user.displayName || user.email, // Store staff name for easier display
+      await runTransaction(db, async (transaction) => {
+        const soldItemsForTransaction: SoldItem[] = [];
+        
+        // Step 1: Read current stock levels and validate within the transaction
+        for (const formItem of values.items) {
+          const stockItemRef = doc(db, "stockItems", formItem.itemId);
+          const stockItemSnap = await transaction.get(stockItemRef);
+
+          if (!stockItemSnap.exists()) {
+            throw new Error(`Item ${formItem.name} (ID: ${formItem.itemId}) not found in stock.`);
+          }
+          const currentStockData = stockItemSnap.data() as StockItem;
+          if (currentStockData.quantity < formItem.quantity) {
+            throw new Error(`Not enough stock for ${formItem.name}. Available: ${currentStockData.quantity}, Requested: ${formItem.quantity}.`);
+          }
+
+          // Prepare item for sales transaction record
+          soldItemsForTransaction.push({
+            itemId: formItem.itemId,
+            name: formItem.name,
+            quantity: formItem.quantity,
+            pricePerUnit: formItem.pricePerUnit,
+            totalPrice: formItem.quantity * formItem.pricePerUnit,
+          });
+        }
+
+        // Step 2: Create the sales transaction document
+        const salesCollectionRef = collection(db, "salesTransactions");
+        const newSaleRef = doc(salesCollectionRef); // Auto-generate ID
+        transaction.set(newSaleRef, {
+          items: soldItemsForTransaction,
+          totalAmount: totalSaleAmount,
+          transactionDate: Timestamp.now(),
+          staffId: user.uid,
+          staffName: user.displayName || user.email,
+        });
+
+        // Step 3: Update stock quantities for each item sold
+        for (const formItem of values.items) {
+          const stockItemRef = doc(db, "stockItems", formItem.itemId);
+          // We've already read and validated the stock, now we calculate new quantity
+          // To be absolutely safe, one could re-read here, but typical transaction patterns
+          // read, validate, then write based on those reads.
+          const stockItemSnap = await transaction.get(stockItemRef); // Re-get to ensure atomicity if needed, or trust prior get.
+          const currentStockData = stockItemSnap.data() as StockItem;
+          const newQuantity = currentStockData.quantity - formItem.quantity;
+          
+          transaction.update(stockItemRef, { 
+            quantity: newQuantity,
+            lastUpdated: Timestamp.now().toDate().toISOString() 
+          });
+        }
       });
 
-      // Commit stock updates
-      await batch.commit();
-
       toast({
-        title: "Sale Recorded!",
-        description: `Total: $${totalSaleAmount.toFixed(2)}. ${values.items.length} item(s) sold.`,
+        title: "Sale Recorded Successfully!",
+        description: `Total: $${totalSaleAmount.toFixed(2)}. Stock levels updated.`,
       });
       form.reset({ items: [{ itemId: "", quantity: 1, pricePerUnit: 0, name: "" }] });
-    } catch (error) {
-      console.error("Error recording sale:", error);
+
+    } catch (error: any) {
+      console.error("Error recording sale transaction:", error);
       toast({
         title: "Sale Recording Failed",
-        description: "An error occurred while recording the sale. Stock levels may not have been updated. Please check manually or try again.",
+        description: error.message || "An unexpected error occurred. The sale was not recorded, and stock levels were not changed.",
         variant: "destructive",
       });
-      // TODO: Implement a rollback mechanism or notify admin if batch commit fails after sale doc creation or vice-versa (if not using a full transaction)
     } finally {
       setIsSubmitting(false);
     }
@@ -197,12 +201,8 @@ export default function RecordSaleForm() {
   const handleItemChange = (value: string, index: number) => {
     const selectedItem = availableItems.find(ai => ai.id === value);
     if (selectedItem) {
-      // Assuming price is stored in `lowStockThreshold * 2.5` as per mock, replace with actual price field in StockItem
-      // For now, let's assume StockItem has a 'price' field
-      // const price = selectedItem.price || (selectedItem.lowStockThreshold * 2.5); // Use actual price field
-      // TODO: Your StockItem type and Firestore data should include a 'price' field.
-      // Using a placeholder price logic for now.
-      const price = parseFloat(((selectedItem.lowStockThreshold || 10) * 2.5).toFixed(2)); 
+      // Use the price from the StockItem
+      const price = selectedItem.price; 
 
       update(index, { 
         ...watchedItems[index], 
@@ -210,6 +210,13 @@ export default function RecordSaleForm() {
         name: selectedItem.name,
         pricePerUnit: price 
       });
+    } else { // Clear price if item is de-selected or not found
+        update(index, {
+            ...watchedItems[index],
+            itemId: "",
+            name: "",
+            pricePerUnit: 0
+        });
     }
   };
 
@@ -257,9 +264,8 @@ export default function RecordSaleForm() {
                         </FormControl>
                         <SelectContent>
                           {availableItems.map((item) => (
-                            <SelectItem key={item.id} value={item.id} disabled={item.quantity === 0}>
-                              {item.name} (Stock: {item.quantity}) 
-                              {/* TODO: Add price display here: - $X.XX */}
+                            <SelectItem key={item.id} value={item.id} disabled={item.quantity <= 0}>
+                              {item.name} (Stock: {item.quantity}) - ${item.price.toFixed(2)}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -284,12 +290,12 @@ export default function RecordSaleForm() {
                             {...formField} 
                             className="bg-input" 
                             min="1"
-                            max={maxQuantity?.toString()} // Set max based on available stock
+                            max={maxQuantity?.toString()} 
                             disabled={isSubmitting || !watchedItems[index]?.itemId}
                             onChange={(e) => {
                                 let val = parseInt(e.target.value, 10);
                                 if (maxQuantity !== undefined && val > maxQuantity) val = maxQuantity;
-                                if (val < 1) val = 1;
+                                if (val < 1 && e.target.value !== "") val = 1; // Allow clearing but default to 1 if typing
                                 formField.onChange(isNaN(val) ? "" : val);
                             }}
                           />
@@ -311,7 +317,7 @@ export default function RecordSaleForm() {
                             placeholder="Price" 
                             {...formField} 
                             className="bg-input" 
-                            readOnly // Price is set from selected item
+                            readOnly 
                             disabled 
                         />
                       </FormControl>
@@ -348,7 +354,7 @@ export default function RecordSaleForm() {
             </div>
           </CardContent>
           <CardFooter>
-            <Button type="submit" className="w-full" size="lg" disabled={isSubmitting || loadingItems || fields.some(f => !f.itemId)}>
+            <Button type="submit" className="w-full" size="lg" disabled={isSubmitting || loadingItems || fields.some(f => !f.itemId || !f.quantity || f.quantity <=0 )}>
               {isSubmitting ? <Loader2 className="animate-spin mr-2" /> : null}
               Record Sale
             </Button>
