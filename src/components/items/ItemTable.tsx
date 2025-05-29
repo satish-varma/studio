@@ -184,14 +184,7 @@ export function ItemTable({ items }: ItemTableProps) {
                     className="rounded-md object-cover"
                     data-ai-hint={`${item.category} item`}
                   />
-                </TableCell>
-                <TableCell className="font-medium text-foreground">{item.name}</TableCell>
-                <TableCell className="text-muted-foreground">{item.category}</TableCell>
-                <TableCell className="text-right text-foreground">{item.quantity}</TableCell>
-                <TableCell className="text-muted-foreground">{item.unit}</TableCell>
-                <TableCell className="text-right text-foreground">₹{item.price.toFixed(2)}</TableCell> {/* Updated currency symbol */}
-                <TableCell className="text-right text-muted-foreground">{item.lowStockThreshold}</TableCell>
-                <TableCell>
+                </TableCell><TableCell className="font-medium text-foreground">{item.name}</TableCell><TableCell className="text-muted-foreground">{item.category}</TableCell><TableCell className="text-right text-foreground">{item.quantity}</TableCell><TableCell className="text-muted-foreground">{item.unit}</TableCell><TableCell className="text-right text-foreground">₹{item.price.toFixed(2)}</TableCell><TableCell className="text-right text-muted-foreground">{item.lowStockThreshold}</TableCell><TableCell>
                   <Badge
                     variant={
                       isOutOfStock ? "destructive" : isLowStock ? "outline" : "secondary"
@@ -203,9 +196,7 @@ export function ItemTable({ items }: ItemTableProps) {
                   >
                     {isOutOfStock ? "Out of Stock" : isLowStock ? "Low Stock" : "In Stock"}
                   </Badge>
-                </TableCell>
-                <TableCell className="text-muted-foreground">{formatDate(item.lastUpdated)}</TableCell>
-                <TableCell className="text-right">
+                </TableCell><TableCell className="text-muted-foreground">{formatDate(item.lastUpdated)}</TableCell><TableCell className="text-right">
                   <Dialog open={stockUpdateItemId === item.id} onOpenChange={(open) => !open && setStockUpdateItemId(null)}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
