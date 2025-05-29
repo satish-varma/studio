@@ -11,6 +11,7 @@ import { getApps, initializeApp } from 'firebase/app';
 import type { StockItem } from '@/types';
 import { Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { Button } from '@/components/ui/button'; // Added Button import
 
 if (!getApps().length) {
   try {
@@ -100,7 +101,7 @@ export default function EditItemPage() {
   // This effect is a client-side title update.
   useEffect(() => {
     if (item?.name) {
-      document.title = \`Edit \${item.name} - StallSync\`;
+      document.title = `Edit ${item.name} - StallSync`;
     }
     return () => { document.title = "StallSync - Stock Management"; } // Reset on unmount
   }, [item?.name]);
