@@ -85,12 +85,7 @@ export function SalesTable({ transactions }: SalesTableProps) {
               <TableRow key={sale.id}>
                 <TableCell className="font-medium text-primary">
                   <Button variant="link" className="p-0 h-auto" onClick={() => handleViewDetails(sale.id)}>{sale.id.substring(0,8)}...</Button>
-                </TableCell>
-                <TableCell className="text-muted-foreground">{formatDate(sale.transactionDate)}</TableCell>
-                <TableCell className="text-muted-foreground">{totalItemsSold}</TableCell>
-                <TableCell className="text-right font-semibold text-accent">₹{sale.totalAmount.toFixed(2)}</TableCell> {/* Updated currency symbol */}
-                <TableCell className="text-muted-foreground">{sale.staffName || sale.staffId.substring(0,8)}</TableCell>
-                <TableCell className="text-right">
+                </TableCell><TableCell className="text-muted-foreground">{formatDate(sale.transactionDate)}</TableCell><TableCell className="text-muted-foreground">{totalItemsSold}</TableCell><TableCell className="text-right font-semibold text-accent">₹{sale.totalAmount.toFixed(2)}</TableCell><TableCell className="text-muted-foreground">{sale.staffName || sale.staffId.substring(0,8)}</TableCell><TableCell className="text-right">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button variant="ghost" size="icon" className="h-8 w-8">
