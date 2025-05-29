@@ -12,7 +12,6 @@ import {
 } from "@/components/ui/select";
 import { PlusCircle, Search, Filter } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useToast } from "@/hooks/use-toast";
 
 interface ItemControlsProps {
   searchTerm: string;
@@ -34,15 +33,9 @@ export function ItemControls({
   categories,
 }: ItemControlsProps) {
   const router = useRouter();
-  const { toast } = useToast();
 
   const handleAddNewItem = () => {
-    // TODO: Implement navigation to a dedicated "add new item" page or open a modal form.
-    // For now, router.push('/items/new'); could be a target if such a page exists.
-    toast({
-      title: "TODO: Implement Add New Item",
-      description: "This functionality requires a form to input new item details.",
-    });
+    router.push('/items/new');
   };
 
   return (

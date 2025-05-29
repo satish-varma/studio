@@ -1,3 +1,4 @@
+
 "use client";
 
 import Link from "next/link";
@@ -10,6 +11,8 @@ import {
   Users,
   Settings,
   LucideIcon,
+  UserCircle, // Added for Profile
+  LifeBuoy,   // Added for Support
 } from "lucide-react";
 import {
   SidebarMenu,
@@ -24,15 +27,18 @@ interface NavItem {
   label: string;
   icon: LucideIcon;
   roles?: UserRole[]; // Roles that can see this item
+  exactMatch?: boolean; // For items like Dashboard that shouldn't highlight for sub-routes
 }
 
 const navItems: NavItem[] = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ['staff', 'manager', 'admin'] },
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ['staff', 'manager', 'admin'], exactMatch: true },
   { href: "/items", label: "Stock Items", icon: Package, roles: ['staff', 'manager', 'admin'] },
   { href: "/sales/record", label: "Record Sale", icon: ShoppingCart, roles: ['staff', 'manager', 'admin'] },
-  { href: "/sales/history", label: "Sales History", icon: History, roles: ['staff', 'manager', 'admin'] }, // Filtering by staff might be manager only
-  { href: "/users", label: "User Management", icon: Users, roles: ['admin'] }, // Example admin-only
-  { href: "/settings", label: "Settings", icon: Settings, roles: ['manager', 'admin'] }, // Example manager/admin
+  { href: "/sales/history", label: "Sales History", icon: History, roles: ['staff', 'manager', 'admin'] },
+  // { href: "/users", label: "User Management", icon: Users, roles: ['admin'] }, // Example admin-only, can be enabled later
+  { href: "/profile", label: "My Profile", icon: UserCircle, roles: ['staff', 'manager', 'admin'] },
+  { href: "/settings", label: "Settings", icon: Settings, roles: ['manager', 'admin'] },
+  { href: "/support", label: "Support", icon: LifeBuoy, roles: ['staff', 'manager', 'admin'] },
 ];
 
 export function AppSidebarNav() {
@@ -47,20 +53,23 @@ export function AppSidebarNav() {
 
   return (
     <SidebarMenu>
-      {filteredNavItems.map((item) => (
-        <SidebarMenuItem key={item.href}>
-          <Link href={item.href} passHref legacyBehavior>
-            <SidebarMenuButton
-              isActive={pathname.startsWith(item.href)}
-              tooltip={{ children: item.label, className: "bg-primary text-primary-foreground" }}
-              className="justify-start"
-            >
-              <item.icon />
-              <span>{item.label}</span>
-            </SidebarMenuButton>
-          </Link>
-        </SidebarMenuItem>
-      ))}
+      {filteredNavItems.map((item) => {
+        const isActive = item.exactMatch ? pathname === item.href : pathname.startsWith(item.href);
+        return (
+          <SidebarMenuItem key={item.href}>
+            <Link href={item.href} passHref legacyBehavior>
+              <SidebarMenuButton
+                isActive={isActive}
+                tooltip={{ children: item.label, className: "bg-primary text-primary-foreground" }}
+                className="justify-start"
+              >
+                <item.icon />
+                <span>{item.label}</span>
+              </SidebarMenuButton>
+            </Link>
+          </SidebarMenuItem>
+        );
+      })}
     </SidebarMenu>
   );
 }

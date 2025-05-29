@@ -81,17 +81,17 @@ export function UserNav() {
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
-          <DropdownMenuItem onClick={() => { /* TODO: router.push('/profile') */ toast({title: "TODO", description: "Profile page not yet implemented."}) }}>
+          <DropdownMenuItem onClick={() => router.push('/profile')}>
             <UserCircle className="mr-2 h-4 w-4" />
             <span>Profile</span>
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => { /* TODO: router.push('/settings') */ toast({title: "TODO", description: "Settings page not yet implemented."}) }}>
+          <DropdownMenuItem onClick={() => router.push('/settings')}>
             <Settings className="mr-2 h-4 w-4" />
             <span>Settings</span>
           </DropdownMenuItem>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => { /* TODO: router.push('/support') */ toast({title: "TODO", description: "Support page not yet implemented."}) }}>
+        <DropdownMenuItem onClick={() => router.push('/support')}>
           <LifeBuoy className="mr-2 h-4 w-4" />
           <span>Support</span>
         </DropdownMenuItem>

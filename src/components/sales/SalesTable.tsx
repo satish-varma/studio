@@ -1,4 +1,6 @@
 
+"use client";
+
 import {
   Table,
   TableBody,
@@ -7,7 +9,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { SaleTransaction } from "@/types";
 import { MoreHorizontal, Eye, Printer } from "lucide-react";
@@ -18,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
+import { useRouter } from "next/navigation";
 
 interface SalesTableProps {
   transactions: SaleTransaction[];
@@ -25,34 +27,32 @@ interface SalesTableProps {
 
 export function SalesTable({ transactions }: SalesTableProps) {
   const { toast } = useToast();
+  const router = useRouter();
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    try {
+      return new Date(dateString).toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch (e) {
+      return "Invalid Date";
+    }
   };
 
   const handleViewDetails = (transactionId: string) => {
-    // TODO: Implement navigation to a detailed sale view page (e.g., /sales/history/[transactionId])
-    // or open a modal displaying all items in the transaction, customer details (if any), etc.
-    toast({
-      title: "TODO: Implement View Sale Details",
-      description: `Functionality to view details for sale ${transactionId} needs to be built.`,
-    });
+    router.push(`/sales/history/${transactionId}`);
   };
 
   const handlePrintReceipt = (transactionId: string) => {
-    // TODO: Implement receipt printing functionality. This might involve:
-    // 1. Fetching full sale details.
-    // 2. Formatting them into a printable HTML structure.
-    // 3. Using window.print() or integrating with a printing service/library.
+    // Printing is now handled on the details page
+    router.push(`/sales/history/${transactionId}?print=true`);
     toast({
-      title: "TODO: Implement Print Receipt",
-      description: `Functionality to print a receipt for sale ${transactionId} needs to be built.`,
+      title: "Navigating to Details for Printing",
+      description: "The print option is available on the sale details page.",
     });
   };
 
