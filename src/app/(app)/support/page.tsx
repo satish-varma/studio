@@ -1,7 +1,7 @@
 
 import PageHeader from "@/components/shared/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { LifeBuoy, Mail, HelpCircle, BookOpen, MessageSquare } from "lucide-react";
+import { LifeBuoy, Mail, HelpCircle, BookOpen, MessageSquare, Wrench } from "lucide-react"; // Added Wrench
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -114,7 +114,7 @@ export default function SupportPage() {
         </CardHeader>
         <CardContent>
            <div className="p-8 text-center text-muted-foreground bg-muted/30 rounded-md border border-dashed">
-                <Construction className="mx-auto h-12 w-12 text-primary mb-4" />
+                <Wrench className="mx-auto h-12 w-12 text-primary mb-4" /> {/* Replaced Construction with Wrench */}
                 <p className="text-xl font-semibold">Comprehensive Guides - Coming Soon!</p>
                 <p className="mt-2 text-sm">
                   We are working on detailed documentation and video tutorials.
