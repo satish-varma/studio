@@ -10,13 +10,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import type { Site } from "@/types/site";
-import { MoreHorizontal, Edit, Trash2, Store, Loader2 } from "lucide-react"; // Added Store icon
+import type { Stall } from "@/types/stall";
+import { MoreHorizontal, Edit, Trash2, Loader2 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -30,7 +29,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { useRouter } from "next/navigation";
+import { useRouter, useParams } from "next/navigation";
 import { useState } from "react";
 import { getFirestore, doc, deleteDoc } from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
@@ -40,58 +39,51 @@ if (!getApps().length) {
   try {
     initializeApp(firebaseConfig);
   } catch (error) {
-    console.error("Firebase initialization error in SitesTable:", error);
+    console.error("Firebase initialization error in StallsTable:", error);
   }
 }
 const db = getFirestore();
 
-interface SitesTableProps {
-  sites: Site[];
+interface StallsTableProps {
+  stalls: Stall[];
 }
 
-export function SitesTable({ sites }: SitesTableProps) {
+export function StallsTable({ stalls }: StallsTableProps) {
   const { toast } = useToast();
   const router = useRouter();
+  const params = useParams();
+  const siteId = params.siteId as string;
+
   const [isDeleting, setIsDeleting] = useState(false);
-  const [siteToDelete, setSiteToDelete] = useState<Site | null>(null);
+  const [stallToDelete, setStallToDelete] = useState<Stall | null>(null);
 
-  const handleEdit = (siteId: string) => {
-    router.push(`/admin/sites/${siteId}/edit`);
+  const handleEdit = (stallId: string) => {
+    router.push(`/admin/sites/${siteId}/stalls/${stallId}/edit`);
   };
 
-  const handleManageStalls = (siteId: string) => {
-    router.push(`/admin/sites/${siteId}/stalls`);
-  };
-
-  const openDeleteDialog = (site: Site) => {
-    setSiteToDelete(site);
+  const openDeleteDialog = (stall: Stall) => {
+    setStallToDelete(stall);
   };
 
   const closeDeleteDialog = () => {
-    setSiteToDelete(null);
+    setStallToDelete(null);
   };
 
   const handleDeleteConfirm = async () => {
-    if (!siteToDelete) return;
+    if (!stallToDelete) return;
     setIsDeleting(true);
     try {
-      // TODO: Before deleting a site, consider implications for stalls associated with it.
-      // Options:
-      // 1. Prevent deletion if site has stalls.
-      // 2. Delete associated stalls (requires a transaction or Firebase Function for atomicity).
-      // 3. Orphan stalls (they will still have the siteId but the site doc won't exist).
-      // For now, we'll just delete the site document.
-      await deleteDoc(doc(db, "sites", siteToDelete.id));
+      await deleteDoc(doc(db, "stalls", stallToDelete.id));
       toast({
-        title: "Site Deleted",
-        description: `Site "${siteToDelete.name}" has been successfully deleted.`,
+        title: "Stall Deleted",
+        description: `Stall "${stallToDelete.name}" has been successfully deleted.`,
       });
-      // Data will refresh due to onSnapshot in parent component
+      // Data will refresh due to onSnapshot in parent component (StallsClientPage)
     } catch (error: any) {
-      console.error("Error deleting site:", error);
+      console.error("Error deleting stall:", error);
       toast({
         title: "Deletion Failed",
-        description: error.message || "Could not delete the site. Please try again.",
+        description: error.message || "Could not delete the stall. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -109,8 +101,8 @@ export function SitesTable({ sites }: SitesTableProps) {
     } catch (e) { return "Invalid Date"; }
   };
 
-  if (sites.length === 0) {
-    return <p className="text-center text-muted-foreground py-8">No sites found. Add your first site!</p>;
+  if (stalls.length === 0) {
+    return <p className="text-center text-muted-foreground py-8">No stalls found for this site. Add your first stall!</p>;
   }
 
   return (
@@ -120,40 +112,36 @@ export function SitesTable({ sites }: SitesTableProps) {
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
-              <TableHead>Location</TableHead>
+              <TableHead>Type</TableHead>
               <TableHead>Created At</TableHead>
               <TableHead>Last Updated</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {sites.map((site) => (
-              <TableRow key={site.id}>
-                <TableCell className="font-medium text-foreground">{site.name}</TableCell>
-                <TableCell className="text-muted-foreground">{site.location || "N/A"}</TableCell>
-                <TableCell className="text-muted-foreground">{formatDate(site.createdAt)}</TableCell>
-                <TableCell className="text-muted-foreground">{formatDate(site.updatedAt)}</TableCell>
+            {stalls.map((stall) => (
+              <TableRow key={stall.id}>
+                <TableCell className="font-medium text-foreground">{stall.name}</TableCell>
+                <TableCell className="text-muted-foreground">{stall.stallType}</TableCell>
+                <TableCell className="text-muted-foreground">{formatDate(stall.createdAt)}</TableCell>
+                <TableCell className="text-muted-foreground">{formatDate(stall.updatedAt)}</TableCell>
                 <TableCell className="text-right">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button variant="ghost" size="icon" className="h-8 w-8">
                         <MoreHorizontal className="h-4 w-4" />
-                        <span className="sr-only">Site Actions</span>
+                        <span className="sr-only">Stall Actions</span>
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => handleManageStalls(site.id)}>
-                        <Store className="mr-2 h-4 w-4" /> Manage Stalls
-                      </DropdownMenuItem>
-                       <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={() => handleEdit(site.id)}>
-                        <Edit className="mr-2 h-4 w-4" /> Edit Site
+                      <DropdownMenuItem onClick={() => handleEdit(stall.id)}>
+                        <Edit className="mr-2 h-4 w-4" /> Edit Stall
                       </DropdownMenuItem>
                       <DropdownMenuItem
-                        onClick={() => openDeleteDialog(site)}
+                        onClick={() => openDeleteDialog(stall)}
                         className="text-destructive focus:text-destructive-foreground focus:bg-destructive"
                       >
-                        <Trash2 className="mr-2 h-4 w-4" /> Delete Site
+                        <Trash2 className="mr-2 h-4 w-4" /> Delete Stall
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -164,21 +152,21 @@ export function SitesTable({ sites }: SitesTableProps) {
         </Table>
       </div>
 
-      {siteToDelete && (
-        <AlertDialog open={!!siteToDelete} onOpenChange={(open) => !open && closeDeleteDialog()}>
+      {stallToDelete && (
+        <AlertDialog open={!!stallToDelete} onOpenChange={(open) => !open && closeDeleteDialog()}>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Are you sure?</AlertDialogTitle>
               <AlertDialogDescription>
-                This action cannot be undone. This will permanently delete the site "{siteToDelete.name}".
-                Stalls associated with this site will NOT be automatically deleted and may need manual cleanup or re-association.
+                This action cannot be undone. This will permanently delete the stall "{stallToDelete.name}".
+                Any items or data associated with this stall will need to be manually re-assigned or handled.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel onClick={closeDeleteDialog} disabled={isDeleting}>Cancel</AlertDialogCancel>
               <AlertDialogAction onClick={handleDeleteConfirm} disabled={isDeleting} className="bg-destructive hover:bg-destructive/90">
                 {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Delete Site
+                Delete Stall
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
