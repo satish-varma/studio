@@ -3,7 +3,7 @@
 
 import PageHeader from "@/components/shared/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
-import { Settings as SettingsIcon, Palette, BellRing, DatabaseZap, Download, Loader2 } from "lucide-react";
+import { Settings as SettingsIcon, Palette, BellRing, DatabaseZap, Download, Loader2, MailWarning } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -60,7 +60,7 @@ export default function SettingsPage() {
 
       const headers = [
         "ID", "Name", "Category", "Quantity", "Unit", 
-        "Price", "Low Stock Threshold", "Image URL", "Last Updated"
+        "Price (₹)", "Low Stock Threshold", "Image URL", "Last Updated"
       ];
       
       const csvRows = [headers.join(",")];
@@ -72,7 +72,7 @@ export default function SettingsPage() {
           escapeCsvCell(item.category),
           escapeCsvCell(item.quantity),
           escapeCsvCell(item.unit),
-          escapeCsvCell(item.price),
+          escapeCsvCell(item.price.toFixed(2)),
           escapeCsvCell(item.lowStockThreshold),
           escapeCsvCell(item.imageUrl || ""),
           escapeCsvCell(item.lastUpdated ? new Date(item.lastUpdated).toLocaleString('en-IN') : "")
@@ -223,14 +223,19 @@ export default function SettingsPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between p-4 bg-muted/30 rounded-md">
-              <Label htmlFor="low-stock-alerts" className="text-sm font-medium">Low Stock Email Alerts</Label>
+              <div className="flex items-center space-x-2">
+                <MailWarning className="h-4 w-4 text-muted-foreground" />
+                <Label htmlFor="low-stock-alerts" className="text-sm font-medium">Low Stock Email Alerts</Label>
+              </div>
+              {/* TODO: Backend implementation needed for this feature (e.g., Firebase Functions + Email service) */}
               <Switch id="low-stock-alerts" disabled />
             </div>
+             <p className="text-xs text-center text-muted-foreground">(Email alert functionality requires backend setup)</p>
             <div className="flex items-center justify-between p-4 bg-muted/30 rounded-md">
               <Label htmlFor="new-sale-notif" className="text-sm font-medium">In-App New Sale Notifications</Label>
               <Switch id="new-sale-notif" checked disabled />
             </div>
-             <p className="text-xs text-center text-muted-foreground">(Notification preferences coming soon)</p>
+             <p className="text-xs text-center text-muted-foreground">(Other notification preferences coming soon)</p>
           </CardContent>
         </Card>
       </div>
@@ -279,5 +284,7 @@ export default function SettingsPage() {
     </div>
   );
 }
+
+    
 
     
