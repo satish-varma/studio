@@ -2,14 +2,14 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Package, IndianRupee, TrendingUp, AlertTriangle, Loader2, Info } from "lucide-react";
 import PageHeader from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
 import { useAuth } from '@/contexts/AuthContext';
-import { getFirestore, collection, query, where, onSnapshot, Timestamp, QueryConstraint } from "firebase/firestore";
-import { firebaseConfig } from '@/lib/firebaseConfig'; // Assuming firebaseConfig is correctly set up
+import { getFirestore, collection, query, where, onSnapshot, Timestamp, QueryConstraint, orderBy } from "firebase/firestore";
+import { firebaseConfig } from '@/lib/firebaseConfig'; 
 import { getApps, initializeApp } from 'firebase/app';
 import type { StockItem, SaleTransaction } from '@/types';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -47,21 +47,24 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    document.title = "Dashboard - StallSync";
+    return () => { document.title = "StallSync - Stock Management"; } 
+  }, []);
+
+  useEffect(() => {
     if (!user) {
       setLoading(false);
       return; 
     }
 
-    // For admins, if no site is selected, don't fetch or show stats. Prompt to select.
     if (user.role === 'admin' && !activeSiteId) {
       setLoading(false);
       setStats({ totalItems: 0, totalSalesMonth: 0, itemsSoldToday: 0, lowStockAlerts: 0 });
       setRecentSales([]);
-      setError(null); // Not an error, but a state to show message
+      setError(null); 
       return;
     }
     
-    // If a user is not an admin and doesn't have an activeSiteId (e.g. default not set)
     if (user.role !== 'admin' && !activeSiteId) {
         setLoading(false);
         setError("No active site context. Please check your profile or contact an administrator.");
@@ -69,7 +72,6 @@ export default function DashboardPage() {
         setRecentSales([]);
         return;
     }
-
 
     setLoading(true);
     setError(null);
@@ -87,6 +89,10 @@ export default function DashboardPage() {
       if (activeStallId) {
         stockItemsQueryConstraints.push(where("stallId", "==", activeStallId));
       }
+    } else { // Should not happen for staff/manager due to earlier check, but good for safety
+        setLoading(false);
+        setError("Site context is missing for fetching stock items.");
+        return;
     }
     
     const stockItemsRef = collection(db, "stockItems");
@@ -97,7 +103,7 @@ export default function DashboardPage() {
       const total = items.length;
       const lowStock = items.filter(item => item.quantity <= item.lowStockThreshold).length;
       setStats(prevStats => ({ ...prevStats, totalItems: total, lowStockAlerts: lowStock }));
-      setLoading(false); // Consider moving this to after sales also load or use separate loading flags
+      // Consider loading false only after both subscriptions have fired once
     }, (err) => {
       console.error("Error fetching stock items for dashboard:", err);
       setError("Failed to load stock item data.");
@@ -111,15 +117,15 @@ export default function DashboardPage() {
       if (activeStallId) {
         salesQueryConstraints.push(where("stallId", "==", activeStallId));
       }
+    } else { // Should not happen for staff/manager due to earlier check
+        setLoading(false);
+        setError("Site context is missing for fetching sales transactions.");
+        return;
     }
-    // To optimize, we could limit the sales query to the last month + today if it gets very large
-    // For now, fetching all and filtering client-side for simplicity of dashboard stats.
-    // salesQueryConstraints.push(where("transactionDate", ">=", Timestamp.fromDate(monthStart)));
-    // For recent sales, add order by and limit
     
     const salesTransactionsRef = collection(db, "salesTransactions");
+    // Fetch sales for the current month or newer to optimize slightly, then filter client-side for "today" and "this month"
     const salesQuery = query(salesTransactionsRef, ...salesQueryConstraints, where("transactionDate", ">=", Timestamp.fromDate(monthStart)), orderBy("transactionDate", "desc"));
-
 
     const unsubscribeSales = onSnapshot(salesQuery, (snapshot) => {
       const transactions: SaleTransaction[] = snapshot.docs.map(doc => {
@@ -136,11 +142,9 @@ export default function DashboardPage() {
 
       transactions.forEach(sale => {
         const saleDate = new Date(sale.transactionDate);
-        // Total Sales (Month)
         if (isWithinInterval(saleDate, { start: monthStart, end: monthEnd })) {
           salesThisMonth += sale.totalAmount;
         }
-        // Items Sold (Today)
         if (isWithinInterval(saleDate, { start: todayStart, end: todayEnd })) {
           sale.items.forEach(item => {
             itemsToday += Number(item.quantity) || 0;
@@ -153,7 +157,7 @@ export default function DashboardPage() {
         totalSalesMonth: salesThisMonth,
         itemsSoldToday: itemsToday,
       }));
-      setRecentSales(transactions.slice(0, 3)); // Display top 3 recent sales
+      setRecentSales(transactions.slice(0, 3)); 
       setLoading(false); 
     }, (err) => {
       console.error("Error fetching sales transactions for dashboard:", err);
@@ -274,7 +278,7 @@ export default function DashboardPage() {
             <Button 
               className="flex-1"
               onClick={() => router.push('/sales/record')}
-              disabled={!activeSiteId || !activeStallId} // Disable if no specific stall selected for recording sale
+              disabled={!activeSiteId || !activeStallId} 
             >
               Record New Sale
             </Button>
@@ -282,18 +286,20 @@ export default function DashboardPage() {
               variant="secondary"
               className="flex-1"
               onClick={() => router.push('/items/new')}
-              disabled={!activeSiteId || !activeStallId} // Disable if no specific stall selected for adding item
+              disabled={!activeSiteId || !activeStallId} 
             >
               Add New Item
             </Button>
           </CardContent>
-            {!activeSiteId || !activeStallId ? (
-                <p className="text-xs text-muted-foreground px-6 pt-2">Select a specific site and stall to enable quick actions.</p>
-            ) : null}
+          {(!activeSiteId || !activeStallId) && (
+            <CardFooter className="pt-3 pb-4 justify-center">
+                <p className="text-xs text-muted-foreground text-center"> 
+                    Select a specific site and stall to enable quick actions.
+                </p>
+            </CardFooter>
+          )}
         </Card>
       </div>
     </div>
   );
 }
-
-    
