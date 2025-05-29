@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import type { StockItem, SoldItem } from "@/types";
-import { PlusCircle, Trash2, IndianRupee, Loader2 } from "lucide-react"; // Changed DollarSign to IndianRupee
+import { PlusCircle, Trash2, IndianRupee, Loader2 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { 
@@ -34,7 +34,9 @@ import {
   runTransaction, 
   Timestamp,
   QuerySnapshot,
-  DocumentData 
+  DocumentData,
+  DocumentReference, // Added for type safety
+  DocumentSnapshot // Added for type safety
 } from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
@@ -53,8 +55,8 @@ const db = getFirestore();
 const saleItemSchema = z.object({
   itemId: z.string().min(1, "Please select an item."),
   quantity: z.coerce.number().min(1, "Quantity must be at least 1."),
-  pricePerUnit: z.coerce.number().positive("Price must be positive."), // This will be auto-filled
-  name: z.string(), // To store item name for the transaction
+  pricePerUnit: z.coerce.number().positive("Price must be positive."),
+  name: z.string(), 
 });
 
 const recordSaleFormSchema = z.object({
@@ -91,7 +93,7 @@ export default function RecordSaleForm() {
           id: doc.id,
           ...doc.data()
         } as StockItem));
-        setAvailableItems(fetchedItems.filter(item => item.quantity > 0)); // Only show items with quantity > 0
+        setAvailableItems(fetchedItems.filter(item => item.quantity > 0));
         setLoadingItems(false);
       },
       (error) => {
@@ -125,12 +127,20 @@ export default function RecordSaleForm() {
 
     try {
       await runTransaction(db, async (transaction) => {
-        const soldItemsForTransaction: SoldItem[] = [];
-        
+        const stockItemRefsAndData: { ref: DocumentReference; snapshot: DocumentSnapshot; formItem: z.infer<typeof saleItemSchema> }[] = [];
+
+        // Phase 1: Read all stock items
         for (const formItem of values.items) {
           const stockItemRef = doc(db, "stockItems", formItem.itemId);
           const stockItemSnap = await transaction.get(stockItemRef);
+          stockItemRefsAndData.push({ ref: stockItemRef, snapshot: stockItemSnap, formItem });
+        }
 
+        const soldItemsForTransaction: SoldItem[] = [];
+        let calculatedTotalAmount = 0;
+
+        // Phase 2: Validate and prepare writes (no reads here)
+        for (const { snapshot: stockItemSnap, formItem } of stockItemRefsAndData) {
           if (!stockItemSnap.exists()) {
             throw new Error(`Item ${formItem.name} (ID: ${formItem.itemId}) not found in stock.`);
           }
@@ -138,35 +148,40 @@ export default function RecordSaleForm() {
           if (currentStockData.quantity < formItem.quantity) {
             throw new Error(`Not enough stock for ${formItem.name}. Available: ${currentStockData.quantity}, Requested: ${formItem.quantity}.`);
           }
-          if (currentStockData.price !== formItem.pricePerUnit) {
-            // This is a safeguard, price should be auto-filled and read-only
-            console.warn(`Price mismatch for ${formItem.name}. Using stored price: ${currentStockData.price}`);
-            formItem.pricePerUnit = currentStockData.price;
-          }
-
+          
+          // Use the price from Firestore, not from the form (which should be auto-filled and read-only)
+          const pricePerUnit = currentStockData.price; 
 
           soldItemsForTransaction.push({
             itemId: formItem.itemId,
             name: formItem.name,
             quantity: formItem.quantity,
-            pricePerUnit: formItem.pricePerUnit, // Use validated/corrected price
-            totalPrice: formItem.quantity * formItem.pricePerUnit,
+            pricePerUnit: pricePerUnit,
+            totalPrice: formItem.quantity * pricePerUnit,
           });
+          calculatedTotalAmount += formItem.quantity * pricePerUnit;
+        }
+        
+        // Ensure totalSaleAmount used for the transaction is the one calculated from DB prices
+        if (Math.abs(calculatedTotalAmount - totalSaleAmount) > 0.001) { // Compare with a small epsilon
+             console.warn(`Frontend total ${totalSaleAmount} differs from backend calculated total ${calculatedTotalAmount}. Using backend total.`);
         }
 
+
+        // Phase 3: Perform all writes
         const salesCollectionRef = collection(db, "salesTransactions");
         const newSaleRef = doc(salesCollectionRef); 
         transaction.set(newSaleRef, {
           items: soldItemsForTransaction,
-          totalAmount: totalSaleAmount, // Recalculate here based on potentially corrected prices if strictness is desired
+          totalAmount: calculatedTotalAmount, // Use the recalculated total
           transactionDate: Timestamp.now(),
           staffId: user.uid,
           staffName: user.displayName || user.email,
+          isDeleted: false, // Initialize isDeleted for new sales
         });
 
-        for (const formItem of values.items) {
-          const stockItemRef = doc(db, "stockItems", formItem.itemId);
-          const stockItemSnap = await transaction.get(stockItemRef); // Re-get for atomicity, though already got it once
+        for (const { ref: stockItemRef, snapshot: stockItemSnap, formItem } of stockItemRefsAndData) {
+          // No need to re-get stockItemSnap, already have it from phase 1
           const currentStockData = stockItemSnap.data() as StockItem;
           const newQuantity = currentStockData.quantity - formItem.quantity;
           
@@ -179,7 +194,7 @@ export default function RecordSaleForm() {
 
       toast({
         title: "Sale Recorded Successfully!",
-        description: `Total: ₹${totalSaleAmount.toFixed(2)}. Stock levels updated.`, // Updated currency symbol
+        description: `Total: ₹${totalSaleAmount.toFixed(2)}. Stock levels updated.`,
       });
       form.reset({ items: [{ itemId: "", quantity: 1, pricePerUnit: 0, name: "" }] });
 
@@ -198,12 +213,12 @@ export default function RecordSaleForm() {
   const handleItemChange = (value: string, index: number) => {
     const selectedItem = availableItems.find(ai => ai.id === value);
     if (selectedItem) {
-      const price = selectedItem.price; // Get price from the stock item
+      const price = selectedItem.price;
       update(index, { 
         ...watchedItems[index], 
         itemId: selectedItem.id, 
         name: selectedItem.name,
-        pricePerUnit: price // Auto-fill the price
+        pricePerUnit: price 
       });
     } else { 
         update(index, {
@@ -229,7 +244,7 @@ export default function RecordSaleForm() {
     <Card className="w-full max-w-2xl mx-auto shadow-xl">
       <CardHeader>
         <CardTitle className="text-2xl flex items-center">
-          <IndianRupee className="mr-2 h-6 w-6 text-accent" /> {/* Updated icon */}
+          <IndianRupee className="mr-2 h-6 w-6 text-accent" />
           Record New Sale
         </CardTitle>
       </CardHeader>
@@ -260,7 +275,7 @@ export default function RecordSaleForm() {
                         <SelectContent>
                           {availableItems.map((item) => (
                             <SelectItem key={item.id} value={item.id} disabled={item.quantity <= 0}>
-                              {item.name} (Stock: {item.quantity}) - ₹{item.price.toFixed(2)} {/* Updated currency symbol */}
+                              {item.name} (Stock: {item.quantity}) - ₹{item.price.toFixed(2)}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -305,15 +320,15 @@ export default function RecordSaleForm() {
                   name={`items.${index}.pricePerUnit`}
                   render={({ field: formField }) => (
                     <FormItem className="w-28">
-                      <FormLabel>Price/Unit (₹)</FormLabel> {/* Updated currency symbol */}
+                      <FormLabel>Price/Unit (₹)</FormLabel>
                       <FormControl>
                         <Input 
                             type="number" 
                             placeholder="Price" 
                             {...formField} 
-                            className="bg-input" 
-                            readOnly // Price is auto-filled and not editable by user
-                            disabled // Visually indicate it's not for user input
+                            className="bg-input text-muted-foreground" 
+                            readOnly 
+                            disabled 
                         />
                       </FormControl>
                       <FormMessage />
@@ -344,7 +359,7 @@ export default function RecordSaleForm() {
 
             <div className="pt-4 text-right">
               <p className="text-2xl font-bold text-foreground">
-                Total: ₹{totalSaleAmount.toFixed(2)} {/* Updated currency symbol */}
+                Total: ₹{totalSaleAmount.toFixed(2)}
               </p>
             </div>
           </CardContent>
@@ -364,3 +379,4 @@ export default function RecordSaleForm() {
     </Card>
   );
 }
+
