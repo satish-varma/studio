@@ -1,3 +1,4 @@
+
 import ItemsClientPage from "@/components/items/ItemsClientPage";
 
 export const metadata = {
@@ -5,7 +6,6 @@ export const metadata = {
 };
 
 export default function ItemsPage() {
-  // Server component, can fetch initial data if needed and pass to client component
-  // For now, ItemsClientPage handles its own (mock) data
+  // Data fetching and management are handled within ItemsClientPage using client-side Firebase.
   return <ItemsClientPage />;
 }

@@ -1,3 +1,4 @@
+
 import SalesHistoryClientPage from "@/components/sales/SalesHistoryClientPage";
 
 export const metadata = {
@@ -5,7 +6,6 @@ export const metadata = {
 };
 
 export default function SalesHistoryPage() {
-  // Server component, can fetch initial data if needed and pass to client component
-  // For now, SalesHistoryClientPage handles its own (mock) data
+  // Data fetching and management are handled within SalesHistoryClientPage using client-side Firebase.
   return <SalesHistoryClientPage />;
 }

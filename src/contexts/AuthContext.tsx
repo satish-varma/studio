@@ -1,83 +1,42 @@
-// =================================================================================
-// !! IMPORTANT FOR PRODUCTION !!
-// This AuthContext uses a MOCK implementation. For a production application,
-// you MUST replace this with a real Firebase Authentication setup.
-// 1. Uncomment the Firebase imports and initialization code.
-// 2. Ensure `firebaseConfig.ts` contains your actual Firebase project configuration.
-// 3. Replace all `mockAuth` calls with their `firebase/auth` equivalents.
-// 4. Implement proper user data fetching (e.g., roles from Firestore) after authentication.
-// =================================================================================
+
 "use client";
 
 import type { ReactNode } from 'react';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import type { AppUser, UserRole } from '@/types/user';
-// import { initializeApp, type FirebaseApp } from 'firebase/app';
-// import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut as firebaseSignOut, type Auth, type User as FirebaseUser } from 'firebase/auth';
-// import { firebaseConfig } from '@/lib/firebaseConfig'; 
+import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
+import { 
+  getAuth, 
+  onAuthStateChanged, 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signOut as firebaseSignOut, 
+  type Auth, 
+  type User as FirebaseUser 
+} from 'firebase/auth';
+import { getFirestore, doc, getDoc, setDoc, type Firestore } from 'firebase/firestore';
+import { firebaseConfig } from '@/lib/firebaseConfig'; 
 
-// Mock Firebase App and Auth
-interface MockAuth {
-  onAuthStateChanged: (callback: (user: AppUser | null) => void) => () => void;
-  signInWithEmailAndPassword: (email: string, pass: string) => Promise<{ user: AppUser }>;
-  createUserWithEmailAndPassword: (email: string, pass: string) => Promise<{ user: AppUser }>;
-  signOut: () => Promise<void>;
-  currentUser: AppUser | null;
+let app: FirebaseApp;
+let auth: Auth;
+let db: Firestore;
+
+// Initialize Firebase only if it hasn't been initialized yet
+if (!getApps().length) {
+  try {
+    app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app);
+  } catch (error) {
+    console.error("Firebase initialization error:", error);
+    // In a production app, you might want to show a global error message 
+    // or prevent the app from rendering if Firebase fails to initialize.
+  }
+} else {
+  app = getApps()[0];
+  auth = getAuth(app);
+  db = getFirestore(app);
 }
-
-// let app: FirebaseApp;
-// let auth: Auth;
-
-// try {
-//   app = initializeApp(firebaseConfig);
-//   auth = getAuth(app);
-// } catch (error) {
-//   console.error("Firebase initialization error:", error);
-//   // Handle initialization error in a production app, e.g., show an error message to the user
-// }
-
-// MOCK IMPLEMENTATION - REPLACE FOR PRODUCTION
-const mockAuth: MockAuth = {
-  currentUser: null,
-  onAuthStateChanged: (callback) => {
-    const timeoutId = setTimeout(() => {
-      if (mockAuth.currentUser) {
-         callback(mockAuth.currentUser);
-      } else {
-         callback(null);
-      }
-    }, 500); // Reduced delay for faster mock auth check
-    return () => clearTimeout(timeoutId); 
-  },
-  signInWithEmailAndPassword: async (email, password) => {
-    if (email === 'staff@example.com' && password === 'password') {
-      const user: AppUser = { id: 'staff-id', email, role: 'staff', displayName: 'Staff User', photoURL: `https://placehold.co/40x40/E3F2FD/4285F4?text=SU` };
-      mockAuth.currentUser = user;
-      return { user };
-    }
-    if (email === 'manager@example.com' && password === 'password') {
-       const user: AppUser = { id: 'manager-id', email, role: 'manager', displayName: 'Manager User', photoURL: `https://placehold.co/40x40/E3F2FD/4285F4?text=MU` };
-       mockAuth.currentUser = user;
-      return { user };
-    }
-    if (email === 'admin@example.com' && password === 'password') {
-       const user: AppUser = { id: 'admin-id', email, role: 'admin', displayName: 'Admin User', photoURL: `https://placehold.co/40x40/E3F2FD/4285F4?text=AU` };
-       mockAuth.currentUser = user;
-      return { user };
-    }
-    throw new Error('Invalid credentials. Hint: try staff@example.com with password "password".');
-  },
-  createUserWithEmailAndPassword: async (email, password) => {
-    const user: AppUser = { id: `new-${Date.now()}`, email, role: 'staff', displayName: 'New User', photoURL: `https://placehold.co/40x40/E3F2FD/4285F4?text=NU` };
-    mockAuth.currentUser = user;
-    return { user };
-  },
-  signOut: async () => {
-    mockAuth.currentUser = null;
-  },
-};
-// END MOCK IMPLEMENTATION
-
 
 interface AuthContextType {
   user: AppUser | null;
@@ -94,22 +53,59 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // PRODUCTION: Replace mockAuth.onAuthStateChanged with firebase/auth onAuthStateChanged
-    // const unsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
-    const unsubscribe = mockAuth.onAuthStateChanged((mockUser: AppUser | null) => {
-      if (mockUser) {
-        // PRODUCTION: If using Firebase, firebaseUser would be the object.
-        // You would then fetch additional user data (like role) from your database (e.g., Firestore).
-        // const userDoc = await getDoc(doc(firestore, "users", firebaseUser.uid));
-        // const userRole = userDoc.exists() ? userDoc.data().role : 'staff';
-        const appUser: AppUser = {
-          id: mockUser.id, // firebaseUser.uid,
-          email: mockUser.email, // firebaseUser.email,
-          displayName: mockUser.displayName, // firebaseUser.displayName,
-          photoURL: mockUser.photoURL, // firebaseUser.photoURL,
-          role: mockUser.role || 'staff', // Replace with role from your DB
-        };
-        setUser(appUser);
+    if (!auth || !db) {
+      // Firebase not initialized, handle accordingly
+      setLoading(false);
+      console.error("Firebase Auth or Firestore is not initialized.");
+      // Potentially set an error state here to inform the user
+      return;
+    }
+
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
+      if (firebaseUser) {
+        try {
+          const userDocRef = doc(db, "users", firebaseUser.uid);
+          const userDocSnap = await getDoc(userDocRef);
+          
+          let userRole: UserRole = 'staff'; // Default role
+          let displayName = firebaseUser.displayName;
+
+          if (userDocSnap.exists()) {
+            const userData = userDocSnap.data();
+            userRole = userData.role || 'staff';
+            displayName = userData.displayName || firebaseUser.displayName || "User";
+          } else {
+            // If user doc doesn't exist (e.g., migrated user or direct Firebase Console creation), create it.
+            // For new sign-ups, the doc is created in the signUp function.
+            // This handles cases where a user might exist in Auth but not Firestore.
+             await setDoc(userDocRef, { 
+              email: firebaseUser.email, 
+              role: 'staff', // Default role for users found in Auth but not Firestore
+              displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User",
+              createdAt: new Date().toISOString(),
+            });
+          }
+
+          const appUser: AppUser = {
+            uid: firebaseUser.uid,
+            email: firebaseUser.email,
+            displayName: displayName,
+            photoURL: firebaseUser.photoURL,
+            role: userRole,
+          };
+          setUser(appUser);
+        } catch (error) {
+          console.error("Error fetching user role from Firestore:", error);
+          // Fallback: create a user object without a role or with a default one
+          const fallbackUser: AppUser = {
+            uid: firebaseUser.uid,
+            email: firebaseUser.email,
+            displayName: firebaseUser.displayName || "User",
+            photoURL: firebaseUser.photoURL,
+            role: 'staff', // Fallback role
+          };
+          setUser(fallbackUser);
+        }
       } else {
         setUser(null);
       }
@@ -119,17 +115,44 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const signIn = async (email: string, pass: string): Promise<AppUser | null> => {
+    if (!auth || !db) throw new Error("Firebase not initialized.");
     setLoading(true);
     try {
-      // PRODUCTION: Replace with signInWithEmailAndPassword(auth, email, pass);
-      const userCredential = await mockAuth.signInWithEmailAndPassword(email, pass);
-      // const firebaseUser = userCredential.user;
-      // const userDoc = await getDoc(doc(firestore, "users", firebaseUser.uid)); // Fetch role
-      // const appUser: AppUser = { id: firebaseUser.uid, email: firebaseUser.email, displayName: firebaseUser.displayName, photoURL: firebaseUser.photoURL, role: userDoc.exists() ? userDoc.data().role : 'staff' };
-      // setUser(appUser);
-      setUser(userCredential.user); 
+      const userCredential = await signInWithEmailAndPassword(auth, email, pass);
+      const firebaseUser = userCredential.user;
+      
+      const userDocRef = doc(db, "users", firebaseUser.uid);
+      const userDocSnap = await getDoc(userDocRef);
+      
+      let userRole: UserRole = 'staff';
+      let displayName = firebaseUser.displayName;
+
+      if (userDocSnap.exists()) {
+        const userData = userDocSnap.data();
+        userRole = userData.role || 'staff';
+        displayName = userData.displayName || firebaseUser.displayName || "User";
+      } else {
+        // This case should be rare for sign-in if signUp creates the doc.
+        // However, to be safe, assign a default role.
+        console.warn(`User document not found for UID: ${firebaseUser.uid} during sign-in. Assigning default role.`);
+         await setDoc(userDocRef, { 
+            email: firebaseUser.email, 
+            role: 'staff',
+            displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User",
+            createdAt: new Date().toISOString(),
+          });
+      }
+
+      const appUser: AppUser = { 
+        uid: firebaseUser.uid, 
+        email: firebaseUser.email, 
+        displayName: displayName, 
+        photoURL: firebaseUser.photoURL, 
+        role: userRole 
+      };
+      setUser(appUser);
       setLoading(false);
-      return userCredential.user; // appUser
+      return appUser;
     } catch (error) {
       console.error("Sign in error:", error);
       setUser(null);
@@ -139,19 +162,34 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
   
   const signUp = async (email: string, pass: string, role: UserRole = 'staff'): Promise<AppUser | null> => {
+    if (!auth || !db) throw new Error("Firebase not initialized.");
     setLoading(true);
     try {
-      // PRODUCTION: Replace with createUserWithEmailAndPassword(auth, email, pass);
-      const userCredential = await mockAuth.createUserWithEmailAndPassword(email, pass);
-      // const firebaseUser = userCredential.user;
-      // await setDoc(doc(firestore, "users", firebaseUser.uid), { email: firebaseUser.email, role, displayName: "New User" }); // Store role in Firestore
-      // const appUser: AppUser = { id: firebaseUser.uid, email: firebaseUser.email, role, displayName: "New User" };
-      // setUser(appUser);
-      const newUser = { ...userCredential.user, role, displayName: userCredential.user.displayName || "New User" };
-      mockAuth.currentUser = newUser;
-      setUser(newUser);
+      const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
+      const firebaseUser = userCredential.user;
+      
+      // Store user details (including role) in Firestore
+      // TODO: Consider adding more profile details here if needed (e.g., firstName, lastName)
+      const userDocRef = doc(db, "users", firebaseUser.uid);
+      const initialDisplayName = firebaseUser.displayName || email.split('@')[0] || "New User";
+      await setDoc(userDocRef, {
+        email: firebaseUser.email,
+        role: role,
+        displayName: initialDisplayName,
+        createdAt: new Date().toISOString(),
+        // You might want to set a default photoURL or leave it to Firebase profile updates
+      });
+
+      const appUser: AppUser = { 
+        uid: firebaseUser.uid, 
+        email: firebaseUser.email, 
+        displayName: initialDisplayName, 
+        photoURL: firebaseUser.photoURL, // This will likely be null initially
+        role 
+      };
+      setUser(appUser);
       setLoading(false);
-      return newUser; // appUser
+      return appUser;
     } catch (error) {
       console.error("Sign up error:", error);
       setUser(null);
@@ -161,10 +199,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signOutUser = async () => {
+    if (!auth) throw new Error("Firebase Auth not initialized.");
     setLoading(true);
     try {
-      // PRODUCTION: await firebaseSignOut(auth);
-      await mockAuth.signOut();
+      await firebaseSignOut(auth);
       setUser(null);
     } catch (error) {
       console.error("Sign out error:", error);

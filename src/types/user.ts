@@ -1,7 +1,8 @@
+
 export type UserRole = 'staff' | 'manager' | 'admin';
 
 export interface AppUser {
-  id: string;
+  uid: string; // Changed from id to uid to align with Firebase
   email: string | null;
   displayName?: string | null;
   photoURL?: string | null;
