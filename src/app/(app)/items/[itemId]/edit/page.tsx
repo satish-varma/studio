@@ -11,7 +11,7 @@ import { getApps, initializeApp } from 'firebase/app';
 import type { StockItem } from '@/types';
 import { Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { Button } from '@/components/ui/button'; // Added Button import
+import { Button } from '@/components/ui/button';
 
 if (!getApps().length) {
   try {
@@ -64,6 +64,15 @@ export default function EditItemPage() {
     }
   }, [itemId, router, toast]);
 
+  // Moved useEffect for document.title before conditional returns to fix hook order error.
+  // The effect's internal logic will handle cases where item or item.name might be null/undefined.
+  useEffect(() => {
+    if (item?.name) {
+      document.title = `Edit ${item.name} - StallSync`;
+    }
+    return () => { document.title = "StallSync - Stock Management"; } // Reset on unmount
+  }, [item?.name]);
+
   if (loading) {
     return (
       <div className="flex justify-center items-center py-10">
@@ -95,18 +104,6 @@ export default function EditItemPage() {
     );
   }
   
-  // Dynamically set metadata title - this needs to be handled differently in App Router for server-side metadata.
-  // For client components, document.title can be used, or a Head component for simpler cases.
-  // For now, we set a generic title for the page component itself via export const metadata.
-  // This effect is a client-side title update.
-  useEffect(() => {
-    if (item?.name) {
-      document.title = `Edit ${item.name} - StallSync`;
-    }
-    return () => { document.title = "StallSync - Stock Management"; } // Reset on unmount
-  }, [item?.name]);
-
-
   return (
     <div className="space-y-6">
       <PageHeader
