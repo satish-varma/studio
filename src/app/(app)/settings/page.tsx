@@ -8,10 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { useState } from "react";
-import { getFirestore, collection, getDocs, query, orderBy } from "firebase/firestore";
+import { getFirestore, collection, getDocs, query, orderBy, where, Timestamp } from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
-import type { StockItem } from "@/types";
+import type { StockItem, SaleTransaction, SoldItem } from "@/types";
 import { useToast } from "@/hooks/use-toast";
 
 // Initialize Firebase only if it hasn't been initialized yet
@@ -27,15 +27,13 @@ const db = getFirestore();
 export default function SettingsPage() {
   const { toast } = useToast();
   const [isExportingStock, setIsExportingStock] = useState(false);
-  const [isExportingSales, setIsExportingSales] = useState(false); // Placeholder for sales export
+  const [isExportingSales, setIsExportingSales] = useState(false);
 
   const escapeCsvCell = (cellData: any): string => {
     if (cellData === null || cellData === undefined) {
       return "";
     }
     const stringData = String(cellData);
-    // If the stringData contains a comma, a newline, or a double quote, enclose it in double quotes.
-    // Also, escape any existing double quotes by replacing them with two double quotes.
     if (stringData.includes(",") || stringData.includes("\n") || stringData.includes('"')) {
       return `"${stringData.replace(/"/g, '""')}"`;
     }
@@ -46,7 +44,7 @@ export default function SettingsPage() {
     setIsExportingStock(true);
     try {
       const stockItemsCollectionRef = collection(db, "stockItems");
-      const q = query(stockItemsCollectionRef, orderBy("name")); // Order by name for consistency
+      const q = query(stockItemsCollectionRef, orderBy("name"));
       const querySnapshot = await getDocs(q);
       
       const items: StockItem[] = [];
@@ -65,7 +63,7 @@ export default function SettingsPage() {
         "Price", "Low Stock Threshold", "Image URL", "Last Updated"
       ];
       
-      const csvRows = [headers.join(",")]; // Header row
+      const csvRows = [headers.join(",")];
 
       items.forEach(item => {
         const row = [
@@ -104,6 +102,88 @@ export default function SettingsPage() {
       setIsExportingStock(false);
     }
   };
+
+  const exportSalesDataToCsv = async () => {
+    setIsExportingSales(true);
+    try {
+      const salesCollectionRef = collection(db, "salesTransactions");
+      // Fetch non-deleted sales, ordered by transaction date
+      const q = query(
+        salesCollectionRef,
+        where("isDeleted", "!=", true),
+        orderBy("transactionDate", "desc")
+      );
+      const querySnapshot = await getDocs(q);
+
+      const transactions: SaleTransaction[] = [];
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        transactions.push({
+          id: doc.id,
+          ...data,
+          transactionDate: (data.transactionDate as Timestamp).toDate().toISOString(),
+        } as SaleTransaction);
+      });
+
+      if (transactions.length === 0) {
+        toast({ title: "No Sales Data", description: "There are no sales transactions to export.", variant: "default" });
+        setIsExportingSales(false);
+        return;
+      }
+
+      const headers = [
+        "Transaction ID", "Date", "Staff Name", "Staff ID", "Total Amount (₹)",
+        "Number of Item Types", "Total Quantity of Items", "Items Sold (JSON)"
+      ];
+      const csvRows = [headers.join(",")];
+
+      transactions.forEach(sale => {
+        const numberOfItemTypes = sale.items.length;
+        const totalQuantityOfItems = sale.items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+        const itemsJson = JSON.stringify(sale.items.map(item => ({
+          id: item.itemId,
+          name: item.name,
+          quantity: item.quantity,
+          pricePerUnit: item.pricePerUnit,
+          totalPrice: item.totalPrice
+        })));
+
+        const row = [
+          escapeCsvCell(sale.id),
+          escapeCsvCell(new Date(sale.transactionDate).toLocaleString('en-IN')),
+          escapeCsvCell(sale.staffName || 'N/A'),
+          escapeCsvCell(sale.staffId),
+          escapeCsvCell(sale.totalAmount.toFixed(2)),
+          escapeCsvCell(numberOfItemTypes),
+          escapeCsvCell(totalQuantityOfItems),
+          escapeCsvCell(itemsJson)
+        ];
+        csvRows.push(row.join(","));
+      });
+
+      const csvString = csvRows.join("\n");
+      const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement("a");
+      if (link.download !== undefined) {
+        const url = URL.createObjectURL(blob);
+        link.setAttribute("href", url);
+        link.setAttribute("download", `stallsync_sales_data_${new Date().toISOString().split('T')[0]}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }
+      toast({ title: "Export Successful", description: "Sales data CSV downloaded." });
+
+    } catch (error: any) {
+      console.error("Error exporting sales data:", error);
+      toast({ title: "Export Failed", description: error.message || "Could not export sales data.", variant: "destructive" });
+    } finally {
+      setIsExportingSales(false);
+    }
+  };
+
 
   return (
     <div className="space-y-6">
@@ -178,9 +258,18 @@ export default function SettingsPage() {
             )}
             Export Stock Data (CSV)
           </Button>
-          <Button variant="outline" className="w-full" disabled>
-            <Download className="mr-2 h-4 w-4" />
-            Export Sales Data (CSV) (Soon)
+          <Button 
+            variant="outline" 
+            className="w-full" 
+            onClick={exportSalesDataToCsv}
+            disabled={isExportingSales}
+          >
+            {isExportingSales ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="mr-2 h-4 w-4" />
+            )}
+            Export Sales Data (CSV)
           </Button>
         </CardContent>
          <CardFooter>
@@ -190,3 +279,5 @@ export default function SettingsPage() {
     </div>
   );
 }
+
+    
