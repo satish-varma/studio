@@ -7,4 +7,5 @@ export interface AppUser {
   displayName?: string | null;
   photoURL?: string | null;
   role: UserRole;
+  createdAt?: string; // ISO date string, set upon user creation
 }
