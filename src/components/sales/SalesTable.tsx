@@ -16,12 +16,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useToast } from "@/hooks/use-toast";
 
 interface SalesTableProps {
   transactions: SaleTransaction[];
 }
 
 export function SalesTable({ transactions }: SalesTableProps) {
+  const { toast } = useToast();
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleString('en-US', {
@@ -34,11 +36,19 @@ export function SalesTable({ transactions }: SalesTableProps) {
   };
 
   const handleViewDetails = (transactionId: string) => {
-    alert(`View details for sale ${transactionId} - To be implemented`);
+    // TODO: Implement navigation to a detailed sale view page or open a modal.
+    toast({
+      title: "Coming Soon!",
+      description: `View details for sale ${transactionId} will be implemented here.`,
+    });
   };
 
   const handlePrintReceipt = (transactionId: string) => {
-    alert(`Print receipt for sale ${transactionId} - To be implemented`);
+    // TODO: Implement receipt printing functionality.
+    toast({
+      title: "Coming Soon!",
+      description: `Print receipt for sale ${transactionId} will be implemented here.`,
+    });
   };
 
   if (transactions.length === 0) {

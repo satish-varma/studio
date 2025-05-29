@@ -75,14 +75,14 @@ export default function RecordSaleForm() {
   }, [watchedItems, availableItems]);
 
   function onSubmit(values: RecordSaleFormValues) {
-    console.log("Sale recorded:", values);
-    // Here you would typically:
-    // 1. Send data to server action / API
-    // 2. Update stock levels
-    // 3. Save transaction
+    // TODO: Replace console.log with actual API call to record sale and update inventory.
+    // console.log("Sale recorded:", values); 
+    // For production, this data should be sent to a backend service.
+    // Example: await recordSaleOnServer(values);
+
     toast({
-      title: "Sale Recorded!",
-      description: `Total: $${totalSaleAmount.toFixed(2)}. ${values.items.length} item(s) sold.`,
+      title: "Sale Recorded! (Mock)",
+      description: `Total: $${totalSaleAmount.toFixed(2)}. ${values.items.length} item(s) sold. This is a mock action.`,
     });
     form.reset({ items: [{ itemId: "", quantity: 1 }] }); // Reset form
   }

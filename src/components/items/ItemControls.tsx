@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/select";
 import { PlusCircle, Search, Filter } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useToast } from "@/hooks/use-toast";
 
 interface ItemControlsProps {
   searchTerm: string;
@@ -32,10 +33,15 @@ export function ItemControls({
   categories,
 }: ItemControlsProps) {
   const router = useRouter();
+  const { toast } = useToast();
 
   const handleAddNewItem = () => {
-    // router.push('/items/new'); // Or open a modal
-    alert("Add new item functionality to be implemented.");
+    // TODO: Implement navigation to add new item page or open a modal.
+    // router.push('/items/new'); 
+    toast({
+      title: "Coming Soon!",
+      description: "Functionality to add a new item will be implemented here.",
+    });
   };
 
   return (

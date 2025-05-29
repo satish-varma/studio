@@ -1,3 +1,16 @@
+// =================================================================================
+// !! IMPORTANT FOR PRODUCTION !!
+// This file contains MOCK data. For a production application,
+// this data MUST be fetched from a real backend database (e.g., Firestore,
+// a SQL database, or any other persistent storage solution).
+//
+// Actions for production:
+// 1. Set up a database and define schemas for items, sales, etc.
+// 2. Create API endpoints or server actions to Create, Read, Update, and Delete (CRUD) data.
+// 3. Replace all usages of `mockStockItems` and `mockSalesTransactions` with
+//    calls to your backend services.
+// =================================================================================
+
 import type { StockItem, SaleTransaction, SoldItem } from '@/types';
 
 export const mockStockItems: StockItem[] = [

@@ -18,22 +18,38 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
 
 interface ItemTableProps {
   items: StockItem[];
 }
 
 export function ItemTable({ items }: ItemTableProps) {
+  const { toast } = useToast();
+
   const handleEdit = (itemId: string) => {
-    alert(`Edit item ${itemId} - To be implemented`);
+    // TODO: Implement item edit functionality (e.g., navigate to an edit page or open a modal).
+    toast({
+      title: "Coming Soon!",
+      description: `Edit functionality for item ${itemId} will be implemented here.`,
+    });
   };
 
   const handleDelete = (itemId: string) => {
-    alert(`Delete item ${itemId} - To be implemented`);
+    // TODO: Implement item delete functionality with confirmation.
+    toast({
+      title: "Coming Soon!",
+      description: `Delete functionality for item ${itemId} will be implemented here.`,
+      variant: "destructive"
+    });
   };
 
   const handleUpdateStock = (itemId: string) => {
-    alert(`Update stock for item ${itemId} - To be implemented`);
+    // TODO: Implement stock update functionality (e.g., open a modal to change quantity).
+    toast({
+      title: "Coming Soon!",
+      description: `Stock update functionality for item ${itemId} will be implemented here.`,
+    });
   };
   
   const formatDate = (dateString: string) => {
