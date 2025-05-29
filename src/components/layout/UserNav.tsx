@@ -1,3 +1,4 @@
+
 "use client";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -58,7 +59,7 @@ export function UserNav() {
             <AvatarImage 
               src={user.photoURL || `https://placehold.co/40x40/E3F2FD/4285F4?text=${getInitials(user.displayName)}`} 
               alt={user.displayName || "User"}
-              data-ai-hint="profile avatar"
+              data-ai-hint="user avatar"
             />
             <AvatarFallback className="bg-secondary text-secondary-foreground">{getInitials(user.displayName)}</AvatarFallback>
           </Avatar>
@@ -80,17 +81,17 @@ export function UserNav() {
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
-          <DropdownMenuItem onClick={() => router.push('/profile')}> {/* Assuming a /profile page */}
+          <DropdownMenuItem onClick={() => { /* TODO: router.push('/profile') */ toast({title: "TODO", description: "Profile page not yet implemented."}) }}>
             <UserCircle className="mr-2 h-4 w-4" />
             <span>Profile</span>
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => router.push('/settings')}>
+          <DropdownMenuItem onClick={() => { /* TODO: router.push('/settings') */ toast({title: "TODO", description: "Settings page not yet implemented."}) }}>
             <Settings className="mr-2 h-4 w-4" />
             <span>Settings</span>
           </DropdownMenuItem>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => router.push('/support')}> {/* Assuming a /support page */}
+        <DropdownMenuItem onClick={() => { /* TODO: router.push('/support') */ toast({title: "TODO", description: "Support page not yet implemented."}) }}>
           <LifeBuoy className="mr-2 h-4 w-4" />
           <span>Support</span>
         </DropdownMenuItem>

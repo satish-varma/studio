@@ -1,3 +1,4 @@
+
 import Image from "next/image";
 import {
   Table,
@@ -28,27 +29,36 @@ export function ItemTable({ items }: ItemTableProps) {
   const { toast } = useToast();
 
   const handleEdit = (itemId: string) => {
-    // TODO: Implement item edit functionality (e.g., navigate to an edit page or open a modal).
+    // TODO: Implement item edit functionality. This typically involves:
+    // 1. Navigating to an edit page (e.g., /items/[itemId]/edit) or
+    // 2. Opening a modal pre-filled with the item's data.
+    // 3. Saving changes back to Firestore.
     toast({
-      title: "Coming Soon!",
-      description: `Edit functionality for item ${itemId} will be implemented here.`,
+      title: "TODO: Implement Edit Item",
+      description: `Functionality to edit item ${itemId} needs to be built.`,
     });
   };
 
   const handleDelete = (itemId: string) => {
-    // TODO: Implement item delete functionality with confirmation.
+    // TODO: Implement item delete functionality. This typically involves:
+    // 1. Showing a confirmation dialog.
+    // 2. If confirmed, deleting the item document from Firestore.
+    // 3. Handling potential errors (e.g., if the item is part of an undeletable transaction).
     toast({
-      title: "Coming Soon!",
-      description: `Delete functionality for item ${itemId} will be implemented here.`,
+      title: "TODO: Implement Delete Item",
+      description: `Functionality to delete item ${itemId} needs to be built with confirmation.`,
       variant: "destructive"
     });
   };
 
   const handleUpdateStock = (itemId: string) => {
-    // TODO: Implement stock update functionality (e.g., open a modal to change quantity).
+    // TODO: Implement stock update functionality. This typically involves:
+    // 1. Opening a modal allowing the user to input the new quantity or adjust the current quantity.
+    // 2. Updating the 'quantity' and 'lastUpdated' fields in Firestore for the specific item.
+    // 3. Potentially logging this stock adjustment separately if detailed inventory tracking is needed.
     toast({
-      title: "Coming Soon!",
-      description: `Stock update functionality for item ${itemId} will be implemented here.`,
+      title: "TODO: Implement Update Stock",
+      description: `Functionality to update stock for item ${itemId} needs to be built.`,
     });
   };
   
@@ -74,6 +84,7 @@ export function ItemTable({ items }: ItemTableProps) {
             <TableHead>Category</TableHead>
             <TableHead className="text-right">Quantity</TableHead>
             <TableHead>Unit</TableHead>
+            <TableHead className="text-right">Price</TableHead>
             <TableHead className="text-right">Low Stock At</TableHead>
             <TableHead>Status</TableHead>
             <TableHead>Last Updated</TableHead>
@@ -100,13 +111,14 @@ export function ItemTable({ items }: ItemTableProps) {
                     width={48}
                     height={48}
                     className="rounded-md object-cover"
-                    data-ai-hint={`${item.category} ${item.name}`}
+                    data-ai-hint={`${item.category} item`}
                   />
                 </TableCell>
                 <TableCell className="font-medium text-foreground">{item.name}</TableCell>
                 <TableCell className="text-muted-foreground">{item.category}</TableCell>
                 <TableCell className="text-right text-foreground">{item.quantity}</TableCell>
                 <TableCell className="text-muted-foreground">{item.unit}</TableCell>
+                <TableCell className="text-right text-foreground">${item.price.toFixed(2)}</TableCell>
                 <TableCell className="text-right text-muted-foreground">{item.lowStockThreshold}</TableCell>
                 <TableCell>
                   <Badge

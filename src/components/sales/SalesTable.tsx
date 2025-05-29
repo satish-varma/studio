@@ -1,3 +1,4 @@
+
 import {
   Table,
   TableBody,
@@ -36,18 +37,22 @@ export function SalesTable({ transactions }: SalesTableProps) {
   };
 
   const handleViewDetails = (transactionId: string) => {
-    // TODO: Implement navigation to a detailed sale view page or open a modal.
+    // TODO: Implement navigation to a detailed sale view page (e.g., /sales/history/[transactionId])
+    // or open a modal displaying all items in the transaction, customer details (if any), etc.
     toast({
-      title: "Coming Soon!",
-      description: `View details for sale ${transactionId} will be implemented here.`,
+      title: "TODO: Implement View Sale Details",
+      description: `Functionality to view details for sale ${transactionId} needs to be built.`,
     });
   };
 
   const handlePrintReceipt = (transactionId: string) => {
-    // TODO: Implement receipt printing functionality.
+    // TODO: Implement receipt printing functionality. This might involve:
+    // 1. Fetching full sale details.
+    // 2. Formatting them into a printable HTML structure.
+    // 3. Using window.print() or integrating with a printing service/library.
     toast({
-      title: "Coming Soon!",
-      description: `Print receipt for sale ${transactionId} will be implemented here.`,
+      title: "TODO: Implement Print Receipt",
+      description: `Functionality to print a receipt for sale ${transactionId} needs to be built.`,
     });
   };
 
@@ -75,7 +80,7 @@ export function SalesTable({ transactions }: SalesTableProps) {
                 <Button variant="link" className="p-0 h-auto" onClick={() => handleViewDetails(sale.id)}>{sale.id.substring(0,8)}...</Button>
               </TableCell>
               <TableCell className="text-muted-foreground">{formatDate(sale.transactionDate)}</TableCell>
-              <TableCell className="text-muted-foreground">{sale.items.length}</TableCell>
+              <TableCell className="text-muted-foreground">{sale.items.reduce((acc, item) => acc + item.quantity, 0)}</TableCell>
               <TableCell className="text-right font-semibold text-accent">${sale.totalAmount.toFixed(2)}</TableCell>
               <TableCell className="text-muted-foreground">{sale.staffName || sale.staffId.substring(0,8)}</TableCell>
               <TableCell className="text-right">

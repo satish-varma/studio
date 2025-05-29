@@ -5,10 +5,21 @@ import { useState, useMemo, useEffect } from "react";
 import { SalesHistoryControls } from "@/components/sales/SalesHistoryControls";
 import { SalesTable } from "@/components/sales/SalesTable";
 import PageHeader from "@/components/shared/PageHeader";
-import type { SaleTransaction } from "@/types";
+import type { SaleTransaction, AppUser } from "@/types";
 import type { DateRange } from "react-day-picker";
-import { subDays, isWithinInterval, startOfDay, endOfDay } from "date-fns";
-import { getFirestore, collection, onSnapshot, query, where, orderBy, Timestamp, QuerySnapshot, DocumentData } from "firebase/firestore";
+import { subDays, startOfDay, endOfDay } from "date-fns";
+import { 
+    getFirestore, 
+    collection, 
+    onSnapshot, 
+    query, 
+    where, 
+    orderBy, 
+    Timestamp, 
+    QuerySnapshot, 
+    DocumentData,
+    getDocs
+} from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
@@ -35,26 +46,55 @@ export default function SalesHistoryClientPage() {
   const [transactions, setTransactions] = useState<SaleTransaction[]>([]);
   const [loadingTransactions, setLoadingTransactions] = useState(true);
   const [errorTransactions, setErrorTransactions] = useState<string | null>(null);
+  const [staffList, setStaffList] = useState<AppUser[]>([]);
+  const [loadingStaff, setLoadingStaff] = useState(false);
+
+  const isManagerOrAdmin = user?.role === 'manager' || user?.role === 'admin';
+
+  useEffect(() => {
+    async function fetchStaffMembers() {
+      if (isManagerOrAdmin) {
+        setLoadingStaff(true);
+        try {
+          const usersCollectionRef = collection(db, "users");
+          // Fetch users who are staff or managers to populate the filter
+          const q = query(usersCollectionRef, where("role", "in", ["staff", "manager", "admin"]));
+          const querySnapshot = await getDocs(q);
+          const fetchedStaff: AppUser[] = [];
+          querySnapshot.forEach((doc) => {
+            fetchedStaff.push({ uid: doc.id, ...doc.data() } as AppUser);
+          });
+          setStaffList(fetchedStaff);
+        } catch (error) {
+          console.error("Error fetching staff members:", error);
+          // Optionally, set an error state for staff loading
+        } finally {
+          setLoadingStaff(false);
+        }
+      }
+    }
+    if (user) { // Fetch staff only if user is loaded and is manager/admin
+        fetchStaffMembers();
+    }
+  }, [user, isManagerOrAdmin]);
+
 
   useEffect(() => {
     if (!user) {
-      // Don't fetch if user is not loaded or not authenticated
       setLoadingTransactions(false);
       return;
     }
 
-    // TODO: Secure this data fetching with Firebase Security Rules.
-    // Staff should only see their own sales. Managers/Admins can see all sales or filter by staff.
+    setLoadingTransactions(true);
     let salesQuery = query(collection(db, "salesTransactions"), orderBy("transactionDate", "desc"));
 
+    // Apply staff filter based on current user's role
     if (user.role === 'staff') {
       salesQuery = query(salesQuery, where("staffId", "==", user.uid));
-    } else if (staffFilter !== "all") {
+    } else if (isManagerOrAdmin && staffFilter !== "all") {
       salesQuery = query(salesQuery, where("staffId", "==", staffFilter));
     }
     
-    // Apply date range filter if dates are set
-    // Firestore timestamps need to be handled carefully
     if (dateRange?.from) {
       salesQuery = query(salesQuery, where("transactionDate", ">=", Timestamp.fromDate(startOfDay(dateRange.from))));
     }
@@ -70,7 +110,6 @@ export default function SalesHistoryClientPage() {
           return {
             id: doc.id,
             ...data,
-            // Ensure transactionDate is a string (ISO format) as expected by the type
             transactionDate: (data.transactionDate as Timestamp).toDate().toISOString(),
           } as SaleTransaction;
         });
@@ -86,32 +125,13 @@ export default function SalesHistoryClientPage() {
     );
 
     return () => unsubscribe();
-  }, [user, dateRange, staffFilter]);
+  }, [user, dateRange, staffFilter, isManagerOrAdmin]);
   
-  // Filtering client-side after fetching based on role / selection
-  // This is mainly for date range now as Firestore query handles staff filtering
+  // Client-side filtering is no longer strictly needed as Firestore queries handle it,
+  // but useMemo is kept for potential future client-side refinements or if data structure changes.
   const filteredTransactions = useMemo(() => {
-    return transactions.filter(transaction => {
-      const transactionDateObj = new Date(transaction.transactionDate);
-      
-      const matchesDateRange = dateRange?.from && dateRange?.to 
-        ? isWithinInterval(transactionDateObj, { start: startOfDay(dateRange.from), end: endOfDay(dateRange.to) })
-        : dateRange?.from // if only 'from' is set, filter from that date onwards
-        ? transactionDateObj >= startOfDay(dateRange.from)
-        : true; 
-      
-      // Staff filter is now primarily handled by the Firestore query
-      // This client-side filter can be a fallback or for additional logic if needed
-      let matchesStaff = true;
-      if (user?.role === 'staff') {
-        matchesStaff = transaction.staffId === user.uid;
-      } else if (staffFilter !== "all") {
-        matchesStaff = transaction.staffId === staffFilter;
-      }
-      
-      return matchesDateRange && matchesStaff;
-    });
-  }, [transactions, dateRange, staffFilter, user]);
+    return transactions; // Data is pre-filtered by Firestore queries
+  }, [transactions]);
 
   return (
     <div className="space-y-6">
@@ -124,7 +144,9 @@ export default function SalesHistoryClientPage() {
         onDateRangeChange={setDateRange}
         staffFilter={staffFilter}
         onStaffFilterChange={setStaffFilter}
-        // staffMembers prop is removed for now, TODO: fetch from 'users' collection for managers/admins
+        staffMembers={staffList} 
+        isLoadingStaff={loadingStaff}
+        showStaffFilter={isManagerOrAdmin}
       />
       {loadingTransactions && (
          <div className="flex justify-center items-center py-10">

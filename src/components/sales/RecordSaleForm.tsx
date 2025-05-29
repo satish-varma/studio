@@ -53,7 +53,7 @@ const db = getFirestore();
 const saleItemSchema = z.object({
   itemId: z.string().min(1, "Please select an item."),
   quantity: z.coerce.number().min(1, "Quantity must be at least 1."),
-  pricePerUnit: z.coerce.number().positive("Price must be positive."),
+  pricePerUnit: z.coerce.number().positive("Price must be positive."), // This will be auto-filled
   name: z.string(), // To store item name for the transaction
 });
 
@@ -84,7 +84,6 @@ export default function RecordSaleForm() {
   });
 
   useEffect(() => {
-    // Fetch available stock items from Firestore
     const itemsCollectionRef = collection(db, "stockItems");
     const unsubscribe = onSnapshot(itemsCollectionRef, 
       (snapshot: QuerySnapshot<DocumentData>) => {
@@ -92,8 +91,7 @@ export default function RecordSaleForm() {
           id: doc.id,
           ...doc.data()
         } as StockItem));
-        // Filter out items with 0 quantity, though ideally form validation should prevent this too
-        setAvailableItems(fetchedItems.filter(item => item.quantity > 0));
+        setAvailableItems(fetchedItems.filter(item => item.quantity > 0)); // Only show items with quantity > 0
         setLoadingItems(false);
       },
       (error) => {
@@ -129,7 +127,6 @@ export default function RecordSaleForm() {
       await runTransaction(db, async (transaction) => {
         const soldItemsForTransaction: SoldItem[] = [];
         
-        // Step 1: Read current stock levels and validate within the transaction
         for (const formItem of values.items) {
           const stockItemRef = doc(db, "stockItems", formItem.itemId);
           const stockItemSnap = await transaction.get(stockItemRef);
@@ -141,35 +138,35 @@ export default function RecordSaleForm() {
           if (currentStockData.quantity < formItem.quantity) {
             throw new Error(`Not enough stock for ${formItem.name}. Available: ${currentStockData.quantity}, Requested: ${formItem.quantity}.`);
           }
+          if (currentStockData.price !== formItem.pricePerUnit) {
+            // This is a safeguard, price should be auto-filled and read-only
+            console.warn(`Price mismatch for ${formItem.name}. Using stored price: ${currentStockData.price}`);
+            formItem.pricePerUnit = currentStockData.price;
+          }
 
-          // Prepare item for sales transaction record
+
           soldItemsForTransaction.push({
             itemId: formItem.itemId,
             name: formItem.name,
             quantity: formItem.quantity,
-            pricePerUnit: formItem.pricePerUnit,
+            pricePerUnit: formItem.pricePerUnit, // Use validated/corrected price
             totalPrice: formItem.quantity * formItem.pricePerUnit,
           });
         }
 
-        // Step 2: Create the sales transaction document
         const salesCollectionRef = collection(db, "salesTransactions");
-        const newSaleRef = doc(salesCollectionRef); // Auto-generate ID
+        const newSaleRef = doc(salesCollectionRef); 
         transaction.set(newSaleRef, {
           items: soldItemsForTransaction,
-          totalAmount: totalSaleAmount,
+          totalAmount: totalSaleAmount, // Recalculate here based on potentially corrected prices if strictness is desired
           transactionDate: Timestamp.now(),
           staffId: user.uid,
           staffName: user.displayName || user.email,
         });
 
-        // Step 3: Update stock quantities for each item sold
         for (const formItem of values.items) {
           const stockItemRef = doc(db, "stockItems", formItem.itemId);
-          // We've already read and validated the stock, now we calculate new quantity
-          // To be absolutely safe, one could re-read here, but typical transaction patterns
-          // read, validate, then write based on those reads.
-          const stockItemSnap = await transaction.get(stockItemRef); // Re-get to ensure atomicity if needed, or trust prior get.
+          const stockItemSnap = await transaction.get(stockItemRef); // Re-get for atomicity, though already got it once
           const currentStockData = stockItemSnap.data() as StockItem;
           const newQuantity = currentStockData.quantity - formItem.quantity;
           
@@ -201,16 +198,14 @@ export default function RecordSaleForm() {
   const handleItemChange = (value: string, index: number) => {
     const selectedItem = availableItems.find(ai => ai.id === value);
     if (selectedItem) {
-      // Use the price from the StockItem
-      const price = selectedItem.price; 
-
+      const price = selectedItem.price; // Get price from the stock item
       update(index, { 
         ...watchedItems[index], 
         itemId: selectedItem.id, 
         name: selectedItem.name,
-        pricePerUnit: price 
+        pricePerUnit: price // Auto-fill the price
       });
-    } else { // Clear price if item is de-selected or not found
+    } else { 
         update(index, {
             ...watchedItems[index],
             itemId: "",
@@ -295,7 +290,7 @@ export default function RecordSaleForm() {
                             onChange={(e) => {
                                 let val = parseInt(e.target.value, 10);
                                 if (maxQuantity !== undefined && val > maxQuantity) val = maxQuantity;
-                                if (val < 1 && e.target.value !== "") val = 1; // Allow clearing but default to 1 if typing
+                                if (val < 1 && e.target.value !== "") val = 1; 
                                 formField.onChange(isNaN(val) ? "" : val);
                             }}
                           />
@@ -317,8 +312,8 @@ export default function RecordSaleForm() {
                             placeholder="Price" 
                             {...formField} 
                             className="bg-input" 
-                            readOnly 
-                            disabled 
+                            readOnly // Price is auto-filled and not editable by user
+                            disabled // Visually indicate it's not for user input
                         />
                       </FormControl>
                       <FormMessage />
@@ -354,7 +349,12 @@ export default function RecordSaleForm() {
             </div>
           </CardContent>
           <CardFooter>
-            <Button type="submit" className="w-full" size="lg" disabled={isSubmitting || loadingItems || fields.some(f => !f.itemId || !f.quantity || f.quantity <=0 )}>
+            <Button 
+              type="submit" 
+              className="w-full" 
+              size="lg" 
+              disabled={isSubmitting || loadingItems || fields.some(f => !f.itemId || !f.quantity || f.quantity <=0 || f.pricePerUnit <= 0 )}
+            >
               {isSubmitting ? <Loader2 className="animate-spin mr-2" /> : null}
               Record Sale
             </Button>

@@ -1,3 +1,4 @@
+
 "use client";
 
 import { Button } from "@/components/ui/button";
@@ -36,11 +37,11 @@ export function ItemControls({
   const { toast } = useToast();
 
   const handleAddNewItem = () => {
-    // TODO: Implement navigation to add new item page or open a modal.
-    // router.push('/items/new'); 
+    // TODO: Implement navigation to a dedicated "add new item" page or open a modal form.
+    // For now, router.push('/items/new'); could be a target if such a page exists.
     toast({
-      title: "Coming Soon!",
-      description: "Functionality to add a new item will be implemented here.",
+      title: "TODO: Implement Add New Item",
+      description: "This functionality requires a form to input new item details.",
     });
   };
 
