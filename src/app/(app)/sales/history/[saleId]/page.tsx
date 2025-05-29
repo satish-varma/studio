@@ -203,8 +203,12 @@ export default function SaleDetailsPage() {
                     <TableRow key={index} className="print:border-b print:border-gray-300">
                       <TableCell className="font-medium print:text-sm">{item.name}</TableCell>
                       <TableCell className="text-right print:text-sm">{item.quantity}</TableCell>
-                      <TableCell className="text-right print:text-sm">₹{item.pricePerUnit.toFixed(2)}</TableCell> {/* Updated currency symbol */}
-                      <TableCell className="text-right print:text-sm">₹{item.totalPrice.toFixed(2)}</TableCell> {/* Updated currency symbol */}
+                      <TableCell className="text-right print:text-sm">
+                        ₹{typeof item.pricePerUnit === 'number' ? item.pricePerUnit.toFixed(2) : 'N/A'}
+                      </TableCell>
+                      <TableCell className="text-right print:text-sm">
+                        ₹{typeof item.totalPrice === 'number' ? item.totalPrice.toFixed(2) : 'N/A'}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -214,7 +218,7 @@ export default function SaleDetailsPage() {
           <div className="flex justify-end pt-4 border-t print:border-t-2 print:border-black">
             <div className="text-right">
               <p className="text-lg font-semibold text-foreground print:text-xl">
-                Grand Total: ₹{transaction.totalAmount.toFixed(2)} {/* Updated currency symbol */}
+                Grand Total: ₹{transaction.totalAmount.toFixed(2)}
               </p>
             </div>
           </div>
