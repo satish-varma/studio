@@ -17,9 +17,9 @@ import {
 import { getFirestore, doc, getDoc, setDoc, type Firestore } from 'firebase/firestore';
 import { firebaseConfig } from '@/lib/firebaseConfig'; 
 
-let app: FirebaseApp;
-let auth: Auth;
-let db: Firestore;
+let app: FirebaseApp | undefined; // Allow app to be undefined initially
+let auth: Auth | undefined;
+let db: Firestore | undefined;
 
 // Initialize Firebase only if it hasn't been initialized yet
 if (!getApps().length) {
@@ -27,17 +27,23 @@ if (!getApps().length) {
     app = initializeApp(firebaseConfig);
   } catch (error) {
     console.error("Firebase initialization error during initial app load:", error);
+    // app remains undefined if initialization fails
   }
 } else {
-  app = getApps()[0];
+  app = getApp(); // Use getApp() if apps already exist
 }
 
-// Ensure auth and db are initialized after app
-try {
-  auth = getAuth(app);
-  db = getFirestore(app);
-} catch (error) {
-   console.error("Firebase Auth/DB initialization error:", error);
+// Ensure auth and db are initialized only if app was successfully initialized
+if (app) {
+  try {
+    auth = getAuth(app);
+    db = getFirestore(app);
+  } catch (error) {
+     console.error("Firebase Auth/DB initialization error:", error);
+     // auth and db might remain undefined if getAuth/getFirestore fails
+  }
+} else {
+    console.error("Firebase App could not be initialized. Auth and Firestore setup will be skipped.");
 }
 
 
@@ -60,13 +66,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (!auth || !db) {
       setLoading(false);
       console.error("Firebase Auth or Firestore is not initialized in AuthProvider effect.");
+      // Potentially set an error state here for the UI to reflect this critical failure
       return;
     }
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
       if (firebaseUser) {
         try {
-          const userDocRef = doc(db, "users", firebaseUser.uid);
+          const userDocRef = doc(db as Firestore, "users", firebaseUser.uid); // Type assertion for db
           const userDocSnap = await getDoc(userDocRef);
           
           let userRole: UserRole = 'staff'; 
@@ -93,6 +100,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             displayName: currentDisplayName,
             photoURL: firebaseUser.photoURL,
             role: userRole,
+            createdAt: userDocSnap.exists() ? userDocSnap.data().createdAt : new Date().toISOString(),
           };
           setUser(appUser);
         } catch (error) {
@@ -103,6 +111,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User",
             photoURL: firebaseUser.photoURL,
             role: 'staff', 
+            createdAt: new Date().toISOString(),
           };
           setUser(fallbackUser);
         }
@@ -121,16 +130,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const userCredential = await signInWithEmailAndPassword(auth, email, pass);
       const firebaseUser = userCredential.user;
       
-      const userDocRef = doc(db, "users", firebaseUser.uid);
+      const userDocRef = doc(db as Firestore, "users", firebaseUser.uid);
       const userDocSnap = await getDoc(userDocRef);
       
       let userRole: UserRole = 'staff';
       let currentDisplayName = firebaseUser.displayName;
+      let createdAt = new Date().toISOString();
+
 
       if (userDocSnap.exists()) {
         const userData = userDocSnap.data();
         userRole = userData.role || 'staff';
         currentDisplayName = userData.displayName || firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User";
+        createdAt = userData.createdAt || createdAt;
       } else {
         console.warn(`User document not found for UID: ${firebaseUser.uid} during sign-in. Assigning default role and creating document.`);
         currentDisplayName = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User";
@@ -138,7 +150,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             email: firebaseUser.email, 
             role: 'staff',
             displayName: currentDisplayName,
-            createdAt: new Date().toISOString(),
+            createdAt: createdAt,
           });
       }
 
@@ -147,7 +159,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         email: firebaseUser.email, 
         displayName: currentDisplayName, 
         photoURL: firebaseUser.photoURL, 
-        role: userRole 
+        role: userRole,
+        createdAt: createdAt
       };
       setUser(appUser);
       return appUser;
@@ -167,16 +180,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
       const firebaseUser = userCredential.user;
       
-      // It's good practice to update the Firebase Auth profile display name as well
-      // This doesn't happen automatically with createUserWithEmailAndPassword
-      // await updateProfile(firebaseUser, { displayName: displayName }); // If you need this immediately for firebaseUser.displayName
-
-      const userDocRef = doc(db, "users", firebaseUser.uid);
+      const createdAt = new Date().toISOString();
+      const userDocRef = doc(db as Firestore, "users", firebaseUser.uid);
       await setDoc(userDocRef, {
         email: firebaseUser.email,
         role: role,
         displayName: displayName,
-        createdAt: new Date().toISOString(),
+        createdAt: createdAt,
       });
 
       const appUser: AppUser = { 
@@ -184,7 +194,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         email: firebaseUser.email, 
         displayName: displayName, 
         photoURL: firebaseUser.photoURL, 
-        role 
+        role,
+        createdAt
       };
       setUser(appUser); 
       return appUser;
