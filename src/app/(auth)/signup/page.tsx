@@ -1,9 +1,9 @@
 
-import { LoginForm } from '@/components/auth/LoginForm';
+import { SignUpForm } from '@/components/auth/SignUpForm';
 import Image from 'next/image';
 import Link from 'next/link';
 
-export default function LoginPage() {
+export default function SignUpPage() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
       <div className="w-full max-w-md space-y-8">
@@ -17,20 +17,17 @@ export default function LoginPage() {
             className="mx-auto rounded-lg shadow-md"
           />
           <h1 className="mt-6 text-3xl font-extrabold text-foreground">
-            Welcome to StallSync
+            Create your StallSync Account
           </h1>
           <p className="mt-2 text-muted-foreground">
-            Sign in to manage your inventory.
+            Fill in the details below to get started.
           </p>
         </div>
-        <LoginForm />
+        <SignUpForm />
         <p className="text-center text-sm text-muted-foreground">
-          Hint: Try staff@example.com, manager@example.com, or admin@example.com with password 'password'.
-        </p>
-        <p className="text-center text-sm text-muted-foreground">
-          Don&apos;t have an account?{' '}
-          <Link href="/signup" className="font-medium text-primary hover:underline">
-            Sign Up
+          Already have an account?{' '}
+          <Link href="/login" className="font-medium text-primary hover:underline">
+            Sign In
           </Link>
         </p>
       </div>

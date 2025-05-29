@@ -42,7 +42,7 @@ interface AuthContextType {
   user: AppUser | null;
   loading: boolean;
   signIn: (email: string, pass: string) => Promise<AppUser | null>;
-  signUp: (email: string, pass: string, role?: UserRole) => Promise<AppUser | null>; 
+  signUp: (email: string, pass: string, displayName: string, role?: UserRole) => Promise<AppUser | null>; 
   signOutUser: () => Promise<void>;
 }
 
@@ -68,20 +68,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           const userDocSnap = await getDoc(userDocRef);
           
           let userRole: UserRole = 'staff'; // Default role
-          let displayName = firebaseUser.displayName;
+          let currentDisplayName = firebaseUser.displayName;
 
           if (userDocSnap.exists()) {
             const userData = userDocSnap.data();
             userRole = userData.role || 'staff';
-            displayName = userData.displayName || firebaseUser.displayName || "User";
+            currentDisplayName = userData.displayName || firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User";
           } else {
-            // If user doc doesn't exist (e.g., migrated user or direct Firebase Console creation), create it.
-            // For new sign-ups, the doc is created in the signUp function.
-            // This handles cases where a user might exist in Auth but not Firestore.
-             await setDoc(userDocRef, { 
+            // This case handles users who might exist in Firebase Auth but not in Firestore
+            // (e.g. if they were created directly in Firebase console or if Firestore doc creation failed previously).
+            // For new sign-ups via the app, the document is created in the signUp function.
+            console.warn(`User document not found for UID: ${firebaseUser.uid} during auth state change. Creating one with default role.`);
+            currentDisplayName = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User";
+            await setDoc(userDocRef, { 
               email: firebaseUser.email, 
-              role: 'staff', // Default role for users found in Auth but not Firestore
-              displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User",
+              role: 'staff', 
+              displayName: currentDisplayName,
               createdAt: new Date().toISOString(),
             });
           }
@@ -89,20 +91,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           const appUser: AppUser = {
             uid: firebaseUser.uid,
             email: firebaseUser.email,
-            displayName: displayName,
+            displayName: currentDisplayName,
             photoURL: firebaseUser.photoURL,
             role: userRole,
           };
           setUser(appUser);
         } catch (error) {
-          console.error("Error fetching user role from Firestore:", error);
-          // Fallback: create a user object without a role or with a default one
+          console.error("Error fetching user data from Firestore:", error);
           const fallbackUser: AppUser = {
             uid: firebaseUser.uid,
             email: firebaseUser.email,
-            displayName: firebaseUser.displayName || "User",
+            displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User",
             photoURL: firebaseUser.photoURL,
-            role: 'staff', // Fallback role
+            role: 'staff', 
           };
           setUser(fallbackUser);
         }
@@ -125,20 +126,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const userDocSnap = await getDoc(userDocRef);
       
       let userRole: UserRole = 'staff';
-      let displayName = firebaseUser.displayName;
+      let currentDisplayName = firebaseUser.displayName;
 
       if (userDocSnap.exists()) {
         const userData = userDocSnap.data();
         userRole = userData.role || 'staff';
-        displayName = userData.displayName || firebaseUser.displayName || "User";
+        currentDisplayName = userData.displayName || firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User";
       } else {
-        // This case should be rare for sign-in if signUp creates the doc.
-        // However, to be safe, assign a default role.
-        console.warn(`User document not found for UID: ${firebaseUser.uid} during sign-in. Assigning default role.`);
+        console.warn(`User document not found for UID: ${firebaseUser.uid} during sign-in. Assigning default role and creating document.`);
+        currentDisplayName = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User";
          await setDoc(userDocRef, { 
             email: firebaseUser.email, 
             role: 'staff',
-            displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User",
+            displayName: currentDisplayName,
             createdAt: new Date().toISOString(),
           });
       }
@@ -146,7 +146,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const appUser: AppUser = { 
         uid: firebaseUser.uid, 
         email: firebaseUser.email, 
-        displayName: displayName, 
+        displayName: currentDisplayName, 
         photoURL: firebaseUser.photoURL, 
         role: userRole 
       };
@@ -161,38 +161,34 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
   
-  const signUp = async (email: string, pass: string, role: UserRole = 'staff'): Promise<AppUser | null> => {
+  const signUp = async (email: string, pass: string, displayName: string, role: UserRole = 'staff'): Promise<AppUser | null> => {
     if (!auth || !db) throw new Error("Firebase not initialized.");
     setLoading(true);
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
       const firebaseUser = userCredential.user;
       
-      // Store user details (including role) in Firestore
-      // TODO: Consider adding more profile details here if needed (e.g., firstName, lastName)
       const userDocRef = doc(db, "users", firebaseUser.uid);
-      const initialDisplayName = firebaseUser.displayName || email.split('@')[0] || "New User";
       await setDoc(userDocRef, {
         email: firebaseUser.email,
         role: role,
-        displayName: initialDisplayName,
+        displayName: displayName,
         createdAt: new Date().toISOString(),
-        // You might want to set a default photoURL or leave it to Firebase profile updates
       });
 
       const appUser: AppUser = { 
         uid: firebaseUser.uid, 
         email: firebaseUser.email, 
-        displayName: initialDisplayName, 
-        photoURL: firebaseUser.photoURL, // This will likely be null initially
+        displayName: displayName, 
+        photoURL: firebaseUser.photoURL, // This will likely be null initially from Firebase Auth
         role 
       };
-      setUser(appUser);
+      setUser(appUser); // Set the user in context after successful sign-up & Firestore doc creation
       setLoading(false);
       return appUser;
     } catch (error) {
       console.error("Sign up error:", error);
-      setUser(null);
+      setUser(null); // Clear user on error
       setLoading(false);
       throw error;
     }
