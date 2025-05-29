@@ -24,7 +24,7 @@ import { getFirestore, doc, setDoc, addDoc, collection } from "firebase/firestor
 import { firebaseConfig } from "@/lib/firebaseConfig";
 import { getApps, initializeApp } from "firebase/app";
 import type { StockItem } from "@/types";
-import { useState } from "react"; // Added useState import
+import { useState } from "react"; 
 
 if (!getApps().length) {
   try {
@@ -176,7 +176,7 @@ export default function ItemForm({ initialData, itemId }: ItemFormProps) {
                 name="price"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Price per Unit ($)</FormLabel>
+                    <FormLabel>Price per Unit (₹)</FormLabel> {/* Updated currency symbol */}
                     <FormControl>
                       <Input type="number" step="0.01" placeholder="0.00" {...field} onChange={e => field.onChange(parseFloat(e.target.value) || 0)} disabled={isSubmitting} className="bg-input"/>
                     </FormControl>

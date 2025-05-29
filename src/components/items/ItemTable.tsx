@@ -189,7 +189,7 @@ export function ItemTable({ items }: ItemTableProps) {
                 <TableCell className="text-muted-foreground">{item.category}</TableCell>
                 <TableCell className="text-right text-foreground">{item.quantity}</TableCell>
                 <TableCell className="text-muted-foreground">{item.unit}</TableCell>
-                <TableCell className="text-right text-foreground">${item.price.toFixed(2)}</TableCell>
+                <TableCell className="text-right text-foreground">₹{item.price.toFixed(2)}</TableCell> {/* Updated currency symbol */}
                 <TableCell className="text-right text-muted-foreground">{item.lowStockThreshold}</TableCell>
                 <TableCell>
                   <Badge

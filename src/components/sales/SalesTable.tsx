@@ -31,12 +31,13 @@ export function SalesTable({ transactions }: SalesTableProps) {
 
   const formatDate = (dateString: string) => {
     try {
-      return new Date(dateString).toLocaleString('en-US', {
+      return new Date(dateString).toLocaleString('en-IN', { // Changed to en-IN for Indian locale
         year: 'numeric',
         month: 'short',
         day: 'numeric',
         hour: '2-digit',
         minute: '2-digit',
+        hour12: true
       });
     } catch (e) {
       return "Invalid Date";
@@ -81,7 +82,7 @@ export function SalesTable({ transactions }: SalesTableProps) {
               </TableCell>
               <TableCell className="text-muted-foreground">{formatDate(sale.transactionDate)}</TableCell>
               <TableCell className="text-muted-foreground">{sale.items.reduce((acc, item) => acc + item.quantity, 0)}</TableCell>
-              <TableCell className="text-right font-semibold text-accent">${sale.totalAmount.toFixed(2)}</TableCell>
+              <TableCell className="text-right font-semibold text-accent">₹{sale.totalAmount.toFixed(2)}</TableCell> {/* Updated currency symbol */}
               <TableCell className="text-muted-foreground">{sale.staffName || sale.staffId.substring(0,8)}</TableCell>
               <TableCell className="text-right">
                 <DropdownMenu>

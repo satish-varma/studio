@@ -88,7 +88,7 @@ export default function SaleDetailsPage() {
   
   useEffect(() => {
     if (transaction?.id) {
-      document.title = \`Sale Details \${transaction.id.substring(0,8)} - StallSync\`;
+      document.title = `Sale Details ${transaction.id.substring(0,8)} - StallSync`;
     }
      return () => { document.title = "StallSync - Stock Management"; }
   }, [transaction?.id]);
@@ -96,9 +96,10 @@ export default function SaleDetailsPage() {
   const formatDate = (dateString: string) => {
     if (!dateString) return "N/A";
     try {
-      return new Date(dateString).toLocaleString('en-US', {
+      return new Date(dateString).toLocaleString('en-IN', { // Changed to en-IN for Indian locale
         year: 'numeric', month: 'long', day: 'numeric',
-        hour: '2-digit', minute: '2-digit', second: '2-digit'
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        hour12: true
       });
     } catch (e) { return "Invalid Date"; }
   };
@@ -202,8 +203,8 @@ export default function SaleDetailsPage() {
                     <TableRow key={index} className="print:border-b print:border-gray-300">
                       <TableCell className="font-medium print:text-sm">{item.name}</TableCell>
                       <TableCell className="text-right print:text-sm">{item.quantity}</TableCell>
-                      <TableCell className="text-right print:text-sm">${item.pricePerUnit.toFixed(2)}</TableCell>
-                      <TableCell className="text-right print:text-sm">${item.totalPrice.toFixed(2)}</TableCell>
+                      <TableCell className="text-right print:text-sm">₹{item.pricePerUnit.toFixed(2)}</TableCell> {/* Updated currency symbol */}
+                      <TableCell className="text-right print:text-sm">₹{item.totalPrice.toFixed(2)}</TableCell> {/* Updated currency symbol */}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -213,7 +214,7 @@ export default function SaleDetailsPage() {
           <div className="flex justify-end pt-4 border-t print:border-t-2 print:border-black">
             <div className="text-right">
               <p className="text-lg font-semibold text-foreground print:text-xl">
-                Grand Total: ${transaction.totalAmount.toFixed(2)}
+                Grand Total: ₹{transaction.totalAmount.toFixed(2)} {/* Updated currency symbol */}
               </p>
             </div>
           </div>

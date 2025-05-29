@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import type { StockItem, SoldItem } from "@/types";
-import { PlusCircle, Trash2, DollarSign, Loader2 } from "lucide-react";
+import { PlusCircle, Trash2, IndianRupee, Loader2 } from "lucide-react"; // Changed DollarSign to IndianRupee
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { 
@@ -179,7 +179,7 @@ export default function RecordSaleForm() {
 
       toast({
         title: "Sale Recorded Successfully!",
-        description: `Total: $${totalSaleAmount.toFixed(2)}. Stock levels updated.`,
+        description: `Total: ₹${totalSaleAmount.toFixed(2)}. Stock levels updated.`, // Updated currency symbol
       });
       form.reset({ items: [{ itemId: "", quantity: 1, pricePerUnit: 0, name: "" }] });
 
@@ -229,7 +229,7 @@ export default function RecordSaleForm() {
     <Card className="w-full max-w-2xl mx-auto shadow-xl">
       <CardHeader>
         <CardTitle className="text-2xl flex items-center">
-          <DollarSign className="mr-2 h-6 w-6 text-accent" />
+          <IndianRupee className="mr-2 h-6 w-6 text-accent" /> {/* Updated icon */}
           Record New Sale
         </CardTitle>
       </CardHeader>
@@ -260,7 +260,7 @@ export default function RecordSaleForm() {
                         <SelectContent>
                           {availableItems.map((item) => (
                             <SelectItem key={item.id} value={item.id} disabled={item.quantity <= 0}>
-                              {item.name} (Stock: {item.quantity}) - ${item.price.toFixed(2)}
+                              {item.name} (Stock: {item.quantity}) - ₹{item.price.toFixed(2)} {/* Updated currency symbol */}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -305,7 +305,7 @@ export default function RecordSaleForm() {
                   name={`items.${index}.pricePerUnit`}
                   render={({ field: formField }) => (
                     <FormItem className="w-28">
-                      <FormLabel>Price/Unit</FormLabel>
+                      <FormLabel>Price/Unit (₹)</FormLabel> {/* Updated currency symbol */}
                       <FormControl>
                         <Input 
                             type="number" 
@@ -344,7 +344,7 @@ export default function RecordSaleForm() {
 
             <div className="pt-4 text-right">
               <p className="text-2xl font-bold text-foreground">
-                Total: ${totalSaleAmount.toFixed(2)}
+                Total: ₹{totalSaleAmount.toFixed(2)} {/* Updated currency symbol */}
               </p>
             </div>
           </CardContent>
