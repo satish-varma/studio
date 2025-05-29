@@ -18,12 +18,15 @@ import {
     Timestamp, 
     QuerySnapshot, 
     DocumentData,
-    getDocs
+    getDocs,
+    doc,
+    updateDoc
 } from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
 import { Loader2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
 // Initialize Firebase only if it hasn't been initialized yet
 if (!getApps().length) {
@@ -37,6 +40,7 @@ const db = getFirestore();
 
 export default function SalesHistoryClientPage() {
   const { user } = useAuth();
+  const { toast } = useToast();
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
     from: subDays(new Date(), 29),
     to: new Date(),
@@ -57,9 +61,8 @@ export default function SalesHistoryClientPage() {
         setLoadingStaff(true);
         try {
           const usersCollectionRef = collection(db, "users");
-          // Fetch users who are staff or managers to populate the filter
-          const q = query(usersCollectionRef, where("role", "in", ["staff", "manager", "admin"]));
-          const querySnapshot = await getDocs(q);
+          const qUsers = query(usersCollectionRef, where("role", "in", ["staff", "manager", "admin"]));
+          const querySnapshot = await getDocs(qUsers);
           const fetchedStaff: AppUser[] = [];
           querySnapshot.forEach((doc) => {
             fetchedStaff.push({ uid: doc.id, ...doc.data() } as AppUser);
@@ -67,13 +70,12 @@ export default function SalesHistoryClientPage() {
           setStaffList(fetchedStaff);
         } catch (error) {
           console.error("Error fetching staff members:", error);
-          // Optionally, set an error state for staff loading
         } finally {
           setLoadingStaff(false);
         }
       }
     }
-    if (user) { // Fetch staff only if user is loaded and is manager/admin
+    if (user) { 
         fetchStaffMembers();
     }
   }, [user, isManagerOrAdmin]);
@@ -86,22 +88,25 @@ export default function SalesHistoryClientPage() {
     }
 
     setLoadingTransactions(true);
-    let salesQuery = query(collection(db, "salesTransactions"), orderBy("transactionDate", "desc"));
+    let salesQueryConstraints = [
+        orderBy("transactionDate", "desc"),
+        where("isDeleted", "!=", true) // Filter out soft-deleted sales
+    ];
 
-    // Apply staff filter based on current user's role
     if (user.role === 'staff') {
-      salesQuery = query(salesQuery, where("staffId", "==", user.uid));
+      salesQueryConstraints.push(where("staffId", "==", user.uid));
     } else if (isManagerOrAdmin && staffFilter !== "all") {
-      salesQuery = query(salesQuery, where("staffId", "==", staffFilter));
+      salesQueryConstraints.push(where("staffId", "==", staffFilter));
     }
     
     if (dateRange?.from) {
-      salesQuery = query(salesQuery, where("transactionDate", ">=", Timestamp.fromDate(startOfDay(dateRange.from))));
+      salesQueryConstraints.push(where("transactionDate", ">=", Timestamp.fromDate(startOfDay(dateRange.from))));
     }
     if (dateRange?.to) {
-      salesQuery = query(salesQuery, where("transactionDate", "<=", Timestamp.fromDate(endOfDay(dateRange.to))));
+      salesQueryConstraints.push(where("transactionDate", "<=", Timestamp.fromDate(endOfDay(dateRange.to))));
     }
-
+    
+    const salesQuery = query(collection(db, "salesTransactions"), ...salesQueryConstraints);
 
     const unsubscribe = onSnapshot(salesQuery,
       (snapshot: QuerySnapshot<DocumentData>) => {
@@ -126,11 +131,36 @@ export default function SalesHistoryClientPage() {
 
     return () => unsubscribe();
   }, [user, dateRange, staffFilter, isManagerOrAdmin]);
+
+  const handleDeleteSaleWithJustification = async (saleId: string, justification: string) => {
+    if (!user || user.role !== 'admin') {
+      toast({ title: "Permission Denied", description: "Only admins can delete sales.", variant: "destructive" });
+      return;
+    }
+    if (!justification || justification.trim() === "") {
+        toast({ title: "Justification Required", description: "Please provide a reason for deleting the sale.", variant: "destructive" });
+        return;
+    }
+
+    const saleDocRef = doc(db, "salesTransactions", saleId);
+    try {
+      await updateDoc(saleDocRef, {
+        isDeleted: true,
+        deletedAt: new Date().toISOString(),
+        deletedBy: user.uid,
+        deletionJustification: justification.trim(),
+      });
+      toast({ title: "Sale Deleted", description: "The sale transaction has been marked as deleted." });
+      // Note: Stock levels are not automatically reverted with a soft delete.
+      // This would require a more complex process or manual adjustment if needed.
+    } catch (error: any) {
+      console.error("Error deleting sale:", error);
+      toast({ title: "Deletion Failed", description: error.message || "Could not delete the sale transaction.", variant: "destructive" });
+    }
+  };
   
-  // Client-side filtering is no longer strictly needed as Firestore queries handle it,
-  // but useMemo is kept for potential future client-side refinements or if data structure changes.
   const filteredTransactions = useMemo(() => {
-    return transactions; // Data is pre-filtered by Firestore queries
+    return transactions; 
   }, [transactions]);
 
   return (
@@ -159,7 +189,13 @@ export default function SalesHistoryClientPage() {
           <p>{errorTransactions}</p>
         </div>
       )}
-      {!loadingTransactions && !errorTransactions && <SalesTable transactions={filteredTransactions} />}
+      {!loadingTransactions && !errorTransactions && 
+        <SalesTable 
+            transactions={filteredTransactions} 
+            currentUserRole={user?.role}
+            onDeleteSale={handleDeleteSaleWithJustification}
+        />
+      }
     </div>
   );
 }

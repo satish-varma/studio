@@ -10,28 +10,49 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import type { SaleTransaction } from "@/types";
-import { MoreHorizontal, Eye, Printer } from "lucide-react";
+import type { SaleTransaction, UserRole } from "@/types";
+import { MoreHorizontal, Eye, Printer, Trash2, Loader2 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 interface SalesTableProps {
   transactions: SaleTransaction[];
+  currentUserRole?: UserRole;
+  onDeleteSale: (saleId: string, justification: string) => Promise<void>;
 }
 
-export function SalesTable({ transactions }: SalesTableProps) {
+export function SalesTable({ transactions, currentUserRole, onDeleteSale }: SalesTableProps) {
   const { toast } = useToast();
   const router = useRouter();
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [justification, setJustification] = useState("");
+  const [saleToDelete, setSaleToDelete] = useState<SaleTransaction | null>(null);
+
 
   const formatDate = (dateString: string) => {
     try {
-      return new Date(dateString).toLocaleString('en-IN', { // Changed to en-IN for Indian locale
+      return new Date(dateString).toLocaleString('en-IN', { 
         year: 'numeric',
         month: 'short',
         day: 'numeric',
@@ -49,13 +70,33 @@ export function SalesTable({ transactions }: SalesTableProps) {
   };
 
   const handlePrintReceipt = (transactionId: string) => {
-    // Printing is now handled on the details page
     router.push(`/sales/history/${transactionId}?print=true`);
     toast({
       title: "Navigating to Details for Printing",
       description: "The print option is available on the sale details page.",
     });
   };
+
+  const openDeleteDialog = (sale: SaleTransaction) => {
+    setSaleToDelete(sale);
+    setJustification(""); // Reset justification
+  };
+
+  const closeDeleteDialog = () => {
+    setSaleToDelete(null);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!saleToDelete || !justification.trim()) {
+        toast({title: "Error", description: "Justification cannot be empty.", variant: "destructive"});
+        return;
+    }
+    setIsDeleting(true);
+    await onDeleteSale(saleToDelete.id, justification.trim());
+    setIsDeleting(false);
+    closeDeleteDialog();
+  };
+
 
   if (transactions.length === 0) {
     return <p className="text-center text-muted-foreground py-8">No sales transactions found for the selected criteria.</p>;
@@ -85,29 +126,81 @@ export function SalesTable({ transactions }: SalesTableProps) {
               <TableRow key={sale.id}>
                 <TableCell className="font-medium text-primary">
                   <Button variant="link" className="p-0 h-auto" onClick={() => handleViewDetails(sale.id)}>{sale.id.substring(0,8)}...</Button>
-                </TableCell><TableCell className="text-muted-foreground">{formatDate(sale.transactionDate)}</TableCell><TableCell className="text-muted-foreground">{totalItemsSold}</TableCell><TableCell className="text-right font-semibold text-accent">₹{sale.totalAmount.toFixed(2)}</TableCell><TableCell className="text-muted-foreground">{sale.staffName || sale.staffId.substring(0,8)}</TableCell><TableCell className="text-right">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8">
-                        <MoreHorizontal className="h-4 w-4" />
-                        <span className="sr-only">Actions</span>
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => handleViewDetails(sale.id)}>
-                        <Eye className="mr-2 h-4 w-4" /> View Details
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handlePrintReceipt(sale.id)}>
-                        <Printer className="mr-2 h-4 w-4" /> Print Receipt
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                </TableCell>
+                <TableCell className="text-muted-foreground">{formatDate(sale.transactionDate)}</TableCell>
+                <TableCell className="text-muted-foreground">{totalItemsSold}</TableCell>
+                <TableCell className="text-right font-semibold text-accent">₹{sale.totalAmount.toFixed(2)}</TableCell>
+                <TableCell className="text-muted-foreground">{sale.staffName || sale.staffId.substring(0,8)}</TableCell>
+                <TableCell className="text-right">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                          <MoreHorizontal className="h-4 w-4" />
+                          <span className="sr-only">Actions</span>
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => handleViewDetails(sale.id)}>
+                          <Eye className="mr-2 h-4 w-4" /> View Details
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handlePrintReceipt(sale.id)}>
+                          <Printer className="mr-2 h-4 w-4" /> Print Receipt
+                        </DropdownMenuItem>
+                        {currentUserRole === 'admin' && (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem 
+                              onClick={() => openDeleteDialog(sale)}
+                              className="text-destructive focus:text-destructive-foreground focus:bg-destructive"
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" /> Delete Sale
+                            </DropdownMenuItem>
+                          </>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                 </TableCell>
               </TableRow>
             );
           })}
         </TableBody>
       </Table>
+
+      {saleToDelete && (
+        <AlertDialog open={!!saleToDelete} onOpenChange={(open) => !open && closeDeleteDialog()}>
+            <AlertDialogContent>
+                <AlertDialogHeader>
+                <AlertDialogTitle>Delete Sale Transaction: #{saleToDelete.id.substring(0,8)}...?</AlertDialogTitle>
+                <AlertDialogDescription>
+                    This action will mark the sale as deleted. It will no longer appear in the main sales history.
+                    Please provide a justification for this action. This action cannot be directly undone through the UI.
+                </AlertDialogDescription>
+                </AlertDialogHeader>
+                <div className="space-y-2 py-2">
+                    <Label htmlFor="justification">Justification for Deletion <span className="text-destructive">*</span></Label>
+                    <Textarea
+                        id="justification"
+                        value={justification}
+                        onChange={(e) => setJustification(e.target.value)}
+                        placeholder="Enter reason for deleting this sale transaction..."
+                        className="min-h-[80px] bg-input"
+                        disabled={isDeleting}
+                    />
+                </div>
+                <AlertDialogFooter>
+                <AlertDialogCancel onClick={closeDeleteDialog} disabled={isDeleting}>Cancel</AlertDialogCancel>
+                <AlertDialogAction 
+                    onClick={handleDeleteConfirm} 
+                    disabled={isDeleting || !justification.trim()}
+                    className="bg-destructive hover:bg-destructive/90"
+                >
+                    {isDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                    Confirm Delete
+                </AlertDialogAction>
+                </AlertDialogFooter>
+            </AlertDialogContent>
+        </AlertDialog>
+      )}
     </div>
   );
 }
