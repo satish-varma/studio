@@ -20,13 +20,15 @@ import {
     DocumentData,
     getDocs,
     doc,
-    updateDoc
+    updateDoc,
+    QueryConstraint // Import QueryConstraint
 } from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
-import { Loader2 } from "lucide-react";
+import { Loader2, Info } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 // Initialize Firebase only if it hasn't been initialized yet
 if (!getApps().length) {
@@ -39,7 +41,7 @@ if (!getApps().length) {
 const db = getFirestore();
 
 export default function SalesHistoryClientPage() {
-  const { user } = useAuth();
+  const { user, activeSiteId, activeStallId } = useAuth();
   const { toast } = useToast();
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
     from: subDays(new Date(), 29),
@@ -61,6 +63,7 @@ export default function SalesHistoryClientPage() {
         setLoadingStaff(true);
         try {
           const usersCollectionRef = collection(db, "users");
+          // Fetch all users who can make sales (staff, manager, admin)
           const qUsers = query(usersCollectionRef, where("role", "in", ["staff", "manager", "admin"]));
           const querySnapshot = await getDocs(qUsers);
           const fetchedStaff: AppUser[] = [];
@@ -70,6 +73,7 @@ export default function SalesHistoryClientPage() {
           setStaffList(fetchedStaff);
         } catch (error) {
           console.error("Error fetching staff members:", error);
+          toast({ title: "Error", description: "Could not load staff list for filtering.", variant: "destructive" });
         } finally {
           setLoadingStaff(false);
         }
@@ -78,27 +82,65 @@ export default function SalesHistoryClientPage() {
     if (user) { 
         fetchStaffMembers();
     }
-  }, [user, isManagerOrAdmin]);
+  }, [user, isManagerOrAdmin, toast]);
 
 
   useEffect(() => {
     if (!user) {
       setLoadingTransactions(false);
+      setErrorTransactions("User not authenticated.");
       return;
     }
 
+    // For admins, if no site is selected, don't fetch all sales from all sites by default.
+    // Prompt them to select a site first, or have a different view for "All Sites" if truly needed (can be very broad).
+    // For simplicity now, if activeSiteId is null for an admin, show a message.
+    // Staff/Managers should always have an activeSiteId from their default settings.
+    if (user.role === 'admin' && !activeSiteId) {
+      setLoadingTransactions(false);
+      setErrorTransactions(null); // Not an error, but a state to show message
+      setTransactions([]); // Clear transactions
+      return;
+    }
+    if (!activeSiteId && (user.role === 'staff' || user.role === 'manager')) {
+        setLoadingTransactions(false);
+        setErrorTransactions("No active site context. Please check your profile settings or contact an admin.");
+        setTransactions([]);
+        return;
+    }
+
+
     setLoadingTransactions(true);
-    let salesQueryConstraints = [
+    setErrorTransactions(null);
+    
+    const salesCollectionRef = collection(db, "salesTransactions");
+    let salesQueryConstraints: QueryConstraint[] = [ // Use QueryConstraint[] type
         orderBy("transactionDate", "desc"),
-        where("isDeleted", "!=", true) // Filter out soft-deleted sales
+        where("isDeleted", "!=", true)
     ];
 
+    // Site and Stall filtering
+    if (activeSiteId) {
+        salesQueryConstraints.push(where("siteId", "==", activeSiteId));
+        if (activeStallId) {
+            salesQueryConstraints.push(where("stallId", "==", activeStallId));
+        }
+    } else if (user.role !== 'admin') { // Staff/Manager must have a siteId
+        setLoadingTransactions(false);
+        setErrorTransactions("Site context is missing for your role.");
+        setTransactions([]);
+        return;
+    }
+
+
+    // Staff filtering (applies on top of site/stall)
     if (user.role === 'staff') {
       salesQueryConstraints.push(where("staffId", "==", user.uid));
     } else if (isManagerOrAdmin && staffFilter !== "all") {
       salesQueryConstraints.push(where("staffId", "==", staffFilter));
     }
     
+    // Date range filtering
     if (dateRange?.from) {
       salesQueryConstraints.push(where("transactionDate", ">=", Timestamp.fromDate(startOfDay(dateRange.from))));
     }
@@ -106,9 +148,9 @@ export default function SalesHistoryClientPage() {
       salesQueryConstraints.push(where("transactionDate", "<=", Timestamp.fromDate(endOfDay(dateRange.to))));
     }
     
-    const salesQuery = query(collection(db, "salesTransactions"), ...salesQueryConstraints);
+    const finalSalesQuery = query(salesCollectionRef, ...salesQueryConstraints);
 
-    const unsubscribe = onSnapshot(salesQuery,
+    const unsubscribe = onSnapshot(finalSalesQuery,
       (snapshot: QuerySnapshot<DocumentData>) => {
         const fetchedTransactions: SaleTransaction[] = snapshot.docs.map(doc => {
           const data = doc.data();
@@ -120,17 +162,21 @@ export default function SalesHistoryClientPage() {
         });
         setTransactions(fetchedTransactions);
         setLoadingTransactions(false);
-        setErrorTransactions(null);
       },
       (error) => {
         console.error("Error fetching sales transactions:", error);
-        setErrorTransactions("Failed to load sales history. Please try again later.");
+        // Check for specific Firestore index error
+        if (error.message.includes("requires an index")) {
+          setErrorTransactions(`Query requires a Firestore index. Please create it in the Firebase console. Details: ${error.message}`);
+        } else {
+          setErrorTransactions("Failed to load sales history. Please try again later.");
+        }
         setLoadingTransactions(false);
       }
     );
 
     return () => unsubscribe();
-  }, [user, dateRange, staffFilter, isManagerOrAdmin]);
+  }, [user, activeSiteId, activeStallId, dateRange, staffFilter, isManagerOrAdmin]);
 
   const handleDeleteSaleWithJustification = async (saleId: string, justification: string) => {
     if (!user || user.role !== 'admin') {
@@ -151,8 +197,6 @@ export default function SalesHistoryClientPage() {
         deletionJustification: justification.trim(),
       });
       toast({ title: "Sale Deleted", description: "The sale transaction has been marked as deleted." });
-      // Note: Stock levels are not automatically reverted with a soft delete.
-      // This would require a more complex process or manual adjustment if needed.
     } catch (error: any) {
       console.error("Error deleting sale:", error);
       toast({ title: "Deletion Failed", description: error.message || "Could not delete the sale transaction.", variant: "destructive" });
@@ -163,11 +207,30 @@ export default function SalesHistoryClientPage() {
     return transactions; 
   }, [transactions]);
 
+  if (user?.role === 'admin' && !activeSiteId) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="Sales History"
+          description="View and filter all past sales transactions."
+        />
+        <Alert variant="default" className="border-primary/50">
+          <Info className="h-4 w-4" />
+          <AlertTitle>Select a Site</AlertTitle>
+          <AlertDescription>
+            Please select an active Site from the dropdown in the header bar to view sales history.
+            You can select "All Stalls" within a site or a specific stall.
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Sales History"
-        description="View and filter all past sales transactions."
+        description="View and filter all past sales transactions for the selected site/stall."
       />
       <SalesHistoryControls
         dateRange={dateRange}
@@ -185,9 +248,11 @@ export default function SalesHistoryClientPage() {
         </div>
       )}
       {errorTransactions && (
-        <div className="text-center py-10 text-destructive">
-          <p>{errorTransactions}</p>
-        </div>
+        <Alert variant="destructive" className="my-4">
+          <Info className="h-4 w-4" />
+          <AlertTitle>Error Loading Sales</AlertTitle>
+          <AlertDescription>{errorTransactions}</AlertDescription>
+        </Alert>
       )}
       {!loadingTransactions && !errorTransactions && 
         <SalesTable 

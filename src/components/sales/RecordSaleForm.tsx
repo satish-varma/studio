@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import type { StockItem, SoldItem } from "@/types";
-import { PlusCircle, Trash2, IndianRupee, Loader2 } from "lucide-react";
+import { PlusCircle, Trash2, IndianRupee, Loader2, Info } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { 
@@ -35,12 +35,15 @@ import {
   Timestamp,
   QuerySnapshot,
   DocumentData,
-  DocumentReference, // Added for type safety
-  DocumentSnapshot // Added for type safety
+  DocumentReference,
+  DocumentSnapshot,
+  query,
+  where
 } from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 // Initialize Firebase only if it hasn't been initialized yet
 if (!getApps().length) {
@@ -67,7 +70,7 @@ type RecordSaleFormValues = z.infer<typeof recordSaleFormSchema>;
 
 export default function RecordSaleForm() {
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { user, activeSiteId, activeStallId } = useAuth();
   const [availableItems, setAvailableItems] = useState<StockItem[]>([]);
   const [loadingItems, setLoadingItems] = useState(true);
   const [totalSaleAmount, setTotalSaleAmount] = useState(0);
@@ -86,8 +89,20 @@ export default function RecordSaleForm() {
   });
 
   useEffect(() => {
+    if (!activeSiteId || !activeStallId) {
+      setAvailableItems([]);
+      setLoadingItems(false);
+      return;
+    }
+    setLoadingItems(true);
     const itemsCollectionRef = collection(db, "stockItems");
-    const unsubscribe = onSnapshot(itemsCollectionRef, 
+    const q = query(
+      itemsCollectionRef, 
+      where("siteId", "==", activeSiteId),
+      where("stallId", "==", activeStallId)
+    );
+
+    const unsubscribe = onSnapshot(q, 
       (snapshot: QuerySnapshot<DocumentData>) => {
         const fetchedItems: StockItem[] = snapshot.docs.map(doc => ({
           id: doc.id,
@@ -98,12 +113,12 @@ export default function RecordSaleForm() {
       },
       (error) => {
         console.error("Error fetching stock items for sale form:", error);
-        toast({ title: "Error", description: "Could not load items. Please try again.", variant: "destructive"});
+        toast({ title: "Error", description: "Could not load items for the current site/stall. Please try again.", variant: "destructive"});
         setLoadingItems(false);
       }
     );
     return () => unsubscribe();
-  }, [toast]);
+  }, [activeSiteId, activeStallId, toast]);
 
   const watchedItems = form.watch("items");
 
@@ -123,33 +138,40 @@ export default function RecordSaleForm() {
       setIsSubmitting(false);
       return;
     }
+    if (!activeSiteId || !activeStallId) {
+      toast({ title: "Context Error", description: "Please select a site and stall from the header to record a sale.", variant: "destructive"});
+      setIsSubmitting(false);
+      return;
+    }
     setIsSubmitting(true);
 
     try {
       await runTransaction(db, async (transaction) => {
         const stockItemRefsAndData: { ref: DocumentReference; snapshot: DocumentSnapshot; formItem: z.infer<typeof saleItemSchema> }[] = [];
 
-        // Phase 1: Read all stock items
         for (const formItem of values.items) {
           const stockItemRef = doc(db, "stockItems", formItem.itemId);
           const stockItemSnap = await transaction.get(stockItemRef);
+          if (!stockItemSnap.exists()) {
+            throw new Error(`Item ${formItem.name} (ID: ${formItem.itemId}) not found in stock for site ${activeSiteId} and stall ${activeStallId}.`);
+          }
+          // Verify item belongs to current active site/stall - though query should handle this.
+          const itemData = stockItemSnap.data() as StockItem;
+          if (itemData.siteId !== activeSiteId || itemData.stallId !== activeStallId) {
+             throw new Error(`Item ${formItem.name} does not belong to the active site/stall.`);
+          }
           stockItemRefsAndData.push({ ref: stockItemRef, snapshot: stockItemSnap, formItem });
         }
 
         const soldItemsForTransaction: SoldItem[] = [];
         let calculatedTotalAmount = 0;
 
-        // Phase 2: Validate and prepare writes (no reads here)
         for (const { snapshot: stockItemSnap, formItem } of stockItemRefsAndData) {
-          if (!stockItemSnap.exists()) {
-            throw new Error(`Item ${formItem.name} (ID: ${formItem.itemId}) not found in stock.`);
-          }
           const currentStockData = stockItemSnap.data() as StockItem;
           if (currentStockData.quantity < formItem.quantity) {
             throw new Error(`Not enough stock for ${formItem.name}. Available: ${currentStockData.quantity}, Requested: ${formItem.quantity}.`);
           }
           
-          // Use the price from Firestore, not from the form (which should be auto-filled and read-only)
           const pricePerUnit = currentStockData.price; 
 
           soldItemsForTransaction.push({
@@ -162,26 +184,24 @@ export default function RecordSaleForm() {
           calculatedTotalAmount += formItem.quantity * pricePerUnit;
         }
         
-        // Ensure totalSaleAmount used for the transaction is the one calculated from DB prices
-        if (Math.abs(calculatedTotalAmount - totalSaleAmount) > 0.001) { // Compare with a small epsilon
+        if (Math.abs(calculatedTotalAmount - totalSaleAmount) > 0.001) {
              console.warn(`Frontend total ${totalSaleAmount} differs from backend calculated total ${calculatedTotalAmount}. Using backend total.`);
         }
 
-
-        // Phase 3: Perform all writes
         const salesCollectionRef = collection(db, "salesTransactions");
         const newSaleRef = doc(salesCollectionRef); 
         transaction.set(newSaleRef, {
           items: soldItemsForTransaction,
-          totalAmount: calculatedTotalAmount, // Use the recalculated total
+          totalAmount: calculatedTotalAmount,
           transactionDate: Timestamp.now(),
           staffId: user.uid,
           staffName: user.displayName || user.email,
-          isDeleted: false, // Initialize isDeleted for new sales
+          siteId: activeSiteId, // Add active siteId
+          stallId: activeStallId, // Add active stallId
+          isDeleted: false,
         });
 
         for (const { ref: stockItemRef, snapshot: stockItemSnap, formItem } of stockItemRefsAndData) {
-          // No need to re-get stockItemSnap, already have it from phase 1
           const currentStockData = stockItemSnap.data() as StockItem;
           const newQuantity = currentStockData.quantity - formItem.quantity;
           
@@ -230,12 +250,23 @@ export default function RecordSaleForm() {
     }
   };
 
+  if (!activeSiteId || !activeStallId) {
+    return (
+      <Alert variant="default" className="max-w-2xl mx-auto shadow-lg border-primary/50">
+        <Info className="h-4 w-4" />
+        <AlertTitle>Site & Stall Context Required</AlertTitle>
+        <AlertDescription>
+          Please select an active Site and Stall from the dropdowns in the header bar to record a sale or view available items.
+        </AlertDescription>
+      </Alert>
+    );
+  }
 
   if (loadingItems) {
     return (
       <div className="flex justify-center items-center py-10">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <p className="ml-2">Loading items for sale...</p>
+        <p className="ml-2">Loading items for sale at the current site/stall...</p>
       </div>
     );
   }
@@ -251,6 +282,15 @@ export default function RecordSaleForm() {
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)}>
           <CardContent className="space-y-6">
+            {availableItems.length === 0 && !loadingItems && (
+               <Alert variant="default">
+                <Info className="h-4 w-4" />
+                <AlertTitle>No Items Available</AlertTitle>
+                <AlertDescription>
+                  There are no stock items available for sale at the currently selected site and stall, or all items are out of stock.
+                </AlertDescription>
+              </Alert>
+            )}
             {fields.map((field, index) => (
               <div key={field.id} className="flex items-end gap-4 p-4 border rounded-md bg-muted/30">
                 <FormField
@@ -265,7 +305,7 @@ export default function RecordSaleForm() {
                           handleItemChange(value, index);
                         }} 
                         defaultValue={formField.value}
-                        disabled={isSubmitting}
+                        disabled={isSubmitting || availableItems.length === 0}
                       >
                         <FormControl>
                           <SelectTrigger className="bg-input">
@@ -301,7 +341,7 @@ export default function RecordSaleForm() {
                             className="bg-input" 
                             min="1"
                             max={maxQuantity?.toString()} 
-                            disabled={isSubmitting || !watchedItems[index]?.itemId}
+                            disabled={isSubmitting || !watchedItems[index]?.itemId || availableItems.length === 0}
                             onChange={(e) => {
                                 let val = parseInt(e.target.value, 10);
                                 if (maxQuantity !== undefined && val > maxQuantity) val = maxQuantity;
@@ -352,7 +392,7 @@ export default function RecordSaleForm() {
               variant="outline"
               onClick={() => append({ itemId: "", quantity: 1, pricePerUnit: 0, name: "" })}
               className="w-full border-dashed"
-              disabled={isSubmitting}
+              disabled={isSubmitting || availableItems.length === 0}
             >
               <PlusCircle className="mr-2 h-4 w-4" /> Add Another Item
             </Button>
@@ -368,7 +408,7 @@ export default function RecordSaleForm() {
               type="submit" 
               className="w-full" 
               size="lg" 
-              disabled={isSubmitting || loadingItems || fields.some(f => !f.itemId || !f.quantity || f.quantity <=0 || f.pricePerUnit <= 0 )}
+              disabled={isSubmitting || loadingItems || fields.some(f => !f.itemId || !f.quantity || f.quantity <=0 || f.pricePerUnit <= 0 ) || availableItems.length === 0}
             >
               {isSubmitting ? <Loader2 className="animate-spin mr-2" /> : null}
               Record Sale

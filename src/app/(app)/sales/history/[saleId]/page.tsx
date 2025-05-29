@@ -4,16 +4,16 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import PageHeader from "@/components/shared/PageHeader";
-import { getFirestore, doc, getDoc } from "firebase/firestore";
+import { getFirestore, doc, getDoc, DocumentSnapshot } from "firebase/firestore";
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp } from 'firebase/app';
-import type { SaleTransaction, SoldItem } from '@/types';
-import { Loader2, Printer, ArrowLeft } from 'lucide-react';
+import type { SaleTransaction, SoldItem, Site, Stall } from '@/types';
+import { Loader2, Printer, ArrowLeft, Store, Building } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import Image from 'next/image'; // For logo in print view
+import Image from 'next/image';
 import { useReactToPrint } from 'react-to-print';
 
 if (!getApps().length) {
@@ -32,6 +32,8 @@ export default function SaleDetailsPage() {
   const saleId = params.saleId as string;
 
   const [transaction, setTransaction] = useState<SaleTransaction | null>(null);
+  const [siteDetails, setSiteDetails] = useState<Site | null>(null);
+  const [stallDetails, setStallDetails] = useState<Stall | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
@@ -39,19 +41,19 @@ export default function SaleDetailsPage() {
 
   const handlePrint = useReactToPrint({
     content: () => printableComponentRef.current,
-    documentTitle: `Receipt-Sale-${saleId.substring(0,8)}`,
+    documentTitle: `Receipt-Sale-${saleId?.substring(0,8) || 'details'}`,
     onBeforeGetContent: () => {
       toast({ title: "Preparing receipt...", description: "Please wait a moment." });
       return Promise.resolve();
     },
     onAfterPrint: () => toast({ title: "Print job sent."}),
-    removeAfterPrint: true, // Clean up the iframe
+    removeAfterPrint: true, 
   });
 
 
   useEffect(() => {
     if (saleId) {
-      const fetchTransaction = async () => {
+      const fetchTransactionDetails = async () => {
         setLoading(true);
         setError(null);
         try {
@@ -59,26 +61,50 @@ export default function SaleDetailsPage() {
           const saleDocSnap = await getDoc(saleDocRef);
 
           if (saleDocSnap.exists()) {
-            const data = saleDocSnap.data();
-            setTransaction({ 
+            const data = saleDocSnap.data() as Omit<SaleTransaction, 'id'>;
+            const currentTransaction: SaleTransaction = { 
               id: saleDocSnap.id,
               ...data,
-              transactionDate: (data.transactionDate as any).toDate().toISOString(), // Convert Firestore Timestamp
-            } as SaleTransaction);
+              transactionDate: (data.transactionDate as any).toDate().toISOString(),
+            };
+            setTransaction(currentTransaction);
+
+            // Fetch site details if siteId exists
+            if (currentTransaction.siteId) {
+              const siteDocRef = doc(db, "sites", currentTransaction.siteId);
+              const siteDocSnap = await getDoc(siteDocRef);
+              if (siteDocSnap.exists()) {
+                setSiteDetails({ id: siteDocSnap.id, ...siteDocSnap.data() } as Site);
+              } else {
+                console.warn(`Site details not found for siteId: ${currentTransaction.siteId}`);
+              }
+            }
+
+            // Fetch stall details if stallId exists
+            if (currentTransaction.stallId) {
+              const stallDocRef = doc(db, "stalls", currentTransaction.stallId);
+              const stallDocSnap = await getDoc(stallDocRef);
+              if (stallDocSnap.exists()) {
+                setStallDetails({ id: stallDocSnap.id, ...stallDocSnap.data() } as Stall);
+              } else {
+                console.warn(`Stall details not found for stallId: ${currentTransaction.stallId}`);
+              }
+            }
+
           } else {
             setError("Sale transaction not found.");
             toast({ title: "Error", description: "Sale transaction not found.", variant: "destructive" });
             router.replace("/sales/history");
           }
         } catch (err: any) {
-          console.error("Error fetching sale transaction:", err);
+          console.error("Error fetching sale transaction details:", err);
           setError("Failed to load sale transaction data.");
           toast({ title: "Error", description: "Failed to load sale data.", variant: "destructive" });
         } finally {
           setLoading(false);
         }
       };
-      fetchTransaction();
+      fetchTransactionDetails();
     } else {
       setLoading(false);
       setError("No sale ID provided.");
@@ -96,7 +122,7 @@ export default function SaleDetailsPage() {
   const formatDate = (dateString: string) => {
     if (!dateString) return "N/A";
     try {
-      return new Date(dateString).toLocaleString('en-IN', { // Changed to en-IN for Indian locale
+      return new Date(dateString).toLocaleString('en-IN', {
         year: 'numeric', month: 'long', day: 'numeric',
         hour: '2-digit', minute: '2-digit', second: '2-digit',
         hour12: true
@@ -140,7 +166,13 @@ export default function SaleDetailsPage() {
     <div className="space-y-6">
       <PageHeader
         title={`Sale Details: #${transaction.id.substring(0, 8)}...`}
-        description={`Recorded on ${formatDate(transaction.transactionDate)} by ${transaction.staffName || 'N/A'}.`}
+        description={
+          <div className="text-sm text-muted-foreground">
+            <p>Recorded on {formatDate(transaction.transactionDate)} by {transaction.staffName || 'N/A'}.</p>
+            {siteDetails && <p className="flex items-center"><Building className="h-4 w-4 mr-1" />Site: {siteDetails.name}</p>}
+            {stallDetails && <p className="flex items-center"><Store className="h-4 w-4 mr-1" />Stall: {stallDetails.name} ({stallDetails.stallType})</p>}
+          </div>
+        }
         actions={
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => router.back()}>
@@ -153,14 +185,16 @@ export default function SaleDetailsPage() {
         }
       />
 
-      <Card ref={printableComponentRef} className="shadow-lg printable-area"> {/* Ref for printing */}
+      <Card ref={printableComponentRef} className="shadow-lg printable-area">
         <CardHeader className="border-b print:border-b-2 print:border-black">
-           <div className="flex justify-between items-center">
+           <div className="flex justify-between items-start">
             <div>
                 <CardTitle className="text-2xl print:text-3xl">Receipt / Sale Invoice</CardTitle>
                 <CardDescription className="print:text-sm">Transaction ID: {transaction.id}</CardDescription>
+                 {siteDetails && <p className="text-xs text-muted-foreground print:text-sm flex items-center mt-1"><Building className="h-3 w-3 mr-1" />{siteDetails.name} {siteDetails.location && `(${siteDetails.location})`}</p>}
+                 {stallDetails && <p className="text-xs text-muted-foreground print:text-sm flex items-center"><Store className="h-3 w-3 mr-1" />{stallDetails.name} ({stallDetails.stallType})</p>}
             </div>
-            <div className="print:block hidden"> {/* Show logo only on print */}
+            <div className="print:block hidden">
                  <Image 
                     src="https://placehold.co/100x40.png?text=StallSync" 
                     alt="StallSync Logo"
@@ -179,7 +213,7 @@ export default function SaleDetailsPage() {
               <p className="text-sm text-muted-foreground print:text-base"><strong>Date:</strong> {formatDate(transaction.transactionDate)}</p>
               <p className="text-sm text-muted-foreground print:text-base"><strong>Staff:</strong> {transaction.staffName || transaction.staffId.substring(0,8)}</p>
             </div>
-             <div className="print:block hidden text-right"> {/* Company details for print */}
+             <div className="print:block hidden text-right">
                 <p className="font-semibold">Your Company Name</p>
                 <p className="text-xs">123 Market Street, Cityville</p>
                 <p className="text-xs">contact@example.com</p>
@@ -222,27 +256,31 @@ export default function SaleDetailsPage() {
               </p>
             </div>
           </div>
-           <div className="print:block hidden pt-6 text-center text-xs"> {/* Footer for print */}
+           <div className="print:block hidden pt-6 text-center text-xs">
                 <p>Thank you for your purchase!</p>
             </div>
         </CardContent>
       </Card>
 
-      {/* Hidden div for printing styles - not strictly necessary with Tailwind's print modifiers but can be useful */}
       <style jsx global>{`
         @media print {
           body {
-            -webkit-print-color-adjust: exact; /* Ensures background colors and images are printed */
+            -webkit-print-color-adjust: exact; 
             print-color-adjust: exact;
           }
-          .printable-area { /* Styles for the specific area to be printed */
-            margin: 20px;
+          .printable-area { 
+            margin: 0;
             padding: 10px;
-            border: 1px solid #ccc;
+            border: none;
             font-family: 'Arial', sans-serif;
+            box-shadow: none;
           }
           .no-print {
             display: none !important;
+          }
+          /* Additional print specific styles can go here */
+          .page-header, .sidebar, .header-content, .action-buttons {
+            display: none !important; /* Hide non-receipt elements */
           }
         }
       `}</style>
