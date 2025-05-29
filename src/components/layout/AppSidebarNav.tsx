@@ -8,11 +8,12 @@ import {
   Package,
   ShoppingCart,
   History,
-  Users, // Added Users icon
+  Users,
   Settings,
   LucideIcon,
   UserCircle, 
-  LifeBuoy,   
+  LifeBuoy,
+  Building, // Icon for Sites
 } from "lucide-react";
 import {
   SidebarMenu,
@@ -35,7 +36,8 @@ const navItems: NavItem[] = [
   { href: "/items", label: "Stock Items", icon: Package, roles: ['staff', 'manager', 'admin'] },
   { href: "/sales/record", label: "Record Sale", icon: ShoppingCart, roles: ['staff', 'manager', 'admin'] },
   { href: "/sales/history", label: "Sales History", icon: History, roles: ['staff', 'manager', 'admin'] },
-  { href: "/users", label: "User Management", icon: Users, roles: ['admin'] }, // Enabled User Management
+  { href: "/users", label: "User Management", icon: Users, roles: ['admin'] },
+  { href: "/admin/sites", label: "Manage Sites", icon: Building, roles: ['admin'] }, // New Site Management Link
   { href: "/profile", label: "My Profile", icon: UserCircle, roles: ['staff', 'manager', 'admin'] },
   { href: "/settings", label: "Settings", icon: Settings, roles: ['manager', 'admin'] },
   { href: "/support", label: "Support", icon: LifeBuoy, roles: ['staff', 'manager', 'admin'] },

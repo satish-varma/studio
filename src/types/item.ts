@@ -9,7 +9,7 @@ export const stockItemSchema = z.object({
   price: z.coerce.number().min(0.01, { message: "Price must be a positive value." }),
   lowStockThreshold: z.coerce.number().int().min(0, { message: "Low stock threshold cannot be negative." }),
   imageUrl: z.string().url({ message: "Please enter a valid URL for the image." }).optional().or(z.literal('')),
-  // lastUpdated is handled server-side or on write, not directly in the form for creation/edit typically.
+  // siteId and stallId will be added when context selection is implemented
 });
 
 export type StockItemFormValues = z.infer<typeof stockItemSchema>;
@@ -17,4 +17,6 @@ export type StockItemFormValues = z.infer<typeof stockItemSchema>;
 export interface StockItem extends StockItemFormValues {
   id: string;
   lastUpdated: string; // ISO date string
+  siteId?: string; // Optional for now
+  stallId?: string; // Optional for now
 }

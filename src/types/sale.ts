@@ -5,6 +5,7 @@ export interface SoldItem {
   quantity: number;
   pricePerUnit: number; // Assuming price is recorded at time of sale
   totalPrice: number;
+  // siteId and stallId can be inferred from the parent SaleTransaction
 }
 
 export interface SaleTransaction {
@@ -18,4 +19,6 @@ export interface SaleTransaction {
   deletedBy?: string; // UID of admin who deleted
   deletedAt?: string; // ISO date string of deletion
   deletionJustification?: string; // Reason for deletion
+  siteId?: string; // Optional for now
+  stallId?: string; // Optional for now
 }
