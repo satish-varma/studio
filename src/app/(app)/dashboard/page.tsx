@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Package, IndianRupee, TrendingUp, AlertTriangle, Loader2, Info } from "lucide-react";
+import { Package, IndianRupee, TrendingUp, AlertTriangle, Loader2, Info, BarChart2 } from "lucide-react";
 import PageHeader from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
@@ -13,7 +13,11 @@ import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp } from 'firebase/app';
 import type { StockItem, SaleTransaction } from '@/types';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { startOfMonth, endOfMonth, startOfDay, endOfDay, isWithinInterval } from 'date-fns';
+import { subDays, startOfDay, endOfDay, isWithinInterval, format, eachDayOfInterval } from 'date-fns';
+
+import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartConfig } from "@/components/ui/chart";
+import { BarChart, Bar, CartesianGrid, XAxis, YAxis } from "recharts";
+
 
 // Initialize Firebase only if it hasn't been initialized yet
 if (!getApps().length) {
@@ -27,10 +31,22 @@ const db = getFirestore();
 
 interface DashboardStats {
   totalItems: number;
-  totalSalesMonth: number;
+  totalSalesLast7Days: number; 
   itemsSoldToday: number;
   lowStockAlerts: number;
 }
+
+interface SalesChartDataPoint {
+  date: string;
+  totalSales: number;
+}
+
+const chartConfig = {
+  totalSales: {
+    label: "Sales (₹)",
+    color: "hsl(var(--primary))", 
+  },
+} satisfies ChartConfig;
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -38,11 +54,12 @@ export default function DashboardPage() {
 
   const [stats, setStats] = useState<DashboardStats>({
     totalItems: 0,
-    totalSalesMonth: 0,
+    totalSalesLast7Days: 0,
     itemsSoldToday: 0,
     lowStockAlerts: 0,
   });
   const [recentSales, setRecentSales] = useState<SaleTransaction[]>([]);
+  const [salesChartData, setSalesChartData] = useState<SalesChartDataPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -59,8 +76,9 @@ export default function DashboardPage() {
 
     if (user.role === 'admin' && !activeSiteId) {
       setLoading(false);
-      setStats({ totalItems: 0, totalSalesMonth: 0, itemsSoldToday: 0, lowStockAlerts: 0 });
+      setStats({ totalItems: 0, totalSalesLast7Days: 0, itemsSoldToday: 0, lowStockAlerts: 0 });
       setRecentSales([]);
+      setSalesChartData([]);
       setError(null); 
       return;
     }
@@ -68,8 +86,9 @@ export default function DashboardPage() {
     if (user.role !== 'admin' && !activeSiteId) {
         setLoading(false);
         setError("No active site context. Please check your profile or contact an administrator.");
-        setStats({ totalItems: 0, totalSalesMonth: 0, itemsSoldToday: 0, lowStockAlerts: 0 });
+        setStats({ totalItems: 0, totalSalesLast7Days: 0, itemsSoldToday: 0, lowStockAlerts: 0 });
         setRecentSales([]);
+        setSalesChartData([]);
         return;
     }
 
@@ -77,10 +96,9 @@ export default function DashboardPage() {
     setError(null);
 
     const now = new Date();
-    const monthStart = startOfMonth(now);
-    const monthEnd = endOfMonth(now);
     const todayStart = startOfDay(now);
     const todayEnd = endOfDay(now);
+    const sevenDaysAgo = startOfDay(subDays(now, 6)); // Inclusive of today, so 6 days back + today = 7 days
 
     // --- Stock Items Listener ---
     let stockItemsQueryConstraints: QueryConstraint[] = [];
@@ -89,7 +107,7 @@ export default function DashboardPage() {
       if (activeStallId) {
         stockItemsQueryConstraints.push(where("stallId", "==", activeStallId));
       }
-    } else { // Should not happen for staff/manager due to earlier check, but good for safety
+    } else { 
         setLoading(false);
         setError("Site context is missing for fetching stock items.");
         return;
@@ -103,29 +121,31 @@ export default function DashboardPage() {
       const total = items.length;
       const lowStock = items.filter(item => item.quantity <= item.lowStockThreshold).length;
       setStats(prevStats => ({ ...prevStats, totalItems: total, lowStockAlerts: lowStock }));
-      // Consider loading false only after both subscriptions have fired once
     }, (err) => {
       console.error("Error fetching stock items for dashboard:", err);
       setError("Failed to load stock item data.");
       setLoading(false);
     });
 
-    // --- Sales Transactions Listener ---
-    let salesQueryConstraints: QueryConstraint[] = [where("isDeleted", "!=", true)];
+    // --- Sales Transactions Listener (Last 7 Days) ---
+    let salesQueryConstraints: QueryConstraint[] = [
+        where("isDeleted", "!=", true),
+        where("transactionDate", ">=", Timestamp.fromDate(sevenDaysAgo)),
+        orderBy("transactionDate", "desc")
+    ];
      if (activeSiteId) {
       salesQueryConstraints.push(where("siteId", "==", activeSiteId));
       if (activeStallId) {
         salesQueryConstraints.push(where("stallId", "==", activeStallId));
       }
-    } else { // Should not happen for staff/manager due to earlier check
+    } else {
         setLoading(false);
         setError("Site context is missing for fetching sales transactions.");
         return;
     }
     
     const salesTransactionsRef = collection(db, "salesTransactions");
-    // Fetch sales for the current month or newer to optimize slightly, then filter client-side for "today" and "this month"
-    const salesQuery = query(salesTransactionsRef, ...salesQueryConstraints, where("transactionDate", ">=", Timestamp.fromDate(monthStart)), orderBy("transactionDate", "desc"));
+    const salesQuery = query(salesTransactionsRef, ...salesQueryConstraints);
 
     const unsubscribeSales = onSnapshot(salesQuery, (snapshot) => {
       const transactions: SaleTransaction[] = snapshot.docs.map(doc => {
@@ -137,14 +157,25 @@ export default function DashboardPage() {
         } as SaleTransaction;
       });
 
-      let salesThisMonth = 0;
+      let salesLast7Days = 0;
       let itemsToday = 0;
+      
+      const dailySalesMap = new Map<string, number>();
+      const dateRangeForChart = eachDayOfInterval({ start: sevenDaysAgo, end: now });
+      dateRangeForChart.forEach(day => {
+        dailySalesMap.set(format(day, 'yyyy-MM-dd'), 0);
+      });
 
       transactions.forEach(sale => {
         const saleDate = new Date(sale.transactionDate);
-        if (isWithinInterval(saleDate, { start: monthStart, end: monthEnd })) {
-          salesThisMonth += sale.totalAmount;
+        // All transactions are already within the last 7 days due to query
+        salesLast7Days += sale.totalAmount;
+
+        const formattedSaleDate = format(saleDate, 'yyyy-MM-dd');
+        if (dailySalesMap.has(formattedSaleDate)) {
+            dailySalesMap.set(formattedSaleDate, (dailySalesMap.get(formattedSaleDate) || 0) + sale.totalAmount);
         }
+
         if (isWithinInterval(saleDate, { start: todayStart, end: todayEnd })) {
           sale.items.forEach(item => {
             itemsToday += Number(item.quantity) || 0;
@@ -154,10 +185,16 @@ export default function DashboardPage() {
       
       setStats(prevStats => ({
         ...prevStats,
-        totalSalesMonth: salesThisMonth,
+        totalSalesLast7Days: salesLast7Days,
         itemsSoldToday: itemsToday,
       }));
       setRecentSales(transactions.slice(0, 3)); 
+
+      const chartDataPoints: SalesChartDataPoint[] = Array.from(dailySalesMap.entries())
+        .map(([date, totalSales]) => ({ date, totalSales }))
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()); // Sort by date
+      setSalesChartData(chartDataPoints);
+      
       setLoading(false); 
     }, (err) => {
       console.error("Error fetching sales transactions for dashboard:", err);
@@ -213,7 +250,7 @@ export default function DashboardPage() {
   
   const dashboardStatCards = [
     { title: "Total Items", value: stats.totalItems.toString(), icon: Package, change: "In current context", color: "text-primary" },
-    { title: "Total Sales (This Month)", value: `₹${stats.totalSalesMonth.toFixed(2)}`, icon: IndianRupee, change: "In current context", color: "text-accent" },
+    { title: "Total Sales (Last 7 Days)", value: `₹${stats.totalSalesLast7Days.toFixed(2)}`, icon: IndianRupee, change: "In current context", color: "text-accent" },
     { title: "Items Sold (Today)", value: stats.itemsSoldToday.toString(), icon: TrendingUp, change: "In current context", color: "text-blue-500" },
     { title: "Low Stock Alerts", value: stats.lowStockAlerts.toString(), icon: AlertTriangle, change: "Needs attention", color: "text-destructive" },
   ];
@@ -241,11 +278,61 @@ export default function DashboardPage() {
         ))}
       </div>
 
+      <Card className="shadow-lg">
+        <CardHeader>
+          <CardTitle className="flex items-center">
+            <BarChart2 className="h-5 w-5 mr-2 text-primary"/>
+            Sales Over Last 7 Days
+          </CardTitle>
+          <CardDescription>Total sales amount per day for the current site/stall context.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {salesChartData.length > 0 ? (
+            <ChartContainer config={chartConfig} className="min-h-[250px] w-full">
+              <BarChart accessibilityLayer data={salesChartData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
+                <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="date"
+                  tickLine={false}
+                  tickMargin={10}
+                  axisLine={false}
+                  tickFormatter={(value) => format(new Date(value), "MMM d")}
+                />
+                <YAxis
+                  tickFormatter={(value) => `₹${value >= 1000 ? `${(value/1000).toFixed(0)}k` : value.toFixed(0)}`}
+                  tickLine={false}
+                  axisLine={false}
+                  tickMargin={10}
+                  width={80}
+                />
+                <ChartTooltip
+                  cursor={false}
+                  content={<ChartTooltipContent 
+                    indicator="dot" 
+                    formatter={(value, name, props) => (
+                        <div className="flex flex-col gap-0.5">
+                            <span className="font-medium text-foreground">{format(new Date(props.payload.date), "MMM d, yyyy")}</span>
+                            <span className="text-muted-foreground">Sales: <span className="font-semibold text-foreground">₹{Number(value).toFixed(2)}</span></span>
+                        </div>
+                    )}
+                    hideLabel 
+                  />}
+                />
+                <Bar dataKey="totalSales" fill="var(--color-totalSales)" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ChartContainer>
+          ) : (
+            <p className="text-sm text-center text-muted-foreground py-10">No sales data available for the last 7 days in this context.</p>
+          )}
+        </CardContent>
+      </Card>
+
+
       <div className="grid gap-6 md:grid-cols-2">
         <Card className="shadow-lg">
           <CardHeader>
             <CardTitle>Recent Sales</CardTitle>
-            <CardDescription>A quick look at your most recent transactions in this context.</CardDescription>
+            <CardDescription>A quick look at your most recent transactions in this context (last 7 days).</CardDescription>
           </CardHeader>
           <CardContent>
             {recentSales.length > 0 ? (
@@ -265,7 +352,7 @@ export default function DashboardPage() {
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">No recent sales in the current context.</p>
+              <p className="text-sm text-muted-foreground">No recent sales in the current context (last 7 days).</p>
             )}
           </CardContent>
         </Card>
@@ -303,3 +390,4 @@ export default function DashboardPage() {
     </div>
   );
 }
+
