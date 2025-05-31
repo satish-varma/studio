@@ -25,27 +25,23 @@ if (firebaseConfig.projectId === "YOUR_PROJECT_ID" || !firebaseConfig.projectId)
 if (firebaseConfig.apiKey === "YOUR_API_KEY_HERE" || !firebaseConfig.apiKey) {
   console.error("AuthContext CRITICAL: Firebase apiKey is a placeholder or missing! Ensure NEXT_PUBLIC_FIREBASE_API_KEY is set.");
 }
-// Add similar checks for authDomain, storageBucket, messagingSenderId, appId if needed.
 
 let _app: FirebaseApp | undefined; 
 let auth: Auth | undefined;
 let db: Firestore | undefined;
 
-// Initialize Firebase only if it hasn't been initialized yet
 if (!getApps().length) {
   try {
     _app = initializeApp(firebaseConfig);
     console.log("AuthContext: Firebase app initialized successfully.");
   } catch (error) {
     console.error("AuthContext: Firebase initialization error during initial app load:", error);
-    // _app remains undefined if initialization fails
   }
 } else {
   _app = getApp(); 
   console.log("AuthContext: Firebase app already initialized, got existing instance.");
 }
 
-// Ensure auth and db are initialized only if _app was successfully initialized
 if (_app) { 
   try {
     auth = getAuth(_app);
@@ -53,7 +49,6 @@ if (_app) {
     console.log("AuthContext: Firebase Auth and Firestore services obtained successfully.");
   } catch (error) {
      console.error("AuthContext: Firebase Auth/DB services initialization error:", error);
-     // auth and db might remain undefined if getAuth/getFirestore fails
   }
 } else {
     console.error("AuthContext CRITICAL: Firebase App object is undefined. Auth and Firestore setup will be skipped. This usually means initializeApp failed due to incorrect configuration.");
@@ -93,14 +88,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const setActiveSite = (siteId: string | null) => {
     setActiveSiteState(siteId);
-    setActiveStallState(null); // Reset stall when site changes
+    setActiveStallState(null); 
     if (typeof window !== 'undefined') {
       if (siteId) {
         localStorage.setItem('activeSiteId', siteId);
       } else {
         localStorage.removeItem('activeSiteId');
       }
-      localStorage.removeItem('activeStallId'); // Always remove stallId when site changes
+      localStorage.removeItem('activeStallId'); 
     }
   };
 
@@ -118,7 +113,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     if (!auth || !db) {
       setLoading(false);
-      console.error("AuthContext: Firebase Auth or Firestore is not initialized in AuthProvider effect. Cannot set up auth listener.");
+      console.error(
+        "AuthContext: CRITICAL - Firebase Auth or Firestore service is not available in the onAuthStateChanged listener. This will prevent user authentication and data fetching. Ensure Firebase is correctly initialized with valid configuration. This is a common cause for 'Missing or insufficient permissions' errors if subsequent operations are attempted without a valid authenticated user.",
+      );
       return;
     }
 
@@ -143,14 +140,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             createdAt = userData.createdAt || createdAt;
 
              if (userRole === 'admin') {
-                // Admins use localStorage or null by default
                 const storedSiteId = typeof window !== 'undefined' ? localStorage.getItem('activeSiteId') : null;
                 const storedStallId = typeof window !== 'undefined' ? localStorage.getItem('activeStallId') : null;
                 setActiveSiteState(storedSiteId);
-                setActiveStallState(storedSiteId ? storedStallId : null); // Stall only if site is set
-            } else { // Staff or Manager
+                setActiveStallState(storedSiteId ? storedStallId : null); 
+            } else { 
                 setActiveSiteState(userDefaultSiteId);
-                setActiveStallState(userDefaultSiteId ? userDefaultStallId : null); // Stall only if default site is set
+                setActiveStallState(userDefaultSiteId ? userDefaultStallId : null); 
             }
 
           } else {
@@ -165,8 +161,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               defaultSiteId: null,
               defaultStallId: null,
             });
-            // For new staff/manager users, their default site/stall will be null initially.
-            // Admins also start with null context.
             setActiveSiteState(null);
             setActiveStallState(null);
           }
@@ -208,7 +202,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setLoading(false);
     });
     return () => unsubscribe();
-  }, []); // Empty dependency array: runs once on mount
+  }, []); 
 
   const signIn = useCallback(async (email: string, pass: string): Promise<AppUser | null> => {
     if (!auth || !db) throw new Error("Firebase not initialized for signIn.");
@@ -235,17 +229,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         createdAt = userData.createdAt || createdAt;
 
         if (userRole === 'admin') {
-            // Admins use localStorage or null by default
             const storedSiteId = typeof window !== 'undefined' ? localStorage.getItem('activeSiteId') : null;
             const storedStallId = typeof window !== 'undefined' ? localStorage.getItem('activeStallId') : null;
             setActiveSiteState(storedSiteId);
             setActiveStallState(storedSiteId ? storedStallId : null);
-        } else { // Staff or Manager
+        } else { 
             setActiveSiteState(userDefaultSiteId);
             setActiveStallState(userDefaultSiteId ? userDefaultStallId : null);
         }
       } else {
-        console.warn(`AuthContext: User document not found for UID: ${firebaseUser.uid} during sign-in. This should ideally not happen if signup creates the doc. Assigning default role 'staff'.`);
+        console.warn(`AuthContext: User document not found for UID: ${firebaseUser.uid} during sign-in. Assigning default role 'staff'.`);
         currentDisplayName = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User";
          await setDoc(userDocRef, { 
             uid: firebaseUser.uid,
@@ -298,7 +291,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         role: role,
         displayName: displayName,
         createdAt: createdAtDate,
-        defaultSiteId: null, // New users don't have a default site/stall yet
+        defaultSiteId: null, 
         defaultStallId: null,
       };
       await setDoc(userDocRef, newUserDocData);
@@ -314,7 +307,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         defaultStallId: undefined,
       };
       setUser(appUser); 
-      // For new users, active context starts as null.
       setActiveSiteState(null);
       setActiveStallState(null);
       return appUser;
@@ -378,3 +370,5 @@ export const useAuth = (): AuthContextType => {
   return context;
 };
 
+
+    
