@@ -1,9 +1,11 @@
+
 "use client";
 
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { UserNav } from "@/components/layout/UserNav";
 import Link from "next/link";
 import Image from "next/image";
+import SiteStallSelector from '@/components/context/SiteStallSelector'; // Import the selector
 
 export function AppHeaderContent() {
   return (
@@ -23,7 +25,7 @@ export function AppHeaderContent() {
           </Link>
       </div>
       <div className="flex items-center gap-4">
-        {/* Add any other header actions here, like notifications */}
+        <SiteStallSelector /> {/* Add the selector here */}
         <UserNav />
       </div>
     </div>
