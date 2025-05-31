@@ -10,7 +10,7 @@ if (!getApps().length) {
   try {
     initializeApp(firebaseConfig);
   } catch (error) {
-    console.error("Firebase initialization error:", error);
+    console.warn("Firebase initialization error in AddNewStallPage (metadata):", error);
   }
 }
 const db = getFirestore();
@@ -25,7 +25,7 @@ async function getSiteName(siteId: string): Promise<string | null> {
     }
     return null;
   } catch (error) {
-    console.error("Error fetching site name:", error);
+    console.warn("Warning fetching site name for metadata in AddNewStallPage:", error);
     return null;
   }
 }
@@ -45,10 +45,7 @@ export default async function AddNewStallPage({ params }: { params: { siteId: st
   const siteName = await getSiteName(params.siteId);
 
   if (!siteName) {
-    // This could redirect to a 404 page or show an error
-    // For now, let's assume if siteName isn't found, the form might still render but lack context
-    // Ideally, you'd handle this more gracefully, perhaps with a `notFound()` call from next/navigation
-     console.warn(`Site with ID ${params.siteId} not found for AddNewStallPage.`);
+     console.warn(`Site with ID ${params.siteId} not found for AddNewStallPage content.`);
      // notFound(); // Or handle this state in the UI
   }
 

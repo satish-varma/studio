@@ -8,7 +8,7 @@ if (!getApps().length) {
   try {
     initializeApp(firebaseConfig);
   } catch (error) {
-    console.error("Firebase initialization error:", error);
+    console.warn("Firebase initialization error in ManageStallsPage (metadata):", error);
   }
 }
 const db = getFirestore();
@@ -23,7 +23,7 @@ async function getSiteName(siteId: string): Promise<string | null> {
     }
     return null;
   } catch (error) {
-    console.error("Error fetching site name:", error);
+    console.warn("Warning fetching site name for metadata in ManageStallsPage:", error);
     return null;
   }
 }
