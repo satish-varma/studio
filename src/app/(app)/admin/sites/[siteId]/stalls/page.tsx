@@ -30,11 +30,12 @@ async function getSiteName(siteId: string): Promise<string | null> {
 }
 
 interface ManageStallsPageProps {
-  params: { siteId: string };
+  params: Promise<{ siteId: string }>; // Corrected: params is a Promise
 }
 
-export async function generateMetadata({ params }: ManageStallsPageProps): Promise<Metadata> {
+export async function generateMetadata({ params: paramsPromise }: ManageStallsPageProps): Promise<Metadata> {
   try {
+    const params = await paramsPromise; // Await the promise to get actual params
     const siteName = await getSiteName(params.siteId);
     if (!siteName) {
       return { title: "Site Not Found - StallSync" };
@@ -49,11 +50,12 @@ export async function generateMetadata({ params }: ManageStallsPageProps): Promi
 }
 
 // Admins only route - further protection should be via security rules & auth context checks in client component
-export default async function ManageStallsPage({ params }: ManageStallsPageProps) {
+export default async function ManageStallsPage({ params: paramsPromise }: ManageStallsPageProps) {
   // The StallsClientPage will handle fetching site details and stalls based on the siteId from params (using useParams hook)
   // The 'params' prop here is primarily for server-side logic like generateMetadata or if data was fetched directly on this page.
   // We can log it here if needed for debugging or future server-side data fetching.
-  // console.log("ManageStallsPage received params:", params);
+  // const params = await paramsPromise; // Await if you need to use params directly in this server component
+  // console.log("ManageStallsPage received params promise, resolved to:", params);
   
   return <StallsClientPage />;
 }
