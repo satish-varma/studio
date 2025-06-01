@@ -13,7 +13,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { StockItem, Stall } from "@/types";
-import { MoreHorizontal, Edit, Trash2, PackageOpen, Loader2, Building, Store, MoveRight, Undo2 } from "lucide-react";
+import { MoreHorizontal, Edit, Trash2, PackageOpen, Loader2, Building, Store, MoveRight, Undo2, Link2Icon } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -42,6 +42,7 @@ import {
   DialogTrigger,
   DialogClose,
 } from "@/components/ui/dialog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -82,7 +83,7 @@ interface ItemTableProps {
   sitesMap: Record<string, string>;
   stallsMap: Record<string, string>;
   availableStallsForAllocation: Stall[];
-  onDataNeedsRefresh: () => void; // Callback to refresh data
+  onDataNeedsRefresh: () => void; 
 }
 
 export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAllocation, onDataNeedsRefresh }: ItemTableProps) {
@@ -90,7 +91,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   const router = useRouter();
   const [isDeleting, setIsDeleting] = useState(false);
   const [isUpdatingStock, setIsUpdatingStock] = useState(false);
-  const [stockUpdateItem, setStockUpdateItem] = useState<StockItem | null>(null); // Store the whole item
+  const [stockUpdateItem, setStockUpdateItem] = useState<StockItem | null>(null);
   const [newQuantity, setNewQuantity] = useState<number | string>("");
 
   const [itemToAllocate, setItemToAllocate] = useState<StockItem | null>(null);
@@ -141,55 +142,44 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       return;
     }
     setIsUpdatingStock(true);
-    const updatedQuantity = Number(newQuantity);
+    const updatedQuantityNum = Number(newQuantity);
 
     try {
       await runTransaction(db, async (transaction) => {
         const itemRef = doc(db, "stockItems", stockUpdateItem.id);
-        
-        // --- Read Phase ---
+        let masterItemRef: DocumentReference | null = null;
+        let masterItemSnap: DocumentSnapshot | null = null;
+        let oldQuantity = 0;
+
         const itemSnap = await transaction.get(itemRef);
         if (!itemSnap.exists()) {
           throw new Error("Item being updated not found.");
         }
         const currentItemData = itemSnap.data() as StockItem;
-        const oldQuantity = currentItemData.quantity;
-        const quantityDelta = updatedQuantity - oldQuantity; // Positive if increased, negative if decreased
+        oldQuantity = currentItemData.quantity;
 
-        let masterItemRef: DocumentReference | null = null;
-        let masterItemSnap: DocumentSnapshot | null = null;
-
-        // If it's a stall item linked to a master, we need to read the master item
         if (currentItemData.stallId && currentItemData.originalMasterItemId) {
           masterItemRef = doc(db, "stockItems", currentItemData.originalMasterItemId);
-          masterItemSnap = await transaction.get(masterItemRef); // Read master item
+          masterItemSnap = await transaction.get(masterItemRef);
           if (!masterItemSnap?.exists()) {
             console.warn(`Master stock item ${currentItemData.originalMasterItemId} not found. Stall stock update will proceed, but master stock cannot be adjusted.`);
-            masterItemRef = null; // Nullify if not found, so we don't try to write to it
+            masterItemRef = null; // Nullify if not found
           }
         }
-
-        // --- Write Phase ---
-        // Update the primary item (stall or master)
+        
         transaction.update(itemRef, {
-          quantity: updatedQuantity,
+          quantity: updatedQuantityNum,
           lastUpdated: new Date().toISOString(),
         });
 
-        // If it was a stall item linked to a found master, adjust master stock
         if (masterItemRef && masterItemSnap && masterItemSnap.exists()) {
           const masterItemData = masterItemSnap.data() as StockItem;
-          // If stall item's quantity increased, master stock decreases (it's being sourced from master)
-          // If stall item's quantity decreased, master stock also decreases (reflecting overall loss)
-          let newMasterQuantity;
-          if (quantityDelta > 0) { // Stall quantity increased
-            newMasterQuantity = masterItemData.quantity - quantityDelta;
-          } else { // Stall quantity decreased (quantityDelta is negative or zero)
-            newMasterQuantity = masterItemData.quantity + quantityDelta; // Adding a negative delta (or zero)
-          }
+          const quantityDelta = updatedQuantityNum - oldQuantity; 
           
+          let newMasterQuantity = masterItemData.quantity - quantityDelta;
+
           transaction.update(masterItemRef, {
-            quantity: Math.max(0, newMasterQuantity), // Ensure master doesn't go negative
+            quantity: Math.max(0, newMasterQuantity), 
             lastUpdated: new Date().toISOString(),
           });
         }
@@ -197,7 +187,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
 
       toast({
         title: "Stock Updated",
-        description: `Stock quantity for "${stockUpdateItem.name}" updated to ${updatedQuantity}. Master stock (if applicable) adjusted.`,
+        description: `Stock quantity for "${stockUpdateItem.name}" updated to ${updatedQuantityNum}. Master stock (if applicable) adjusted.`,
       });
       setStockUpdateItem(null);
       setNewQuantity("");
@@ -237,7 +227,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     try {
       await runTransaction(db, async (transaction) => {
         const masterStockRef = doc(db, "stockItems", itemToAllocate.id);
-        // Read Phase 1
         const masterStockSnap = await transaction.get(masterStockRef);
 
         if (!masterStockSnap.exists()) {
@@ -248,47 +237,54 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           throw new Error(`Concurrent update: Not enough master stock. Available: ${currentMasterStock.quantity}`);
         }
         
-        // Query for existing stall item (outside transaction or handle read inside carefully)
         const stallItemsCollectionRef = collection(db, "stockItems");
         const q = query(stallItemsCollectionRef,
                         where("originalMasterItemId", "==", itemToAllocate.id),
                         where("stallId", "==", targetStallIdForAllocation));
         
-        const existingStallItemQuerySnap = await getDocs(q); // Read potentially outside if needed, but for getDocs better to do it before transaction or structure differently
+        // This getDocs needs to happen OUTSIDE the transaction or be replaced by transaction.get if we know the doc ID.
+        // For this pattern (check if exists, then create or update), it's complex.
+        // A simpler approach if a unique stall item per master item per stall is guaranteed:
+        // Attempt to read. If exists, update. If not, create.
+        // For now, we assume direct reads are okay if we accept potential (rare) race conditions or use a Function.
+        // A robust solution uses a specific structure or Cloud Function.
+        // Here, we'll try to read within transaction for existing, or prepare for new.
         
+        const existingStallItemQuerySnap = await getDocs(q); // This is still outside transaction.
+                                                            // For strict transactionality, we'd need a different approach.
+                                                            // e.g. using a pre-defined ID for the stall item.
+
         let targetStallItemRef: DocumentReference;
-        let newStallItemQuantity = numQuantityToAllocate;
+        let performStallItemUpdate = false;
         let existingStallItemData: StockItem | null = null;
-        let performStallItemReadInsideTransaction = false;
 
 
         if (!existingStallItemQuerySnap.empty) {
           const existingStallItemDoc = existingStallItemQuerySnap.docs[0];
           targetStallItemRef = existingStallItemDoc.ref;
-          performStallItemReadInsideTransaction = true;
+          // To be transactionally safe, re-read inside:
+          const existingStallItemSnapInsideTx = await transaction.get(targetStallItemRef);
+          if (existingStallItemSnapInsideTx.exists()) {
+            existingStallItemData = existingStallItemSnapInsideTx.data() as StockItem;
+            performStallItemUpdate = true;
+          } else {
+             // Item disappeared between query and transaction read, treat as new creation
+             targetStallItemRef = doc(collection(db, "stockItems")); 
+          }
         } else {
           targetStallItemRef = doc(collection(db, "stockItems")); 
         }
         
-        // Read Phase 2 (Conditional)
-        if(performStallItemReadInsideTransaction){
-            const existingStallItemSnap = await transaction.get(targetStallItemRef);
-            if(!existingStallItemSnap.exists()) throw new Error("Stall item intended for update disappeared during transaction.");
-            existingStallItemData = existingStallItemSnap.data() as StockItem;
-            newStallItemQuantity = existingStallItemData.quantity + numQuantityToAllocate;
-        }
-        
-        // Write Phase
-        if (existingStallItemData) { // Update existing stall item
+        if (performStallItemUpdate && existingStallItemData) { 
             transaction.update(targetStallItemRef, {
-                quantity: newStallItemQuantity,
+                quantity: existingStallItemData.quantity + numQuantityToAllocate,
                 lastUpdated: new Date().toISOString(),
             });
-        } else { // Create new stall item
+        } else { 
             const newStallItemDataToSave: Omit<StockItem, 'id'> = {
                 name: currentMasterStock.name,
                 category: currentMasterStock.category,
-                quantity: newStallItemQuantity, // This is just numQuantityToAllocate for new item
+                quantity: numQuantityToAllocate,
                 unit: currentMasterStock.unit,
                 price: currentMasterStock.price,
                 lowStockThreshold: currentMasterStock.lowStockThreshold,
@@ -349,7 +345,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         const stallItemRef = doc(db, "stockItems", itemToReturn.id);
         const masterItemRef = doc(db, "stockItems", itemToReturn.originalMasterItemId!);
 
-        // Read Phase
         const stallItemSnap = await transaction.get(stallItemRef);
         const masterItemSnap = await transaction.get(masterItemRef);
 
@@ -367,7 +362,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           throw new Error(`Concurrent update: Not enough stall stock to return. Available: ${currentStallStock.quantity}`);
         }
         
-        // Write Phase
         transaction.update(masterItemRef, {
           quantity: currentMasterStock.quantity + numQuantityToReturn,
           lastUpdated: new Date().toISOString(),
@@ -457,14 +451,34 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
               const isOutOfStock = item.quantity === 0;
 
               const siteNameDisplay = item.siteId ? (sitesMap[item.siteId] || `Site ID: ${item.siteId.substring(0,6)}...`) : "N/A";
-              let stallDisplay;
+              
+              let stallDisplayElement: React.ReactNode;
               if (item.stallId) {
-                  stallDisplay = stallsMap[item.stallId] || `Stall ID: ${item.stallId.substring(0,6)}...`;
+                  const stallName = stallsMap[item.stallId] || `Stall ID: ${item.stallId.substring(0,6)}...`;
+                  if (item.originalMasterItemId) {
+                      stallDisplayElement = (
+                          <div className="flex items-center">
+                              <span>{stallName}</span>
+                              <Tooltip>
+                                  <TooltipTrigger asChild>
+                                      <Link2Icon className="h-3 w-3 ml-1.5 text-muted-foreground hover:text-primary cursor-help" />
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top">
+                                      <p>Allocated from master stock</p>
+                                      <p className="text-xs text-muted-foreground">Master ID: {item.originalMasterItemId.substring(0,8)}...</p>
+                                  </TooltipContent>
+                              </Tooltip>
+                          </div>
+                      );
+                  } else {
+                      stallDisplayElement = <span>{stallName}</span>;
+                  }
               } else if (item.siteId) {
-                  stallDisplay = `Master Stock`;
+                  stallDisplayElement = <span className="italic">Master Stock</span>;
               } else {
-                  stallDisplay = "Unknown Location";
+                  stallDisplayElement = <span className="italic">Unassigned</span>;
               }
+
 
               return (
                 <TableRow key={item.id} className={cn(
@@ -487,7 +501,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                       <Building size={14} className="mr-1 text-primary/70" /> {siteNameDisplay}
                     </div>
                     <div className="flex items-center text-xs text-muted-foreground/80">
-                      <Store size={12} className="mr-1 text-accent/70" /> {stallDisplay}
+                      <Store size={12} className="mr-1 text-accent/70" /> {stallDisplayElement}
                     </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">{item.category}</TableCell>
@@ -523,7 +537,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                               <PackageOpen className="mr-2 h-4 w-4" /> Update Stock
                             </DropdownMenuItem>
                           </DialogTrigger>
-                           {item.stallId === null && ( 
+                           {item.stallId === null && item.siteId && ( 
                             <DropdownMenuItem onClick={() => handleOpenAllocateDialog(item)}>
                               <MoveRight className="mr-2 h-4 w-4" /> Allocate to Stall
                             </DropdownMenuItem>
@@ -566,7 +580,13 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                         <DialogHeader>
                           <DialogTitle>Update Stock for {stockUpdateItem?.name}</DialogTitle>
                           <DialogDescription>
-                            Current quantity: {stockUpdateItem?.quantity} {stockUpdateItem?.unit} ({stallDisplay} at {siteNameDisplay}).
+                            Current quantity: {stockUpdateItem?.quantity} {stockUpdateItem?.unit} (
+                              { stockUpdateItem?.stallId 
+                                ? stallsMap[stockUpdateItem.stallId] || `Stall ID: ${stockUpdateItem.stallId.substring(0,6)}...`
+                                : stockUpdateItem?.siteId ? "Master Stock" : "Unassigned"
+                              }
+                              {stockUpdateItem?.siteId && ` at ${sitesMap[stockUpdateItem.siteId] || `Site ID: ${stockUpdateItem.siteId.substring(0,6)}...`}`}
+                            ).
                           </DialogDescription>
                         </DialogHeader>
                         <div className="grid gap-4 py-4">
