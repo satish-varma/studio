@@ -3,7 +3,7 @@
 
 import PageHeader from "@/components/shared/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
-import { Settings as SettingsIcon, Palette, BellRing, DatabaseZap, Download, Loader2, MailWarning, SheetIcon } from "lucide-react"; // Added SheetIcon
+import { Settings as SettingsIcon, Palette, BellRing, DatabaseZap, Download, Loader2, MailWarning, SheetIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -11,7 +11,7 @@ import { useState } from "react";
 import { getFirestore, collection, getDocs, query, orderBy, where, Timestamp } from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
-import type { StockItem, SaleTransaction, SoldItem } from "@/types";
+import type { StockItem, SaleTransaction } from "@/types";
 import { useToast } from "@/hooks/use-toast";
 
 // Initialize Firebase only if it hasn't been initialized yet
@@ -26,9 +26,13 @@ const db = getFirestore();
 
 export default function SettingsPage() {
   const { toast } = useToast();
-  const [isExportingStock, setIsExportingStock] = useState(false);
-  const [isExportingSales, setIsExportingSales] = useState(false);
-  const [isProcessingSheets, setIsProcessingSheets] = useState(false);
+  const [isExportingStockCsv, setIsExportingStockCsv] = useState(false);
+  const [isExportingSalesCsv, setIsExportingSalesCsv] = useState(false);
+  
+  const [isProcessingStockSheetsImport, setIsProcessingStockSheetsImport] = useState(false);
+  const [isProcessingStockSheetsExport, setIsProcessingStockSheetsExport] = useState(false);
+  const [isProcessingSalesSheetsImport, setIsProcessingSalesSheetsImport] = useState(false);
+  const [isProcessingSalesSheetsExport, setIsProcessingSalesSheetsExport] = useState(false);
 
 
   const escapeCsvCell = (cellData: any): string => {
@@ -43,7 +47,7 @@ export default function SettingsPage() {
   };
 
   const exportStockItemsToCsv = async () => {
-    setIsExportingStock(true);
+    setIsExportingStockCsv(true);
     try {
       const stockItemsCollectionRef = collection(db, "stockItems");
       const q = query(stockItemsCollectionRef, orderBy("name"));
@@ -56,7 +60,7 @@ export default function SettingsPage() {
 
       if (items.length === 0) {
         toast({ title: "No Stock Data", description: "There are no stock items to export.", variant: "default" });
-        setIsExportingStock(false);
+        setIsExportingStockCsv(false);
         return;
       }
 
@@ -103,12 +107,12 @@ export default function SettingsPage() {
       console.error("Error exporting stock items:", error);
       toast({ title: "Export Failed", description: error.message || "Could not export stock items.", variant: "destructive" });
     } finally {
-      setIsExportingStock(false);
+      setIsExportingStockCsv(false);
     }
   };
 
   const exportSalesDataToCsv = async () => {
-    setIsExportingSales(true);
+    setIsExportingSalesCsv(true);
     try {
       const salesCollectionRef = collection(db, "salesTransactions");
       const q = query(
@@ -130,7 +134,7 @@ export default function SettingsPage() {
 
       if (transactions.length === 0) {
         toast({ title: "No Sales Data", description: "There are no sales transactions to export.", variant: "default" });
-        setIsExportingSales(false);
+        setIsExportingSalesCsv(false);
         return;
       }
 
@@ -185,21 +189,43 @@ export default function SettingsPage() {
       console.error("Error exporting sales data:", error);
       toast({ title: "Export Failed", description: error.message || "Could not export sales data.", variant: "destructive" });
     } finally {
-      setIsExportingSales(false);
+      setIsExportingSalesCsv(false);
     }
   };
 
-  // Placeholder functions for Google Sheets
-  const handleGoogleSheetsAction = async (actionType: string) => {
-    setIsProcessingSheets(true);
+  // --- Placeholder Google Sheets Functions ---
+  const callGoogleSheetsFunction = async (
+    action: string, // e.g., "importStock", "exportStock", "importSales", "exportSales"
+    setLoadingState: React.Dispatch<React.SetStateAction<boolean>>
+  ) => {
+    setLoadingState(true);
     toast({
-      title: "Google Sheets Integration",
-      description: `${actionType} functionality requires backend implementation (Firebase Functions, OAuth, Google Sheets API). This is a UI placeholder.`,
+      title: "Processing Google Sheets Request...",
+      description: `Attempting to ${action.replace(/([A-Z])/g, ' $1').toLowerCase()}... This requires backend setup.`,
+    });
+
+    // Simulate API call to a Firebase Function
+    // In a real implementation, you would use:
+    // const functions = getFunctions(getApp());
+    // const callable = httpsCallable(functions, 'yourSheetsFunctionName');
+    // try {
+    //   const result = await callable({ action: action, sheetId: 'USER_PROVIDED_SHEET_ID_OR_NAME' });
+    //   toast({ title: "Success", description: `${action} completed: ${result.data.message}` });
+    // } catch (error: any) {
+    //   toast({ title: "Error", description: error.message || `Failed to ${action}.`, variant: "destructive" });
+    // } finally {
+    //   setLoadingState(false);
+    // }
+
+    await new Promise(resolve => setTimeout(resolve, 2500)); // Simulate network delay
+    
+    // Simulate a successful response for now
+    toast({
+      title: "Placeholder Action",
+      description: `"${action.replace(/([A-Z])/g, ' $1').toLowerCase()}" simulated. Backend (Firebase Function) needed for real functionality.`,
       duration: 7000,
     });
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    setIsProcessingSheets(false);
+    setLoadingState(false);
   };
 
 
@@ -272,9 +298,9 @@ export default function SettingsPage() {
             variant="outline" 
             className="w-full" 
             onClick={exportStockItemsToCsv}
-            disabled={isExportingStock}
+            disabled={isExportingStockCsv}
           >
-            {isExportingStock ? (
+            {isExportingStockCsv ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
               <Download className="mr-2 h-4 w-4" />
@@ -285,9 +311,9 @@ export default function SettingsPage() {
             variant="outline" 
             className="w-full" 
             onClick={exportSalesDataToCsv}
-            disabled={isExportingSales}
+            disabled={isExportingSalesCsv}
           >
-            {isExportingSales ? (
+            {isExportingSalesCsv ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
               <Download className="mr-2 h-4 w-4" />
@@ -300,11 +326,11 @@ export default function SettingsPage() {
       <Card className="shadow-lg">
         <CardHeader>
             <CardTitle className="flex items-center">
-                <SheetIcon className="mr-2 h-5 w-5 text-green-600" /> {/* Using a green color for Sheets icon */}
+                <SheetIcon className="mr-2 h-5 w-5 text-green-600" />
                 Google Sheets Integration
             </CardTitle>
             <CardDescription>
-                Import or export data directly with Google Sheets. (Requires backend setup)
+                Import or export data directly with Google Sheets. This requires setting up Firebase Functions and Google Cloud OAuth.
             </CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -313,19 +339,19 @@ export default function SettingsPage() {
                 <Button 
                     variant="outline" 
                     className="w-full" 
-                    onClick={() => handleGoogleSheetsAction("Import Stock from Google Sheets")}
-                    disabled={isProcessingSheets}
+                    onClick={() => callGoogleSheetsFunction("importStockItems", setIsProcessingStockSheetsImport)}
+                    disabled={isProcessingStockSheetsImport || isProcessingStockSheetsExport}
                 >
-                    {isProcessingSheets ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4 text-green-700" />}
+                    {isProcessingStockSheetsImport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4 text-green-700" />}
                     Import Stock from Sheets
                 </Button>
                 <Button 
                     variant="outline" 
                     className="w-full" 
-                    onClick={() => handleGoogleSheetsAction("Export Stock to Google Sheets")}
-                    disabled={isProcessingSheets}
+                    onClick={() => callGoogleSheetsFunction("exportStockItems", setIsProcessingStockSheetsExport)}
+                    disabled={isProcessingStockSheetsImport || isProcessingStockSheetsExport}
                 >
-                    {isProcessingSheets ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SheetIcon className="mr-2 h-4 w-4 text-green-700" />}
+                    {isProcessingStockSheetsExport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SheetIcon className="mr-2 h-4 w-4 text-green-700" />}
                     Export Stock to Sheets
                 </Button>
             </div>
@@ -334,25 +360,28 @@ export default function SettingsPage() {
                 <Button 
                     variant="outline" 
                     className="w-full" 
-                    onClick={() => handleGoogleSheetsAction("Import Sales from Google Sheets")}
-                    disabled={isProcessingSheets}
+                    onClick={() => callGoogleSheetsFunction("importSalesHistory", setIsProcessingSalesSheetsImport)}
+                    disabled={isProcessingSalesSheetsImport || isProcessingSalesSheetsExport}
                 >
-                     {isProcessingSheets ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4 text-green-700" />}
+                     {isProcessingSalesSheetsImport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4 text-green-700" />}
                     Import Sales from Sheets
                 </Button>
                 <Button 
                     variant="outline" 
                     className="w-full" 
-                    onClick={() => handleGoogleSheetsAction("Export Sales to Google Sheets")}
-                    disabled={isProcessingSheets}
+                    onClick={() => callGoogleSheetsFunction("exportSalesHistory", setIsProcessingSalesSheetsExport)}
+                    disabled={isProcessingSalesSheetsImport || isProcessingSalesSheetsExport}
                 >
-                    {isProcessingSheets ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SheetIcon className="mr-2 h-4 w-4 text-green-700" />}
+                    {isProcessingSalesSheetsExport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SheetIcon className="mr-2 h-4 w-4 text-green-700" />}
                     Export Sales to Sheets
                 </Button>
             </div>
         </CardContent>
          <CardFooter>
-            <p className="text-xs text-muted-foreground">More configuration options will be available here in future updates.</p>
+            <p className="text-xs text-muted-foreground">
+              Note: Actual Google Sheets integration requires backend (Firebase Functions) development for OAuth and API calls.
+              The buttons above currently simulate the action.
+            </p>
         </CardFooter>
       </Card>
 
