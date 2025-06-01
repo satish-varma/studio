@@ -144,50 +144,47 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     try {
       await runTransaction(db, async (transaction) => {
         const itemRef = doc(db, "stockItems", stockUpdateItem.id);
-        const itemSnap = await transaction.get(itemRef);
+        const itemSnap = await transaction.get(itemRef); // Read 1 (Primary item)
 
         if (!itemSnap.exists()) {
           throw new Error("Item being updated not found.");
         }
         const currentItemData = itemSnap.data() as StockItem;
         const oldQuantity = currentItemData.quantity;
-        const updatedQuantity = Number(newQuantity);
+        const updatedStallQuantity = Number(newQuantity); // This is the new quantity for the stall/primary item
+        const quantityDifference = updatedStallQuantity - oldQuantity; // Positive if increased, negative if decreased
 
         let masterItemRef: DocumentReference | null = null;
         let masterItemSnap: DocumentSnapshot | null = null;
-        let masterItemData: StockItem | null = null;
-        let quantityDifference = 0;
 
-        // Determine if master stock needs reading (must happen before any writes)
-        const needsMasterStockUpdate = 
-          currentItemData.stallId && // It's a stall item
-          currentItemData.originalMasterItemId && // It's linked to a master item
-          updatedQuantity < oldQuantity; // The quantity was decreased
-
-        if (needsMasterStockUpdate) {
-          quantityDifference = oldQuantity - updatedQuantity;
-          masterItemRef = doc(db, "stockItems", currentItemData.originalMasterItemId!);
-          masterItemSnap = await transaction.get(masterItemRef);
-          if (masterItemSnap.exists()) {
-            masterItemData = masterItemSnap.data() as StockItem;
-          } else {
-            // This case should ideally not happen if data integrity is maintained
-            console.warn(`Master stock item ${currentItemData.originalMasterItemId} not found when trying to reflect stall stock decrease. Proceeding with stall item update only.`);
-          }
+        // Read Phase 2: Master item, if applicable (only if it's a stall item linked to master)
+        if (currentItemData.stallId && currentItemData.originalMasterItemId) {
+          masterItemRef = doc(db, "stockItems", currentItemData.originalMasterItemId);
+          masterItemSnap = await transaction.get(masterItemRef); // Read 2 (Master item)
         }
 
-        // Now perform writes
-        transaction.update(itemRef, {
-          quantity: updatedQuantity,
+        // Write Phase
+        // Update the primary item (stall or master)
+        transaction.update(itemRef, { // Write 1 (Primary item)
+          quantity: updatedStallQuantity,
           lastUpdated: new Date().toISOString(),
         });
 
-        if (needsMasterStockUpdate && masterItemRef && masterItemData) {
-          const newMasterQuantity = Math.max(0, masterItemData.quantity - quantityDifference);
-          transaction.update(masterItemRef, {
-            quantity: newMasterQuantity,
+        // If it was a stall item linked to a master, and the master was found, adjust master stock
+        if (masterItemRef && masterItemSnap && masterItemSnap.exists()) {
+          const masterItemData = masterItemSnap.data() as StockItem;
+          // Adjust master stock by the same difference.
+          // If stall stock increased (quantityDifference > 0), master stock increases.
+          // If stall stock decreased (quantityDifference < 0), master stock decreases.
+          const newMasterQuantity = masterItemData.quantity + quantityDifference;
+          
+          transaction.update(masterItemRef, { // Write 2 (Master item)
+            quantity: Math.max(0, newMasterQuantity), // Ensure master doesn't go negative
             lastUpdated: new Date().toISOString(),
           });
+        } else if (masterItemRef && currentItemData.originalMasterItemId && !masterItemSnap?.exists()) {
+          // Master item was expected (originalMasterItemId exists) but not found. This is an inconsistency.
+          console.warn(`Master stock item ${currentItemData.originalMasterItemId} not found when trying to reflect stall stock update. Proceeding with stall item update only.`);
         }
       });
 
@@ -244,9 +241,18 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         }
         
         const stallItemsCollectionRef = collection(db, "stockItems");
+        // Query for existing stall item using getDocs before transaction (or plan to read inside)
+        // For simplicity and to ensure atomicity, we read/write inside the transaction if possible,
+        // or handle creation/update based on a pre-transaction check and then verify inside.
+        // The current pattern reads master, then queries, then reads existing stall (if found) all within transaction.
+
         const q = query(stallItemsCollectionRef,
                         where("originalMasterItemId", "==", itemToAllocate.id),
                         where("stallId", "==", targetStallIdForAllocation));
+        
+        // To adhere to "reads before writes", this query should ideally be done *before* the transaction,
+        // or if done inside, all its reads must complete before any transaction.set/update.
+        // Let's adjust to query outside, then read specific doc inside.
         
         const existingStallItemQuerySnap = await getDocs(q); // Query outside transaction
         let targetStallItemRef: DocumentReference;
@@ -684,3 +690,4 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     </>
   );
 }
+
