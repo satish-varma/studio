@@ -47,13 +47,13 @@ if (!getApps().length) {
 const db = getFirestore();
 
 export default function ItemsClientPage() {
-  const { user, activeSiteId, auth } = useAuth(); // auth might be needed for idToken
+  const { user, activeSiteId, auth } = useAuth(); 
   const { toast } = useToast();
 
   const [searchTerm, setSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [stockStatusFilter, setStockStatusFilter] = useState("all");
-  const [stallFilterOption, setStallFilterOption] = useState("all");
+  const [stallFilterOption, setStallFilterOption] = useState("all"); // "all", "master", or stallId
 
   const [items, setItems] = useState<StockItem[]>([]);
   const [stallsForFilterDropdown, setStallsForFilterDropdown] = useState<Stall[]>([]);
@@ -65,14 +65,7 @@ export default function ItemsClientPage() {
   const [loadingMaps, setLoadingMaps] = useState(true);
   const [errorItems, setErrorItems] = useState<string | null>(null);
 
-  // Commented out Google Sheets related state
-  // const [showSheetIdDialog, setShowSheetIdDialog] = useState(false);
-  // const [sheetIdInputValue, setSheetIdInputValue] = useState("");
-  // const [currentSheetAction, setCurrentSheetAction] = useState<"importStockItems" | "exportStockItems" | null>(null);
-  // const [isProcessingSheets, setIsProcessingSheets] = useState(false);
 
-
-  // Fetch all sites for mapping IDs to names
   useEffect(() => {
     const sitesCollectionRef = collection(db, "sites");
     const unsubscribeSites = onSnapshot(sitesCollectionRef, (snapshot) => {
@@ -81,24 +74,13 @@ export default function ItemsClientPage() {
         newSitesMap[doc.id] = (doc.data() as Site).name;
       });
       setSitesMap(newSitesMap);
-      // Check if both maps are loaded
-      if (Object.keys(stallsMap).length > 0 && Object.keys(newSitesMap).length > 0) {
-        setLoadingMaps(false);
-      } else if (Object.keys(newSitesMap).length > 0 && Object.keys(stallsMap).length === 0 && !activeSiteId) { // No active site, so stallsMap might stay empty
-        setLoadingMaps(false);
-      }
+      checkMapsLoaded(newSitesMap, stallsMap);
     }, (error) => {
       console.error("Error fetching sites map:", error);
       setErrorItems("Failed to load site context data.");
       setLoadingMaps(false);
     });
 
-    return () => unsubscribeSites();
-  }, [stallsMap, activeSiteId]); // Rerun if stallsMap changes or activeSiteId changes (for the else if condition)
-
-  // Fetch all stalls for mapping IDs to names (used by ItemTable)
-  // AND stalls for the active site for the filter dropdown
-  useEffect(() => {
     const allStallsCollectionRef = collection(db, "stalls");
     const unsubscribeAllStalls = onSnapshot(allStallsCollectionRef, (snapshot) => {
       const newStallsMap: Record<string, string> = {};
@@ -106,17 +88,21 @@ export default function ItemsClientPage() {
         newStallsMap[doc.id] = (doc.data() as Stall).name;
       });
       setStallsMap(newStallsMap);
-      // Check if both maps are loaded
-      if (Object.keys(sitesMap).length > 0 && Object.keys(newStallsMap).length > 0) {
-        setLoadingMaps(false);
-      } else if (Object.keys(newStallsMap).length > 0 && Object.keys(sitesMap).length === 0) { // if sitesMap is empty but stalls load
-         setLoadingMaps(false);
-      }
+      checkMapsLoaded(sitesMap, newStallsMap);
     }, (error) => {
       console.error("Error fetching all stalls map:", error);
       setErrorItems("Failed to load stall context data.");
       setLoadingMaps(false);
     });
+    
+    const checkMapsLoaded = (currentSitesMap: Record<string, string>, currentStallsMap: Record<string, string>) => {
+        if (Object.keys(currentSitesMap).length > 0 && Object.keys(currentStallsMap).length > 0) {
+            setLoadingMaps(false);
+        } else if (Object.keys(currentSitesMap).length > 0 && !activeSiteId) { // If no active site, stallsMap might be empty initially
+            setLoadingMaps(false);
+        }
+    };
+
 
     let unsubscribeDropdownStalls: () => void = () => {};
     if (activeSiteId) {
@@ -136,10 +122,11 @@ export default function ItemsClientPage() {
       setLoadingDropdownStalls(false);
     }
     return () => {
+      unsubscribeSites();
       unsubscribeAllStalls();
       unsubscribeDropdownStalls();
     };
-  }, [activeSiteId, sitesMap]); // Rerun if sitesMap changes
+  }, [activeSiteId]);
 
 
   // Fetch Stock Items based on activeSiteId and stallFilterOption
@@ -168,21 +155,21 @@ export default function ItemsClientPage() {
 
     if (stallFilterOption === "master") {
       qConstraints.push(where("stallId", "==", null));
-    } else if (stallFilterOption !== "all") {
+    } else if (stallFilterOption !== "all") { // "all" means all for the site, no specific stallId filter here
       qConstraints.push(where("stallId", "==", stallFilterOption));
     }
     // Temporarily removed orderBy("name") from query to debug internal assertion
-    // qConstraints.push(orderBy("name"));
+    // Adding it back for client-side sort below
 
     const q = query(itemsCollectionRef, ...qConstraints);
 
     const unsubscribe = onSnapshot(q,
       (snapshot: QuerySnapshot<DocumentData>) => {
-        const fetchedItems: StockItem[] = snapshot.docs.map(doc => ({
+        let fetchedItems: StockItem[] = snapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
         } as StockItem));
-        // If orderBy("name") was removed from query, sort client-side for now
+        // Client-side sort by name
         fetchedItems.sort((a, b) => a.name.localeCompare(b.name));
         setItems(fetchedItems);
         setLoadingItems(false);
@@ -220,22 +207,6 @@ export default function ItemsClientPage() {
     });
   }, [items, searchTerm, categoryFilter, stockStatusFilter]);
 
-  /* Commented out Google Sheets Integration specific code and CSV export
-  const handleSheetIdDialogSubmit = async () => {
-    // ... (Google Sheets logic was here)
-  };
-
-  const openSheetIdPromptForItemActions = (action: "importStockItems" | "exportStockItems") => {
-    // ... (Google Sheets logic was here)
-  };
-
-  const callGoogleSheetsApiForItemActions = async (
-    // ... (Google Sheets logic was here)
-  ) => {
-    // ... (Google Sheets logic was here)
-  };
-  */
-
 
   return (
     <div className="space-y-6">
@@ -263,7 +234,7 @@ export default function ItemsClientPage() {
           <p className="ml-2">Loading items and context data...</p>
         </div>
       )}
-      {errorItems && !loadingItems && ( // Show error only if not loading
+      {errorItems && !loadingItems && ( 
         <Alert variant="default" className="border-primary/30">
             <Info className="h-4 w-4" />
             <AlertTitle>Information</AlertTitle>
@@ -271,18 +242,28 @@ export default function ItemsClientPage() {
         </Alert>
       )}
       {!loadingItems && !loadingMaps && !errorItems && (
-        <ItemTable items={filteredItems} sitesMap={sitesMap} stallsMap={stallsMap} />
+        <ItemTable 
+            items={filteredItems} 
+            sitesMap={sitesMap} 
+            stallsMap={stallsMap}
+            availableStallsForAllocation={stallsForFilterDropdown} 
+        />
       )}
-
-      {/*
+      
+      {/* Commented out CSV and Google Sheets integration cards
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          // CSV Export Card and Google Sheets Card were here
+        <Card className="shadow-lg">
+           // CSV Export card content was here
+        </Card>
+        <Card className="shadow-lg">
+            // Google Sheets card content was here
+        </Card>
       </div>
       */}
 
-      {/*
+      {/* Commented out Google Sheets Dialog
       <AlertDialog open={showSheetIdDialog} onOpenChange={setShowSheetIdDialog}>
-        // AlertDialog for Google Sheets was here
+         // AlertDialog content was here
       </AlertDialog>
       */}
 

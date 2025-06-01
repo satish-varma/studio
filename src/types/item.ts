@@ -9,8 +9,9 @@ export const stockItemSchema = z.object({
   price: z.coerce.number().min(0.00, { message: "Price must be a non-negative value." }),
   lowStockThreshold: z.coerce.number().int().min(0, { message: "Low stock threshold cannot be negative." }),
   imageUrl: z.string().url({ message: "Please enter a valid URL for the image." }).optional().or(z.literal('')),
-  siteId: z.string().nullable().optional(), 
-  stallId: z.string().nullable().optional(), 
+  siteId: z.string().nullable().optional(),
+  stallId: z.string().nullable().optional(),
+  originalMasterItemId: z.string().nullable().optional(), // Link to master stock if allocated
 });
 
 export type StockItemFormValues = z.infer<typeof stockItemSchema>;
@@ -20,4 +21,5 @@ export interface StockItem extends StockItemFormValues {
   lastUpdated: string; // ISO date string for Firestore, will be AdminTimestamp on server
   // siteId and stallId are now explicitly part of StockItemFormValues and can be null/undefined
   // An item with a siteId and null stallId is considered "master stock" for that site.
+  // originalMasterItemId links a stall item back to its master stock origin.
 }

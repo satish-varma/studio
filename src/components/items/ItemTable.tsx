@@ -12,12 +12,13 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { StockItem } from "@/types"; // Removed Stall, Site as they are not directly used here
-import { MoreHorizontal, Edit, Trash2, PackageOpen, Loader2, Building, Store } from "lucide-react";
+import type { StockItem, Stall } from "@/types";
+import { MoreHorizontal, Edit, Trash2, PackageOpen, Loader2, Building, Store, MoveRight } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -29,6 +30,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
   Dialog,
@@ -42,11 +44,24 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
-import { useState } from "react"; // Removed useMemo as it wasn't used
-import { getFirestore, doc, deleteDoc, updateDoc } from "firebase/firestore";
+import { useState } from "react";
+import { 
+  getFirestore, 
+  doc, 
+  deleteDoc, 
+  updateDoc, 
+  runTransaction, 
+  collection, 
+  query, 
+  where, 
+  getDocs,
+  writeBatch,
+  serverTimestamp
+} from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 
@@ -61,17 +76,25 @@ const db = getFirestore();
 
 interface ItemTableProps {
   items: StockItem[];
-  sitesMap: Record<string, string>; // siteId -> siteName
-  stallsMap: Record<string, string>; // stallId -> stallName
+  sitesMap: Record<string, string>;
+  stallsMap: Record<string, string>;
+  availableStallsForAllocation: Stall[]; // Stalls for the current active site
 }
 
-export function ItemTable({ items, sitesMap, stallsMap }: ItemTableProps) {
+export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAllocation }: ItemTableProps) {
   const { toast } = useToast();
   const router = useRouter();
   const [isDeleting, setIsDeleting] = useState(false);
   const [isUpdatingStock, setIsUpdatingStock] = useState(false);
   const [stockUpdateItemId, setStockUpdateItemId] = useState<string | null>(null);
   const [newQuantity, setNewQuantity] = useState<number | string>("");
+
+  const [itemToAllocate, setItemToAllocate] = useState<StockItem | null>(null);
+  const [showAllocateDialog, setShowAllocateDialog] = useState(false);
+  const [targetStallIdForAllocation, setTargetStallIdForAllocation] = useState("");
+  const [quantityToAllocate, setQuantityToAllocate] = useState<number | string>("");
+  const [isAllocating, setIsAllocating] = useState(false);
+
 
   const handleEdit = (itemId: string) => {
     router.push(`/items/${itemId}/edit`);
@@ -131,6 +154,106 @@ export function ItemTable({ items, sitesMap, stallsMap }: ItemTableProps) {
       setIsUpdatingStock(false);
     }
   };
+
+  const handleOpenAllocateDialog = (item: StockItem) => {
+    setItemToAllocate(item);
+    setQuantityToAllocate(1); // Default to 1
+    setTargetStallIdForAllocation("");
+    setShowAllocateDialog(true);
+  };
+
+  const handleConfirmAllocation = async () => {
+    if (!itemToAllocate || !targetStallIdForAllocation || quantityToAllocate === "" || Number(quantityToAllocate) <= 0) {
+      toast({ title: "Invalid Input", description: "Please select a target stall and enter a valid quantity greater than 0.", variant: "destructive" });
+      return;
+    }
+
+    const numQuantityToAllocate = Number(quantityToAllocate);
+    if (numQuantityToAllocate > itemToAllocate.quantity) {
+      toast({ title: "Insufficient Stock", description: `Cannot allocate ${numQuantityToAllocate}. Only ${itemToAllocate.quantity} available in master stock.`, variant: "destructive" });
+      return;
+    }
+
+    setIsAllocating(true);
+    try {
+      await runTransaction(db, async (transaction) => {
+        const masterStockRef = doc(db, "stockItems", itemToAllocate.id);
+        const masterStockSnap = await transaction.get(masterStockRef);
+
+        if (!masterStockSnap.exists()) {
+          throw new Error("Master stock item not found.");
+        }
+        const currentMasterStock = masterStockSnap.data() as StockItem;
+        if (currentMasterStock.quantity < numQuantityToAllocate) {
+          throw new Error(`Concurrent update: Not enough master stock. Available: ${currentMasterStock.quantity}`);
+        }
+
+        // Query for existing item in target stall that originated from this master item
+        const stallItemsRef = collection(db, "stockItems");
+        const q = query(stallItemsRef, 
+                        where("originalMasterItemId", "==", itemToAllocate.id), 
+                        where("stallId", "==", targetStallIdForAllocation));
+        const existingStallItemQuerySnap = await getDocs(q); // getDocs is not a transaction read, but okay for this check pattern
+
+        let targetStallItemRef;
+        let newStallItemQuantity = numQuantityToAllocate;
+
+        if (!existingStallItemQuerySnap.empty) {
+          // Item already exists in stall, update its quantity
+          const existingStallItemDoc = existingStallItemQuerySnap.docs[0];
+          targetStallItemRef = existingStallItemDoc.ref;
+          const existingStallItemData = existingStallItemDoc.data() as StockItem;
+          newStallItemQuantity = existingStallItemData.quantity + numQuantityToAllocate;
+          
+          transaction.update(targetStallItemRef, {
+            quantity: newStallItemQuantity,
+            lastUpdated: new Date().toISOString(),
+          });
+
+        } else {
+          // Item does not exist in stall, create a new one
+          targetStallItemRef = doc(collection(db, "stockItems")); // New doc ref
+          const newStallItemData: Omit<StockItem, 'id'> = {
+            name: currentMasterStock.name,
+            category: currentMasterStock.category,
+            quantity: newStallItemQuantity,
+            unit: currentMasterStock.unit,
+            price: currentMasterStock.price, // Stall items typically inherit price but could be modifiable
+            lowStockThreshold: currentMasterStock.lowStockThreshold, // Or set a default for stall
+            imageUrl: currentMasterStock.imageUrl,
+            siteId: currentMasterStock.siteId,
+            stallId: targetStallIdForAllocation,
+            originalMasterItemId: itemToAllocate.id,
+            lastUpdated: new Date().toISOString(),
+          };
+          transaction.set(targetStallItemRef, newStallItemData);
+        }
+
+        // Decrement master stock
+        transaction.update(masterStockRef, {
+          quantity: currentMasterStock.quantity - numQuantityToAllocate,
+          lastUpdated: new Date().toISOString(),
+        });
+      });
+
+      toast({
+        title: "Stock Allocated",
+        description: `${numQuantityToAllocate} unit(s) of ${itemToAllocate.name} allocated successfully.`,
+      });
+      setShowAllocateDialog(false);
+      setItemToAllocate(null);
+      // Data will refresh from parent onSnapshot
+    } catch (error: any) {
+      console.error("Error allocating stock:", error);
+      toast({
+        title: "Allocation Failed",
+        description: error.message || "Could not allocate stock. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsAllocating(false);
+    }
+  };
   
   const formatDate = (dateString?: string) => {
     if (!dateString) return "N/A";
@@ -149,163 +272,229 @@ export function ItemTable({ items, sitesMap, stallsMap }: ItemTableProps) {
     return <p className="text-center text-muted-foreground py-8">No items found for the current filter.</p>;
   }
 
+  const stallsForCurrentSite = itemToAllocate?.siteId 
+    ? availableStallsForAllocation.filter(s => s.siteId === itemToAllocate.siteId) 
+    : [];
+
   return (
-    <div className="rounded-lg border shadow-sm overflow-hidden bg-card">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="w-[64px]">Image</TableHead>
-            <TableHead>Name</TableHead>
-            <TableHead>Location</TableHead>
-            <TableHead>Category</TableHead>
-            <TableHead className="text-right">Quantity</TableHead>
-            <TableHead>Unit</TableHead>
-            <TableHead className="text-right">Price</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Last Updated</TableHead>
-            <TableHead className="text-right">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {items.map((item) => {
-            const isLowStock = item.quantity <= item.lowStockThreshold;
-            const isOutOfStock = item.quantity === 0;
-            
-            const siteNameDisplay = item.siteId ? (sitesMap[item.siteId] || `Site ID: ${item.siteId.substring(0,6)}...`) : "N/A";
-            let stallDisplay;
-            if (item.stallId) {
-                stallDisplay = stallsMap[item.stallId] || `Stall ID: ${item.stallId.substring(0,6)}...`;
-            } else if (item.siteId) { // Master stock, siteId must exist
-                stallDisplay = "Master Stock";
-            } else {
-                stallDisplay = "Unknown Stall"; // Should not happen if siteId is always present
-            }
-            
-            return (
-              <TableRow key={item.id} className={cn(
-                isLowStock && !isOutOfStock && "bg-orange-500/10 hover:bg-orange-500/20",
-                isOutOfStock && "bg-destructive/10 hover:bg-destructive/20",
-              )}>
-                <TableCell>
-                  <Image
-                    src={item.imageUrl || `https://placehold.co/64x64.png?text=${item.name.substring(0,2)}`}
-                    alt={item.name}
-                    data-ai-hint={`${item.category} item`}
-                    width={40}
-                    height={40}
-                    className="rounded-md object-cover"
-                  />
-                </TableCell>
-                <TableCell className="font-medium text-foreground">{item.name}</TableCell>
-                <TableCell className="text-sm">
-                  <div className="flex items-center text-muted-foreground">
-                    <Building size={14} className="mr-1 text-primary/70" /> {siteNameDisplay}
-                  </div>
-                  <div className="flex items-center text-xs text-muted-foreground/80">
-                    <Store size={12} className="mr-1 text-accent/70" /> {stallDisplay}
-                  </div>
-                </TableCell>
-                <TableCell className="text-muted-foreground">{item.category}</TableCell>
-                <TableCell className="text-right text-foreground">{item.quantity}</TableCell>
-                <TableCell className="text-muted-foreground">{item.unit}</TableCell>
-                <TableCell className="text-right text-foreground">₹{item.price.toFixed(2)}</TableCell>
-                <TableCell>
-                  <Badge
-                    variant={
-                      isOutOfStock ? "destructive" : isLowStock ? "outline" : "secondary"
-                    }
-                    className={cn(
-                       isLowStock && !isOutOfStock && "border-orange-500 text-orange-600 dark:text-orange-400",
-                       isOutOfStock && "bg-destructive text-destructive-foreground"
-                    )}
-                  >
-                    {isOutOfStock ? "Out of Stock" : isLowStock ? "Low Stock" : "In Stock"}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-muted-foreground text-xs">{formatDate(item.lastUpdated)}</TableCell>
-                <TableCell className="text-right">
-                  <Dialog open={stockUpdateItemId === item.id} onOpenChange={(open) => !open && setStockUpdateItemId(null)}>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <MoreHorizontal className="h-4 w-4" />
-                          <span className="sr-only">Actions</span>
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DialogTrigger asChild>
-                          <DropdownMenuItem onClick={() => handleOpenUpdateStockDialog(item)}>
-                            <PackageOpen className="mr-2 h-4 w-4" /> Update Stock
-                          </DropdownMenuItem>
-                        </DialogTrigger>
-                        <DropdownMenuItem onClick={() => handleEdit(item.id)}>
-                          <Edit className="mr-2 h-4 w-4" /> Edit Item
-                        </DropdownMenuItem>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <DropdownMenuItem onSelect={(e) => e.preventDefault()} className="text-destructive focus:text-destructive-foreground focus:bg-destructive">
-                              <Trash2 className="mr-2 h-4 w-4" /> Delete Item
+    <>
+      <div className="rounded-lg border shadow-sm overflow-hidden bg-card">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-[64px]">Image</TableHead>
+              <TableHead>Name</TableHead>
+              <TableHead>Location</TableHead>
+              <TableHead>Category</TableHead>
+              <TableHead className="text-right">Quantity</TableHead>
+              <TableHead>Unit</TableHead>
+              <TableHead className="text-right">Price</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Last Updated</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((item) => {
+              const isLowStock = item.quantity <= item.lowStockThreshold;
+              const isOutOfStock = item.quantity === 0;
+              
+              const siteNameDisplay = item.siteId ? (sitesMap[item.siteId] || `Site ID: ${item.siteId.substring(0,6)}...`) : "N/A";
+              let stallDisplay;
+              if (item.stallId) {
+                  stallDisplay = stallsMap[item.stallId] || `Stall ID: ${item.stallId.substring(0,6)}...`;
+              } else if (item.siteId) {
+                  stallDisplay = `Master Stock`;
+              } else {
+                  stallDisplay = "Unknown Location";
+              }
+              
+              return (
+                <TableRow key={item.id} className={cn(
+                  isLowStock && !isOutOfStock && "bg-orange-500/10 hover:bg-orange-500/20",
+                  isOutOfStock && "bg-destructive/10 hover:bg-destructive/20",
+                )}>
+                  <TableCell>
+                    <Image
+                      src={item.imageUrl || `https://placehold.co/64x64.png?text=${item.name.substring(0,2)}`}
+                      alt={item.name}
+                      data-ai-hint={`${item.category} item`}
+                      width={40}
+                      height={40}
+                      className="rounded-md object-cover"
+                    />
+                  </TableCell>
+                  <TableCell className="font-medium text-foreground">{item.name}</TableCell>
+                  <TableCell className="text-sm">
+                    <div className="flex items-center text-muted-foreground">
+                      <Building size={14} className="mr-1 text-primary/70" /> {siteNameDisplay}
+                    </div>
+                    <div className="flex items-center text-xs text-muted-foreground/80">
+                      <Store size={12} className="mr-1 text-accent/70" /> {stallDisplay}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{item.category}</TableCell>
+                  <TableCell className="text-right text-foreground">{item.quantity}</TableCell>
+                  <TableCell className="text-muted-foreground">{item.unit}</TableCell>
+                  <TableCell className="text-right text-foreground">₹{item.price.toFixed(2)}</TableCell>
+                  <TableCell>
+                    <Badge
+                      variant={
+                        isOutOfStock ? "destructive" : isLowStock ? "outline" : "secondary"
+                      }
+                      className={cn(
+                         isLowStock && !isOutOfStock && "border-orange-500 text-orange-600 dark:text-orange-400",
+                         isOutOfStock && "bg-destructive text-destructive-foreground"
+                      )}
+                    >
+                      {isOutOfStock ? "Out of Stock" : isLowStock ? "Low Stock" : "In Stock"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground text-xs">{formatDate(item.lastUpdated)}</TableCell>
+                  <TableCell className="text-right">
+                    <Dialog open={stockUpdateItemId === item.id} onOpenChange={(open) => !open && setStockUpdateItemId(null)}>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <MoreHorizontal className="h-4 w-4" />
+                            <span className="sr-only">Actions</span>
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DialogTrigger asChild>
+                            <DropdownMenuItem onClick={() => handleOpenUpdateStockDialog(item)}>
+                              <PackageOpen className="mr-2 h-4 w-4" /> Update Stock
                             </DropdownMenuItem>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                This action cannot be undone. This will permanently delete the item "{item.name}".
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => handleDelete(item.id, item.name)} disabled={isDeleting} className="bg-destructive hover:bg-destructive/90">
-                                {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                Delete
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                    <DialogContent className="sm:max-w-[425px]">
-                      <DialogHeader>
-                        <DialogTitle>Update Stock for {item.name}</DialogTitle>
-                        <DialogDescription>
-                          Current quantity: {item.quantity} {item.unit} ({stallDisplay} at {siteNameDisplay}).
-                        </DialogDescription>
-                      </DialogHeader>
-                      <div className="grid gap-4 py-4">
-                        <div className="grid grid-cols-4 items-center gap-4">
-                          <Label htmlFor="quantity" className="text-right">
-                            New Quantity
-                          </Label>
-                          <Input
-                            id="quantity"
-                            type="number"
-                            value={newQuantity}
-                            onChange={(e) => setNewQuantity(e.target.value)}
-                            className="col-span-3 bg-input"
-                            min="0"
-                          />
+                          </DialogTrigger>
+                           {item.stallId === null && ( // Only show for master stock
+                            <DropdownMenuItem onClick={() => handleOpenAllocateDialog(item)}>
+                              <MoveRight className="mr-2 h-4 w-4" /> Allocate to Stall
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onClick={() => handleEdit(item.id)}>
+                            <Edit className="mr-2 h-4 w-4" /> Edit Item
+                          </DropdownMenuItem>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <DropdownMenuItem onSelect={(e) => e.preventDefault()} className="text-destructive focus:text-destructive-foreground focus:bg-destructive">
+                                <Trash2 className="mr-2 h-4 w-4" /> Delete Item
+                              </DropdownMenuItem>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  This action cannot be undone. This will permanently delete the item "{item.name}".
+                                  If this is master stock, any allocated stall stock derived from it will NOT be automatically deleted.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => handleDelete(item.id, item.name)} disabled={isDeleting} className="bg-destructive hover:bg-destructive/90">
+                                  {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                  Delete
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                      <DialogContent className="sm:max-w-[425px]">
+                        <DialogHeader>
+                          <DialogTitle>Update Stock for {item.name}</DialogTitle>
+                          <DialogDescription>
+                            Current quantity: {item.quantity} {item.unit} ({stallDisplay} at {siteNameDisplay}).
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="grid gap-4 py-4">
+                          <div className="grid grid-cols-4 items-center gap-4">
+                            <Label htmlFor="quantity" className="text-right">
+                              New Quantity
+                            </Label>
+                            <Input
+                              id="quantity"
+                              type="number"
+                              value={newQuantity}
+                              onChange={(e) => setNewQuantity(e.target.value)}
+                              className="col-span-3 bg-input"
+                              min="0"
+                            />
+                          </div>
                         </div>
-                      </div>
-                      <DialogFooter>
-                        <DialogClose asChild>
-                           <Button type="button" variant="outline" disabled={isUpdatingStock}>Cancel</Button>
-                        </DialogClose>
-                        <Button type="button" onClick={handleStockQuantityChange} disabled={isUpdatingStock}>
-                          {isUpdatingStock && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                          Save changes
-                        </Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
-                </TableCell>
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
-    </div>
+                        <DialogFooter>
+                          <DialogClose asChild>
+                             <Button type="button" variant="outline" disabled={isUpdatingStock}>Cancel</Button>
+                          </DialogClose>
+                          <Button type="button" onClick={handleStockQuantityChange} disabled={isUpdatingStock}>
+                            {isUpdatingStock && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Save changes
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+
+      {/* Allocation Dialog */}
+      {itemToAllocate && (
+        <AlertDialog open={showAllocateDialog} onOpenChange={setShowAllocateDialog}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Allocate Stock: {itemToAllocate.name}</AlertDialogTitle>
+              <AlertDialogDescription>
+                Current master stock: {itemToAllocate.quantity} {itemToAllocate.unit} at {sitesMap[itemToAllocate.siteId!] || 'Unknown Site'}.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="space-y-4 py-2">
+              <div>
+                <Label htmlFor="targetStall">Target Stall</Label>
+                <Select
+                  value={targetStallIdForAllocation}
+                  onValueChange={setTargetStallIdForAllocation}
+                  disabled={isAllocating || stallsForCurrentSite.length === 0}
+                >
+                  <SelectTrigger id="targetStall" className="bg-input">
+                    <SelectValue placeholder={stallsForCurrentSite.length === 0 ? "No stalls in this site" : "Select target stall"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {stallsForCurrentSite.map((stall) => (
+                      <SelectItem key={stall.id} value={stall.id}>
+                        {stall.name} ({stall.stallType})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="quantityToAllocate">Quantity to Allocate</Label>
+                <Input
+                  id="quantityToAllocate"
+                  type="number"
+                  value={quantityToAllocate}
+                  onChange={(e) => setQuantityToAllocate(e.target.value)}
+                  min="1"
+                  max={itemToAllocate.quantity}
+                  className="bg-input"
+                  disabled={isAllocating}
+                />
+              </div>
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => setShowAllocateDialog(false)} disabled={isAllocating}>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleConfirmAllocation} disabled={isAllocating || !targetStallIdForAllocation || Number(quantityToAllocate) <= 0}>
+                {isAllocating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Confirm Allocation
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+    </>
   );
 }
-
-    
