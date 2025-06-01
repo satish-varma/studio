@@ -9,31 +9,40 @@ import { google, Auth, sheets_v4 } from 'googleapis';
 // ====================================================================================
 // Firebase Admin SDK Initialization
 // ====================================================================================
-// IMPORTANT: Ensure your service account key JSON file is available and
-// GOOGLE_APPLICATION_CREDENTIALS environment variable is set in your deployment environment.
-// For local development, you can point this to the path of your service account key.
-// Example: initializeApp({ credential: cert(require('@/path/to/your/serviceAccountKey.json')) });
-// If GOOGLE_APPLICATION_CREDENTIALS is set, initializeApp() without arguments works.
-
 let adminApp: App;
+let adminDb: ReturnType<typeof getAdminFirestore>;
+
 if (!getApps().length) {
   try {
-    // If GOOGLE_APPLICATION_CREDENTIALS is set in the environment (e.g., Cloud Functions, App Engine),
-    // initializeApp() will automatically use it.
-    // For local dev, you might need to explicitly pass credentials:
-    // const serviceAccount = require('/path/to/your/serviceAccountKey.json');
+    // Option 1: Using GOOGLE_APPLICATION_CREDENTIALS environment variable (recommended for deployed environments)
+    // Ensure this environment variable points to the path of your service account key JSON file.
+    // adminApp = initializeApp();
+
+    // Option 2: Explicitly using a service account key (useful for local development if GOOGLE_APPLICATION_CREDENTIALS is not set)
+    // IMPORTANT: Replace with the actual path to your service account key JSON file.
+    // DO NOT COMMIT THE ACTUAL KEY FILE TO YOUR REPOSITORY.
+    // const serviceAccount = require('@/../../path/to/your-serviceAccountKey.json'); // Adjust path as needed
     // adminApp = initializeApp({ credential: cert(serviceAccount) });
+    
+    // Fallback/Default: Attempt to initialize without explicit credentials (relies on GOOGLE_APPLICATION_CREDENTIALS)
     adminApp = initializeApp();
     console.log("Firebase Admin SDK initialized successfully in API route.");
   } catch (e: any) {
     console.error("Firebase Admin SDK initialization error in API route:", e.message);
     // If admin SDK fails, we can't proceed securely.
+    // Consider if you want to throw here or let requests fail later.
   }
 } else {
   adminApp = getApp();
   console.log("Firebase Admin SDK already initialized, got existing instance in API route.");
 }
-// const adminDb = getAdminFirestore(adminApp); // Uncomment if you need to access Firestore from admin SDK
+
+if (adminApp!) { // The '!' asserts adminApp is defined after the try-catch block or getApp()
+    adminDb = getAdminFirestore(adminApp);
+} else {
+    console.error("CRITICAL: Firebase Admin App is not initialized. Firestore Admin DB cannot be obtained.");
+}
+
 
 // ====================================================================================
 // Google OAuth2 Client Setup
@@ -55,8 +64,8 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET && GOOGLE_REDIRECT_URI) {
 }
 
 export async function POST(request: NextRequest) {
-  if (!adminApp) {
-    return NextResponse.json({ error: 'Firebase Admin SDK not initialized on server.' }, { status: 500 });
+  if (!adminApp || !adminDb) {
+    return NextResponse.json({ error: 'Firebase Admin SDK not properly initialized on server.' }, { status: 500 });
   }
   if (!oauth2Client) {
     return NextResponse.json({ error: 'Google OAuth2 client not configured on server.' }, { status: 500 });
@@ -64,7 +73,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { action, dataType, sheetId, data } = body; // `data` would be for import
+    const { action, dataType, sheetId, data: importData } = body; // `data` would be for import
 
     const authorizationHeader = request.headers.get('Authorization');
     if (!authorizationHeader || !authorizationHeader.startsWith('Bearer ')) {
@@ -83,51 +92,69 @@ export async function POST(request: NextRequest) {
     console.log(`Authenticated user UID: ${uid} attempting action: ${action} for dataType: ${dataType}`);
 
     // ================================================================================
-    // TODO: OAuth Token Management (Crucial Step for You to Implement)
+    // OAuth Token Management - CRUCIAL IMPLEMENTATION NEEDED
     // ================================================================================
+    // TODO:
     // 1. Retrieve Stored Google OAuth Tokens for the User (from Firestore, associated with `uid`)
-    //    Example:
-    //    const userGoogleTokensRef = adminDb.collection('userGoogleTokens').doc(uid);
-    //    const userTokensDoc = await userGoogleTokensRef.get();
-    //    if (!userTokensDoc.exists || !userTokensDoc.data()?.access_token) {
-    //      // If no tokens, or access_token is missing/expired (need to check expiry too)
-    //      // Generate auth URL and tell client to redirect for authorization
-    //      const authUrl = oauth2Client.generateAuthUrl({
-    //        access_type: 'offline', // 'offline' to get a refresh_token
-    //        scope: ['https://www.googleapis.com/auth/spreadsheets'], // Scope for Google Sheets
-    //        prompt: 'consent', // Optional: force consent screen for testing, remove for production if refresh token is stored
-    //      });
-    //      console.log(`User ${uid} needs Google Sheets authorization. Auth URL: ${authUrl}`);
-    //      return NextResponse.json({ error: 'Google Sheets authorization required.', needsAuth: true, authUrl: authUrl }, { status: 403 });
-    //    }
-    //    oauth2Client.setCredentials(userTokensDoc.data() as Auth.Credentials);
+    //    These tokens (access_token, refresh_token, expiry_date) should have been stored
+    //    after the user successfully completed the OAuth flow via your /api/auth/google/callback route.
+    
+    // Example placeholder for token retrieval:
+    // const userGoogleTokensRef = adminDb.collection('userGoogleOAuthTokens').doc(uid);
+    // const userTokensDoc = await userGoogleTokensRef.get();
+    //
+    // if (!userTokensDoc.exists || !userTokensDoc.data()?.access_token) {
+    //   // If no tokens, or access_token is missing
+    //   // Generate auth URL and tell client to redirect for authorization
+    //   const authUrl = oauth2Client.generateAuthUrl({
+    //     access_type: 'offline', // 'offline' to get a refresh_token
+    //     scope: ['https://www.googleapis.com/auth/spreadsheets'], // Scope for Google Sheets
+    //     prompt: 'consent', // Optional: force consent screen for testing, remove for production if refresh token is stored
+    //   });
+    //   console.log(`User ${uid} needs Google Sheets authorization. Auth URL: ${authUrl}`);
+    //   return NextResponse.json({ error: 'Google Sheets authorization required.', needsAuth: true, authUrl: authUrl }, { status: 403 });
+    // }
+    //
+    // const storedTokens = userTokensDoc.data() as Auth.Credentials;
+    // oauth2Client.setCredentials(storedTokens);
 
     // 2. Handle Token Refresh (if access_token is expired, use refresh_token)
     //    The googleapis library can sometimes handle this automatically if refresh_token is set.
-    //    Or, you might need to explicitly check expiry and refresh:
-    //    oauth2Client.on('tokens', (tokens) => {
-    //      if (tokens.refresh_token) { /* store new refresh_token */ }
-    //      /* store new access_token and expiry_date */
-    //      userGoogleTokensRef.set(tokens, { merge: true });
+    //    Or, you might need to explicitly check expiry and refresh.
+    //
+    //    oauth2Client.on('tokens', (newTokens) => {
+    //      if (newTokens.refresh_token) {
+    //        // If a new refresh token is issued, update it in Firestore
+    //        storedTokens.refresh_token = newTokens.refresh_token;
+    //      }
+    //      storedTokens.access_token = newTokens.access_token;
+    //      storedTokens.expiry_date = newTokens.expiry_date;
+    //      // Update the tokens in Firestore for the user
+    //      // await userGoogleTokensRef.set(storedTokens, { merge: true });
+    //      console.log('Tokens refreshed and updated in store for user:', uid);
     //    });
-    //    // Before making an API call, ensure tokens are fresh:
-    //    // if (oauth2Client.isTokenExpiring()) { await oauth2Client.refreshAccessToken(); }
-    //    // OR simply try the call and catch auth errors to trigger refresh.
+    //
+    //    // Before making an API call, ensure tokens are fresh (simplified check):
+    //    // if (storedTokens.expiry_date && storedTokens.expiry_date < Date.now() + 60000) { // If expires in next minute
+    //    //   console.log('Access token expired or will expire soon, attempting refresh for user:', uid);
+    //    //   await oauth2Client.refreshAccessToken(); // This will trigger the 'tokens' event if successful
+    //    // }
+    //    // More robust: try the call, and if it fails with an auth error, then refresh and retry.
 
     // For this placeholder, we'll simulate the need for auth if not 'exporting' as a simple example
-    // In a real app, you'd check for valid, non-expired tokens.
-    const MOCK_USER_HAS_TOKENS = action === 'exportStockItems' || action === 'exportSalesHistory'; // Simulate user has tokens only for export
+    // In a real app, you'd check for valid, non-expired tokens from your token store.
+    const MOCK_USER_HAS_TOKENS = action === 'exportStockItems' || action === 'exportSalesHistory'; 
 
-    if (!MOCK_USER_HAS_TOKENS) {
+    if (!MOCK_USER_HAS_TOKENS) { // Replace this with actual token check
         const authUrl = oauth2Client.generateAuthUrl({
            access_type: 'offline',
            scope: ['https://www.googleapis.com/auth/spreadsheets'],
            prompt: 'consent',
          });
-        console.log(`User ${uid} needs Google Sheets authorization for action '${action}'. Auth URL: ${authUrl}`);
+        console.log(`User ${uid} (simulated) needs Google Sheets authorization for action '${action}'. Auth URL: ${authUrl}`);
         return NextResponse.json({ error: 'Google Sheets authorization required.', needsAuth: true, authUrl: authUrl }, { status: 403 });
     }
-    console.log(`User ${uid} (simulated) has Google OAuth tokens for action '${action}'.`);
+    console.log(`User ${uid} (simulated to have) has Google OAuth tokens for action '${action}'.`);
 
 
     const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
@@ -140,32 +167,42 @@ export async function POST(request: NextRequest) {
       case 'importStockItems':
         // TODO:
         // 1. Validate `sheetId`.
-        // 2. Use `sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range: 'Sheet1!A:Z' })` (adjust range as needed).
+        // 2. Use `sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range: 'Sheet1!A:Z' })` (adjust range and sheet name).
         // 3. Parse `response.data.values`.
-        // 4. Validate and transform data.
-        // 5. Batch write to Firestore `stockItems` collection, linking to `siteId` and `stallId` (which you might need to pass from client or derive).
+        // 4. Validate and transform data to match your StockItem schema.
+        // 5. Batch write to Firestore `stockItems` collection.
+        //    Ensure items are associated with the correct user, siteId, stallId if applicable.
+        //    Consider transactional writes if updating existing items or creating new ones based on Sheet data.
         return NextResponse.json({ message: `Stock items import from sheet '${sheetId}' initiated (placeholder). User UID: ${uid}. Full backend implementation required.` });
 
       case 'exportStockItems':
         // TODO:
-        // 1. Fetch stock items from Firestore (filter by `siteId`, `stallId` if provided by client).
-        //    Example: // const stockItemsSnapshot = await adminDb.collection('stockItems').where('uid', '==', uid).get();
-        //    // const stockItems = stockItemsSnapshot.docs.map(doc => ({id: doc.id, ...doc.data()}));
-        // 2. Format `stockItems` into a 2D array (`values`). Include headers.
-        // 3. If `sheetId` is provided, use `sheets.spreadsheets.values.update()`.
-        //    If `sheetId` is NOT provided, create a new sheet:
-        //    // const spreadsheet = await sheets.spreadsheets.create({ resource: { properties: { title: 'StallSync Stock Export' } } });
-        //    // const newSheetId = spreadsheet.data.spreadsheetId;
-        //    // Then use `sheets.spreadsheets.values.update({ spreadsheetId: newSheetId, ... })`
-        //    // Return the newSheetId or a link to it in the message.
+        // 1. Fetch stock items from Firestore. Filter by user, `siteId`, `stallId` as appropriate.
+        //    Example: const stockItemsSnapshot = await adminDb.collection('stockItems').where('uid', '==', uid).get(); // Adjust query
+        //    const stockItemsData = stockItemsSnapshot.docs.map(doc => ({id: doc.id, ...doc.data()}));
+        // 2. Format `stockItemsData` into a 2D array (`values`) for Sheets. Include headers as the first row.
+        // 3. Handle `sheetId`:
+        //    - If `sheetId` is provided: Use `sheets.spreadsheets.values.update()` or `clear()` then `append()`.
+        //    - If `sheetId` is NOT provided: Create a new sheet:
+        //      // const spreadsheet = await sheets.spreadsheets.create({ resource: { properties: { title: 'StallSync Stock Export' } } });
+        //      // const newSheetId = spreadsheet.data.spreadsheetId;
+        //      // Use `sheets.spreadsheets.values.append({ spreadsheetId: newSheetId, range: 'Sheet1', valueInputOption: 'USER_ENTERED', resource: { values } })`
+        //      // Return the newSheetId or a link to it.
         return NextResponse.json({ message: `Stock items export to sheet (ID: ${sheetId || 'new sheet'}) initiated (placeholder). User UID: ${uid}. Full backend implementation required.` });
 
       case 'importSalesHistory':
         // TODO: Similar to importStockItems, but for `salesTransactions`.
+        // 1. Validate `sheetId`.
+        // 2. Get data from sheet.
+        // 3. Parse and validate.
+        // 4. Batch write to Firestore `salesTransactions` collection.
         return NextResponse.json({ message: `Sales history import from sheet '${sheetId}' initiated (placeholder). User UID: ${uid}. Full backend implementation required.` });
 
       case 'exportSalesHistory':
         // TODO: Similar to exportStockItems, but for `salesTransactions`.
+        // 1. Fetch sales transactions from Firestore.
+        // 2. Format data.
+        // 3. Create new sheet or update existing one.
         return NextResponse.json({ message: `Sales history export to sheet (ID: ${sheetId || 'new sheet'}) initiated (placeholder). User UID: ${uid}. Full backend implementation required.` });
 
       default:
@@ -174,13 +211,18 @@ export async function POST(request: NextRequest) {
 
   } catch (error: any) {
     console.error('Error in Google Sheets proxy API:', error);
-    if (error.response?.data?.error === 'invalid_grant') {
-        // This can happen if refresh token is invalid or revoked
-        // TODO: You might want to clear the stored tokens for the user and re-trigger the auth flow
-        return NextResponse.json({ error: 'Google authorization is invalid. Please re-authorize.', needsAuth: true, authUrl: oauth2Client.generateAuthUrl({ access_type: 'offline', scope: ['https://www.googleapis.com/auth/spreadsheets'], prompt: 'consent' }) }, { status: 403 });
+    if (error.code === 401 || (error.response?.data?.error === 'invalid_grant' || error.response?.data?.error === 'unauthorized_client')) {
+        // This can happen if refresh token is invalid, revoked, or access token is malformed/expired and refresh fails.
+        // TODO: You must clear the stored tokens for the user and re-trigger the auth flow.
+        // Example: await adminDb.collection('userGoogleOAuthTokens').doc(uid).delete();
+        const authUrl = oauth2Client.generateAuthUrl({ 
+            access_type: 'offline', 
+            scope: ['https://www.googleapis.com/auth/spreadsheets'], 
+            prompt: 'consent' // Force re-consent
+        });
+        return NextResponse.json({ error: 'Google authorization is invalid or expired. Please re-authorize.', needsAuth: true, authUrl: authUrl }, { status: 403 });
     }
     return NextResponse.json({ error: error.message || 'An unexpected error occurred on the server.' }, { status: 500 });
   }
 }
-
     
