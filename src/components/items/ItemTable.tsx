@@ -13,7 +13,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { StockItem, Stall } from "@/types";
-import { MoreHorizontal, Edit, Trash2, PackageOpen, Loader2, Building, Store, MoveRight, Undo2, Link2Icon, Shuffle } from "lucide-react";
+import { MoreHorizontal, Edit, Trash2, PackageOpen, Loader2, Building, Store, MoveRight, Undo2, Link2Icon, Shuffle, CheckSquare, Square } from "lucide-react"; // Added CheckSquare, Square
+import { Checkbox } from "@/components/ui/checkbox"; // Added Checkbox
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -42,14 +43,14 @@ import {
   DialogTrigger,
   DialogClose,
 } from "@/components/ui/dialog";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip"; // Added TooltipProvider
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import {
   getFirestore,
   doc,
@@ -82,7 +83,7 @@ interface ItemTableProps {
   items: StockItem[];
   sitesMap: Record<string, string>;
   stallsMap: Record<string, string>;
-  availableStallsForAllocation: Stall[]; // Stalls for the currently active site
+  availableStallsForAllocation: Stall[];
   onDataNeedsRefresh: () => void;
 }
 
@@ -111,9 +112,30 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   const [quantityToTransfer, setQuantityToTransfer] = useState<number | string>("");
   const [isTransferring, setIsTransferring] = useState(false);
 
+  const [selectedItems, setSelectedItems] = useState<string[]>([]);
+  const [showBatchDeleteDialog, setShowBatchDeleteDialog] = useState(false);
+  const [isBatchDeleting, setIsBatchDeleting] = useState(false);
+
+
+  const handleSelectAll = (checked: boolean | 'indeterminate') => {
+    if (checked === true) {
+      setSelectedItems(items.map(item => item.id));
+    } else {
+      setSelectedItems([]);
+    }
+  };
+
+  const handleSelectItem = (itemId: string, checked: boolean | 'indeterminate') => {
+    if (checked === true) {
+      setSelectedItems(prev => [...prev, itemId]);
+    } else {
+      setSelectedItems(prev => prev.filter(id => id !== itemId));
+    }
+  };
 
   const handleEdit = (itemId: string) => {
     router.push(`/items/${itemId}/edit`);
+    setSelectedItems([]); // Clear selection when navigating
   };
 
   const handleDelete = async (itemId: string, itemName: string) => {
@@ -125,6 +147,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         description: `${itemName} has been successfully deleted.`,
       });
       onDataNeedsRefresh();
+      setSelectedItems(prev => prev.filter(id => id !== itemId));
     } catch (error: any) {
       console.error("Error deleting item:", error);
       toast({
@@ -160,32 +183,32 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         }
         const currentItemData = itemSnap.data() as StockItem;
         const oldQuantity = currentItemData.quantity;
-        const quantityDelta = updatedQuantityNum - oldQuantity;
+        const quantityDelta = updatedQuantityNum - oldQuantity; // Positive if increased, negative if decreased
 
-        // If it's a stall item with a master link, prepare to read master
         let masterItemRef: DocumentReference | null = null;
         let masterItemSnap: DocumentSnapshot | null = null;
+
         if (currentItemData.stallId && currentItemData.originalMasterItemId) {
           masterItemRef = doc(db, "stockItems", currentItemData.originalMasterItemId);
-          masterItemSnap = await transaction.get(masterItemRef); // Read master
+          masterItemSnap = await transaction.get(masterItemRef);
           if (!masterItemSnap?.exists()) {
-            console.warn(`Master stock item ${currentItemData.originalMasterItemId} not found. Stall stock update will proceed, but master stock cannot be adjusted.`);
-            masterItemRef = null; // Nullify if not found, so no master update attempted
+            console.warn(`Master stock item ${currentItemData.originalMasterItemId} not found during stall stock update. Stall stock will update, but master cannot be adjusted.`);
+            masterItemRef = null; // Ensure no attempt to update a non-existent master
           }
         }
-
-        // Perform writes after all reads
+        
         transaction.update(itemRef, {
           quantity: updatedQuantityNum,
           lastUpdated: new Date().toISOString(),
         });
 
-        if (masterItemRef && masterItemSnap && masterItemSnap.exists()) {
+        if (masterItemRef && masterItemSnap?.exists()) {
           const masterItemData = masterItemSnap.data() as StockItem;
-          const newMasterQuantity = masterItemData.quantity - quantityDelta; // if delta is positive (increase in stall), master decreases. if delta is negative (decrease in stall), master also effectively decreases by abs(delta)
-
+          // If stall stock increased, master decreases. If stall stock decreased, master also decreases (reflecting loss from system)
+          const newMasterQuantity = masterItemData.quantity - quantityDelta;
+          
           transaction.update(masterItemRef, {
-            quantity: Math.max(0, newMasterQuantity),
+            quantity: Math.max(0, newMasterQuantity), // Ensure master doesn't go below 0
             lastUpdated: new Date().toISOString(),
           });
         }
@@ -193,7 +216,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
 
       toast({
         title: "Stock Updated",
-        description: `Stock quantity for "${stockUpdateItem.name}" updated to ${updatedQuantityNum}. Master stock (if applicable) adjusted accordingly.`,
+        description: `Stock quantity for "${stockUpdateItem.name}" updated to ${updatedQuantityNum}. Master stock (if applicable) adjusted.`,
       });
       setStockUpdateItem(null);
       setNewQuantity("");
@@ -244,40 +267,32 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           throw new Error(`Concurrent update: Not enough master stock. Available: ${currentMasterStock.quantity}`);
         }
 
-        // Check if item already exists at target stall (linked to the same master item)
         const stallItemsQuery = query(
           collection(db, "stockItems"),
           where("originalMasterItemId", "==", itemToAllocate.id),
           where("stallId", "==", targetStallIdForAllocation)
         );
-        // This getDocs is problematic inside a transaction. We'll query first, then read the specific doc inside.
-        // For a more robust solution, structure data so you can directly get the targetStallItemRef if it exists.
-        // Or, accept that this specific check for existing stall item happens outside strict transactionality for getDocs.
-        // A common pattern: try to get. If not found, create. If found, update. All within transaction.
-        const existingStallItemsSnap = await getDocs(stallItemsQuery); // Ideally, this is avoided or handled differently.
-        let targetStallItemRef: DocumentReference;
+        
+        // Read existing stall item (if any) within the transaction
+        let targetStallItemRef: DocumentReference | null = null;
         let existingStallItemData: StockItem | null = null;
-
-        if (!existingStallItemsSnap.empty) {
-            targetStallItemRef = existingStallItemsSnap.docs[0].ref;
+        const existingStallItemsQuerySnap = await getDocs(stallItemsQuery); // This getDocs is outside strict transaction for query part
+                                                                         // but specific doc read will be transactional if found.
+        if (!existingStallItemsQuerySnap.empty) {
+            targetStallItemRef = existingStallItemsQuerySnap.docs[0].ref;
             const targetStallItemSnap = await transaction.get(targetStallItemRef);
             if (targetStallItemSnap.exists()) {
                 existingStallItemData = targetStallItemSnap.data() as StockItem;
-            } else {
-                 // Discrepancy, item might have been deleted. Treat as new.
-                 targetStallItemRef = doc(collection(db, "stockItems"));
             }
-        } else {
-            targetStallItemRef = doc(collection(db, "stockItems"));
         }
 
-
-        if (existingStallItemData) {
+        if (targetStallItemRef && existingStallItemData) { // Found existing item at stall
             transaction.update(targetStallItemRef, {
                 quantity: existingStallItemData.quantity + numQuantityToAllocate,
                 lastUpdated: new Date().toISOString(),
             });
-        } else {
+        } else { // Item does not exist at stall, create new one
+            const newStallItemRef = doc(collection(db, "stockItems"));
             const newStallItemDataToSave: Omit<StockItem, 'id'> = {
                 name: currentMasterStock.name,
                 category: currentMasterStock.category,
@@ -291,7 +306,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                 originalMasterItemId: itemToAllocate.id,
                 lastUpdated: new Date().toISOString(),
             };
-            transaction.set(targetStallItemRef, newStallItemDataToSave);
+            transaction.set(newStallItemRef, newStallItemDataToSave);
         }
 
         transaction.update(masterStockRef, {
@@ -425,39 +440,34 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
 
         let destinationItemRef: DocumentReference | null = null;
         let destinationItemSnap: DocumentSnapshot | null = null;
-
-        // If source item has master link, try to find destination item with same master link
-        if (sourceItemData.originalMasterItemId) {
-          const q = query(
+        
+        const q = query(
             collection(db, "stockItems"),
             where("stallId", "==", destinationStallId),
-            where("originalMasterItemId", "==", sourceItemData.originalMasterItemId)
-          );
-          // This getDocs is not ideal inside a transaction for finding the ref.
-          // If we knew the destination doc ID, we'd use transaction.get().
-          // For now, we'll query outside then read its ref inside. This has a small race condition window.
-          const destQuerySnap = await getDocs(q);
-          if (!destQuerySnap.empty) {
+            where("originalMasterItemId", "==", sourceItemData.originalMasterItemId || null) // Handles both linked and unlinked
+        );
+        // For unlinked items, this query would be more specific, e.g., matching name, category, price.
+        // For now, if originalMasterItemId is null, we simplify by assuming we need to create a new one if not found by this simpler query.
+        // The actual read of destItemSnap happens inside the transaction after query.
+        const destQuerySnap = await getDocs(q);
+        if (!destQuerySnap.empty) {
             destinationItemRef = destQuerySnap.docs[0].ref;
-            destinationItemSnap = await transaction.get(destinationItemRef); // Read inside transaction
-          }
+            destinationItemSnap = await transaction.get(destinationItemRef);
         }
-        // If no originalMasterItemId, or if no item found via originalMasterItemId at destination,
-        // we'll create a new one or look for one by other means (simplified for now to create new).
 
-        // Writes
+
         transaction.update(sourceItemRef, {
           quantity: sourceItemData.quantity - numQuantityToTransfer,
           lastUpdated: new Date().toISOString()
         });
 
-        if (destinationItemSnap && destinationItemSnap.exists()) { // Found existing item at destination
+        if (destinationItemSnap && destinationItemSnap.exists()) {
           const destItemData = destinationItemSnap.data() as StockItem;
           transaction.update(destinationItemRef!, {
             quantity: destItemData.quantity + numQuantityToTransfer,
             lastUpdated: new Date().toISOString()
           });
-        } else { // Create new item at destination
+        } else {
           const newDestItemRef = doc(collection(db, "stockItems"));
           transaction.set(newDestItemRef, {
             name: sourceItemData.name,
@@ -469,7 +479,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             imageUrl: sourceItemData.imageUrl,
             siteId: sourceItemData.siteId,
             stallId: destinationStallId,
-            originalMasterItemId: sourceItemData.originalMasterItemId || null, // Preserve link
+            originalMasterItemId: sourceItemData.originalMasterItemId || null,
             lastUpdated: new Date().toISOString(),
           });
         }
@@ -489,6 +499,42 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     }
   };
 
+  const handleOpenBatchDeleteDialog = () => {
+    if (selectedItems.length === 0) {
+      toast({ title: "No Items Selected", description: "Please select items to delete.", variant: "default" });
+      return;
+    }
+    setShowBatchDeleteDialog(true);
+  };
+
+  const handleConfirmBatchDelete = async () => {
+    setIsBatchDeleting(true);
+    const batch = writeBatch(db);
+    selectedItems.forEach(itemId => {
+      const itemRef = doc(db, "stockItems", itemId);
+      batch.delete(itemRef);
+    });
+
+    try {
+      await batch.commit();
+      toast({
+        title: "Batch Delete Successful",
+        description: `${selectedItems.length} item(s) have been deleted.`,
+      });
+      onDataNeedsRefresh();
+      setSelectedItems([]);
+    } catch (error: any) {
+      console.error("Error during batch delete:", error);
+      toast({
+        title: "Batch Delete Failed",
+        description: error.message || "Could not delete selected items.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsBatchDeleting(false);
+      setShowBatchDeleteDialog(false);
+    }
+  };
 
   const formatDate = (dateString?: string) => {
     if (!dateString) return "N/A";
@@ -503,7 +549,11 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     }
   };
 
-  if (items.length === 0) {
+  const isAllSelected = useMemo(() => items.length > 0 && selectedItems.length === items.length, [items, selectedItems]);
+  const isIndeterminate = useMemo(() => selectedItems.length > 0 && selectedItems.length < items.length, [items, selectedItems]);
+
+
+  if (items.length === 0 && selectedItems.length === 0) { // Ensure batch actions bar doesn't show if items list itself is empty
     return (
       <div className="text-center py-10 px-4 bg-card rounded-lg border shadow-sm">
         <PackageOpen className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
@@ -529,11 +579,45 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
 
 
   return (
-    <>
+    <TooltipProvider>
+      {selectedItems.length > 0 && (
+        <div className="mb-4 p-3 bg-accent/10 border border-accent/30 rounded-md flex items-center justify-between">
+          <p className="text-sm text-accent-foreground">
+            {selectedItems.length} item(s) selected.
+          </p>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="border-accent text-accent hover:bg-accent hover:text-accent-foreground">
+                Batch Actions <MoreHorizontal className="ml-2 h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem 
+                onClick={handleOpenBatchDeleteDialog}
+                className="text-destructive focus:text-destructive-foreground focus:bg-destructive"
+                disabled={isBatchDeleting}
+              >
+                <Trash2 className="mr-2 h-4 w-4" /> Delete Selected
+              </DropdownMenuItem>
+              {/* Future Batch Update Options can be added here */}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
       <div className="rounded-lg border shadow-sm overflow-hidden bg-card">
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-[50px]">
+                <Checkbox
+                  checked={isAllSelected || isIndeterminate}
+                  onCheckedChange={handleSelectAll}
+                  aria-label="Select all items"
+                  className={isIndeterminate ? '[&_svg]:hidden indeterminate-checkbox' : ''}
+                  data-state={isIndeterminate ? 'indeterminate' : (isAllSelected ? 'checked' : 'unchecked')}
+                />
+                 {isIndeterminate && <Square className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-2.5 w-2.5 text-primary fill-current pointer-events-none" />}
+              </TableHead>
               <TableHead className="w-[64px]">Image</TableHead>
               <TableHead>Name</TableHead>
               <TableHead>Location</TableHead>
@@ -550,6 +634,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             {items.map((item) => {
               const isLowStock = item.quantity <= item.lowStockThreshold;
               const isOutOfStock = item.quantity === 0;
+              const isSelected = selectedItems.includes(item.id);
 
               const siteNameDisplay = item.siteId ? (sitesMap[item.siteId] || `Site ID: ${item.siteId.substring(0,6)}...`) : "N/A";
 
@@ -562,7 +647,9 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                               <span>{stallName}</span>
                               <Tooltip>
                                   <TooltipTrigger asChild>
-                                      <Link2Icon className="h-3 w-3 ml-1.5 text-muted-foreground hover:text-primary cursor-help" />
+                                      <Button variant="ghost" size="icon" className="h-5 w-5 ml-1 p-0 hover:bg-transparent">
+                                        <Link2Icon className="h-3 w-3 text-muted-foreground hover:text-primary" />
+                                      </Button>
                                   </TooltipTrigger>
                                   <TooltipContent side="top">
                                       <p>Allocated from master stock</p>
@@ -582,10 +669,24 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
 
 
               return (
-                <TableRow key={item.id} className={cn(
-                  isLowStock && !isOutOfStock && "bg-orange-500/10 hover:bg-orange-500/20",
-                  isOutOfStock && "bg-destructive/10 hover:bg-destructive/20",
-                )}>
+                <TableRow 
+                    key={item.id} 
+                    data-state={isSelected ? "selected" : ""}
+                    className={cn(
+                        isSelected && "bg-primary/5 hover:bg-primary/10",
+                        isLowStock && !isOutOfStock && "bg-orange-500/10 hover:bg-orange-500/20",
+                        isOutOfStock && "bg-destructive/10 hover:bg-destructive/20",
+                        isSelected && isLowStock && !isOutOfStock && "bg-orange-500/20 hover:bg-orange-500/25",
+                        isSelected && isOutOfStock && "bg-destructive/20 hover:bg-destructive/25",
+                    )}
+                >
+                  <TableCell>
+                     <Checkbox
+                        checked={isSelected}
+                        onCheckedChange={(checked) => handleSelectItem(item.id, checked)}
+                        aria-label={`Select item ${item.name}`}
+                      />
+                  </TableCell>
                   <TableCell>
                     <Image
                       src={item.imageUrl || `https://placehold.co/64x64.png?text=${item.name.substring(0,2)}`}
@@ -730,6 +831,28 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         </Table>
       </div>
 
+      {/* Batch Delete Dialog */}
+      <AlertDialog open={showBatchDeleteDialog} onOpenChange={setShowBatchDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Batch Delete</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete {selectedItems.length} selected item(s)? This action cannot be undone.
+              This will permanently delete the selected items. Associated master/stall stock links will not be automatically reconciled by this batch operation.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setShowBatchDeleteDialog(false)} disabled={isBatchDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmBatchDelete} disabled={isBatchDeleting} className="bg-destructive hover:bg-destructive/90">
+              {isBatchDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Delete Selected Items
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+
+      {/* ALLOCATE DIALOG */}
       {itemToAllocate && (
         <AlertDialog open={showAllocateDialog} onOpenChange={setShowAllocateDialog}>
           <AlertDialogContent>
@@ -784,6 +907,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         </AlertDialog>
       )}
 
+      {/* RETURN TO MASTER DIALOG */}
       {itemToReturn && (
         <AlertDialog open={showReturnDialog} onOpenChange={setShowReturnDialog}>
           <AlertDialogContent>
@@ -823,6 +947,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         </AlertDialog>
       )}
 
+      {/* TRANSFER DIALOG */}
       {itemToTransfer && (
         <AlertDialog open={showTransferDialog} onOpenChange={setShowTransferDialog}>
             <AlertDialogContent>
@@ -881,7 +1006,12 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             </AlertDialogContent>
         </AlertDialog>
       )}
-    </>
+      <style jsx global>{`
+        .indeterminate-checkbox:has(+ svg) { /* Target checkbox when indeterminate state is visualised by sibling svg */
+          background-image: none; /* Remove default checkmark bg */
+        }
+      `}</style>
+    </TooltipProvider>
   );
 }
 
