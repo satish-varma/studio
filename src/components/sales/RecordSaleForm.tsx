@@ -149,7 +149,12 @@ export default function RecordSaleForm() {
 
     try {
       await runTransaction(db, async (transaction) => {
-        const stockItemRefsAndData: { ref: DocumentReference; snapshot: DocumentSnapshot; formItem: z.infer<typeof saleItemSchema> }[] = [];
+        const stockItemRefsAndData: { 
+          ref: DocumentReference; 
+          snapshot: DocumentSnapshot; 
+          formItem: z.infer<typeof saleItemSchema>;
+          originalMasterItemId?: string | null; 
+        }[] = [];
 
         for (const formItem of values.items) {
           const stockItemRef = doc(db, "stockItems", formItem.itemId);
@@ -158,11 +163,15 @@ export default function RecordSaleForm() {
             throw new Error(`Item ${formItem.name} (ID: ${formItem.itemId}) not found in stock.`);
           }
           const itemData = stockItemSnap.data() as StockItem;
-          // Crucially, verify item belongs to the active site and stall.
           if (itemData.siteId !== activeSiteId || itemData.stallId !== activeStallId) {
              throw new Error(`Item ${formItem.name} does not belong to the currently active stall.`);
           }
-          stockItemRefsAndData.push({ ref: stockItemRef, snapshot: stockItemSnap, formItem });
+          stockItemRefsAndData.push({ 
+            ref: stockItemRef, 
+            snapshot: stockItemSnap, 
+            formItem,
+            originalMasterItemId: itemData.originalMasterItemId 
+          });
         }
 
         const soldItemsForTransaction: SoldItem[] = [];
@@ -203,14 +212,32 @@ export default function RecordSaleForm() {
           isDeleted: false,
         });
 
-        for (const { ref: stockItemRef, snapshot: stockItemSnap, formItem } of stockItemRefsAndData) {
-          const currentStockData = stockItemSnap.data() as StockItem;
-          const newQuantity = currentStockData.quantity - formItem.quantity;
+        for (const { ref: stockItemRef, snapshot: stockItemSnap, formItem, originalMasterItemId } of stockItemRefsAndData) {
+          const currentStallStockData = stockItemSnap.data() as StockItem;
+          const newStallQuantity = currentStallStockData.quantity - formItem.quantity;
           
           transaction.update(stockItemRef, { 
-            quantity: newQuantity,
+            quantity: newStallQuantity,
             lastUpdated: Timestamp.now().toDate().toISOString() 
           });
+
+          // If the stall item was linked to a master item, update master stock too
+          if (originalMasterItemId) {
+            const masterStockRef = doc(db, "stockItems", originalMasterItemId);
+            const masterStockSnap = await transaction.get(masterStockRef);
+            if (masterStockSnap.exists()) {
+              const masterItemData = masterStockSnap.data() as StockItem;
+              // We assume master stock was sufficient due to allocation logic,
+              // but good practice to ensure not going negative.
+              const newMasterQuantity = Math.max(0, masterItemData.quantity - formItem.quantity);
+              transaction.update(masterStockRef, {
+                quantity: newMasterQuantity,
+                lastUpdated: Timestamp.now().toDate().toISOString()
+              });
+            } else {
+              console.warn(`Master stock item with ID ${originalMasterItemId} not found when trying to update after stall sale.`);
+            }
+          }
         }
       });
 
