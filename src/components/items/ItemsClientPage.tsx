@@ -6,11 +6,11 @@ import { ItemControls } from "@/components/items/ItemControls";
 import { ItemTable } from "@/components/items/ItemTable";
 import PageHeader from "@/components/shared/PageHeader";
 import type { StockItem, Stall, Site } from "@/types";
-import { 
-  getFirestore, 
-  collection, 
-  onSnapshot, 
-  query, 
+import {
+  getFirestore,
+  collection,
+  onSnapshot,
+  query,
   orderBy,
   where,
   QueryConstraint,
@@ -22,6 +22,20 @@ import { firebaseConfig } from '@/lib/firebaseConfig';
 import { Loader2, Info } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useToast } from "@/hooks/use-toast";
+
 
 if (!getApps().length) {
   try {
@@ -33,12 +47,13 @@ if (!getApps().length) {
 const db = getFirestore();
 
 export default function ItemsClientPage() {
-  const { user, activeSiteId } = useAuth(); 
-  
+  const { user, activeSiteId, auth } = useAuth(); // auth might be needed for idToken
+  const { toast } = useToast();
+
   const [searchTerm, setSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [stockStatusFilter, setStockStatusFilter] = useState("all");
-  const [stallFilterOption, setStallFilterOption] = useState("all"); 
+  const [stallFilterOption, setStallFilterOption] = useState("all");
 
   const [items, setItems] = useState<StockItem[]>([]);
   const [stallsForFilterDropdown, setStallsForFilterDropdown] = useState<Stall[]>([]);
@@ -50,6 +65,13 @@ export default function ItemsClientPage() {
   const [loadingMaps, setLoadingMaps] = useState(true);
   const [errorItems, setErrorItems] = useState<string | null>(null);
 
+  // Commented out Google Sheets related state
+  // const [showSheetIdDialog, setShowSheetIdDialog] = useState(false);
+  // const [sheetIdInputValue, setSheetIdInputValue] = useState("");
+  // const [currentSheetAction, setCurrentSheetAction] = useState<"importStockItems" | "exportStockItems" | null>(null);
+  // const [isProcessingSheets, setIsProcessingSheets] = useState(false);
+
+
   // Fetch all sites for mapping IDs to names
   useEffect(() => {
     const sitesCollectionRef = collection(db, "sites");
@@ -59,12 +81,21 @@ export default function ItemsClientPage() {
         newSitesMap[doc.id] = (doc.data() as Site).name;
       });
       setSitesMap(newSitesMap);
-      setLoadingMaps(prev => stallsMap && Object.keys(stallsMap).length > 0 ? false : prev);
-    }, (error) => console.error("Error fetching sites map:", error));
-    
+      // Check if both maps are loaded
+      if (Object.keys(stallsMap).length > 0 && Object.keys(newSitesMap).length > 0) {
+        setLoadingMaps(false);
+      } else if (Object.keys(newSitesMap).length > 0 && Object.keys(stallsMap).length === 0 && !activeSiteId) { // No active site, so stallsMap might stay empty
+        setLoadingMaps(false);
+      }
+    }, (error) => {
+      console.error("Error fetching sites map:", error);
+      setErrorItems("Failed to load site context data.");
+      setLoadingMaps(false);
+    });
+
     return () => unsubscribeSites();
-  }, [stallsMap]);
-  
+  }, [stallsMap, activeSiteId]); // Rerun if stallsMap changes or activeSiteId changes (for the else if condition)
+
   // Fetch all stalls for mapping IDs to names (used by ItemTable)
   // AND stalls for the active site for the filter dropdown
   useEffect(() => {
@@ -75,14 +106,23 @@ export default function ItemsClientPage() {
         newStallsMap[doc.id] = (doc.data() as Stall).name;
       });
       setStallsMap(newStallsMap);
-      setLoadingMaps(prev => sitesMap && Object.keys(sitesMap).length > 0 ? false : prev);
-    }, (error) => console.error("Error fetching all stalls map:", error));
+      // Check if both maps are loaded
+      if (Object.keys(sitesMap).length > 0 && Object.keys(newStallsMap).length > 0) {
+        setLoadingMaps(false);
+      } else if (Object.keys(newStallsMap).length > 0 && Object.keys(sitesMap).length === 0) { // if sitesMap is empty but stalls load
+         setLoadingMaps(false);
+      }
+    }, (error) => {
+      console.error("Error fetching all stalls map:", error);
+      setErrorItems("Failed to load stall context data.");
+      setLoadingMaps(false);
+    });
 
     let unsubscribeDropdownStalls: () => void = () => {};
     if (activeSiteId) {
       setLoadingDropdownStalls(true);
-      const q = query(collection(db, "stalls"), where("siteId", "==", activeSiteId), orderBy("name"));
-      unsubscribeDropdownStalls = onSnapshot(q, (snapshot) => {
+      const qStallsForDropdown = query(collection(db, "stalls"), where("siteId", "==", activeSiteId), orderBy("name"));
+      unsubscribeDropdownStalls = onSnapshot(qStallsForDropdown, (snapshot) => {
         const fetchedStalls = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Stall));
         setStallsForFilterDropdown(fetchedStalls);
         setLoadingDropdownStalls(false);
@@ -92,14 +132,14 @@ export default function ItemsClientPage() {
         setLoadingDropdownStalls(false);
       });
     } else {
-      setStallsForFilterDropdown([]); 
+      setStallsForFilterDropdown([]);
       setLoadingDropdownStalls(false);
     }
     return () => {
       unsubscribeAllStalls();
       unsubscribeDropdownStalls();
     };
-  }, [activeSiteId, sitesMap]);
+  }, [activeSiteId, sitesMap]); // Rerun if sitesMap changes
 
 
   // Fetch Stock Items based on activeSiteId and stallFilterOption
@@ -123,35 +163,38 @@ export default function ItemsClientPage() {
 
     const itemsCollectionRef = collection(db, "stockItems");
     let qConstraints: QueryConstraint[] = [
-      orderBy("name"),
       where("siteId", "==", activeSiteId)
     ];
 
     if (stallFilterOption === "master") {
       qConstraints.push(where("stallId", "==", null));
-    } else if (stallFilterOption !== "all") { 
+    } else if (stallFilterOption !== "all") {
       qConstraints.push(where("stallId", "==", stallFilterOption));
     }
-    
+    // Temporarily removed orderBy("name") from query to debug internal assertion
+    // qConstraints.push(orderBy("name"));
+
     const q = query(itemsCollectionRef, ...qConstraints);
-    
-    const unsubscribe = onSnapshot(q, 
+
+    const unsubscribe = onSnapshot(q,
       (snapshot: QuerySnapshot<DocumentData>) => {
         const fetchedItems: StockItem[] = snapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
         } as StockItem));
+        // If orderBy("name") was removed from query, sort client-side for now
+        fetchedItems.sort((a, b) => a.name.localeCompare(b.name));
         setItems(fetchedItems);
         setLoadingItems(false);
       },
       (error) => {
         console.error("Error fetching stock items:", error);
-        setErrorItems("Failed to load stock items. Please try again later.");
+        setErrorItems("Failed to load stock items. Please try again later. Error: " + error.message);
         setItems([]);
         setLoadingItems(false);
       }
     );
-    return () => unsubscribe(); 
+    return () => unsubscribe();
   }, [user, activeSiteId, stallFilterOption]);
 
   const uniqueCategories = useMemo(() => {
@@ -164,7 +207,7 @@ export default function ItemsClientPage() {
       const matchesSearchTerm = item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                                 (item.category && item.category.toLowerCase().includes(searchTerm.toLowerCase()));
       const matchesCategory = categoryFilter === "all" || item.category === categoryFilter;
-      
+
       let matchesStockStatus = true;
       if (stockStatusFilter !== "all") {
         const isLowStock = item.quantity <= item.lowStockThreshold;
@@ -177,10 +220,26 @@ export default function ItemsClientPage() {
     });
   }, [items, searchTerm, categoryFilter, stockStatusFilter]);
 
+  /* Commented out Google Sheets Integration specific code and CSV export
+  const handleSheetIdDialogSubmit = async () => {
+    // ... (Google Sheets logic was here)
+  };
+
+  const openSheetIdPromptForItemActions = (action: "importStockItems" | "exportStockItems") => {
+    // ... (Google Sheets logic was here)
+  };
+
+  const callGoogleSheetsApiForItemActions = async (
+    // ... (Google Sheets logic was here)
+  ) => {
+    // ... (Google Sheets logic was here)
+  };
+  */
+
 
   return (
     <div className="space-y-6">
-      <PageHeader 
+      <PageHeader
         title="Stock Items"
         description="Manage your inventory. Add items to site master stock or a specific stall."
       />
@@ -197,14 +256,14 @@ export default function ItemsClientPage() {
         availableStalls={stallsForFilterDropdown}
         isSiteActive={!!activeSiteId}
       />
-      
+
       {(loadingItems || loadingMaps || (activeSiteId && loadingDropdownStalls)) && (
         <div className="flex justify-center items-center py-10">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
           <p className="ml-2">Loading items and context data...</p>
         </div>
       )}
-      {errorItems && (
+      {errorItems && !loadingItems && ( // Show error only if not loading
         <Alert variant="default" className="border-primary/30">
             <Info className="h-4 w-4" />
             <AlertTitle>Information</AlertTitle>
@@ -214,8 +273,19 @@ export default function ItemsClientPage() {
       {!loadingItems && !loadingMaps && !errorItems && (
         <ItemTable items={filteredItems} sitesMap={sitesMap} stallsMap={stallsMap} />
       )}
+
+      {/*
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          // CSV Export Card and Google Sheets Card were here
+      </div>
+      */}
+
+      {/*
+      <AlertDialog open={showSheetIdDialog} onOpenChange={setShowSheetIdDialog}>
+        // AlertDialog for Google Sheets was here
+      </AlertDialog>
+      */}
+
     </div>
   );
 }
-
-    
