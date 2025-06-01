@@ -84,10 +84,12 @@ export function SalesHistoryControls({
             </SelectTrigger>
             <SelectContent>
                 <SelectItem value="all">All Staff</SelectItem>
-                {staffMembers.map((staff) => (
-                <SelectItem key={staff.uid} value={staff.uid}>
-                    {staff.displayName || staff.email} ({staff.role})
-                </SelectItem>
+                {staffMembers
+                  .filter(staff => staff.uid && staff.uid.trim() !== "") // Filter out staff with empty UIDs
+                  .map((staff) => (
+                    <SelectItem key={staff.uid} value={staff.uid}>
+                        {staff.displayName || staff.email} ({staff.role})
+                    </SelectItem>
                 ))}
             </SelectContent>
          </Select>
@@ -95,3 +97,4 @@ export function SalesHistoryControls({
     </div>
   );
 }
+
