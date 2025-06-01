@@ -299,7 +299,7 @@ export default function ProfilePage() {
                     <Select 
                         onValueChange={(value) => field.onChange(value === "none" ? null : value)} 
                         value={field.value || "none"}
-                        disabled={isSubmitting || loadingStalls || !selectedSiteId || sitesForSelectedSite.length === 0}
+                        disabled={isSubmitting || loadingStalls || !selectedSiteId || stallsForSelectedSite.length === 0}
                     >
                       <FormControl>
                         <SelectTrigger className="bg-input">
@@ -341,5 +341,7 @@ export default function ProfilePage() {
     </div>
   );
 }
+
+    
 
     
