@@ -61,7 +61,8 @@ import {
   getDocs,
   writeBatch,
   serverTimestamp,
-  Timestamp
+  Timestamp,
+  DocumentReference
 } from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
@@ -88,7 +89,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   const router = useRouter();
   const [isDeleting, setIsDeleting] = useState(false);
   const [isUpdatingStock, setIsUpdatingStock] = useState(false);
-  const [stockUpdateItemId, setStockUpdateItemId] = useState<string | null>(null);
+  const [stockUpdateItem, setStockUpdateItem] = useState<StockItem | null>(null); // Store the whole item
   const [newQuantity, setNewQuantity] = useState<number | string>("");
 
   const [itemToAllocate, setItemToAllocate] = useState<StockItem | null>(null);
@@ -129,27 +130,57 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   };
 
   const handleOpenUpdateStockDialog = (item: StockItem) => {
-    setStockUpdateItemId(item.id);
+    setStockUpdateItem(item);
     setNewQuantity(item.quantity);
   };
 
   const handleStockQuantityChange = async () => {
-    if (stockUpdateItemId === null || newQuantity === "" || isNaN(Number(newQuantity)) || Number(newQuantity) < 0) {
+    if (stockUpdateItem === null || newQuantity === "" || isNaN(Number(newQuantity)) || Number(newQuantity) < 0) {
       toast({ title: "Invalid Quantity", description: "Please enter a valid non-negative number for the quantity.", variant: "destructive" });
       return;
     }
     setIsUpdatingStock(true);
     try {
-      const itemRef = doc(db, "stockItems", stockUpdateItemId);
-      await updateDoc(itemRef, {
-        quantity: Number(newQuantity),
-        lastUpdated: new Date().toISOString(),
+      await runTransaction(db, async (transaction) => {
+        const itemRef = doc(db, "stockItems", stockUpdateItem.id);
+        const itemSnap = await transaction.get(itemRef);
+
+        if (!itemSnap.exists()) {
+          throw new Error("Item being updated not found.");
+        }
+        const currentItemData = itemSnap.data() as StockItem;
+        const oldQuantity = currentItemData.quantity;
+        const updatedQuantity = Number(newQuantity);
+
+        transaction.update(itemRef, {
+          quantity: updatedQuantity,
+          lastUpdated: new Date().toISOString(),
+        });
+
+        // If it's a stall item, and its quantity decreased, and it has a master item link
+        if (currentItemData.stallId && currentItemData.originalMasterItemId && updatedQuantity < oldQuantity) {
+          const quantityDifference = oldQuantity - updatedQuantity;
+          const masterItemRef = doc(db, "stockItems", currentItemData.originalMasterItemId);
+          const masterItemSnap = await transaction.get(masterItemRef);
+
+          if (masterItemSnap.exists()) {
+            const masterItemData = masterItemSnap.data() as StockItem;
+            const newMasterQuantity = Math.max(0, masterItemData.quantity - quantityDifference);
+            transaction.update(masterItemRef, {
+              quantity: newMasterQuantity,
+              lastUpdated: new Date().toISOString(),
+            });
+          } else {
+            console.warn(`Master stock item ${currentItemData.originalMasterItemId} not found when trying to reflect stall stock decrease.`);
+          }
+        }
       });
+
       toast({
         title: "Stock Updated",
-        description: `Stock quantity updated to ${newQuantity}.`,
+        description: `Stock quantity for "${stockUpdateItem.name}" updated to ${newQuantity}.`,
       });
-      setStockUpdateItemId(null);
+      setStockUpdateItem(null);
       setNewQuantity("");
       onDataNeedsRefresh(); 
     } catch (error: any) {
@@ -197,19 +228,31 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           throw new Error(`Concurrent update: Not enough master stock. Available: ${currentMasterStock.quantity}`);
         }
 
-        const stallItemsRef = collection(db, "stockItems");
-        const q = query(stallItemsRef,
+        // For querying within a transaction, you must use transaction.get() on DocumentReferences.
+        // Complex queries (like where clauses) are not directly supported on the transaction object.
+        // So, we'll get all docs and filter, or structure data to allow direct gets if performance critical.
+        // For now, we'll fetch outside and validate inside, or adjust logic for direct gets if possible.
+        // Let's try to construct the stall item doc ID if predictable or query then get with transaction.
+        // A common pattern is to have a subcollection or a predictable ID.
+        // If not, we query for the stall item first (outside transaction for query, inside for get)
+        
+        const stallItemsCollectionRef = collection(db, "stockItems");
+        const q = query(stallItemsCollectionRef,
                         where("originalMasterItemId", "==", itemToAllocate.id),
                         where("stallId", "==", targetStallIdForAllocation));
-        const existingStallItemQuerySnap = await getDocs(q); // Use getDocs, not transaction.get for queries
-
-        let targetStallItemRef;
+        
+        // Execute the query outside the transaction to get potential document IDs
+        const existingStallItemQuerySnap = await getDocs(q);
+        let targetStallItemRef: DocumentReference;
         let newStallItemQuantity = numQuantityToAllocate;
 
         if (!existingStallItemQuerySnap.empty) {
           const existingStallItemDoc = existingStallItemQuerySnap.docs[0];
-          targetStallItemRef = existingStallItemDoc.ref;
-          const existingStallItemData = existingStallItemDoc.data() as StockItem;
+          targetStallItemRef = existingStallItemDoc.ref; // Get ref to use in transaction
+          const existingStallItemSnap = await transaction.get(targetStallItemRef); // Read within transaction
+          if(!existingStallItemSnap.exists()) throw new Error("Stall item disappeared during transaction.");
+
+          const existingStallItemData = existingStallItemSnap.data() as StockItem;
           newStallItemQuantity = existingStallItemData.quantity + numQuantityToAllocate;
 
           transaction.update(targetStallItemRef, {
@@ -218,7 +261,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           });
 
         } else {
-          targetStallItemRef = doc(collection(db, "stockItems"));
+          targetStallItemRef = doc(collection(db, "stockItems")); // Create new ref
           const newStallItemData: Omit<StockItem, 'id'> = {
             name: currentMasterStock.name,
             category: currentMasterStock.category,
@@ -441,7 +484,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                   </TableCell>
                   <TableCell className="text-muted-foreground text-xs">{formatDate(item.lastUpdated)}</TableCell>
                   <TableCell className="text-right">
-                    <Dialog open={stockUpdateItemId === item.id} onOpenChange={(open) => !open && setStockUpdateItemId(null)}>
+                    <Dialog open={stockUpdateItem?.id === item.id} onOpenChange={(open) => !open && setStockUpdateItem(null)}>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -496,9 +539,9 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                       </DropdownMenu>
                       <DialogContent className="sm:max-w-[425px]">
                         <DialogHeader>
-                          <DialogTitle>Update Stock for {item.name}</DialogTitle>
+                          <DialogTitle>Update Stock for {stockUpdateItem?.name}</DialogTitle>
                           <DialogDescription>
-                            Current quantity: {item.quantity} {item.unit} ({stallDisplay} at {siteNameDisplay}).
+                            Current quantity: {stockUpdateItem?.quantity} {stockUpdateItem?.unit} ({stallDisplay} at {siteNameDisplay}).
                           </DialogDescription>
                         </DialogHeader>
                         <div className="grid gap-4 py-4">
@@ -630,5 +673,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     </>
   );
 }
+
+    
 
     
