@@ -107,15 +107,20 @@ export default function ItemsClientPage() {
     let unsubscribeDropdownStalls: () => void = () => {};
     if (activeSiteId) {
       setLoadingDropdownStalls(true);
-      const qStallsForDropdown = query(collection(db, "stalls"), where("siteId", "==", activeSiteId), orderBy("name"));
+      // Temporarily removed orderBy("name") for debugging index issue
+      const qStallsForDropdown = query(collection(db, "stalls"), where("siteId", "==", activeSiteId));
       unsubscribeDropdownStalls = onSnapshot(qStallsForDropdown, (snapshot) => {
         const fetchedStalls = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Stall));
+        // Sort client-side
+        fetchedStalls.sort((a, b) => a.name.localeCompare(b.name));
         setStallsForFilterDropdown(fetchedStalls);
         setLoadingDropdownStalls(false);
       }, (error) => {
         console.error("Error fetching stalls for filter dropdown:", error);
         setStallsForFilterDropdown([]);
         setLoadingDropdownStalls(false);
+        // Set specific error for this query if needed
+        setErrorItems(prevError => prevError || "Failed to load stalls for filtering. Error: " + error.message);
       });
     } else {
       setStallsForFilterDropdown([]);
@@ -126,7 +131,7 @@ export default function ItemsClientPage() {
       unsubscribeAllStalls();
       unsubscribeDropdownStalls();
     };
-  }, [activeSiteId]);
+  }, [activeSiteId]); // Removed sitesMap, stallsMap from dependencies as they are set within this effect chain indirectly
 
 
   // Fetch Stock Items based on activeSiteId and stallFilterOption
@@ -146,7 +151,7 @@ export default function ItemsClientPage() {
     }
 
     setLoadingItems(true);
-    setErrorItems(null);
+    // setErrorItems(null); // Reset main item error, allow specific error from stall dropdown query to persist if it occurs
 
     const itemsCollectionRef = collection(db, "stockItems");
     let qConstraints: QueryConstraint[] = [
@@ -270,3 +275,4 @@ export default function ItemsClientPage() {
     </div>
   );
 }
+
