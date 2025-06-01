@@ -31,6 +31,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  AlertDialogTrigger, // Kept for other dialogs if any, but not used for single delete trigger now
 } from "@/components/ui/alert-dialog";
 import {
   Dialog,
@@ -119,6 +120,10 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   const [batchUpdateQuantity, setBatchUpdateQuantity] = useState<number | string>("");
   const [isBatchUpdatingStock, setIsBatchUpdatingStock] = useState(false);
 
+  const [itemForSingleDelete, setItemForSingleDelete] = useState<StockItem | null>(null);
+  const [showSingleDeleteDialog, setShowSingleDeleteDialog] = useState(false);
+
+
   const selectableItems = useMemo(() => items.filter(item => !!item.stallId), [items]);
 
   const handleSelectAll = (checked: boolean | 'indeterminate') => {
@@ -131,7 +136,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
 
   const handleSelectItem = (itemId: string, checked: boolean | 'indeterminate') => {
     const item = items.find(i => i.id === itemId);
-    if (item && !item.stallId) return; // Prevent selecting master stock items
+    if (item && !item.stallId) return; 
 
     if (checked === true) {
       setSelectedItems(prev => [...prev, itemId]);
@@ -149,15 +154,14 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     setIsDeleting(true);
     try {
       const itemRef = doc(db, "stockItems", itemId);
-      const itemDoc = await getDoc(itemRef);
-      if (!itemDoc.exists()) {
+      const itemDocSnap = await getDoc(itemRef); // Renamed for clarity
+      if (!itemDocSnap.exists()) {
         throw new Error("Item not found for deletion.");
       }
-      const itemData = itemDoc.data() as StockItem;
+      const itemData = itemDocSnap.data() as StockItem;
 
       await runTransaction(db, async (transaction) => {
         if (itemData.stallId && itemData.originalMasterItemId) {
-          // If it's a stall item linked to master, return its quantity to master
           const masterItemRef = doc(db, "stockItems", itemData.originalMasterItemId);
           const masterItemSnap = await transaction.get(masterItemRef);
           if (masterItemSnap.exists()) {
@@ -179,6 +183,10 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       });
       onDataNeedsRefresh();
       setSelectedItems(prev => prev.filter(id => id !== itemId));
+      if (itemForSingleDelete?.id === itemId) {
+        setShowSingleDeleteDialog(false);
+        setItemForSingleDelete(null);
+      }
     } catch (error: any) {
       console.error("Error deleting item:", error);
       toast({
@@ -215,29 +223,31 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         const currentItemData = itemSnap.data() as StockItem;
         const oldQuantity = currentItemData.quantity;
         
-        // Update the primary item (stall or master)
+        let masterItemSnap: DocumentSnapshot | null = null;
+        let masterItemRef: DocumentReference | null = null;
+
+        if (currentItemData.stallId && currentItemData.originalMasterItemId) {
+            masterItemRef = doc(db, "stockItems", currentItemData.originalMasterItemId);
+            masterItemSnap = await transaction.get(masterItemRef);
+        }
+        
         transaction.update(itemRef, {
           quantity: updatedQuantityNum,
           lastUpdated: new Date().toISOString(),
         });
 
-        // If it's a stall item linked to a master item, adjust master stock
-        if (currentItemData.stallId && currentItemData.originalMasterItemId) {
-          const quantityDelta = updatedQuantityNum - oldQuantity; // Positive if increased, negative if decreased
-          const masterItemRef = doc(db, "stockItems", currentItemData.originalMasterItemId);
-          const masterItemSnap = await transaction.get(masterItemRef);
-
-          if (masterItemSnap.exists()) {
-            const masterItemData = masterItemSnap.data() as StockItem;
-            const newMasterQuantity = masterItemData.quantity - quantityDelta; // Subtract delta: if stall increases, master decreases; if stall decreases, master increases.
-            
-            transaction.update(masterItemRef, {
-              quantity: Math.max(0, newMasterQuantity), // Ensure master stock doesn't go below zero
-              lastUpdated: new Date().toISOString(),
-            });
-          } else {
+        if (masterItemSnap && masterItemSnap.exists() && masterItemRef) {
+          const masterItemData = masterItemSnap.data() as StockItem;
+          const quantityDelta = updatedQuantityNum - oldQuantity; 
+          
+          const newMasterQuantity = masterItemData.quantity - quantityDelta;
+          
+          transaction.update(masterItemRef, {
+            quantity: Math.max(0, newMasterQuantity), 
+            lastUpdated: new Date().toISOString(),
+          });
+        } else if (currentItemData.stallId && currentItemData.originalMasterItemId && !masterItemSnap?.exists()){
             console.warn(`Master stock item ${currentItemData.originalMasterItemId} not found. Stall stock updated, but master cannot be adjusted.`);
-          }
         }
       });
 
@@ -302,6 +312,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         
         let targetStallItemRef: DocumentReference | null = null;
         let existingStallItemData: StockItem | null = null;
+        
         const existingStallItemsQuerySnap = await getDocs(stallItemsQuery); 
                                                                          
         if (!existingStallItemsQuerySnap.empty) {
@@ -458,38 +469,40 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     try {
       await runTransaction(db, async (transaction) => {
         const sourceItemRef = doc(db, "stockItems", itemToTransfer.id);
+        
+        let destinationItemRef: DocumentReference | null = null;
+        let destinationItemSnap: DocumentSnapshot | null = null;
+        
+        // Perform reads first
         const sourceItemSnap = await transaction.get(sourceItemRef);
-
         if (!sourceItemSnap.exists()) throw new Error("Source item not found.");
         const sourceItemData = sourceItemSnap.data() as StockItem;
         if (sourceItemData.quantity < numQuantityToTransfer) throw new Error(`Concurrent update: Not enough source stock. Available: ${sourceItemData.quantity}`);
 
-        let destinationItemRef: DocumentReference | null = null;
-        let destinationItemSnap: DocumentSnapshot | null = null;
-        
         const q = query(
             collection(db, "stockItems"),
             where("stallId", "==", destinationStallId),
             where("originalMasterItemId", "==", sourceItemData.originalMasterItemId || null) 
         );
         
-        const destQuerySnap = await getDocs(q); // This needs to be outside transaction for non-transactional read, or handled carefully.
-                                                 // For now, assuming it's okay to query outside, or we fetch it non-transactionally first.
-                                                 // For strict transaction, fetch outside, then use `transaction.get(ref)`
+        // This getDocs is outside the transaction reads-first requirement because it's a query, not a direct doc read.
+        // However, for strict atomicity with the destination check, this could be a point of refinement if high concurrency is an issue.
+        // For now, we'll fetch the query result and then get the specific doc inside the transaction.
+        const destQuerySnap = await getDocs(q); 
         if (!destQuerySnap.empty) {
             destinationItemRef = destQuerySnap.docs[0].ref;
-            destinationItemSnap = await transaction.get(destinationItemRef);
+            destinationItemSnap = await transaction.get(destinationItemRef); // Read inside transaction
         }
 
-
+        // Now perform writes
         transaction.update(sourceItemRef, {
           quantity: sourceItemData.quantity - numQuantityToTransfer,
           lastUpdated: new Date().toISOString()
         });
 
-        if (destinationItemSnap && destinationItemSnap.exists()) {
+        if (destinationItemSnap && destinationItemSnap.exists() && destinationItemRef) {
           const destItemData = destinationItemSnap.data() as StockItem;
-          transaction.update(destinationItemRef!, {
+          transaction.update(destinationItemRef, {
             quantity: destItemData.quantity + numQuantityToTransfer,
             lastUpdated: new Date().toISOString()
           });
@@ -527,7 +540,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
 
   const handleOpenBatchDeleteDialog = () => {
     if (selectedItems.length === 0) {
-      toast({ title: "No Items Selected", description: "Please select stall items to delete.", variant: "default" });
+      toast({ title: "No Stall Items Selected", description: "Please select stall items to delete.", variant: "default" });
       return;
     }
     setShowBatchDeleteDialog(true);
@@ -537,21 +550,17 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     setIsBatchDeleting(true);
     let successCount = 0;
     let errorCount = 0;
+    const itemsToDeleteInfo = selectedItems.map(id => items.find(item => item.id === id)).filter(item => item && !!item.stallId);
 
-    for (const itemId of selectedItems) {
-      const itemToDelete = items.find(i => i.id === itemId);
-      if (!itemToDelete || !itemToDelete.stallId) { // Ensure it's a stall item
-        console.warn(`Skipping non-stall item or missing item in batch delete: ${itemId}`);
-        continue;
-      }
-
+    for (const itemToDelete of itemsToDeleteInfo) {
+      if (!itemToDelete) continue;
       try {
         await runTransaction(db, async (transaction) => {
           const stallItemRef = doc(db, "stockItems", itemToDelete.id);
           const stallItemSnap = await transaction.get(stallItemRef);
 
           if (!stallItemSnap.exists()) {
-            throw new Error(`Stall item ${itemToDelete.name} not found.`);
+            throw new Error(`Stall item ${itemToDelete.name} not found during batch delete.`);
           }
           const stallItemData = stallItemSnap.data() as StockItem;
 
@@ -561,18 +570,18 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             if (masterItemSnap.exists()) {
               const masterData = masterItemSnap.data() as StockItem;
               transaction.update(masterItemRef, {
-                quantity: masterData.quantity + stallItemData.quantity, // Return quantity to master
+                quantity: masterData.quantity + stallItemData.quantity, 
                 lastUpdated: new Date().toISOString(),
               });
             } else {
-              console.warn(`Master item ${stallItemData.originalMasterItemId} for stall item ${stallItemData.id} not found. Master stock not adjusted.`);
+              console.warn(`Master item ${stallItemData.originalMasterItemId} for stall item ${stallItemData.id} not found. Master stock not adjusted during batch delete.`);
             }
           }
           transaction.delete(stallItemRef);
         });
         successCount++;
       } catch (error: any) {
-        console.error(`Error deleting item ${itemId} in batch:`, error);
+        console.error(`Error deleting item ${itemToDelete.id} in batch:`, error);
         errorCount++;
       }
     }
@@ -615,50 +624,50 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     const newBatchQtyNum = Number(batchUpdateQuantity);
     let successCount = 0;
     let errorCount = 0;
+    const itemsToUpdateInfo = selectedItems.map(id => items.find(item => item.id === id)).filter(item => item && !!item.stallId);
 
-    for (const itemId of selectedItems) {
-      const itemToUpdate = items.find(i => i.id === itemId);
-      if (!itemToUpdate || !itemToUpdate.stallId) { // Ensure it's a stall item
-         console.warn(`Skipping non-stall item or missing item in batch update: ${itemId}`);
-        continue;
-      }
 
+    for (const itemToUpdate of itemsToUpdateInfo) {
+       if (!itemToUpdate) continue;
       try {
         await runTransaction(db, async (transaction) => {
           const stallItemRef = doc(db, "stockItems", itemToUpdate.id);
           const stallItemSnap = await transaction.get(stallItemRef);
 
           if (!stallItemSnap.exists()) {
-            throw new Error(`Stall item ${itemToUpdate.name} not found.`);
+            throw new Error(`Stall item ${itemToUpdate.name} not found during batch update.`);
           }
           const currentStallData = stallItemSnap.data() as StockItem;
           const oldStallQuantity = currentStallData.quantity;
+          
+          let masterItemSnap: DocumentSnapshot | null = null;
+          let masterItemRefToUpdate: DocumentReference | null = null;
+
+          if (currentStallData.originalMasterItemId) {
+            masterItemRefToUpdate = doc(db, "stockItems", currentStallData.originalMasterItemId);
+            masterItemSnap = await transaction.get(masterItemRefToUpdate);
+          }
           
           transaction.update(stallItemRef, {
             quantity: newBatchQtyNum,
             lastUpdated: new Date().toISOString(),
           });
 
-          if (currentStallData.originalMasterItemId) {
+          if (masterItemSnap && masterItemSnap.exists() && masterItemRefToUpdate) {
+            const masterData = masterItemSnap.data() as StockItem;
             const quantityDelta = newBatchQtyNum - oldStallQuantity;
-            const masterItemRef = doc(db, "stockItems", currentStallData.originalMasterItemId);
-            const masterItemSnap = await transaction.get(masterItemRef);
-
-            if (masterItemSnap.exists()) {
-              const masterData = masterItemSnap.data() as StockItem;
-              const newMasterQuantity = masterData.quantity - quantityDelta;
-              transaction.update(masterItemRef, {
-                quantity: Math.max(0, newMasterQuantity),
-                lastUpdated: new Date().toISOString(),
-              });
-            } else {
-              console.warn(`Master item ${currentStallData.originalMasterItemId} for stall item ${currentStallData.id} not found. Master stock not adjusted.`);
-            }
+            const newMasterQuantity = masterData.quantity - quantityDelta;
+            transaction.update(masterItemRefToUpdate, {
+              quantity: Math.max(0, newMasterQuantity),
+              lastUpdated: new Date().toISOString(),
+            });
+          } else if (currentStallData.originalMasterItemId && !masterItemSnap?.exists()){
+             console.warn(`Master item ${currentStallData.originalMasterItemId} for stall item ${currentStallData.id} not found. Master stock not adjusted during batch update.`);
           }
         });
         successCount++;
       } catch (error: any) {
-        console.error(`Error batch updating stock for item ${itemId}:`, error);
+        console.error(`Error batch updating stock for item ${itemToUpdate.id}:`, error);
         errorCount++;
       }
     }
@@ -699,6 +708,11 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
 
   const isAllSelected = useMemo(() => selectableItems.length > 0 && selectedItems.length === selectableItems.length, [selectableItems, selectedItems]);
   const isIndeterminate = useMemo(() => selectedItems.length > 0 && selectedItems.length < selectableItems.length, [selectableItems, selectedItems]);
+
+  const handleOpenSingleDeleteDialog = (item: StockItem) => {
+    setItemForSingleDelete(item);
+    setShowSingleDeleteDialog(true);
+  };
 
 
   if (items.length === 0 && selectedItems.length === 0) { 
@@ -841,7 +855,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                         checked={isSelected}
                         onCheckedChange={(checked) => handleSelectItem(item.id, checked)}
                         aria-label={`Select item ${item.name}`}
-                        disabled={isMasterStock} // Disable checkbox for master stock items
+                        disabled={isMasterStock} 
                       />
                   </TableCell>
                   <TableCell>
@@ -915,30 +929,12 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                           <DropdownMenuItem onClick={() => handleEdit(item.id)}>
                             <Edit className="mr-2 h-4 w-4" /> Edit Item
                           </DropdownMenuItem>
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <DropdownMenuItem onSelect={(e) => e.preventDefault()} className="text-destructive focus:text-destructive-foreground focus:bg-destructive">
-                                <Trash2 className="mr-2 h-4 w-4" /> Delete Item
-                              </DropdownMenuItem>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  This action cannot be undone. This will permanently delete the item "{item.name}".
-                                  If this is a stall item linked to master stock, its quantity will be returned to the master stock.
-                                  If this is master stock, any stall stock items linked to it will NOT be automatically deleted and will become orphaned.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-                                <AlertDialogAction onClick={() => handleDelete(item.id, item.name)} disabled={isDeleting} className="bg-destructive hover:bg-destructive/90">
-                                  {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                  Delete
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
+                          <DropdownMenuItem
+                            onClick={() => handleOpenSingleDeleteDialog(item)}
+                            className="text-destructive focus:text-destructive-foreground focus:bg-destructive"
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" /> Delete Item
+                          </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                       <DialogContent className="sm:max-w-[425px]">
@@ -996,6 +992,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             <AlertDialogDescription>
               Are you sure you want to delete {selectedItems.length} selected stall item(s)? This action cannot be undone.
               For each deleted stall item linked to master stock, its quantity will be returned to the master stock.
+              Master stock items cannot be batch deleted.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1015,8 +1012,9 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             <AlertDialogTitle>Batch Update Stock Quantity for Stall Items</AlertDialogTitle>
             <AlertDialogDescription>
               This will set the quantity for all {selectedItems.length} selected stall items to the new value.
-              If a stall item is linked to master stock, the change in its quantity will be reflected in the master stock
-              (e.g., if stall quantity increases, master quantity decreases by the same amount, and vice-versa).
+              If a selected stall item is linked to master stock, the change in its quantity will be mirrored in the master stock
+              (e.g., if stall quantity increases by 5, master quantity decreases by 5, and vice-versa).
+              Master stock items cannot be batch updated.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="grid gap-4 py-4">
@@ -1044,6 +1042,35 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Single Item Delete Dialog */}
+      {itemForSingleDelete && (
+        <AlertDialog open={showSingleDeleteDialog} onOpenChange={(open) => {
+            setShowSingleDeleteDialog(open);
+            if (!open) setItemForSingleDelete(null); 
+        }}>
+            <AlertDialogContent>
+            <AlertDialogHeader>
+                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                <AlertDialogDescription>
+                This action cannot be undone. This will permanently delete the item "{itemForSingleDelete.name}".
+                If this is a stall item linked to master stock, its quantity will be returned to the master stock.
+                If this is master stock, any stall stock items linked to it will NOT be automatically deleted and will become orphaned.
+                </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+                <AlertDialogCancel onClick={() => {
+                    setShowSingleDeleteDialog(false);
+                    setItemForSingleDelete(null);
+                }} disabled={isDeleting}>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={() => handleDelete(itemForSingleDelete.id, itemForSingleDelete.name)} disabled={isDeleting} className="bg-destructive hover:bg-destructive/90">
+                {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Delete
+                </AlertDialogAction>
+            </AlertDialogFooter>
+            </AlertDialogContent>
+        </AlertDialog>
+        )}
 
 
       {/* ALLOCATE DIALOG */}
