@@ -1,24 +1,31 @@
 
+import type { Timestamp } from "firebase/firestore"; // For client-side type hint
+
 export interface SoldItem {
   itemId: string;
   name: string;
   quantity: number;
-  pricePerUnit: number; // Assuming price is recorded at time of sale
+  pricePerUnit: number; 
   totalPrice: number;
-  // siteId and stallId can be inferred from the parent SaleTransaction
 }
 
 export interface SaleTransaction {
   id: string;
   items: SoldItem[];
   totalAmount: number;
-  transactionDate: string; // ISO date string
-  staffId: string; // ID of the staff member who recorded the sale
-  staffName?: string; // Optional: name for display
-  isDeleted?: boolean; // For soft delete
-  deletedBy?: string; // UID of admin who deleted
-  deletedAt?: string; // ISO date string of deletion
-  deletionJustification?: string; // Reason for deletion
-  siteId?: string; // Optional for now
-  stallId?: string; // Optional for now
+  transactionDate: string; // ISO date string for client, Firestore Timestamp on server/admin SDK
+  staffId: string; 
+  staffName?: string; 
+  isDeleted?: boolean; 
+  deletedBy?: string; 
+  deletedAt?: string; 
+  deletionJustification?: string; 
+  siteId?: string | null; 
+  stallId?: string | null; 
+}
+
+// Type for data structure when using Firestore Admin SDK
+export interface SaleTransactionAdmin extends Omit<SaleTransaction, 'transactionDate' | 'deletedAt'> {
+  transactionDate: Timestamp; // Firestore Admin Timestamp
+  deletedAt?: Timestamp; // Firestore Admin Timestamp
 }
