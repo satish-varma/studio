@@ -67,26 +67,63 @@ export async function POST(request: NextRequest) {
     // TODO: Implement Google OAuth 2.0 Flow and Google Sheets API Interaction
     // ================================================================================
     // This is where the core logic for interacting with Google Sheets would go.
-    // 1. OAuth:
-    //    - For the first time, redirect the user to Google's consent screen.
-    //    - Handle the callback, exchange code for tokens (access & refresh).
-    //    - Securely store tokens (e.g., in Firestore, encrypted, associated with user UID).
-    //    - Use refresh tokens to get new access tokens when they expire.
-    // 2. Google Sheets API (`googleapis` library):
-    //    - Initialize an OAuth2 client: `const oauth2Client = new google.auth.OAuth2(...)`
-    //    - Set credentials: `oauth2Client.setCredentials({ access_token, refresh_token })`
+    //
+    // 1. OAuth Client Setup:
+    //    - Your Google Client ID and Client Secret should be stored securely as environment variables.
+    //      (e.g., GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET in your Firebase Functions config or deployment environment)
+    //    - Initialize an OAuth2 client:
+    //      const oauth2Client = new google.auth.OAuth2(
+    //        process.env.GOOGLE_CLIENT_ID,      // Your Client ID from environment variable
+    //        process.env.GOOGLE_CLIENT_SECRET,  // Your Client Secret from environment variable
+    //        process.env.GOOGLE_REDIRECT_URI    // Your Redirect URI (e.g., https://<your-app-url>/api/auth/google/callback)
+    //      );
+    //
+    // 2. OAuth Flow:
+    //    - If the user doesn't have tokens stored (e.g., in Firestore associated with their UID):
+    //      - Generate an authorization URL:
+    //        const authUrl = oauth2Client.generateAuthUrl({
+    //          access_type: 'offline', // 'offline' to get a refresh token
+    //          scope: ['https://www.googleapis.com/auth/spreadsheets'], // Scope for Google Sheets
+    //          // include_granted_scopes: true, // Optional
+    //        });
+    //      - Redirect the user to `authUrl` or send it to the client to redirect.
+    //    - Handle the callback from Google (at your GOOGLE_REDIRECT_URI):
+    //      - const {tokens} = await oauth2Client.getToken(code_from_query_params);
+    //      - oauth2Client.setCredentials(tokens);
+    //      - Securely store `tokens.access_token` and especially `tokens.refresh_token`
+    //        (e.g., in Firestore, associated with the user's UID).
+    //    - If tokens are already stored:
+    //      - Retrieve tokens.
+    //      - oauth2Client.setCredentials({ access_token, refresh_token });
+    //      - If access_token is expired, `googleapis` library often handles refresh automatically
+    //        if refresh_token is present, or you can explicitly refresh:
+    //        // oauth2Client.on('tokens', (newTokens) => { /* store new tokens */ });
+    //        // await oauth2Client.refreshAccessToken();
+    //
+    // 3. Google Sheets API (`googleapis` library):
     //    - Initialize Sheets API: `const sheets = google.sheets({ version: 'v4', auth: oauth2Client });`
     //    - Perform operations:
     //      - `sheets.spreadsheets.values.get(...)` to read data for import.
     //      - `sheets.spreadsheets.values.update(...)` or `append(...)` to write data for export.
     //      - `sheets.spreadsheets.create(...)` if creating new sheets.
-    // 3. Firestore Interaction (using Firebase Admin SDK):
+    //      - Example: Exporting data (simplified)
+    //        // const spreadsheetId = 'YOUR_SPREADSHEET_ID'; // Or create a new one
+    //        // await sheets.spreadsheets.values.update({
+    //        //   spreadsheetId,
+    //        //   range: 'Sheet1!A1', // Target range
+    //        //   valueInputOption: 'USER_ENTERED',
+    //        //   resource: { values: [["Header1", "Header2"], ["Data1", "Data2"]] },
+    //        // });
+    //
+    // 4. Firestore Interaction (using Firebase Admin SDK):
     //    - Fetch data from Firestore for export.
     //    - Validate and write data to Firestore for import.
     // ================================================================================
 
     console.log(`Placeholder API: Received action '${action}' for data type '${dataType}' with sheetId '${sheetId}'.`);
-    
+    console.log('REMINDER: Implement OAuth 2.0 flow and Google Sheets API interaction here.');
+    console.log('Google Client ID and Secret should be accessed from environment variables (e.g., process.env.GOOGLE_CLIENT_ID).');
+
     // Simulate processing based on action
     switch (action) {
       case 'importStockItems':
@@ -110,3 +147,4 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error.message || 'An unexpected error occurred on the server.' }, { status: 500 });
   }
 }
+
