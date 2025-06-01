@@ -258,12 +258,12 @@ export default function SettingsPage() {
     });
 
     try {
-      const idToken = await auth.currentUser?.getIdToken();
-      if (!idToken) {
+      if (!auth.currentUser) {
         toast({ title: "Authentication Error", description: "User not authenticated. Please re-login.", variant: "destructive" });
         setLoadingState(false);
         return;
       }
+      const idToken = await auth.currentUser.getIdToken();
       
       const response = await fetch('/api/google-sheets-proxy', {
         method: 'POST',
@@ -278,9 +278,22 @@ export default function SettingsPage() {
         }),
       });
 
-      const result = await response.json();
+      let result;
+      try {
+        result = await response.json();
+      } catch (e) {
+        console.error(`Error parsing JSON response from /api/google-sheets-proxy. Status: ${response.status}`, await response.text());
+        toast({
+          title: "API Error",
+          description: `Failed to process request. Server responded with status ${response.status}. Check console for details.`,
+          variant: "destructive",
+        });
+        setLoadingState(false);
+        return;
+      }
 
       if (!response.ok) {
+        console.error(`API Error (${response.status}) for ${friendlyAction}:`, result);
         if (result.needsAuth && result.authUrl) {
           toast({ 
             title: "Authorization Required", 
@@ -289,7 +302,17 @@ export default function SettingsPage() {
           });
           window.location.href = result.authUrl; 
         } else {
-          throw new Error(result.error || `Failed to ${friendlyAction}.`);
+          let errorMessage = result.error || `Failed to ${friendlyAction}. Status: ${response.status}.`;
+          if (response.status === 401 && result.error?.toLowerCase().includes("invalid firebase id token")) {
+            errorMessage = "Authentication with the backend failed (Invalid ID token). Please ensure your Firebase setup is correct or try re-logging in.";
+          } else if (response.status === 403 && result.error?.toLowerCase().includes("google sheets authorization required")) {
+            errorMessage = "Google Sheets authorization is required. Please try the action again to initiate authorization.";
+          }
+          toast({
+            title: "Operation Failed",
+            description: errorMessage,
+            variant: "destructive",
+          });
         }
       } else {
         toast({ title: "Success", description: result.message || `${friendlyAction} completed.` });
@@ -300,15 +323,15 @@ export default function SettingsPage() {
              variant: "default",
              duration: 7000
            });
-           console.warn("Import errors:", result.errors);
+           console.warn(`Import errors for ${dataType}:`, result.errors);
          }
       }
 
     } catch (error: any) {
       console.error(`Error during Google Sheets ${friendlyAction}:`, error);
       toast({ 
-        title: "Error", 
-        description: error.message || `Failed to ${friendlyAction}. Ensure backend and OAuth are correctly set up.`, 
+        title: "Client-side Error", 
+        description: error.message || `Failed to ${friendlyAction}. Check console for details.`, 
         variant: "destructive" 
       });
     } finally {

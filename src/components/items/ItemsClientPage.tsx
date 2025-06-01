@@ -32,8 +32,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
+} from "@/components/ui/alert-dialog"; // AlertDialogTrigger removed as it's not directly used here
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -130,7 +129,6 @@ export default function ItemsClientPage() {
   const exportStockItemsToCsvLocal = async () => {
     setIsExportingCsv(true);
     try {
-      const stockItemsCollectionRef = collection(db, "stockItems");
       const allStockItems = items; 
 
       if (allStockItems.length === 0) {
@@ -188,7 +186,6 @@ export default function ItemsClientPage() {
 
   const handleSheetIdDialogSubmit = () => {
     if (currentSheetAction) {
-      // For import, sheetIdInputValue is required. For export, it's optional.
       if (currentSheetAction.toLowerCase().includes('import') && !sheetIdInputValue.trim()) {
         toast({ title: "Sheet ID Required", description: "Please provide a Google Sheet ID to import from.", variant: "default" });
         return;
@@ -208,7 +205,7 @@ export default function ItemsClientPage() {
 
   const callGoogleSheetsApiForItemActions = async (
     action: "importStockItems" | "exportStockItems", 
-    sheetId?: string // sheetId is now passed as an argument
+    sheetId?: string
   ) => {
     const setLoadingState = action === "importStockItems" ? setIsProcessingSheetsImport : setIsProcessingSheetsExport;
     setLoadingState(true);
@@ -219,12 +216,12 @@ export default function ItemsClientPage() {
     });
 
     try {
-      const idToken = await auth.currentUser?.getIdToken();
-      if (!idToken) {
+      if (!auth.currentUser) {
         toast({ title: "Authentication Error", description: "User not authenticated. Please re-login.", variant: "destructive" });
         setLoadingState(false);
         return;
       }
+      const idToken = await auth.currentUser.getIdToken();
       
       const response = await fetch('/api/google-sheets-proxy', {
         method: 'POST',
@@ -239,10 +236,23 @@ export default function ItemsClientPage() {
         }),
       });
 
-      const result = await response.json();
+      let result;
+      try {
+        result = await response.json();
+      } catch (e) {
+        console.error(`Error parsing JSON response from /api/google-sheets-proxy. Status: ${response.status}`, await response.text());
+        toast({
+          title: "API Error",
+          description: `Failed to process request. Server responded with status ${response.status}. Check console for details.`,
+          variant: "destructive",
+        });
+        setLoadingState(false);
+        return;
+      }
 
       if (!response.ok) {
-         if (result.needsAuth && result.authUrl) {
+        console.error(`API Error (${response.status}) for ${friendlyAction}:`, result);
+        if (result.needsAuth && result.authUrl) {
           toast({ 
             title: "Authorization Required", 
             description: "Please authorize StallSync to access your Google Sheets. Redirecting...",
@@ -250,7 +260,17 @@ export default function ItemsClientPage() {
           });
           window.location.href = result.authUrl;
         } else {
-          throw new Error(result.error || `Failed to ${friendlyAction}.`);
+          let errorMessage = result.error || `Failed to ${friendlyAction}. Status: ${response.status}.`;
+          if (response.status === 401 && result.error?.toLowerCase().includes("invalid firebase id token")) {
+            errorMessage = "Authentication with the backend failed (Invalid ID token). Please ensure your Firebase setup is correct or try re-logging in.";
+          } else if (response.status === 403 && result.error?.toLowerCase().includes("google sheets authorization required")) {
+            errorMessage = "Google Sheets authorization is required. Please try the action again to initiate authorization.";
+          }
+          toast({
+            title: "Operation Failed",
+            description: errorMessage,
+            variant: "destructive",
+          });
         }
       } else {
          toast({ title: "Success", description: result.message || `${friendlyAction} completed.` });
@@ -261,15 +281,15 @@ export default function ItemsClientPage() {
              variant: "default",
              duration: 7000
            });
-           console.warn("Import errors:", result.errors);
+           console.warn("Import errors for stock items:", result.errors);
          }
       }
 
     } catch (error: any) {
       console.error(`Error during Google Sheets ${friendlyAction} for stock items:`, error);
       toast({ 
-        title: "Error", 
-        description: error.message || `Failed to ${friendlyAction}. Ensure backend and OAuth are correctly set up.`, 
+        title: "Client-side Error", 
+        description: error.message || `Failed to ${friendlyAction}. Check console for details.`, 
         variant: "destructive" 
       });
     } finally {
@@ -411,5 +431,4 @@ export default function ItemsClientPage() {
     </div>
   );
 }
-
     
