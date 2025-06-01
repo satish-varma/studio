@@ -33,68 +33,73 @@ if (!getApps().length) {
 const db = getFirestore();
 
 export default function ItemsClientPage() {
-  const { user, activeSiteId } = useAuth(); // activeStallId from AuthContext is for global context, not local filtering here.
+  const { user, activeSiteId } = useAuth(); 
   
   const [searchTerm, setSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [stockStatusFilter, setStockStatusFilter] = useState("all");
-  const [stallFilterOption, setStallFilterOption] = useState("all"); // "all", "master", or specific stallId
+  const [stallFilterOption, setStallFilterOption] = useState("all"); 
 
   const [items, setItems] = useState<StockItem[]>([]);
-  const [stallsForFilter, setStallsForFilter] = useState<Stall[]>([]);
+  const [stallsForFilterDropdown, setStallsForFilterDropdown] = useState<Stall[]>([]);
   const [sitesMap, setSitesMap] = useState<Record<string, string>>({});
   const [stallsMap, setStallsMap] = useState<Record<string, string>>({});
 
   const [loadingItems, setLoadingItems] = useState(true);
-  const [loadingStalls, setLoadingStalls] = useState(false);
+  const [loadingDropdownStalls, setLoadingDropdownStalls] = useState(false);
+  const [loadingMaps, setLoadingMaps] = useState(true);
   const [errorItems, setErrorItems] = useState<string | null>(null);
 
-  // Fetch sites for mapping IDs to names
+  // Fetch all sites for mapping IDs to names
   useEffect(() => {
     const sitesCollectionRef = collection(db, "sites");
-    const unsubscribe = onSnapshot(sitesCollectionRef, (snapshot) => {
+    const unsubscribeSites = onSnapshot(sitesCollectionRef, (snapshot) => {
       const newSitesMap: Record<string, string> = {};
       snapshot.forEach(doc => {
         newSitesMap[doc.id] = (doc.data() as Site).name;
       });
       setSitesMap(newSitesMap);
+      setLoadingMaps(prev => stallsMap && Object.keys(stallsMap).length > 0 ? false : prev);
     }, (error) => console.error("Error fetching sites map:", error));
-    return () => unsubscribe();
-  }, []);
+    
+    return () => unsubscribeSites();
+  }, [stallsMap]);
   
-  // Fetch stalls for filter dropdown when activeSiteId changes AND for mapping IDs to names
-   useEffect(() => {
-    const stallsCollectionRef = collection(db, "stalls");
-    const unsubscribeStallsMap = onSnapshot(stallsCollectionRef, (snapshot) => {
+  // Fetch all stalls for mapping IDs to names (used by ItemTable)
+  // AND stalls for the active site for the filter dropdown
+  useEffect(() => {
+    const allStallsCollectionRef = collection(db, "stalls");
+    const unsubscribeAllStalls = onSnapshot(allStallsCollectionRef, (snapshot) => {
       const newStallsMap: Record<string, string> = {};
       snapshot.forEach(doc => {
         newStallsMap[doc.id] = (doc.data() as Stall).name;
       });
       setStallsMap(newStallsMap);
-    }, (error) => console.error("Error fetching stalls map:", error));
+      setLoadingMaps(prev => sitesMap && Object.keys(sitesMap).length > 0 ? false : prev);
+    }, (error) => console.error("Error fetching all stalls map:", error));
 
-    let unsubscribeStallsForFilter: () => void = () => {};
+    let unsubscribeDropdownStalls: () => void = () => {};
     if (activeSiteId) {
-      setLoadingStalls(true);
+      setLoadingDropdownStalls(true);
       const q = query(collection(db, "stalls"), where("siteId", "==", activeSiteId), orderBy("name"));
-      unsubscribeStallsForFilter = onSnapshot(q, (snapshot) => {
+      unsubscribeDropdownStalls = onSnapshot(q, (snapshot) => {
         const fetchedStalls = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Stall));
-        setStallsForFilter(fetchedStalls);
-        setLoadingStalls(false);
+        setStallsForFilterDropdown(fetchedStalls);
+        setLoadingDropdownStalls(false);
       }, (error) => {
-        console.error("Error fetching stalls for filter:", error);
-        setStallsForFilter([]);
-        setLoadingStalls(false);
+        console.error("Error fetching stalls for filter dropdown:", error);
+        setStallsForFilterDropdown([]);
+        setLoadingDropdownStalls(false);
       });
     } else {
-      setStallsForFilter([]); // Clear stalls if no site is active
-      setLoadingStalls(false);
+      setStallsForFilterDropdown([]); 
+      setLoadingDropdownStalls(false);
     }
     return () => {
-      unsubscribeStallsMap();
-      unsubscribeStallsForFilter();
+      unsubscribeAllStalls();
+      unsubscribeDropdownStalls();
     };
-  }, [activeSiteId]);
+  }, [activeSiteId, sitesMap]);
 
 
   // Fetch Stock Items based on activeSiteId and stallFilterOption
@@ -124,12 +129,10 @@ export default function ItemsClientPage() {
 
     if (stallFilterOption === "master") {
       qConstraints.push(where("stallId", "==", null));
-    } else if (stallFilterOption !== "all") { // Specific stall ID
+    } else if (stallFilterOption !== "all") { 
       qConstraints.push(where("stallId", "==", stallFilterOption));
     }
-    // If stallFilterOption is "all", no additional stallId constraint is added,
-    // so it fetches all items for the activeSiteId (master + all stalls).
-
+    
     const q = query(itemsCollectionRef, ...qConstraints);
     
     const unsubscribe = onSnapshot(q, 
@@ -152,10 +155,6 @@ export default function ItemsClientPage() {
   }, [user, activeSiteId, stallFilterOption]);
 
   const uniqueCategories = useMemo(() => {
-    // Filter items based on current site and stallFilterOption BEFORE extracting categories
-    // This makes categories relevant to the current view.
-    // However, for simplicity and better UX, often categories are from ALL items.
-    // Let's use all items for category filter for now.
     const allFetchedItemsCategories = new Set(items.map(item => item.category));
     return Array.from(allFetchedItemsCategories).sort();
   }, [items]);
@@ -195,14 +194,14 @@ export default function ItemsClientPage() {
         stallFilterOption={stallFilterOption}
         onStallFilterOptionChange={setStallFilterOption}
         categories={uniqueCategories}
-        availableStalls={stallsForFilter}
+        availableStalls={stallsForFilterDropdown}
         isSiteActive={!!activeSiteId}
       />
       
-      {(loadingItems || (activeSiteId && loadingStalls)) && (
+      {(loadingItems || loadingMaps || (activeSiteId && loadingDropdownStalls)) && (
         <div className="flex justify-center items-center py-10">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p className="ml-2">Loading items...</p>
+          <p className="ml-2">Loading items and context data...</p>
         </div>
       )}
       {errorItems && (
@@ -212,9 +211,11 @@ export default function ItemsClientPage() {
             <AlertDescription>{errorItems}</AlertDescription>
         </Alert>
       )}
-      {!loadingItems && !errorItems && (
+      {!loadingItems && !loadingMaps && !errorItems && (
         <ItemTable items={filteredItems} sitesMap={sitesMap} stallsMap={stallsMap} />
       )}
     </div>
   );
 }
+
+    

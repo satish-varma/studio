@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { StockItem, Stall, Site } from "@/types";
+import type { StockItem } from "@/types"; // Removed Stall, Site as they are not directly used here
 import { MoreHorizontal, Edit, Trash2, PackageOpen, Loader2, Building, Store } from "lucide-react";
 import {
   DropdownMenu,
@@ -45,7 +45,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
-import { useState, useMemo } from "react";
+import { useState } from "react"; // Removed useMemo as it wasn't used
 import { getFirestore, doc, deleteDoc, updateDoc } from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
@@ -170,8 +170,16 @@ export function ItemTable({ items, sitesMap, stallsMap }: ItemTableProps) {
           {items.map((item) => {
             const isLowStock = item.quantity <= item.lowStockThreshold;
             const isOutOfStock = item.quantity === 0;
-            const siteName = item.siteId ? sitesMap[item.siteId] || item.siteId.substring(0,6)+"..." : "N/A";
-            const stallName = item.stallId ? stallsMap[item.stallId] || item.stallId.substring(0,6)+"..." : "Master Stock";
+            
+            const siteNameDisplay = item.siteId ? (sitesMap[item.siteId] || `Site ID: ${item.siteId.substring(0,6)}...`) : "N/A";
+            let stallDisplay;
+            if (item.stallId) {
+                stallDisplay = stallsMap[item.stallId] || `Stall ID: ${item.stallId.substring(0,6)}...`;
+            } else if (item.siteId) { // Master stock, siteId must exist
+                stallDisplay = "Master Stock";
+            } else {
+                stallDisplay = "Unknown Stall"; // Should not happen if siteId is always present
+            }
             
             return (
               <TableRow key={item.id} className={cn(
@@ -182,19 +190,19 @@ export function ItemTable({ items, sitesMap, stallsMap }: ItemTableProps) {
                   <Image
                     src={item.imageUrl || `https://placehold.co/64x64.png?text=${item.name.substring(0,2)}`}
                     alt={item.name}
+                    data-ai-hint={`${item.category} item`}
                     width={40}
                     height={40}
                     className="rounded-md object-cover"
-                    data-ai-hint={`${item.category} item`}
                   />
                 </TableCell>
                 <TableCell className="font-medium text-foreground">{item.name}</TableCell>
                 <TableCell className="text-sm">
                   <div className="flex items-center text-muted-foreground">
-                    <Building size={14} className="mr-1 text-primary/70" /> {siteName}
+                    <Building size={14} className="mr-1 text-primary/70" /> {siteNameDisplay}
                   </div>
                   <div className="flex items-center text-xs text-muted-foreground/80">
-                    <Store size={12} className="mr-1 text-accent/70" /> {stallName}
+                    <Store size={12} className="mr-1 text-accent/70" /> {stallDisplay}
                   </div>
                 </TableCell>
                 <TableCell className="text-muted-foreground">{item.category}</TableCell>
@@ -261,7 +269,7 @@ export function ItemTable({ items, sitesMap, stallsMap }: ItemTableProps) {
                       <DialogHeader>
                         <DialogTitle>Update Stock for {item.name}</DialogTitle>
                         <DialogDescription>
-                          Current quantity: {item.quantity} {item.unit} ({item.stallId ? stallsMap[item.stallId] || 'Stall '+item.stallId.substring(0,4) : 'Master Stock'} at {item.siteId ? sitesMap[item.siteId] || 'Site '+item.siteId.substring(0,4) : 'N/A Site'}).
+                          Current quantity: {item.quantity} {item.unit} ({stallDisplay} at {siteNameDisplay}).
                         </DialogDescription>
                       </DialogHeader>
                       <div className="grid gap-4 py-4">
@@ -299,3 +307,5 @@ export function ItemTable({ items, sitesMap, stallsMap }: ItemTableProps) {
     </div>
   );
 }
+
+    
