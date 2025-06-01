@@ -9,52 +9,37 @@ import type { StockItem, Stall, Site } from "@/types";
 import {
   getFirestore,
   collection,
-  onSnapshot,
   query,
   orderBy,
   where,
   QueryConstraint,
-  QuerySnapshot,
-  DocumentData,
-  getDocs // Import getDocs
+  getDocs 
 } from "firebase/firestore";
-import { getApps, initializeApp } from 'firebase/app';
+import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { Loader2, Info } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { useToast } from "@/hooks/use-toast";
 
-
+let db: ReturnType<typeof getFirestore> | undefined;
 if (!getApps().length) {
   try {
     initializeApp(firebaseConfig);
+    db = getFirestore();
   } catch (error) {
     console.error("Firebase initialization error in ItemsClientPage:", error);
   }
+} else {
+  db = getFirestore(getApp());
 }
-const db = getFirestore();
 
 export default function ItemsClientPage() {
-  const { user, activeSiteId, auth } = useAuth(); 
-  const { toast } = useToast();
+  const { user, activeSiteId } = useAuth(); 
 
   const [searchTerm, setSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [stockStatusFilter, setStockStatusFilter] = useState("all");
-  const [stallFilterOption, setStallFilterOption] = useState("all"); // "all", "master", or stallId
+  const [stallFilterOption, setStallFilterOption] = useState("all"); 
 
   const [items, setItems] = useState<StockItem[]>([]);
   const [stallsForFilterDropdown, setStallsForFilterDropdown] = useState<Stall[]>([]);
@@ -64,72 +49,69 @@ export default function ItemsClientPage() {
   const [loadingItems, setLoadingItems] = useState(true);
   const [loadingDropdownStalls, setLoadingDropdownStalls] = useState(false);
   const [loadingMaps, setLoadingMaps] = useState(true);
-  const [errorItems, setErrorItems] = useState<string | null>(null);
+  const [errorData, setErrorData] = useState<string | null>(null);
 
 
   useEffect(() => {
-    const sitesCollectionRef = collection(db, "sites");
-    const unsubscribeSites = onSnapshot(sitesCollectionRef, (snapshot) => {
-      const newSitesMap: Record<string, string> = {};
-      snapshot.forEach(doc => {
-        newSitesMap[doc.id] = (doc.data() as Site).name;
-      });
-      setSitesMap(newSitesMap);
-      checkMapsLoaded(newSitesMap, stallsMap);
-    }, (error) => {
-      console.error("Error fetching sites map:", error);
-      setErrorItems("Failed to load site context data.");
-      setLoadingMaps(false);
-    });
+    const fetchMaps = async () => {
+      if (!db) {
+        setErrorData("Firestore DB instance is not available for fetching maps.");
+        setLoadingMaps(false);
+        return;
+      }
+      setLoadingMaps(true);
+      setErrorData(null);
+      try {
+        const sitesCollectionRef = collection(db, "sites");
+        const sitesSnapshot = await getDocs(sitesCollectionRef);
+        const newSitesMap: Record<string, string> = {};
+        sitesSnapshot.forEach(doc => {
+          newSitesMap[doc.id] = (doc.data() as Site).name;
+        });
+        setSitesMap(newSitesMap);
 
-    const allStallsCollectionRef = collection(db, "stalls");
-    const unsubscribeAllStalls = onSnapshot(allStallsCollectionRef, (snapshot) => {
-      const newStallsMap: Record<string, string> = {};
-      snapshot.forEach(doc => {
-        newStallsMap[doc.id] = (doc.data() as Stall).name;
-      });
-      setStallsMap(newStallsMap);
-      checkMapsLoaded(sitesMap, newStallsMap);
-    }, (error) => {
-      console.error("Error fetching all stalls map:", error);
-      setErrorItems("Failed to load stall context data.");
-      setLoadingMaps(false);
-    });
-    
-    const checkMapsLoaded = (currentSitesMap: Record<string, string>, currentStallsMap: Record<string, string>) => {
-        if (Object.keys(currentSitesMap).length > 0 && Object.keys(currentStallsMap).length > 0) {
-            setLoadingMaps(false);
-        } else if (Object.keys(currentSitesMap).length > 0 && !activeSiteId) {
-            setLoadingMaps(false);
-        }
+        const allStallsCollectionRef = collection(db, "stalls");
+        const allStallsSnapshot = await getDocs(allStallsCollectionRef);
+        const newStallsMap: Record<string, string> = {};
+        allStallsSnapshot.forEach(doc => {
+          newStallsMap[doc.id] = (doc.data() as Stall).name;
+        });
+        setStallsMap(newStallsMap);
+        console.log("ItemsClientPage: Successfully fetched sitesMap and stallsMap using getDocs.");
+      } catch (error) {
+        console.error("ItemsClientPage: Error fetching sitesMap or stallsMap:", error);
+        setErrorData("Failed to load site/stall context data.");
+      } finally {
+        setLoadingMaps(false);
+      }
     };
+    fetchMaps();
+  }, [db]);
 
 
-    // Fetch stalls for filter dropdown
+  useEffect(() => {
     console.log("ItemsClientPage: useEffect for stallsForFilterDropdown triggered.");
     console.log("ItemsClientPage: Current activeSiteId:", activeSiteId);
     console.log("ItemsClientPage: db instance:", db ? "defined" : "undefined");
 
     if (!db) {
-      setErrorItems(prev => prev || "Firestore DB instance is not available for fetching stalls.");
+      setErrorData(prev => prev || "Firestore DB instance is not available for fetching stalls.");
       setLoadingDropdownStalls(false);
       setStallsForFilterDropdown([]);
-      return; // Exit if db is not defined
+      return; 
     }
 
     if (!activeSiteId) {
       console.log("ItemsClientPage: activeSiteId is null/undefined. Clearing stall dropdown and not fetching.");
       setStallsForFilterDropdown([]);
-      setLoadingDropdownStalls(false); // Ensure loading is set to false
-      return; // Do not proceed if activeSiteId is not set
+      setLoadingDropdownStalls(false); 
+      return; 
     }
     
-    // --- TEMPORARY TEST: Use getDocs instead of onSnapshot ---
     const fetchStallsWithGetDocs = async () => {
         setLoadingDropdownStalls(true);
         // Reset only the part of the error relevant to this fetch, if any.
-        // This allows other errors (like main items fetch error) to persist if they occurred.
-        setErrorItems(prev => prev?.includes("stalls for filtering") ? null : prev); 
+        setErrorData(prev => prev?.includes("stalls for filtering") ? null : prev); 
         try {
             console.log(`ItemsClientPage: Attempting to fetch stalls with getDocs for siteId: ${activeSiteId}`);
             const qStalls = query(collection(db, "stalls"), where("siteId", "==", activeSiteId));
@@ -143,7 +125,7 @@ export default function ItemsClientPage() {
             const errorMessage = error.message && error.message.includes("requires an index")
                 ? `Query for stalls requires a Firestore index. Please create it. Link: ${error.message.substring(error.message.indexOf('https://'))}`
                 : "Failed to load stalls for filtering. Error: " + error.message;
-            setErrorItems(prevError => prevError || errorMessage); // Append or set if no prev error
+            setErrorData(prevError => prevError || errorMessage); 
             setStallsForFilterDropdown([]);
         } finally {
             setLoadingDropdownStalls(false);
@@ -151,92 +133,71 @@ export default function ItemsClientPage() {
     };
 
     fetchStallsWithGetDocs();
-    // --- END TEMPORARY TEST ---
-
-    // Original onSnapshot logic (commented out for the test)
-    /*
-    setLoadingDropdownStalls(true);
-    setErrorItems(null); 
-    const qStallsForDropdown = query(collection(db, "stalls"), where("siteId", "==", activeSiteId));
-    const unsubscribeDropdownStalls = onSnapshot(qStallsForDropdown, (snapshot) => {
-      const fetchedStalls = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Stall));
-      fetchedStalls.sort((a, b) => a.name.localeCompare(b.name)); // Client-side sort
-      setStallsForFilterDropdown(fetchedStalls);
-      setLoadingDropdownStalls(false);
-    }, (error) => {
-      console.error("ItemsClientPage: Error fetching stalls for filter dropdown:", error);
-      const specificErrorMessage = error.message && error.message.includes("requires an index")
-          ? `Query for stalls requires a Firestore index. Please create it. Link: ${error.message.substring(error.message.indexOf('https://'))}`
-          : "Failed to load stalls for filtering. Error: " + error.message;
-      setErrorItems(prevError => prevError || specificErrorMessage);
-      setStallsForFilterDropdown([]);
-      setLoadingDropdownStalls(false);
-    });
-    */
-
-    return () => {
-      unsubscribeSites();
-      unsubscribeAllStalls();
-      // if (unsubscribeDropdownStalls) unsubscribeDropdownStalls(); // Only if using onSnapshot
-    };
-  }, [activeSiteId]);
+  }, [activeSiteId, db]);
 
 
-  // Fetch Stock Items based on activeSiteId and stallFilterOption
   useEffect(() => {
-    if (!user) {
-      setLoadingItems(false);
-      setErrorItems("Please log in to view items.");
-      setItems([]);
-      return;
-    }
+    const fetchItems = async () => {
+      if (!user) {
+        setLoadingItems(false);
+        setErrorData("Please log in to view items.");
+        setItems([]);
+        return;
+      }
 
-    if (!activeSiteId) {
-      setItems([]);
-      setLoadingItems(false);
-      setErrorItems(user.role === 'admin' ? "Admin: Please select a site to view its stock." : "Please select an active site to view stock items.");
-      return;
-    }
+      if (!activeSiteId) {
+        setItems([]);
+        setLoadingItems(false);
+        setErrorData(user.role === 'admin' ? "Admin: Please select a site to view its stock." : "Please select an active site to view stock items.");
+        return;
+      }
+      if (!db) {
+        setErrorData("Firestore DB instance is not available for fetching items.");
+        setLoadingItems(false);
+        return;
+      }
 
-    setLoadingItems(true);
+      setLoadingItems(true);
+      setErrorData(null); 
     
-    const itemsCollectionRef = collection(db, "stockItems");
-    let qConstraints: QueryConstraint[] = [
-      where("siteId", "==", activeSiteId)
-    ];
+      const itemsCollectionRef = collection(db, "stockItems");
+      let qConstraints: QueryConstraint[] = [
+        where("siteId", "==", activeSiteId)
+      ];
 
-    if (stallFilterOption === "master") {
-      qConstraints.push(where("stallId", "==", null));
-    } else if (stallFilterOption !== "all") { 
-      qConstraints.push(where("stallId", "==", stallFilterOption));
-    }
+      if (stallFilterOption === "master") {
+        qConstraints.push(where("stallId", "==", null));
+      } else if (stallFilterOption !== "all" && stallFilterOption !== "master") { 
+        qConstraints.push(where("stallId", "==", stallFilterOption));
+      }
     
-    const q = query(itemsCollectionRef, ...qConstraints);
+      const finalQuery = query(itemsCollectionRef, ...qConstraints);
 
-    const unsubscribe = onSnapshot(q,
-      (snapshot: QuerySnapshot<DocumentData>) => {
-        let fetchedItems: StockItem[] = snapshot.docs.map(doc => ({
+      try {
+        const querySnapshot = await getDocs(finalQuery);
+        let fetchedItems: StockItem[] = querySnapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
         } as StockItem));
-        fetchedItems.sort((a, b) => a.name.localeCompare(b.name)); // Client-side sort
+        
+        fetchedItems.sort((a, b) => a.name.localeCompare(b.name)); 
         setItems(fetchedItems);
-        setLoadingItems(false);
-        // Clear general item error if this fetch succeeds, but preserve specific stall dropdown error if it exists
-        setErrorItems(prev => prev?.includes("stalls for filtering") ? prev : null);
-      },
-      (error) => {
-        console.error("Error fetching stock items:", error);
+        console.log(`ItemsClientPage: Successfully fetched ${fetchedItems.length} stock items with getDocs for siteId ${activeSiteId} and stallFilter ${stallFilterOption}.`);
+
+      } catch (error: any) {
+        console.error("ItemsClientPage: Error fetching stock items with getDocs:", error);
         const itemErrorMessage = error.message && error.message.includes("requires an index")
-            ? `Query for items requires a Firestore index. Please create it. Link: ${error.message.substring(error.message.indexOf('https://'))}`
+            ? `Query for items requires a Firestore index. Please create it using the link in the console: ${error.message.substring(error.message.indexOf('https://'))}`
             : "Failed to load stock items. Error: " + error.message;
-        setErrorItems(prevError => prevError || itemErrorMessage);
+        setErrorData(itemErrorMessage);
         setItems([]);
+      } finally {
         setLoadingItems(false);
       }
-    );
-    return () => unsubscribe();
-  }, [user, activeSiteId, stallFilterOption]);
+    };
+
+    fetchItems();
+  }, [user, activeSiteId, stallFilterOption, db]);
 
   const uniqueCategories = useMemo(() => {
     const allFetchedItemsCategories = new Set(items.map(item => item.category));
@@ -288,14 +249,14 @@ export default function ItemsClientPage() {
           <p className="ml-2">Loading items and context data...</p>
         </div>
       )}
-      {errorItems && !loadingItems && ( 
+      {errorData && !(loadingItems || loadingMaps || loadingDropdownStalls) && ( 
         <Alert variant="default" className="border-primary/30">
             <Info className="h-4 w-4" />
             <AlertTitle>Information / Error</AlertTitle>
-            <AlertDescription>{errorItems}</AlertDescription>
+            <AlertDescription>{errorData}</AlertDescription>
         </Alert>
       )}
-      {!loadingItems && !loadingMaps && !errorItems && (
+      {!loadingItems && !loadingMaps && !errorData && (
         <ItemTable 
             items={filteredItems} 
             sitesMap={sitesMap} 
@@ -304,110 +265,10 @@ export default function ItemsClientPage() {
         />
       )}
       
-      {/* 
+      {/* CSV Export and Google Sheets Integration Cards are hidden for now
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card className="shadow-lg">
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <Download className="mr-2 h-5 w-5 text-primary" />
-              Export Data (CSV)
-            </CardTitle>
-            <CardDescription>Download stock items or sales history.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={() => callGoogleSheetsApiForItemActions('exportStockItems', 'stock')}
-              disabled={isProcessingStockCsvExport}
-            >
-              {isProcessingStockCsvExport ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Download className="mr-2 h-4 w-4" />
-              )}
-              Export Stock Items (CSV)
-            </Button>
-          </CardContent>
-        </Card>
-        <Card className="shadow-lg">
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <SheetIcon className="mr-2 h-5 w-5 text-green-600" />
-              Google Sheets Integration
-            </CardTitle>
-            <CardDescription>Import or export stock items.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={() => openSheetIdPromptForItemActions('importStockItems', 'stock')}
-              disabled={isProcessingStockSheets}
-            >
-              {isProcessingStockSheets && currentSheetAction === 'importStockItems' ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Download className="mr-2 h-4 w-4 text-green-700" />
-              )}
-              Import Stock from Sheets
-            </Button>
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={() => openSheetIdPromptForItemActions('exportStockItems', 'stock')}
-              disabled={isProcessingStockSheets}
-            >
-              {isProcessingStockSheets && currentSheetAction === 'exportStockItems' ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <SheetIcon className="mr-2 h-4 w-4 text-green-700" />
-              )}
-              Export Stock to Sheets
-            </Button>
-          </CardContent>
-        </Card>
       </div>
-      */}
-
-      {/* 
-      <AlertDialog open={showSheetIdDialog} onOpenChange={setShowSheetIdDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {currentSheetAction?.toLowerCase().includes('import') ? 'Enter Google Sheet ID for Import' : 'Enter Google Sheet ID for Export (Optional)'}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {currentSheetAction?.toLowerCase().includes('import')
-                ? `Please provide the ID of the Google Sheet you want to import ${currentDataType} data from.`
-                : `If you provide a Sheet ID, ${currentDataType} data will be exported to that sheet. Otherwise, a new sheet will be created.`}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <div className="py-4">
-            <Label htmlFor="itemClientSheetIdInput" className="sr-only">
-              Google Sheet ID
-            </Label>
-            <Input
-              id="itemClientSheetIdInput"
-              value={sheetIdInputValue}
-              onChange={(e) => setSheetIdInputValue(e.target.value)}
-              placeholder="Google Sheet ID (e.g., 123abCDefgHIJkLmNopQ...)"
-              className="bg-input"
-            />
-          </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => {
-              setShowSheetIdDialog(false);
-              setSheetIdInputValue("");
-            }}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleSheetIdDialogSubmit}>
-              Proceed
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
       */}
     </div>
   );
 }
-
