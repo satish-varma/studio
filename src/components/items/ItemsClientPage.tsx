@@ -32,7 +32,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog"; // AlertDialogTrigger removed as it's not directly used here
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -239,17 +239,17 @@ export default function ItemsClientPage() {
       let result;
       try {
         result = await response.json();
-      } catch (e) {
-        console.error(`Error parsing JSON response from /api/google-sheets-proxy. Status: ${response.status}`, await response.text());
+      } catch (parseError: any) {
+        console.error(`Error parsing JSON response from /api/google-sheets-proxy. Status: ${response.status}`, await response.text().catch(() => "Could not read response text."));
         toast({
-          title: "API Error",
-          description: `Failed to process request. Server responded with status ${response.status}. Check console for details.`,
+          title: "API Communication Error",
+          description: `Failed to process request. Server responded with status ${response.status} and non-JSON content. Check console for details.`,
           variant: "destructive",
         });
         setLoadingState(false);
         return;
       }
-
+      
       if (!response.ok) {
         console.error(`API Error (${response.status}) for ${friendlyAction}:`, result);
         if (result.needsAuth && result.authUrl) {
@@ -261,8 +261,8 @@ export default function ItemsClientPage() {
           window.location.href = result.authUrl;
         } else {
           let errorMessage = result.error || `Failed to ${friendlyAction}. Status: ${response.status}.`;
-          if (response.status === 401 && result.error?.toLowerCase().includes("invalid firebase id token")) {
-            errorMessage = "Authentication with the backend failed (Invalid ID token). Please ensure your Firebase setup is correct or try re-logging in.";
+           if (response.status === 401 && result.error?.toLowerCase().includes("invalid firebase id token")) {
+            errorMessage = "Authentication with the backend failed (Invalid Firebase ID token). Please re-authenticate or check your Firebase setup.";
           } else if (response.status === 403 && result.error?.toLowerCase().includes("google sheets authorization required")) {
             errorMessage = "Google Sheets authorization is required. Please try the action again to initiate authorization.";
           }
@@ -271,6 +271,7 @@ export default function ItemsClientPage() {
             description: errorMessage,
             variant: "destructive",
           });
+          throw new Error(result.error || `Failed to ${friendlyAction}.`);
         }
       } else {
          toast({ title: "Success", description: result.message || `${friendlyAction} completed.` });
@@ -287,11 +288,13 @@ export default function ItemsClientPage() {
 
     } catch (error: any) {
       console.error(`Error during Google Sheets ${friendlyAction} for stock items:`, error);
-      toast({ 
-        title: "Client-side Error", 
-        description: error.message || `Failed to ${friendlyAction}. Check console for details.`, 
-        variant: "destructive" 
-      });
+       if (!toast.toasts.find(t => t.title === "Operation Failed")) { // Avoid double toast if already handled
+        toast({ 
+          title: "Client-side Error", 
+          description: error.message || `Failed to ${friendlyAction}. Check console for details.`, 
+          variant: "destructive" 
+        });
+      }
     } finally {
       setLoadingState(false);
     }
@@ -340,6 +343,7 @@ export default function ItemsClientPage() {
           </CardContent>
         </Card>
 
+        {/* 
         <Card className="shadow-md">
           <CardHeader>
               <CardTitle className="flex items-center text-lg">
@@ -376,6 +380,7 @@ export default function ItemsClientPage() {
               </p>
           </CardFooter>
         </Card>
+        */}
       </div>
       
       {loadingItems && (
