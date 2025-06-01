@@ -23,6 +23,20 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { getAuth } from 'firebase/auth';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+
 
 if (!getApps().length) {
   try {
@@ -48,6 +62,11 @@ export default function ItemsClientPage() {
   const [isExportingCsv, setIsExportingCsv] = useState(false);
   const [isProcessingSheetsImport, setIsProcessingSheetsImport] = useState(false);
   const [isProcessingSheetsExport, setIsProcessingSheetsExport] = useState(false);
+
+  const [showSheetIdDialog, setShowSheetIdDialog] = useState(false);
+  const [sheetIdInputValue, setSheetIdInputValue] = useState("");
+  const [currentSheetAction, setCurrentSheetAction] = useState<"importStockItems" | "exportStockItems" | null>(null);
+
 
   useEffect(() => {
     const itemsCollectionRef = collection(db, "stockItems");
@@ -112,15 +131,7 @@ export default function ItemsClientPage() {
     setIsExportingCsv(true);
     try {
       const stockItemsCollectionRef = collection(db, "stockItems");
-      // No need to re-query, use the 'items' state which should be up-to-date
-      // If you need a full fresh export, then re-query as below:
-      // const q = query(stockItemsCollectionRef, orderBy("name"));
-      // const querySnapshot = await getDocs(q);
-      // const allStockItems: StockItem[] = [];
-      // querySnapshot.forEach((doc) => {
-      //   allStockItems.push({ id: doc.id, ...doc.data() } as StockItem);
-      // });
-      const allStockItems = items; // Use current items state
+      const allStockItems = items; 
 
       if (allStockItems.length === 0) {
         toast({ title: "No Stock Data", description: "There are no stock items to export.", variant: "default" });
@@ -175,10 +186,31 @@ export default function ItemsClientPage() {
     }
   };
 
+  const handleSheetIdDialogSubmit = () => {
+    if (currentSheetAction) {
+      // For import, sheetIdInputValue is required. For export, it's optional.
+      if (currentSheetAction.toLowerCase().includes('import') && !sheetIdInputValue.trim()) {
+        toast({ title: "Sheet ID Required", description: "Please provide a Google Sheet ID to import from.", variant: "default" });
+        return;
+      }
+      callGoogleSheetsApiForItemActions(currentSheetAction, sheetIdInputValue.trim() || undefined);
+    }
+    setShowSheetIdDialog(false);
+    setSheetIdInputValue("");
+    setCurrentSheetAction(null);
+  };
+  
+  const openSheetIdPrompt = (action: "importStockItems" | "exportStockItems") => {
+    setCurrentSheetAction(action);
+    setShowSheetIdDialog(true);
+  };
+
+
   const callGoogleSheetsApiForItemActions = async (
     action: "importStockItems" | "exportStockItems", 
-    setLoadingState: React.Dispatch<React.SetStateAction<boolean>>
+    sheetId?: string // sheetId is now passed as an argument
   ) => {
+    const setLoadingState = action === "importStockItems" ? setIsProcessingSheetsImport : setIsProcessingSheetsExport;
     setLoadingState(true);
     const friendlyAction = action.replace(/([A-Z])/g, ' $1').toLowerCase();
     toast({
@@ -193,16 +225,6 @@ export default function ItemsClientPage() {
         setLoadingState(false);
         return;
       }
-
-      let sheetId: string | null = null;
-      if (action.toLowerCase().includes('import') || action.toLowerCase().includes('export')) {
-         sheetId = prompt(`Enter Google Sheet ID for ${friendlyAction} (optional for export, a new sheet will be created if blank):`);
-          if (action.toLowerCase().includes('import') && !sheetId) {
-            toast({ title: "Sheet ID Required", description: "Please provide a Google Sheet ID to import from.", variant: "default" });
-            setLoadingState(false);
-            return;
-         }
-      }
       
       const response = await fetch('/api/google-sheets-proxy', {
         method: 'POST',
@@ -213,7 +235,7 @@ export default function ItemsClientPage() {
         body: JSON.stringify({
           action: action, 
           dataType: 'stock',
-          sheetId: sheetId || undefined,
+          sheetId: sheetId, 
         }),
       });
 
@@ -232,6 +254,15 @@ export default function ItemsClientPage() {
         }
       } else {
          toast({ title: "Success", description: result.message || `${friendlyAction} completed.` });
+         if (result.errors && result.errors.length > 0) {
+           toast({
+             title: "Import Issues",
+             description: `${result.errors.length} rows had issues. Check console for details.`,
+             variant: "default",
+             duration: 7000
+           });
+           console.warn("Import errors:", result.errors);
+         }
       }
 
     } catch (error: any) {
@@ -303,7 +334,7 @@ export default function ItemsClientPage() {
               <Button 
                   variant="outline" 
                   className="w-full" 
-                  onClick={() => callGoogleSheetsApiForItemActions("importStockItems", setIsProcessingSheetsImport)}
+                  onClick={() => openSheetIdPrompt("importStockItems")}
                   disabled={isProcessingSheetsImport || isProcessingSheetsExport || loadingItems}
               >
                   {isProcessingSheetsImport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4 text-green-700" />}
@@ -312,7 +343,7 @@ export default function ItemsClientPage() {
               <Button 
                   variant="outline" 
                   className="w-full" 
-                  onClick={() => callGoogleSheetsApiForItemActions("exportStockItems", setIsProcessingSheetsExport)}
+                  onClick={() => openSheetIdPrompt("exportStockItems")}
                   disabled={isProcessingSheetsImport || isProcessingSheetsExport || loadingItems || items.length === 0}
               >
                   {isProcessingSheetsExport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SheetIcon className="mr-2 h-4 w-4 text-green-700" />}
@@ -339,6 +370,46 @@ export default function ItemsClientPage() {
         </div>
       )}
       {!loadingItems && !errorItems && <ItemTable items={filteredItems} />}
+
+      <AlertDialog open={showSheetIdDialog} onOpenChange={setShowSheetIdDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {currentSheetAction?.toLowerCase().includes('import') ? 'Enter Google Sheet ID for Import' : 'Enter Google Sheet ID for Export (Optional)'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {currentSheetAction?.toLowerCase().includes('import') 
+                ? 'Please provide the ID of the Google Sheet you want to import stock items from.' 
+                : 'If you provide a Sheet ID, data will be exported to that sheet. Otherwise, a new sheet will be created.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="py-4">
+            <Label htmlFor="sheetIdInput" className="sr-only">
+              Google Sheet ID
+            </Label>
+            <Input
+              id="sheetIdInput"
+              value={sheetIdInputValue}
+              onChange={(e) => setSheetIdInputValue(e.target.value)}
+              placeholder="Google Sheet ID (e.g., 123abCDefgHIJkLmNopQRstUVWxYZ1234567890)"
+              className="bg-input"
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => {
+              setShowSheetIdDialog(false);
+              setSheetIdInputValue("");
+              setCurrentSheetAction(null);
+            }}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleSheetIdDialogSubmit}>
+              Proceed
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
     </div>
   );
 }
+
+    

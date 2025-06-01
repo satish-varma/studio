@@ -14,6 +14,17 @@ import { firebaseConfig } from '@/lib/firebaseConfig';
 import type { StockItem, SaleTransaction } from "@/types";
 import { useToast } from "@/hooks/use-toast";
 import { getAuth } from 'firebase/auth';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
 
 if (!getApps().length) {
   try {
@@ -25,6 +36,9 @@ if (!getApps().length) {
 const db = getFirestore();
 const auth = getAuth(getApp());
 
+type GoogleSheetAction = "importStockItems" | "exportStockItems" | "importSalesHistory" | "exportSalesHistory";
+type DataTypeForSheets = 'stock' | 'sales';
+
 export default function SettingsPage() {
   const { toast } = useToast();
   const [isExportingStockCsv, setIsExportingStockCsv] = useState(false);
@@ -34,6 +48,11 @@ export default function SettingsPage() {
   const [isProcessingStockSheetsExport, setIsProcessingStockSheetsExport] = useState(false);
   const [isProcessingSalesSheetsImport, setIsProcessingSalesSheetsImport] = useState(false);
   const [isProcessingSalesSheetsExport, setIsProcessingSalesSheetsExport] = useState(false);
+
+  const [showSheetIdDialog, setShowSheetIdDialog] = useState(false);
+  const [sheetIdInputValue, setSheetIdInputValue] = useState("");
+  const [currentSheetAction, setCurrentSheetAction] = useState<GoogleSheetAction | null>(null);
+  const [currentDataType, setCurrentDataType] = useState<DataTypeForSheets | null>(null);
 
 
   const escapeCsvCell = (cellData: any): string => {
@@ -194,11 +213,43 @@ export default function SettingsPage() {
     }
   };
 
+  const getLoadingStateSetter = (action: GoogleSheetAction): React.Dispatch<React.SetStateAction<boolean>> => {
+    switch (action) {
+      case "importStockItems": return setIsProcessingStockSheetsImport;
+      case "exportStockItems": return setIsProcessingStockSheetsExport;
+      case "importSalesHistory": return setIsProcessingSalesSheetsImport;
+      case "exportSalesHistory": return setIsProcessingSalesSheetsExport;
+      default: return () => {}; // Should not happen
+    }
+  };
+
+  const handleSheetIdDialogSubmit = () => {
+    if (currentSheetAction && currentDataType) {
+      if (currentSheetAction.toLowerCase().includes('import') && !sheetIdInputValue.trim()) {
+        toast({ title: "Sheet ID Required", description: "Please provide a Google Sheet ID to import from.", variant: "default" });
+        return;
+      }
+      callGoogleSheetsApi(currentSheetAction, currentDataType, sheetIdInputValue.trim() || undefined);
+    }
+    setShowSheetIdDialog(false);
+    setSheetIdInputValue("");
+    setCurrentSheetAction(null);
+    setCurrentDataType(null);
+  };
+
+  const openSheetIdPrompt = (action: GoogleSheetAction, dataType: DataTypeForSheets) => {
+    setCurrentSheetAction(action);
+    setCurrentDataType(dataType);
+    setShowSheetIdDialog(true);
+  };
+
+
   const callGoogleSheetsApi = async (
-    action: string, // e.g., "importStockItems", "exportStockItems", "importSalesHistory", "exportSalesHistory"
-    setLoadingState: React.Dispatch<React.SetStateAction<boolean>>,
-    dataType: 'stock' | 'sales'
+    action: GoogleSheetAction,
+    dataType: DataTypeForSheets,
+    sheetId?: string
   ) => {
+    const setLoadingState = getLoadingStateSetter(action);
     setLoadingState(true);
     const friendlyAction = action.replace(/([A-Z])/g, ' $1').toLowerCase();
     toast({
@@ -214,17 +265,6 @@ export default function SettingsPage() {
         return;
       }
       
-      let sheetId: string | null = null;
-      if (action.toLowerCase().includes('import') || action.toLowerCase().includes('export')) { // For export, sheetId might be optional to create a new one
-         sheetId = prompt(`Enter Google Sheet ID for ${friendlyAction} (optional for export, a new sheet will be created if blank):`);
-         if (action.toLowerCase().includes('import') && !sheetId) {
-            toast({ title: "Sheet ID Required", description: "Please provide a Google Sheet ID to import from.", variant: "default" });
-            setLoadingState(false);
-            return;
-         }
-      }
-      
-
       const response = await fetch('/api/google-sheets-proxy', {
         method: 'POST',
         headers: {
@@ -234,7 +274,7 @@ export default function SettingsPage() {
         body: JSON.stringify({ 
           action: action, 
           dataType: dataType,
-          sheetId: sheetId || undefined, 
+          sheetId: sheetId, 
         }),
       });
 
@@ -247,13 +287,21 @@ export default function SettingsPage() {
             description: "Please authorize StallSync to access your Google Sheets. Redirecting...",
             duration: 5000 
           });
-          // In a real app, you might want to store the intended action and redirect back after auth
           window.location.href = result.authUrl; 
         } else {
           throw new Error(result.error || `Failed to ${friendlyAction}.`);
         }
       } else {
         toast({ title: "Success", description: result.message || `${friendlyAction} completed.` });
+         if (result.errors && result.errors.length > 0) {
+           toast({
+             title: "Import Issues",
+             description: `${result.errors.length} rows had issues. Check console for details.`,
+             variant: "default",
+             duration: 7000
+           });
+           console.warn("Import errors:", result.errors);
+         }
       }
 
     } catch (error: any) {
@@ -379,7 +427,7 @@ export default function SettingsPage() {
                 <Button 
                     variant="outline" 
                     className="w-full" 
-                    onClick={() => callGoogleSheetsApi("importStockItems", setIsProcessingStockSheetsImport, 'stock')}
+                    onClick={() => openSheetIdPrompt("importStockItems", 'stock')}
                     disabled={isProcessingStockSheetsImport || isProcessingStockSheetsExport}
                 >
                     {isProcessingStockSheetsImport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4 text-green-700" />}
@@ -388,7 +436,7 @@ export default function SettingsPage() {
                 <Button 
                     variant="outline" 
                     className="w-full" 
-                    onClick={() => callGoogleSheetsApi("exportStockItems", setIsProcessingStockSheetsExport, 'stock')}
+                    onClick={() => openSheetIdPrompt("exportStockItems", 'stock')}
                     disabled={isProcessingStockSheetsImport || isProcessingStockSheetsExport}
                 >
                     {isProcessingStockSheetsExport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SheetIcon className="mr-2 h-4 w-4 text-green-700" />}
@@ -400,7 +448,7 @@ export default function SettingsPage() {
                 <Button 
                     variant="outline" 
                     className="w-full" 
-                    onClick={() => callGoogleSheetsApi("importSalesHistory", setIsProcessingSalesSheetsImport, 'sales')}
+                    onClick={() => openSheetIdPrompt("importSalesHistory", 'sales')}
                     disabled={isProcessingSalesSheetsImport || isProcessingSalesSheetsExport}
                 >
                      {isProcessingSalesSheetsImport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4 text-green-700" />}
@@ -409,7 +457,7 @@ export default function SettingsPage() {
                 <Button 
                     variant="outline" 
                     className="w-full" 
-                    onClick={() => callGoogleSheetsApi("exportSalesHistory", setIsProcessingSalesSheetsExport, 'sales')}
+                    onClick={() => openSheetIdPrompt("exportSalesHistory", 'sales')}
                     disabled={isProcessingSalesSheetsImport || isProcessingSalesSheetsExport}
                 >
                     {isProcessingSalesSheetsExport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SheetIcon className="mr-2 h-4 w-4 text-green-700" />}
@@ -425,6 +473,46 @@ export default function SettingsPage() {
         </CardFooter>
       </Card>
 
+      <AlertDialog open={showSheetIdDialog} onOpenChange={setShowSheetIdDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+                {currentSheetAction?.toLowerCase().includes('import') ? 'Enter Google Sheet ID for Import' : 'Enter Google Sheet ID for Export (Optional)'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {currentSheetAction?.toLowerCase().includes('import') 
+                ? `Please provide the ID of the Google Sheet you want to import ${currentDataType} data from.`
+                : `If you provide a Sheet ID, ${currentDataType} data will be exported to that sheet. Otherwise, a new sheet will be created.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="py-4">
+            <Label htmlFor="settingsSheetIdInput" className="sr-only">
+              Google Sheet ID
+            </Label>
+            <Input
+              id="settingsSheetIdInput"
+              value={sheetIdInputValue}
+              onChange={(e) => setSheetIdInputValue(e.target.value)}
+              placeholder="Google Sheet ID (e.g., 123abCDefgHIJkLmNopQ...)"
+              className="bg-input"
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => {
+              setShowSheetIdDialog(false);
+              setSheetIdInputValue("");
+              setCurrentSheetAction(null);
+              setCurrentDataType(null);
+            }}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleSheetIdDialogSubmit}>
+              Proceed
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
     </div>
   );
 }
+
+    
