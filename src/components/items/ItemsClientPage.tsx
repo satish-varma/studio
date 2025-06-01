@@ -13,7 +13,7 @@ import {
   orderBy,
   where,
   QueryConstraint,
-  getDocs 
+  getDocs
 } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
@@ -34,170 +34,119 @@ if (!getApps().length) {
 }
 
 export default function ItemsClientPage() {
-  const { user, activeSiteId } = useAuth(); 
+  const { user, activeSiteId } = useAuth();
 
   const [searchTerm, setSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [stockStatusFilter, setStockStatusFilter] = useState("all");
-  const [stallFilterOption, setStallFilterOption] = useState("all"); 
+  const [stallFilterOption, setStallFilterOption] = useState("all");
 
   const [items, setItems] = useState<StockItem[]>([]);
   const [stallsForFilterDropdown, setStallsForFilterDropdown] = useState<Stall[]>([]);
   const [sitesMap, setSitesMap] = useState<Record<string, string>>({});
   const [stallsMap, setStallsMap] = useState<Record<string, string>>({});
 
-  const [loadingItems, setLoadingItems] = useState(true);
-  const [loadingDropdownStalls, setLoadingDropdownStalls] = useState(false);
-  const [loadingMaps, setLoadingMaps] = useState(true);
+  const [loadingData, setLoadingData] = useState(true);
   const [errorData, setErrorData] = useState<string | null>(null);
 
-
-  useEffect(() => {
-    const fetchMaps = async () => {
-      if (!db) {
-        setErrorData("Firestore DB instance is not available for fetching maps.");
-        setLoadingMaps(false);
-        return;
-      }
-      setLoadingMaps(true);
-      setErrorData(null);
-      try {
-        const sitesCollectionRef = collection(db, "sites");
-        const sitesSnapshot = await getDocs(sitesCollectionRef);
-        const newSitesMap: Record<string, string> = {};
-        sitesSnapshot.forEach(doc => {
-          newSitesMap[doc.id] = (doc.data() as Site).name;
-        });
-        setSitesMap(newSitesMap);
-
-        const allStallsCollectionRef = collection(db, "stalls");
-        const allStallsSnapshot = await getDocs(allStallsCollectionRef);
-        const newStallsMap: Record<string, string> = {};
-        allStallsSnapshot.forEach(doc => {
-          newStallsMap[doc.id] = (doc.data() as Stall).name;
-        });
-        setStallsMap(newStallsMap);
-        console.log("ItemsClientPage: Successfully fetched sitesMap and stallsMap using getDocs.");
-      } catch (error) {
-        console.error("ItemsClientPage: Error fetching sitesMap or stallsMap:", error);
-        setErrorData("Failed to load site/stall context data.");
-      } finally {
-        setLoadingMaps(false);
-      }
-    };
-    fetchMaps();
-  }, [db]);
-
-
-  useEffect(() => {
-    console.log("ItemsClientPage: useEffect for stallsForFilterDropdown triggered.");
-    console.log("ItemsClientPage: Current activeSiteId:", activeSiteId);
-    console.log("ItemsClientPage: db instance:", db ? "defined" : "undefined");
-
+  const fetchSupportingDataAndItems = useCallback(async () => {
+    if (!user) {
+      setErrorData("Please log in to view items.");
+      setItems([]);
+      setStallsForFilterDropdown([]);
+      setSitesMap({});
+      setStallsMap({});
+      setLoadingData(false);
+      return;
+    }
     if (!db) {
-      setErrorData(prev => prev || "Firestore DB instance is not available for fetching stalls.");
-      setLoadingDropdownStalls(false);
-      setStallsForFilterDropdown([]);
-      return; 
+      setErrorData("Firestore DB instance is not available.");
+      setLoadingData(false);
+      return;
     }
 
-    if (!activeSiteId) {
-      console.log("ItemsClientPage: activeSiteId is null/undefined. Clearing stall dropdown and not fetching.");
-      setStallsForFilterDropdown([]);
-      setLoadingDropdownStalls(false); 
-      return; 
-    }
-    
-    const fetchStallsWithGetDocs = async () => {
-        setLoadingDropdownStalls(true);
-        // Reset only the part of the error relevant to this fetch, if any.
-        setErrorData(prev => prev?.includes("stalls for filtering") ? null : prev); 
-        try {
-            console.log(`ItemsClientPage: Attempting to fetch stalls with getDocs for siteId: ${activeSiteId}`);
-            const qStalls = query(collection(db, "stalls"), where("siteId", "==", activeSiteId));
-            const querySnapshot = await getDocs(qStalls);
-            const fetchedStalls = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Stall));
-            fetchedStalls.sort((a, b) => a.name.localeCompare(b.name)); // Client-side sort
-            setStallsForFilterDropdown(fetchedStalls);
-            console.log(`ItemsClientPage: Successfully fetched ${fetchedStalls.length} stalls with getDocs.`);
-        } catch (error: any) {
-            console.error("ItemsClientPage: Error fetching stalls for filter dropdown (using getDocs):", error);
-            const errorMessage = error.message && error.message.includes("requires an index")
-                ? `Query for stalls requires a Firestore index. Please create it. Link: ${error.message.substring(error.message.indexOf('https://'))}`
-                : "Failed to load stalls for filtering. Error: " + error.message;
-            setErrorData(prevError => prevError || errorMessage); 
-            setStallsForFilterDropdown([]);
-        } finally {
-            setLoadingDropdownStalls(false);
-        }
-    };
+    setLoadingData(true);
+    setErrorData(null);
 
-    fetchStallsWithGetDocs();
-  }, [activeSiteId, db]);
+    try {
+      // Fetch sites map
+      const sitesCollectionRef = collection(db, "sites");
+      const sitesSnapshot = await getDocs(sitesCollectionRef);
+      const newSitesMap: Record<string, string> = {};
+      sitesSnapshot.forEach(doc => {
+        newSitesMap[doc.id] = (doc.data() as Site).name;
+      });
+      setSitesMap(newSitesMap);
+      console.log("ItemsClientPage: Successfully fetched sitesMap using getDocs.");
 
+      // Fetch all stalls map
+      const allStallsCollectionRef = collection(db, "stalls");
+      const allStallsSnapshot = await getDocs(allStallsCollectionRef);
+      const newStallsMap: Record<string, string> = {};
+      allStallsSnapshot.forEach(doc => {
+        newStallsMap[doc.id] = (doc.data() as Stall).name;
+      });
+      setStallsMap(newStallsMap);
+      console.log("ItemsClientPage: Successfully fetched stallsMap using getDocs.");
 
-  useEffect(() => {
-    const fetchItems = async () => {
-      if (!user) {
-        setLoadingItems(false);
-        setErrorData("Please log in to view items.");
-        setItems([]);
-        return;
+      // Fetch stalls for filter dropdown (specific to activeSiteId)
+      if (activeSiteId) {
+        console.log(`ItemsClientPage: Attempting to fetch stalls with getDocs for siteId: ${activeSiteId}`);
+        const qStalls = query(collection(db, "stalls"), where("siteId", "==", activeSiteId));
+        const querySnapshotStalls = await getDocs(qStalls);
+        const fetchedStalls = querySnapshotStalls.docs.map(doc => ({ id: doc.id, ...doc.data() } as Stall));
+        fetchedStalls.sort((a, b) => a.name.localeCompare(b.name));
+        setStallsForFilterDropdown(fetchedStalls);
+        console.log(`ItemsClientPage: Successfully fetched ${fetchedStalls.length} stalls for dropdown.`);
+      } else {
+        setStallsForFilterDropdown([]);
+        console.log("ItemsClientPage: activeSiteId is null, clearing stall dropdown.");
       }
 
+      // Fetch stock items based on activeSiteId and stallFilterOption
       if (!activeSiteId) {
         setItems([]);
-        setLoadingItems(false);
         setErrorData(user.role === 'admin' ? "Admin: Please select a site to view its stock." : "Please select an active site to view stock items.");
-        return;
-      }
-      if (!db) {
-        setErrorData("Firestore DB instance is not available for fetching items.");
-        setLoadingItems(false);
-        return;
-      }
+      } else {
+        const itemsCollectionRef = collection(db, "stockItems");
+        let qConstraints: QueryConstraint[] = [
+          where("siteId", "==", activeSiteId)
+        ];
 
-      setLoadingItems(true);
-      setErrorData(null); 
-    
-      const itemsCollectionRef = collection(db, "stockItems");
-      let qConstraints: QueryConstraint[] = [
-        where("siteId", "==", activeSiteId)
-      ];
+        if (stallFilterOption === "master") {
+          qConstraints.push(where("stallId", "==", null));
+        } else if (stallFilterOption !== "all" && stallFilterOption !== "master") {
+          qConstraints.push(where("stallId", "==", stallFilterOption));
+        }
 
-      if (stallFilterOption === "master") {
-        qConstraints.push(where("stallId", "==", null));
-      } else if (stallFilterOption !== "all" && stallFilterOption !== "master") { 
-        qConstraints.push(where("stallId", "==", stallFilterOption));
-      }
-    
-      const finalQuery = query(itemsCollectionRef, ...qConstraints);
-
-      try {
-        const querySnapshot = await getDocs(finalQuery);
-        let fetchedItems: StockItem[] = querySnapshot.docs.map(doc => ({
+        const finalItemsQuery = query(itemsCollectionRef, ...qConstraints);
+        const itemsSnapshot = await getDocs(finalItemsQuery);
+        let fetchedItems: StockItem[] = itemsSnapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
         } as StockItem));
-        
-        fetchedItems.sort((a, b) => a.name.localeCompare(b.name)); 
+        fetchedItems.sort((a, b) => a.name.localeCompare(b.name));
         setItems(fetchedItems);
         console.log(`ItemsClientPage: Successfully fetched ${fetchedItems.length} stock items with getDocs for siteId ${activeSiteId} and stallFilter ${stallFilterOption}.`);
-
-      } catch (error: any) {
-        console.error("ItemsClientPage: Error fetching stock items with getDocs:", error);
-        const itemErrorMessage = error.message && error.message.includes("requires an index")
-            ? `Query for items requires a Firestore index. Please create it using the link in the console: ${error.message.substring(error.message.indexOf('https://'))}`
-            : "Failed to load stock items. Error: " + error.message;
-        setErrorData(itemErrorMessage);
-        setItems([]);
-      } finally {
-        setLoadingItems(false);
       }
-    };
 
-    fetchItems();
+    } catch (error: any) {
+      console.error("ItemsClientPage: Error fetching data:", error);
+      const errorMessage = error.message && error.message.includes("requires an index")
+          ? `Query requires a Firestore index. Please create it using the link in the console: ${error.message.substring(error.message.indexOf('https://'))}`
+          : "Failed to load data. Error: " + error.message;
+      setErrorData(errorMessage);
+      setItems([]);
+      setStallsForFilterDropdown([]);
+    } finally {
+      setLoadingData(false);
+    }
   }, [user, activeSiteId, stallFilterOption, db]);
+
+  useEffect(() => {
+    fetchSupportingDataAndItems();
+  }, [fetchSupportingDataAndItems]);
+
 
   const uniqueCategories = useMemo(() => {
     const allFetchedItemsCategories = new Set(items.map(item => item.category));
@@ -243,32 +192,28 @@ export default function ItemsClientPage() {
         isSiteActive={!!activeSiteId}
       />
 
-      {(loadingItems || loadingMaps || (activeSiteId && loadingDropdownStalls)) && (
+      {loadingData && (
         <div className="flex justify-center items-center py-10">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
           <p className="ml-2">Loading items and context data...</p>
         </div>
       )}
-      {errorData && !(loadingItems || loadingMaps || loadingDropdownStalls) && ( 
+      {errorData && !loadingData && (
         <Alert variant="default" className="border-primary/30">
             <Info className="h-4 w-4" />
             <AlertTitle>Information / Error</AlertTitle>
             <AlertDescription>{errorData}</AlertDescription>
         </Alert>
       )}
-      {!loadingItems && !loadingMaps && !errorData && (
-        <ItemTable 
-            items={filteredItems} 
-            sitesMap={sitesMap} 
+      {!loadingData && !errorData && (
+        <ItemTable
+            items={filteredItems}
+            sitesMap={sitesMap}
             stallsMap={stallsMap}
-            availableStallsForAllocation={stallsForFilterDropdown} 
+            availableStallsForAllocation={stallsForFilterDropdown}
+            onDataNeedsRefresh={fetchSupportingDataAndItems} // Pass the refresh function
         />
       )}
-      
-      {/* CSV Export and Google Sheets Integration Cards are hidden for now
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-      </div>
-      */}
     </div>
   );
 }

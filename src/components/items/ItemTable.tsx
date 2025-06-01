@@ -49,15 +49,15 @@ import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { 
-  getFirestore, 
-  doc, 
-  deleteDoc, 
-  updateDoc, 
-  runTransaction, 
-  collection, 
-  query, 
-  where, 
+import {
+  getFirestore,
+  doc,
+  deleteDoc,
+  updateDoc,
+  runTransaction,
+  collection,
+  query,
+  where,
   getDocs,
   writeBatch,
   serverTimestamp
@@ -78,10 +78,11 @@ interface ItemTableProps {
   items: StockItem[];
   sitesMap: Record<string, string>;
   stallsMap: Record<string, string>;
-  availableStallsForAllocation: Stall[]; // Stalls for the current active site
+  availableStallsForAllocation: Stall[];
+  onDataNeedsRefresh: () => void; // Callback to refresh data
 }
 
-export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAllocation }: ItemTableProps) {
+export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAllocation, onDataNeedsRefresh }: ItemTableProps) {
   const { toast } = useToast();
   const router = useRouter();
   const [isDeleting, setIsDeleting] = useState(false);
@@ -108,6 +109,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         title: "Item Deleted",
         description: `${itemName} has been successfully deleted.`,
       });
+      onDataNeedsRefresh(); // Refresh data
     } catch (error: any) {
       console.error("Error deleting item:", error);
       toast({
@@ -119,10 +121,10 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       setIsDeleting(false);
     }
   };
-  
+
   const handleOpenUpdateStockDialog = (item: StockItem) => {
     setStockUpdateItemId(item.id);
-    setNewQuantity(item.quantity); 
+    setNewQuantity(item.quantity);
   };
 
   const handleStockQuantityChange = async () => {
@@ -141,8 +143,9 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         title: "Stock Updated",
         description: `Stock quantity updated to ${newQuantity}.`,
       });
-      setStockUpdateItemId(null); 
+      setStockUpdateItemId(null);
       setNewQuantity("");
+      onDataNeedsRefresh(); // Refresh data
     } catch (error: any) {
       console.error("Error updating stock:", error);
       toast({
@@ -157,7 +160,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
 
   const handleOpenAllocateDialog = (item: StockItem) => {
     setItemToAllocate(item);
-    setQuantityToAllocate(1); // Default to 1
+    setQuantityToAllocate(1);
     setTargetStallIdForAllocation("");
     setShowAllocateDialog(true);
   };
@@ -188,38 +191,35 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           throw new Error(`Concurrent update: Not enough master stock. Available: ${currentMasterStock.quantity}`);
         }
 
-        // Query for existing item in target stall that originated from this master item
         const stallItemsRef = collection(db, "stockItems");
-        const q = query(stallItemsRef, 
-                        where("originalMasterItemId", "==", itemToAllocate.id), 
+        const q = query(stallItemsRef,
+                        where("originalMasterItemId", "==", itemToAllocate.id),
                         where("stallId", "==", targetStallIdForAllocation));
-        const existingStallItemQuerySnap = await getDocs(q); // getDocs is not a transaction read, but okay for this check pattern
+        const existingStallItemQuerySnap = await getDocs(q);
 
         let targetStallItemRef;
         let newStallItemQuantity = numQuantityToAllocate;
 
         if (!existingStallItemQuerySnap.empty) {
-          // Item already exists in stall, update its quantity
           const existingStallItemDoc = existingStallItemQuerySnap.docs[0];
           targetStallItemRef = existingStallItemDoc.ref;
           const existingStallItemData = existingStallItemDoc.data() as StockItem;
           newStallItemQuantity = existingStallItemData.quantity + numQuantityToAllocate;
-          
+
           transaction.update(targetStallItemRef, {
             quantity: newStallItemQuantity,
             lastUpdated: new Date().toISOString(),
           });
 
         } else {
-          // Item does not exist in stall, create a new one
-          targetStallItemRef = doc(collection(db, "stockItems")); // New doc ref
+          targetStallItemRef = doc(collection(db, "stockItems"));
           const newStallItemData: Omit<StockItem, 'id'> = {
             name: currentMasterStock.name,
             category: currentMasterStock.category,
             quantity: newStallItemQuantity,
             unit: currentMasterStock.unit,
-            price: currentMasterStock.price, // Stall items typically inherit price but could be modifiable
-            lowStockThreshold: currentMasterStock.lowStockThreshold, // Or set a default for stall
+            price: currentMasterStock.price,
+            lowStockThreshold: currentMasterStock.lowStockThreshold,
             imageUrl: currentMasterStock.imageUrl,
             siteId: currentMasterStock.siteId,
             stallId: targetStallIdForAllocation,
@@ -229,7 +229,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           transaction.set(targetStallItemRef, newStallItemData);
         }
 
-        // Decrement master stock
         transaction.update(masterStockRef, {
           quantity: currentMasterStock.quantity - numQuantityToAllocate,
           lastUpdated: new Date().toISOString(),
@@ -242,7 +241,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       });
       setShowAllocateDialog(false);
       setItemToAllocate(null);
-      // Data will refresh from parent onSnapshot
+      onDataNeedsRefresh(); // Refresh data
     } catch (error: any) {
       console.error("Error allocating stock:", error);
       toast({
@@ -254,7 +253,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       setIsAllocating(false);
     }
   };
-  
+
   const formatDate = (dateString?: string) => {
     if (!dateString) return "N/A";
     try {
@@ -284,8 +283,8 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     );
   }
 
-  const stallsForCurrentSite = itemToAllocate?.siteId 
-    ? availableStallsForAllocation.filter(s => s.siteId === itemToAllocate.siteId) 
+  const stallsForCurrentSite = itemToAllocate?.siteId
+    ? availableStallsForAllocation.filter(s => s.siteId === itemToAllocate.siteId)
     : [];
 
   return (
@@ -310,7 +309,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             {items.map((item) => {
               const isLowStock = item.quantity <= item.lowStockThreshold;
               const isOutOfStock = item.quantity === 0;
-              
+
               const siteNameDisplay = item.siteId ? (sitesMap[item.siteId] || `Site ID: ${item.siteId.substring(0,6)}...`) : "N/A";
               let stallDisplay;
               if (item.stallId) {
@@ -320,7 +319,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
               } else {
                   stallDisplay = "Unknown Location";
               }
-              
+
               return (
                 <TableRow key={item.id} className={cn(
                   isLowStock && !isOutOfStock && "bg-orange-500/10 hover:bg-orange-500/20",
@@ -378,7 +377,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                               <PackageOpen className="mr-2 h-4 w-4" /> Update Stock
                             </DropdownMenuItem>
                           </DialogTrigger>
-                           {item.stallId === null && ( // Only show for master stock
+                           {item.stallId === null && ( 
                             <DropdownMenuItem onClick={() => handleOpenAllocateDialog(item)}>
                               <MoveRight className="mr-2 h-4 w-4" /> Allocate to Stall
                             </DropdownMenuItem>
@@ -453,7 +452,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         </Table>
       </div>
 
-      {/* Allocation Dialog */}
       {itemToAllocate && (
         <AlertDialog open={showAllocateDialog} onOpenChange={setShowAllocateDialog}>
           <AlertDialogContent>
