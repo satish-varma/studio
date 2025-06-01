@@ -4,7 +4,7 @@ import StallForm from "@/components/admin/StallForm";
 import { getFirestore, doc, getDoc } from "firebase/firestore";
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp } from 'firebase/app';
-import { notFound } from 'next/navigation';
+import type { Metadata } from 'next';
 
 if (!getApps().length) {
   try {
@@ -24,29 +24,42 @@ async function getSiteName(siteId: string): Promise<string | null> {
       return siteDocSnap.data()?.name || "Unknown Site";
     }
     return null;
-  } catch (error) {
+  } catch (error: any) {
     console.warn("Warning fetching site name for metadata in AddNewStallPage:", error);
     return null;
   }
 }
 
-export async function generateMetadata({ params }: { params: { siteId: string } }) {
-  const siteName = await getSiteName(params.siteId);
-  if (!siteName) {
-    return { title: "Site Not Found - StallSync" };
-  }
-  return {
-    title: `Add New Stall to ${siteName} - StallSync`,
-  };
+interface AddNewStallPageProps {
+  params: { siteId: string };
 }
 
-// Admins only route
-export default async function AddNewStallPage({ params }: { params: { siteId: string } }) {
-  const siteName = await getSiteName(params.siteId);
+export async function generateMetadata({ params }: AddNewStallPageProps): Promise<Metadata> {
+  try {
+    const siteName = await getSiteName(params.siteId);
+    if (!siteName) {
+      return { title: "Site Not Found - StallSync" };
+    }
+    return {
+      title: `Add New Stall to ${siteName} - StallSync`,
+    };
+  } catch (error: any) {
+    console.error("Error in generateMetadata AddNewStallPage:", error);
+    return { title: "Metadata Error - StallSync" };
+  }
+}
 
-  if (!siteName) {
+export default async function AddNewStallPage({ params }: AddNewStallPageProps) {
+  let siteName: string | null = null;
+  
+  try {
+    siteName = await getSiteName(params.siteId);
+  } catch (error: any) {
+    console.error("Error processing params in AddNewStallPage:", error);
+  }
+  
+  if (!siteName && params.siteId) {
      console.warn(`Site with ID ${params.siteId} not found for AddNewStallPage content.`);
-     // notFound(); // Or handle this state in the UI
   }
 
   return (
@@ -55,7 +68,7 @@ export default async function AddNewStallPage({ params }: { params: { siteId: st
         title={siteName ? `Add New Stall to "${siteName}"` : "Add New Stall"}
         description="Fill in the details below to add a new stall to this site."
       />
-      <StallForm /> {/* siteId is derived from URL in StallForm */}
+      <StallForm /> {/* siteId is derived from URL in StallForm via useParams() hook */}
     </div>
   );
 }

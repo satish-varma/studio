@@ -29,31 +29,13 @@ async function getSiteName(siteId: string): Promise<string | null> {
   }
 }
 
-interface PageDynamicParams {
-  siteId: string;
+interface ManageStallsPageProps {
+  params: { siteId: string };
 }
 
-interface DynamicPageProps {
-  params: Promise<PageDynamicParams>;
-}
-
-export async function generateMetadata({ params: paramsPromise }: DynamicPageProps): Promise<Metadata> {
-  if (!paramsPromise || typeof paramsPromise.then !== 'function') {
-    console.warn("generateMetadata in ManageStallsPage received non-Promise params:", paramsPromise);
-    // Fallback for non-promise params, though ideally types prevent this.
-    const resolvedParams = paramsPromise as unknown as PageDynamicParams;
-    const siteName = await getSiteName(resolvedParams.siteId);
-     if (!siteName) {
-      return { title: "Site Not Found - StallSync" };
-    }
-    return {
-      title: `Manage Stalls at ${siteName} - StallSync`,
-    };
-  }
-
+export async function generateMetadata({ params }: ManageStallsPageProps): Promise<Metadata> {
   try {
-    const actualParams = await paramsPromise;
-    const siteName = await getSiteName(actualParams.siteId);
+    const siteName = await getSiteName(params.siteId);
     if (!siteName) {
       return { title: "Site Not Found - StallSync" };
     }
@@ -66,21 +48,12 @@ export async function generateMetadata({ params: paramsPromise }: DynamicPagePro
   }
 }
 
-
 // Admins only route - further protection should be via security rules & auth context checks in client component
-export default async function ManageStallsPage({ params: paramsPromise }: DynamicPageProps) {
-  // Even if actualParams.siteId isn't directly used here for rendering (as StallsClientPage uses useParams),
-  // awaiting paramsPromise ensures the component matches the expected signature if PageProps
-  // indeed expects params to be a Promise.
-  try {
-    const actualParams = await paramsPromise;
-    // You could log actualParams.siteId here if needed for debugging.
-  } catch (error) {
-    console.error("Error resolving params in ManageStallsPage (page component):", error);
-    // Potentially render an error state or redirect, though StallsClientPage might also handle missing siteId.
-  }
-  
+export default async function ManageStallsPage({ params }: ManageStallsPageProps) {
   // The StallsClientPage will handle fetching site details and stalls based on the siteId from params (using useParams hook)
+  // The 'params' prop here is primarily for server-side logic like generateMetadata or if data was fetched directly on this page.
+  // We can log it here if needed for debugging or future server-side data fetching.
+  // console.log("ManageStallsPage received params:", params);
+  
   return <StallsClientPage />;
 }
-
