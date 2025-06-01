@@ -269,7 +269,19 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   };
 
   if (items.length === 0) {
-    return <p className="text-center text-muted-foreground py-8">No items found for the current filter.</p>;
+    return (
+      <div className="text-center py-10 px-4 bg-card rounded-lg border shadow-sm">
+        <PackageOpen className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+        <p className="text-xl font-semibold text-foreground mb-2">No Stock Items Found</p>
+        <p className="text-muted-foreground">
+          No items match your current filters for this site/stall.
+        </p>
+        <p className="text-muted-foreground mt-1">
+          Try adjusting the search or filters above. You can also use the "Add New Item" button
+          (if enabled) to add stock to the currently selected site context.
+        </p>
+      </div>
+    );
   }
 
   const stallsForCurrentSite = itemToAllocate?.siteId 
