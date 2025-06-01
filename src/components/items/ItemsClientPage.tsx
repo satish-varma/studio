@@ -14,16 +14,16 @@ import {
   DocumentData, 
   query, 
   orderBy,
-  getDocs // Added for CSV export
+  getDocs
 } from "firebase/firestore";
-import { getApps, initializeApp } from 'firebase/app';
+import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { Loader2, Download, SheetIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
+import { getAuth } from 'firebase/auth';
 
-// Initialize Firebase only if it hasn't been initialized yet
 if (!getApps().length) {
   try {
     initializeApp(firebaseConfig);
@@ -32,6 +32,8 @@ if (!getApps().length) {
   }
 }
 const db = getFirestore();
+const auth = getAuth(getApp());
+
 
 export default function ItemsClientPage() {
   const { toast } = useToast();
@@ -49,7 +51,7 @@ export default function ItemsClientPage() {
 
   useEffect(() => {
     const itemsCollectionRef = collection(db, "stockItems");
-    const q = query(itemsCollectionRef, orderBy("name")); // Keep consistent ordering
+    const q = query(itemsCollectionRef, orderBy("name"));
     
     const unsubscribe = onSnapshot(q, 
       (snapshot: QuerySnapshot<DocumentData>) => {
@@ -109,7 +111,6 @@ export default function ItemsClientPage() {
   const exportStockItemsToCsvLocal = async () => {
     setIsExportingCsv(true);
     try {
-      // Fetch all items again for export to ensure completeness, ignoring client-side filters
       const stockItemsCollectionRef = collection(db, "stockItems");
       const q = query(stockItemsCollectionRef, orderBy("name"));
       const querySnapshot = await getDocs(q);
@@ -172,24 +173,57 @@ export default function ItemsClientPage() {
     }
   };
 
-  const callGoogleSheetsFunctionForItemActions = async (
+  const callGoogleSheetsApiForItemActions = async (
     action: string, 
     setLoadingState: React.Dispatch<React.SetStateAction<boolean>>
   ) => {
     setLoadingState(true);
     toast({
       title: "Processing Google Sheets Request...",
-      description: `Attempting to ${action.replace(/([A-Z])/g, ' $1').toLowerCase()} stock items... This requires backend setup.`,
+      description: `Attempting to ${action.replace(/([A-Z])/g, ' $1').toLowerCase()} stock items...`,
     });
 
-    await new Promise(resolve => setTimeout(resolve, 2500)); // Simulate network delay
-    
-    toast({
-      title: "Placeholder Action",
-      description: `"${action.replace(/([A-Z])/g, ' $1').toLowerCase()} stock items" simulated. Backend (Firebase Function) needed for real functionality.`,
-      duration: 7000,
-    });
-    setLoadingState(false);
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) {
+        toast({ title: "Authentication Error", description: "User not authenticated.", variant: "destructive" });
+        setLoadingState(false);
+        return;
+      }
+
+      const sheetId = prompt(`Enter Google Sheet ID for ${action.replace(/([A-Z])/g, ' $1').toLowerCase()} stock items:`);
+      if (!sheetId && action.toLowerCase().includes('import')) {
+        toast({ title: "Sheet ID Required", description: "Please provide a Google Sheet ID to import from.", variant: "destructive" });
+        setLoadingState(false);
+        return;
+      }
+
+      const response = await fetch('/api/google-sheets-proxy', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          action: action, // e.g., "importStockItems", "exportStockItems"
+          dataType: 'stock',
+          sheetId: sheetId || undefined,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || `Failed to ${action}.`);
+      }
+
+      toast({ title: "Success", description: result.message || `${action} completed.` });
+    } catch (error: any) {
+      console.error(`Error during Google Sheets ${action} for stock items:`, error);
+      toast({ title: "Error", description: error.message || `Failed to ${action}. Backend setup required.`, variant: "destructive" });
+    } finally {
+      setLoadingState(false);
+    }
   };
 
 
@@ -249,7 +283,7 @@ export default function ItemsClientPage() {
               <Button 
                   variant="outline" 
                   className="w-full" 
-                  onClick={() => callGoogleSheetsFunctionForItemActions("importStockItems", setIsProcessingSheetsImport)}
+                  onClick={() => callGoogleSheetsApiForItemActions("importStockItems", setIsProcessingSheetsImport)}
                   disabled={isProcessingSheetsImport || isProcessingSheetsExport || loadingItems}
               >
                   {isProcessingSheetsImport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4 text-green-700" />}
@@ -258,7 +292,7 @@ export default function ItemsClientPage() {
               <Button 
                   variant="outline" 
                   className="w-full" 
-                  onClick={() => callGoogleSheetsFunctionForItemActions("exportStockItems", setIsProcessingSheetsExport)}
+                  onClick={() => callGoogleSheetsApiForItemActions("exportStockItems", setIsProcessingSheetsExport)}
                   disabled={isProcessingSheetsImport || isProcessingSheetsExport || loadingItems}
               >
                   {isProcessingSheetsExport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SheetIcon className="mr-2 h-4 w-4 text-green-700" />}
@@ -267,7 +301,7 @@ export default function ItemsClientPage() {
           </CardContent>
           <CardFooter>
               <p className="text-xs text-muted-foreground">
-                Note: Requires backend (Firebase Functions) setup for Google Sheets API.
+                Note: Requires backend API route development for Google Sheets API calls.
               </p>
           </CardFooter>
         </Card>
@@ -288,5 +322,3 @@ export default function ItemsClientPage() {
     </div>
   );
 }
-
-    

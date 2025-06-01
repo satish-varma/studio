@@ -9,12 +9,12 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { useState } from "react";
 import { getFirestore, collection, getDocs, query, orderBy, where, Timestamp } from "firebase/firestore";
-import { getApps, initializeApp } from 'firebase/app';
+import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import type { StockItem, SaleTransaction } from "@/types";
 import { useToast } from "@/hooks/use-toast";
+import { getAuth } from 'firebase/auth';
 
-// Initialize Firebase only if it hasn't been initialized yet
 if (!getApps().length) {
   try {
     initializeApp(firebaseConfig);
@@ -23,6 +23,7 @@ if (!getApps().length) {
   }
 }
 const db = getFirestore();
+const auth = getAuth(getApp());
 
 export default function SettingsPage() {
   const { toast } = useToast();
@@ -193,39 +194,62 @@ export default function SettingsPage() {
     }
   };
 
-  // --- Placeholder Google Sheets Functions ---
-  const callGoogleSheetsFunction = async (
+  const callGoogleSheetsApi = async (
     action: string, // e.g., "importStock", "exportStock", "importSales", "exportSales"
-    setLoadingState: React.Dispatch<React.SetStateAction<boolean>>
+    setLoadingState: React.Dispatch<React.SetStateAction<boolean>>,
+    dataType: 'stock' | 'sales' // To differentiate which API endpoint to call
   ) => {
     setLoadingState(true);
     toast({
       title: "Processing Google Sheets Request...",
-      description: `Attempting to ${action.replace(/([A-Z])/g, ' $1').toLowerCase()}... This requires backend setup.`,
+      description: `Attempting to ${action.replace(/([A-Z])/g, ' $1').toLowerCase()}...`,
     });
 
-    // Simulate API call to a Firebase Function
-    // In a real implementation, you would use:
-    // const functions = getFunctions(getApp());
-    // const callable = httpsCallable(functions, 'yourSheetsFunctionName');
-    // try {
-    //   const result = await callable({ action: action, sheetId: 'USER_PROVIDED_SHEET_ID_OR_NAME' });
-    //   toast({ title: "Success", description: `${action} completed: ${result.data.message}` });
-    // } catch (error: any) {
-    //   toast({ title: "Error", description: error.message || `Failed to ${action}.`, variant: "destructive" });
-    // } finally {
-    //   setLoadingState(false);
-    // }
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) {
+        toast({ title: "Authentication Error", description: "User not authenticated.", variant: "destructive" });
+        setLoadingState(false);
+        return;
+      }
+      
+      // For import, you might need to get a sheetId from the user
+      // For export, you might ask for a sheet name or create a new one.
+      // This is simplified for now.
+      const sheetId = prompt(`Enter Google Sheet ID for ${action}:`);
+      if (!sheetId && action.toLowerCase().includes('import')) {
+        toast({ title: "Sheet ID Required", description: "Please provide a Google Sheet ID to import from.", variant: "destructive" });
+        setLoadingState(false);
+        return;
+      }
 
-    await new Promise(resolve => setTimeout(resolve, 2500)); // Simulate network delay
-    
-    // Simulate a successful response for now
-    toast({
-      title: "Placeholder Action",
-      description: `"${action.replace(/([A-Z])/g, ' $1').toLowerCase()}" simulated. Backend (Firebase Function) needed for real functionality.`,
-      duration: 7000,
-    });
-    setLoadingState(false);
+      const response = await fetch('/api/google-sheets-proxy', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ 
+          action: action, // e.g., "importStockItems", "exportStockItems"
+          dataType: dataType,
+          sheetId: sheetId || undefined, // Pass sheetId for operations that need it
+          // You might pass other parameters like specific data for export
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || `Failed to ${action}.`);
+      }
+
+      toast({ title: "Success", description: result.message || `${action} completed.` });
+    } catch (error: any) {
+      console.error(`Error during Google Sheets ${action}:`, error);
+      toast({ title: "Error", description: error.message || `Failed to ${action}. Backend setup required.`, variant: "destructive" });
+    } finally {
+      setLoadingState(false);
+    }
   };
 
 
@@ -330,7 +354,7 @@ export default function SettingsPage() {
                 Google Sheets Integration
             </CardTitle>
             <CardDescription>
-                Import or export data directly with Google Sheets. This requires setting up Firebase Functions and Google Cloud OAuth.
+                Import or export data directly with Google Sheets. This requires setting up OAuth and backend API calls.
             </CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -339,7 +363,7 @@ export default function SettingsPage() {
                 <Button 
                     variant="outline" 
                     className="w-full" 
-                    onClick={() => callGoogleSheetsFunction("importStockItems", setIsProcessingStockSheetsImport)}
+                    onClick={() => callGoogleSheetsApi("importStockItems", setIsProcessingStockSheetsImport, 'stock')}
                     disabled={isProcessingStockSheetsImport || isProcessingStockSheetsExport}
                 >
                     {isProcessingStockSheetsImport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4 text-green-700" />}
@@ -348,7 +372,7 @@ export default function SettingsPage() {
                 <Button 
                     variant="outline" 
                     className="w-full" 
-                    onClick={() => callGoogleSheetsFunction("exportStockItems", setIsProcessingStockSheetsExport)}
+                    onClick={() => callGoogleSheetsApi("exportStockItems", setIsProcessingStockSheetsExport, 'stock')}
                     disabled={isProcessingStockSheetsImport || isProcessingStockSheetsExport}
                 >
                     {isProcessingStockSheetsExport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SheetIcon className="mr-2 h-4 w-4 text-green-700" />}
@@ -360,7 +384,7 @@ export default function SettingsPage() {
                 <Button 
                     variant="outline" 
                     className="w-full" 
-                    onClick={() => callGoogleSheetsFunction("importSalesHistory", setIsProcessingSalesSheetsImport)}
+                    onClick={() => callGoogleSheetsApi("importSalesHistory", setIsProcessingSalesSheetsImport, 'sales')}
                     disabled={isProcessingSalesSheetsImport || isProcessingSalesSheetsExport}
                 >
                      {isProcessingSalesSheetsImport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4 text-green-700" />}
@@ -369,7 +393,7 @@ export default function SettingsPage() {
                 <Button 
                     variant="outline" 
                     className="w-full" 
-                    onClick={() => callGoogleSheetsFunction("exportSalesHistory", setIsProcessingSalesSheetsExport)}
+                    onClick={() => callGoogleSheetsApi("exportSalesHistory", setIsProcessingSalesSheetsExport, 'sales')}
                     disabled={isProcessingSalesSheetsImport || isProcessingSalesSheetsExport}
                 >
                     {isProcessingSalesSheetsExport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SheetIcon className="mr-2 h-4 w-4 text-green-700" />}
@@ -379,8 +403,8 @@ export default function SettingsPage() {
         </CardContent>
          <CardFooter>
             <p className="text-xs text-muted-foreground">
-              Note: Actual Google Sheets integration requires backend (Firebase Functions) development for OAuth and API calls.
-              The buttons above currently simulate the action.
+              Note: Full Google Sheets integration requires backend API route development for OAuth and Google Sheets API calls.
+              The buttons above will call a placeholder API route.
             </p>
         </CardFooter>
       </Card>
