@@ -10,6 +10,15 @@ export interface AppUser {
   createdAt?: string; // ISO date string, set upon user creation
   defaultSiteId?: string;
   defaultStallId?: string;
+
+  // New fields for default filters
+  defaultItemSearchTerm?: string;
+  defaultItemCategoryFilter?: string;
+  defaultItemStockStatusFilter?: string;
+  defaultItemStallFilterOption?: string; // "all", "master", or stallId
+  defaultSalesDateRangeFrom?: string; // ISO date string
+  defaultSalesDateRangeTo?: string; // ISO date string
+  defaultSalesStaffFilter?: string; // "all" or staff UID
 }
 
 export interface UserGoogleOAuthTokens {

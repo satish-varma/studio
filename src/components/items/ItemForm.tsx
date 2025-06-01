@@ -14,17 +14,18 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription as UiCardDescription } from "@/components/ui/card"; // Aliased CardDescription
 import { stockItemSchema, type StockItemFormValues } from "@/types/item";
-import { Loader2, Save } from "lucide-react";
+import { Loader2, Save, Info } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
-import { getFirestore, doc, setDoc, addDoc, collection } from "firebase/firestore";
+import { getFirestore, doc, setDoc, addDoc, collection, getDoc } from "firebase/firestore";
 import { firebaseConfig } from "@/lib/firebaseConfig";
 import { getApps, initializeApp } from "firebase/app";
 import type { StockItem } from "@/types";
-import { useState } from "react"; 
+import { useState, useEffect } from "react"; 
 import { useAuth } from "@/contexts/AuthContext";
+import { logStockMovement } from "@/lib/stockLogger";
 
 if (!getApps().length) {
   try {
@@ -38,14 +39,17 @@ const db = getFirestore();
 interface ItemFormProps {
   initialData?: StockItem | null; 
   itemId?: string | null; 
+  sitesMap?: Record<string, string>; // Optional, for displaying names
+  stallsMap?: Record<string, string>; // Optional, for displaying names
 }
 
-export default function ItemForm({ initialData, itemId }: ItemFormProps) {
+export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap = {} }: ItemFormProps) {
   const router = useRouter();
   const { toast } = useToast();
-  const { activeSiteId, activeStallId } = useAuth(); // Get context
+  const { user, activeSiteId, activeStallId } = useAuth(); 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const isEditMode = !!initialData && !!itemId;
+  const [itemStatusMessage, setItemStatusMessage] = useState<string | null>(null);
 
   const form = useForm<StockItemFormValues>({
     resolver: zodResolver(stockItemSchema),
@@ -57,8 +61,6 @@ export default function ItemForm({ initialData, itemId }: ItemFormProps) {
       price: initialData.price,
       lowStockThreshold: initialData.lowStockThreshold,
       imageUrl: initialData.imageUrl || "",
-      // siteId and stallId are part of initialData if editing, but not directly editable here.
-      // For new items, they will be set from context.
     } : {
       name: "",
       category: "",
@@ -70,42 +72,99 @@ export default function ItemForm({ initialData, itemId }: ItemFormProps) {
     },
   });
 
+  useEffect(() => {
+    if (isEditMode && initialData) {
+      let message = "Editing ";
+      if (!initialData.stallId && initialData.siteId) {
+        message += `Master Stock at: ${sitesMap[initialData.siteId] || `Site ID ${initialData.siteId.substring(0,6)}...`}`;
+      } else if (initialData.stallId && initialData.siteId) {
+        message += `Stall Stock at: ${stallsMap[initialData.stallId] || `Stall ID ${initialData.stallId.substring(0,6)}...`}, ${sitesMap[initialData.siteId] || `Site ID ${initialData.siteId.substring(0,6)}...`}`;
+        if (initialData.originalMasterItemId) {
+          message += ` (Linked to Master ID: ${initialData.originalMasterItemId.substring(0,6)}...)`;
+        }
+      } else {
+        message += "Uncategorized Item";
+      }
+      setItemStatusMessage(message);
+    } else if (!isEditMode) {
+        if (activeSiteId && !activeStallId) {
+            setItemStatusMessage(`Adding new Master Stock item to: ${sitesMap[activeSiteId] || `Site ID ${activeSiteId.substring(0,6)}...`}`);
+        } else if (activeSiteId && activeStallId) {
+            setItemStatusMessage(`Adding new Stall Stock item to: ${stallsMap[activeStallId] || `Stall ID ${activeStallId.substring(0,6)}...`} at ${sitesMap[activeSiteId] || `Site ID ${activeSiteId.substring(0,6)}...`}`);
+        } else {
+            setItemStatusMessage("Select a site (and optionally a stall) in the header to define where this new item will be created.");
+        }
+    }
+  }, [isEditMode, initialData, sitesMap, stallsMap, activeSiteId, activeStallId]);
+
+
   async function onSubmit(values: StockItemFormValues) {
+    if (!user) {
+      toast({ title: "Error", description: "User not authenticated.", variant: "destructive" });
+      return;
+    }
     setIsSubmitting(true);
     try {
+      const newQuantity = Number(values.quantity);
       const baseItemData = {
         ...values,
         price: Number(values.price), 
-        quantity: Number(values.quantity), 
+        quantity: newQuantity, 
         lowStockThreshold: Number(values.lowStockThreshold), 
         lastUpdated: new Date().toISOString(),
       };
 
-      if (isEditMode && itemId) {
+      if (isEditMode && itemId && initialData) {
         const itemRef = doc(db, "stockItems", itemId);
-        // When editing, we generally don't change siteId/stallId via this simple form.
-        // That would be a "move" operation. We merge to update other fields.
-        // We exclude siteId and stallId from `baseItemData` to avoid overriding them if they were set from `initialData`
-        // but not part of the form's explicit fields.
         const { siteId: initialSiteId, stallId: initialStallId, ...editableValues } = baseItemData;
         await setDoc(itemRef, editableValues, { merge: true });
+        
+        const oldQuantity = initialData.quantity;
+        const quantityChange = newQuantity - oldQuantity;
+
+        if (quantityChange !== 0) {
+          await logStockMovement(user, {
+            stockItemId: itemId,
+            masterStockItemIdForContext: initialData.originalMasterItemId,
+            siteId: initialData.siteId!, // Assuming siteId is always present for existing items
+            stallId: initialData.stallId,
+            type: initialData.stallId ? 'DIRECT_STALL_UPDATE' : 'DIRECT_MASTER_UPDATE',
+            quantityChange: quantityChange,
+            quantityBefore: oldQuantity,
+            quantityAfter: newQuantity,
+            notes: "Direct update via item form.",
+          });
+        }
+
         toast({
           title: "Item Updated",
           description: `${values.name} has been successfully updated.`,
         });
-      } else { // Creating a new item
+      } else { 
         if (!activeSiteId) {
           toast({ title: "Site Context Missing", description: "Please select an active site from the header to add an item.", variant: "destructive" });
           setIsSubmitting(false);
           return;
         }
-        // New item is associated with activeSiteId and activeStallId (which can be null for master stock)
         const itemDataToSave = {
           ...baseItemData,
           siteId: activeSiteId,
-          stallId: activeStallId, // This can be null, creating "master stock" for the site
+          stallId: activeStallId, 
+          originalMasterItemId: null, // New items don't have this until allocated from master
         };
-        await addDoc(collection(db, "stockItems"), itemDataToSave);
+        const newItemRef = await addDoc(collection(db, "stockItems"), itemDataToSave);
+        
+        await logStockMovement(user, {
+          stockItemId: newItemRef.id,
+          siteId: activeSiteId,
+          stallId: activeStallId,
+          type: activeStallId ? 'CREATE_STALL_DIRECT' : 'CREATE_MASTER',
+          quantityChange: newQuantity,
+          quantityBefore: 0,
+          quantityAfter: newQuantity,
+          notes: "New item created.",
+        });
+
         toast({
           title: "Item Added",
           description: `${values.name} has been successfully added. ${activeStallId ? 'To stall.' : 'To site master stock.'}`,
@@ -131,6 +190,12 @@ export default function ItemForm({ initialData, itemId }: ItemFormProps) {
         <CardTitle className="text-2xl">
           {isEditMode ? `Edit: ${initialData?.name}` : "Add New Stock Item"}
         </CardTitle>
+        {itemStatusMessage && (
+            <UiCardDescription className="text-sm text-muted-foreground pt-1 flex items-center">
+                <Info size={14} className="mr-1.5 text-primary/80" />
+                {itemStatusMessage}
+            </UiCardDescription>
+        )}
       </CardHeader>
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)}>
@@ -236,7 +301,7 @@ export default function ItemForm({ initialData, itemId }: ItemFormProps) {
              <Button type="button" variant="outline" onClick={() => router.back()} disabled={isSubmitting}>
                 Cancel
             </Button>
-            <Button type="submit" disabled={isSubmitting}>
+            <Button type="submit" disabled={isSubmitting || (!isEditMode && !activeSiteId) }>
               {isSubmitting ? (
                 <Loader2 className="animate-spin mr-2" />
               ) : (

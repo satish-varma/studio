@@ -7,7 +7,7 @@ import { SalesTable } from "@/components/sales/SalesTable";
 import PageHeader from "@/components/shared/PageHeader";
 import type { SaleTransaction, AppUser } from "@/types";
 import type { DateRange } from "react-day-picker";
-import { subDays, startOfDay, endOfDay } from "date-fns";
+import { subDays, startOfDay, endOfDay, parseISO, isValid } from "date-fns";
 import { 
     getFirestore, 
     collection, 
@@ -42,11 +42,13 @@ const db = getFirestore();
 export default function SalesHistoryClientPage() {
   const { user, activeSiteId, activeStallId } = useAuth();
   const { toast } = useToast();
-  const [dateRange, setDateRange] = useState<DateRange | undefined>({
-    from: subDays(new Date(), 29),
-    to: new Date(),
+
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(() => {
+    const from = user?.defaultSalesDateRangeFrom ? parseISO(user.defaultSalesDateRangeFrom) : subDays(new Date(), 29);
+    const to = user?.defaultSalesDateRangeTo ? parseISO(user.defaultSalesDateRangeTo) : new Date();
+    return { from: isValid(from) ? from : undefined, to: isValid(to) ? to : undefined };
   });
-  const [staffFilter, setStaffFilter] = useState("all"); 
+  const [staffFilter, setStaffFilter] = useState(() => user?.defaultSalesStaffFilter || "all"); 
   
   const [transactions, setTransactions] = useState<SaleTransaction[]>([]);
   const [loadingTransactions, setLoadingTransactions] = useState(true);
@@ -55,6 +57,16 @@ export default function SalesHistoryClientPage() {
   const [loadingStaff, setLoadingStaff] = useState(false);
 
   const isManagerOrAdmin = user?.role === 'manager' || user?.role === 'admin';
+
+  // Effect to update filters if user context changes
+  useEffect(() => {
+    if (user) {
+      const fromDate = user.defaultSalesDateRangeFrom ? parseISO(user.defaultSalesDateRangeFrom) : subDays(new Date(), 29);
+      const toDate = user.defaultSalesDateRangeTo ? parseISO(user.defaultSalesDateRangeTo) : new Date();
+      setDateRange({ from: isValid(fromDate) ? fromDate : undefined, to: isValid(toDate) ? toDate : undefined });
+      setStaffFilter(user.defaultSalesStaffFilter || "all");
+    }
+  }, [user]);
 
   useEffect(() => {
     async function fetchStaffMembers() {
@@ -109,7 +121,7 @@ export default function SalesHistoryClientPage() {
     const salesCollectionRef = collection(db, "salesTransactions");
     let salesQueryConstraints: QueryConstraint[] = [
         orderBy("transactionDate", "desc"),
-        where("isDeleted", "==", false) // Changed from "!=" to "==" for better indexing
+        where("isDeleted", "==", false) 
     ];
 
     if (activeSiteId) {
@@ -126,14 +138,14 @@ export default function SalesHistoryClientPage() {
 
     if (user.role === 'staff') {
       salesQueryConstraints.push(where("staffId", "==", user.uid));
-    } else if (isManagerOrAdmin && staffFilter !== "all") {
+    } else if (isManagerOrAdmin && staffFilter && staffFilter !== "all") {
       salesQueryConstraints.push(where("staffId", "==", staffFilter));
     }
     
-    if (dateRange?.from) {
+    if (dateRange?.from && isValid(dateRange.from)) {
       salesQueryConstraints.push(where("transactionDate", ">=", Timestamp.fromDate(startOfDay(dateRange.from))));
     }
-    if (dateRange?.to) {
+    if (dateRange?.to && isValid(dateRange.to)) {
       salesQueryConstraints.push(where("transactionDate", "<=", Timestamp.fromDate(endOfDay(dateRange.to))));
     }
     
@@ -177,6 +189,8 @@ export default function SalesHistoryClientPage() {
     }
 
     const saleDocRef = doc(db, "salesTransactions", saleId);
+    // Note: Reverting stock for deleted sales is complex and not implemented here.
+    // This delete is a "soft delete" for record-keeping.
     try {
       await updateDoc(saleDocRef, {
         isDeleted: true,
@@ -252,4 +266,3 @@ export default function SalesHistoryClientPage() {
     </div>
   );
 }
-

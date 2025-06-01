@@ -44,6 +44,7 @@ import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { logStockMovement } from "@/lib/stockLogger";
 
 if (!getApps().length) {
   try {
@@ -88,18 +89,17 @@ export default function RecordSaleForm() {
   });
 
   useEffect(() => {
-    if (!activeSiteId || !activeStallId) { // A specific stall MUST be active for sales
+    if (!activeSiteId || !activeStallId) { 
       setAvailableItems([]);
       setLoadingItems(false);
       return;
     }
     setLoadingItems(true);
     const itemsCollectionRef = collection(db, "stockItems");
-    // Query for items specific to the active site AND stall
     const q = query(
       itemsCollectionRef, 
       where("siteId", "==", activeSiteId),
-      where("stallId", "==", activeStallId) // Ensure items are from the selected stall
+      where("stallId", "==", activeStallId) 
     );
 
     const unsubscribe = onSnapshot(q, 
@@ -108,7 +108,6 @@ export default function RecordSaleForm() {
           id: doc.id,
           ...doc.data()
         } as StockItem));
-        // Only make items with quantity > 0 available for sale
         setAvailableItems(fetchedItems.filter(item => item.quantity > 0));
         setLoadingItems(false);
       },
@@ -140,51 +139,58 @@ export default function RecordSaleForm() {
       setIsSubmitting(false);
       return;
     }
-    if (!activeSiteId || !activeStallId) { // Double-check: Sale must be from a specific stall
+    if (!activeSiteId || !activeStallId) { 
       toast({ title: "Context Error", description: "Please select an active site AND a specific stall from the header to record a sale.", variant: "destructive"});
       setIsSubmitting(false);
       return;
     }
     setIsSubmitting(true);
+    const saleTransactionId = doc(collection(db, "salesTransactions")).id; // Generate ID upfront for logging
 
     try {
       await runTransaction(db, async (transaction) => {
-        const stockItemRefsAndData: { 
-          ref: DocumentReference; 
-          snapshot: DocumentSnapshot; 
-          formItem: z.infer<typeof saleItemSchema>;
-          originalMasterItemId?: string | null; 
-        }[] = [];
-
-        for (const formItem of values.items) {
+        const stockItemReads: Promise<DocumentSnapshot>[] = [];
+        values.items.forEach(formItem => {
           const stockItemRef = doc(db, "stockItems", formItem.itemId);
-          const stockItemSnap = await transaction.get(stockItemRef);
-          if (!stockItemSnap.exists()) {
-            throw new Error(`Item ${formItem.name} (ID: ${formItem.itemId}) not found in stock.`);
-          }
-          const itemData = stockItemSnap.data() as StockItem;
-          if (itemData.siteId !== activeSiteId || itemData.stallId !== activeStallId) {
-             throw new Error(`Item ${formItem.name} does not belong to the currently active stall.`);
-          }
-          stockItemRefsAndData.push({ 
-            ref: stockItemRef, 
-            snapshot: stockItemSnap, 
-            formItem,
-            originalMasterItemId: itemData.originalMasterItemId 
-          });
-        }
+          stockItemReads.push(transaction.get(stockItemRef));
+        });
+        const stockItemSnapshots = await Promise.all(stockItemReads);
 
         const soldItemsForTransaction: SoldItem[] = [];
         let calculatedTotalAmount = 0;
+        
+        const stockUpdatesAndLogs: {
+          ref: DocumentReference;
+          newQuantity: number;
+          log: Omit<Parameters<typeof logStockMovement>[1], 'stockItemId' | 'siteId' | 'stallId' | 'masterStockItemIdForContext'>;
+          originalData: StockItem;
+        }[] = [];
 
-        for (const { snapshot: stockItemSnap, formItem } of stockItemRefsAndData) {
-          const currentStockData = stockItemSnap.data() as StockItem;
+        const masterStockUpdatesAndLogs: {
+          ref: DocumentReference;
+          newQuantity: number;
+          log: Omit<Parameters<typeof logStockMovement>[1], 'stockItemId' | 'siteId' | 'stallId' | 'masterStockItemIdForContext'>;
+          originalData: StockItem;
+        }[] = [];
+
+
+        for (let i = 0; i < values.items.length; i++) {
+          const formItem = values.items[i];
+          const stockItemSnap = stockItemSnapshots[i];
+
+          if (!stockItemSnap.exists()) {
+            throw new Error(`Item ${formItem.name} (ID: ${formItem.itemId}) not found in stock.`);
+          }
+          const currentStockData = { id: stockItemSnap.id, ...stockItemSnap.data() } as StockItem;
+
+          if (currentStockData.siteId !== activeSiteId || currentStockData.stallId !== activeStallId) {
+             throw new Error(`Item ${formItem.name} does not belong to the currently active stall.`);
+          }
           if (currentStockData.quantity < formItem.quantity) {
             throw new Error(`Not enough stock for ${formItem.name}. Available: ${currentStockData.quantity}, Requested: ${formItem.quantity}.`);
           }
           
           const pricePerUnit = currentStockData.price; 
-
           soldItemsForTransaction.push({
             itemId: formItem.itemId,
             name: formItem.name,
@@ -193,15 +199,52 @@ export default function RecordSaleForm() {
             totalPrice: formItem.quantity * pricePerUnit,
           });
           calculatedTotalAmount += formItem.quantity * pricePerUnit;
+
+          // Prepare stall stock update
+          stockUpdatesAndLogs.push({
+            ref: stockItemSnap.ref,
+            newQuantity: currentStockData.quantity - formItem.quantity,
+            log: {
+              type: 'SALE_FROM_STALL',
+              quantityChange: -formItem.quantity,
+              quantityBefore: currentStockData.quantity,
+              quantityAfter: currentStockData.quantity - formItem.quantity,
+              notes: `Sale ID: ${saleTransactionId}`,
+            },
+            originalData: currentStockData,
+          });
+          
+          // Prepare master stock update if linked
+          if (currentStockData.originalMasterItemId) {
+            const masterStockRef = doc(db, "stockItems", currentStockData.originalMasterItemId);
+            const masterStockSnap = await transaction.get(masterStockRef); // Read master item
+            if (masterStockSnap.exists()) {
+              const masterItemData = { id: masterStockSnap.id, ...masterStockSnap.data() } as StockItem;
+              masterStockUpdatesAndLogs.push({
+                ref: masterStockRef,
+                newQuantity: Math.max(0, masterItemData.quantity - formItem.quantity),
+                log: {
+                  type: 'SALE_AFFECTS_MASTER',
+                  quantityChange: -formItem.quantity,
+                  quantityBefore: masterItemData.quantity,
+                  quantityAfter: Math.max(0, masterItemData.quantity - formItem.quantity),
+                  notes: `Sale ID: ${saleTransactionId} from stall item ${currentStockData.id}`,
+                  linkedStockItemId: currentStockData.id,
+                },
+                originalData: masterItemData,
+              });
+            } else {
+              console.warn(`Master stock item ${currentStockData.originalMasterItemId} not found for sale of stall item ${currentStockData.id}.`);
+            }
+          }
         }
         
         if (Math.abs(calculatedTotalAmount - totalSaleAmount) > 0.001) {
              console.warn(`Frontend total ${totalSaleAmount} differs from backend calculated total ${calculatedTotalAmount}. Using backend total.`);
         }
 
-        const salesCollectionRef = collection(db, "salesTransactions");
-        const newSaleRef = doc(salesCollectionRef); 
-        transaction.set(newSaleRef, {
+        const salesDocRef = doc(db, "salesTransactions", saleTransactionId);
+        transaction.set(salesDocRef, {
           items: soldItemsForTransaction,
           totalAmount: calculatedTotalAmount,
           transactionDate: Timestamp.now(),
@@ -212,34 +255,67 @@ export default function RecordSaleForm() {
           isDeleted: false,
         });
 
-        for (const { ref: stockItemRef, snapshot: stockItemSnap, formItem, originalMasterItemId } of stockItemRefsAndData) {
-          const currentStallStockData = stockItemSnap.data() as StockItem;
-          const newStallQuantity = currentStallStockData.quantity - formItem.quantity;
-          
-          transaction.update(stockItemRef, { 
-            quantity: newStallQuantity,
+        stockUpdatesAndLogs.forEach(update => {
+          transaction.update(update.ref, { 
+            quantity: update.newQuantity,
             lastUpdated: Timestamp.now().toDate().toISOString() 
           });
+        });
 
-          // If the stall item was linked to a master item, update master stock too
-          if (originalMasterItemId) {
-            const masterStockRef = doc(db, "stockItems", originalMasterItemId);
-            const masterStockSnap = await transaction.get(masterStockRef);
-            if (masterStockSnap.exists()) {
-              const masterItemData = masterStockSnap.data() as StockItem;
-              // We assume master stock was sufficient due to allocation logic,
-              // but good practice to ensure not going negative.
-              const newMasterQuantity = Math.max(0, masterItemData.quantity - formItem.quantity);
-              transaction.update(masterStockRef, {
-                quantity: newMasterQuantity,
-                lastUpdated: Timestamp.now().toDate().toISOString()
-              });
-            } else {
-              console.warn(`Master stock item with ID ${originalMasterItemId} not found when trying to update after stall sale.`);
-            }
-          }
-        }
+        masterStockUpdatesAndLogs.forEach(update => {
+          transaction.update(update.ref, {
+            quantity: update.newQuantity,
+            lastUpdated: Timestamp.now().toDate().toISOString()
+          });
+        });
       });
+
+      // Post-transaction logging
+      const stockItemsProcessedForLogging = new Set<string>();
+      for (const formItem of values.items) {
+          const soldStallItem = availableItems.find(i => i.id === formItem.itemId); // Get full item data
+          if (soldStallItem && !stockItemsProcessedForLogging.has(soldStallItem.id)) {
+              await logStockMovement(user, {
+                  stockItemId: soldStallItem.id,
+                  siteId: soldStallItem.siteId!,
+                  stallId: soldStallItem.stallId,
+                  masterStockItemIdForContext: soldStallItem.originalMasterItemId,
+                  type: 'SALE_FROM_STALL',
+                  quantityChange: -formItem.quantity,
+                  quantityBefore: soldStallItem.quantity, // This is pre-transaction qty
+                  quantityAfter: soldStallItem.quantity - formItem.quantity,
+                  notes: `Sale ID: ${saleTransactionId}`,
+                  relatedTransactionId: saleTransactionId,
+              });
+              stockItemsProcessedForLogging.add(soldStallItem.id);
+
+              if (soldStallItem.originalMasterItemId) {
+                  // Need to fetch master item's state *before* this sale for accurate logging
+                  // This might be complex if multiple items in sale link to same master
+                  // For simplicity, we might log based on inferred master state or skip detailed master log here
+                  // and rely on a separate process or direct master item updates to log their own changes.
+                  // Let's assume for now the SALE_AFFECTS_MASTER log is handled if master's qty is directly updated.
+                  // We can create a log for the master item based on the info we have.
+                   const masterItemDoc = await getDoc(doc(db, "stockItems", soldStallItem.originalMasterItemId));
+                   if(masterItemDoc.exists()){
+                       const masterItemData = masterItemDoc.data() as StockItem;
+                        await logStockMovement(user, {
+                            stockItemId: soldStallItem.originalMasterItemId,
+                            siteId: masterItemData.siteId!,
+                            stallId: null, // Master stock
+                            type: 'SALE_AFFECTS_MASTER',
+                            quantityChange: -formItem.quantity,
+                            quantityBefore: masterItemData.quantity + formItem.quantity, // Approximate before this specific sale item's effect
+                            quantityAfter: masterItemData.quantity, // Current quantity after transaction
+                            notes: `Linked to sale of stall item ${soldStallItem.name} (ID: ${soldStallItem.id}), Sale ID: ${saleTransactionId}`,
+                            relatedTransactionId: saleTransactionId,
+                            linkedStockItemId: soldStallItem.id,
+                        });
+                   }
+              }
+          }
+      }
+
 
       toast({
         title: "Sale Recorded Successfully!",
@@ -279,7 +355,7 @@ export default function RecordSaleForm() {
     }
   };
 
-  if (!activeSiteId || !activeStallId) { // A specific stall must be active
+  if (!activeSiteId || !activeStallId) { 
     return (
       <Alert variant="default" className="max-w-2xl mx-auto shadow-lg border-primary/50">
         <Info className="h-4 w-4" />

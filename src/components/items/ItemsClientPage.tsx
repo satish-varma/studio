@@ -36,10 +36,16 @@ if (!getApps().length) {
 export default function ItemsClientPage() {
   const { user, activeSiteId } = useAuth();
 
-  const [searchTerm, setSearchTerm] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("all");
-  const [stockStatusFilter, setStockStatusFilter] = useState("all");
-  const [stallFilterOption, setStallFilterOption] = useState("all");
+  // Initialize filter states from user defaults or component defaults
+  const [searchTerm, setSearchTerm] = useState(() => user?.defaultItemSearchTerm || "");
+  const [categoryFilter, setCategoryFilter] = useState(() => user?.defaultItemCategoryFilter || "all");
+  const [stockStatusFilter, setStockStatusFilter] = useState(() => user?.defaultItemStockStatusFilter || "all");
+  const [stallFilterOption, setStallFilterOption] = useState(() => {
+    // If user has a default stall, and it's for the *current* active site, use it.
+    // Otherwise, use their general default, or "all".
+    // This logic might need refinement if activeSiteId changes and defaultStallOption is for a different site.
+    return user?.defaultItemStallFilterOption || "all";
+  });
 
   const [items, setItems] = useState<StockItem[]>([]);
   const [stallsForFilterDropdown, setStallsForFilterDropdown] = useState<Stall[]>([]);
@@ -48,6 +54,18 @@ export default function ItemsClientPage() {
 
   const [loadingData, setLoadingData] = useState(true);
   const [errorData, setErrorData] = useState<string | null>(null);
+  
+  // Effect to update filters if user context changes (e.g., after profile update)
+  useEffect(() => {
+    if (user) {
+      setSearchTerm(user.defaultItemSearchTerm || "");
+      setCategoryFilter(user.defaultItemCategoryFilter || "all");
+      setStockStatusFilter(user.defaultItemStockStatusFilter || "all");
+      // Potentially more complex logic for stallFilterOption if it depends on activeSiteId synchronicity
+      setStallFilterOption(user.defaultItemStallFilterOption || "all");
+    }
+  }, [user]);
+
 
   const fetchSupportingDataAndItems = useCallback(async () => {
     if (!user) {
@@ -69,7 +87,6 @@ export default function ItemsClientPage() {
     setErrorData(null);
 
     try {
-      // Fetch sites map
       const sitesCollectionRef = collection(db, "sites");
       const sitesSnapshot = await getDocs(sitesCollectionRef);
       const newSitesMap: Record<string, string> = {};
@@ -77,9 +94,7 @@ export default function ItemsClientPage() {
         newSitesMap[doc.id] = (doc.data() as Site).name;
       });
       setSitesMap(newSitesMap);
-      console.log("ItemsClientPage: Successfully fetched sitesMap using getDocs.");
 
-      // Fetch all stalls map
       const allStallsCollectionRef = collection(db, "stalls");
       const allStallsSnapshot = await getDocs(allStallsCollectionRef);
       const newStallsMap: Record<string, string> = {};
@@ -87,23 +102,26 @@ export default function ItemsClientPage() {
         newStallsMap[doc.id] = (doc.data() as Stall).name;
       });
       setStallsMap(newStallsMap);
-      console.log("ItemsClientPage: Successfully fetched stallsMap using getDocs.");
 
-      // Fetch stalls for filter dropdown (specific to activeSiteId)
       if (activeSiteId) {
-        console.log(`ItemsClientPage: Attempting to fetch stalls with getDocs for siteId: ${activeSiteId}`);
         const qStalls = query(collection(db, "stalls"), where("siteId", "==", activeSiteId));
         const querySnapshotStalls = await getDocs(qStalls);
         const fetchedStalls = querySnapshotStalls.docs.map(doc => ({ id: doc.id, ...doc.data() } as Stall));
         fetchedStalls.sort((a, b) => a.name.localeCompare(b.name));
         setStallsForFilterDropdown(fetchedStalls);
-        console.log(`ItemsClientPage: Successfully fetched ${fetchedStalls.length} stalls for dropdown.`);
+        
+        // If current stallFilterOption is a specific stall ID that's not in the new list for this site, reset it
+        if (stallFilterOption !== 'all' && stallFilterOption !== 'master' && !fetchedStalls.find(s => s.id === stallFilterOption)) {
+            setStallFilterOption('all'); // Or user.defaultItemStallFilterOption if that's also for this site
+        }
+
       } else {
         setStallsForFilterDropdown([]);
-        console.log("ItemsClientPage: activeSiteId is null, clearing stall dropdown.");
+        if (stallFilterOption !== 'all' && stallFilterOption !== 'master') {
+             setStallFilterOption('all'); // Reset if no active site but a specific stall was selected
+        }
       }
 
-      // Fetch stock items based on activeSiteId and stallFilterOption
       if (!activeSiteId) {
         setItems([]);
         setErrorData(user.role === 'admin' ? "Admin: Please select a site to view its stock." : "Please select an active site to view stock items.");
@@ -127,7 +145,6 @@ export default function ItemsClientPage() {
         } as StockItem));
         fetchedItems.sort((a, b) => a.name.localeCompare(b.name));
         setItems(fetchedItems);
-        console.log(`ItemsClientPage: Successfully fetched ${fetchedItems.length} stock items with getDocs for siteId ${activeSiteId} and stallFilter ${stallFilterOption}.`);
       }
 
     } catch (error: any) {
@@ -141,11 +158,11 @@ export default function ItemsClientPage() {
     } finally {
       setLoadingData(false);
     }
-  }, [user, activeSiteId, stallFilterOption, db]);
+  }, [user, activeSiteId, stallFilterOption, db]); // stallFilterOption is a dependency now
 
   useEffect(() => {
     fetchSupportingDataAndItems();
-  }, [fetchSupportingDataAndItems]);
+  }, [fetchSupportingDataAndItems]); // fetchSupportingDataAndItems itself changes when its deps change.
 
 
   const uniqueCategories = useMemo(() => {
@@ -157,10 +174,10 @@ export default function ItemsClientPage() {
     return items.filter(item => {
       const matchesSearchTerm = item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                                 (item.category && item.category.toLowerCase().includes(searchTerm.toLowerCase()));
-      const matchesCategory = categoryFilter === "all" || item.category === categoryFilter;
+      const matchesCategory = categoryFilter === "all" || !categoryFilter || item.category === categoryFilter;
 
       let matchesStockStatus = true;
-      if (stockStatusFilter !== "all") {
+      if (stockStatusFilter && stockStatusFilter !== "all") {
         const isLowStock = item.quantity <= item.lowStockThreshold;
         const isOutOfStock = item.quantity === 0;
         if (stockStatusFilter === "in-stock") matchesStockStatus = !isLowStock && !isOutOfStock;
@@ -211,7 +228,7 @@ export default function ItemsClientPage() {
             sitesMap={sitesMap}
             stallsMap={stallsMap}
             availableStallsForAllocation={stallsForFilterDropdown}
-            onDataNeedsRefresh={fetchSupportingDataAndItems} // Pass the refresh function
+            onDataNeedsRefresh={fetchSupportingDataAndItems} 
         />
       )}
     </div>
