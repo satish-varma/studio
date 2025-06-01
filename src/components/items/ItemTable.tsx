@@ -13,7 +13,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { StockItem, Stall } from "@/types";
-import { MoreHorizontal, Edit, Trash2, PackageOpen, Loader2, Building, Store, MoveRight, Undo2, Link2Icon } from "lucide-react";
+import { MoreHorizontal, Edit, Trash2, PackageOpen, Loader2, Building, Store, MoveRight, Undo2, Link2Icon, Shuffle } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -82,8 +82,8 @@ interface ItemTableProps {
   items: StockItem[];
   sitesMap: Record<string, string>;
   stallsMap: Record<string, string>;
-  availableStallsForAllocation: Stall[];
-  onDataNeedsRefresh: () => void; 
+  availableStallsForAllocation: Stall[]; // Stalls for the currently active site
+  onDataNeedsRefresh: () => void;
 }
 
 export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAllocation, onDataNeedsRefresh }: ItemTableProps) {
@@ -105,6 +105,12 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   const [quantityToReturn, setQuantityToReturn] = useState<number | string>("");
   const [isReturning, setIsReturning] = useState(false);
 
+  const [itemToTransfer, setItemToTransfer] = useState<StockItem | null>(null);
+  const [showTransferDialog, setShowTransferDialog] = useState(false);
+  const [destinationStallId, setDestinationStallId] = useState("");
+  const [quantityToTransfer, setQuantityToTransfer] = useState<number | string>("");
+  const [isTransferring, setIsTransferring] = useState(false);
+
 
   const handleEdit = (itemId: string) => {
     router.push(`/items/${itemId}/edit`);
@@ -118,7 +124,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         title: "Item Deleted",
         description: `${itemName} has been successfully deleted.`,
       });
-      onDataNeedsRefresh(); 
+      onDataNeedsRefresh();
     } catch (error: any) {
       console.error("Error deleting item:", error);
       toast({
@@ -147,26 +153,28 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     try {
       await runTransaction(db, async (transaction) => {
         const itemRef = doc(db, "stockItems", stockUpdateItem.id);
-        let masterItemRef: DocumentReference | null = null;
-        let masterItemSnap: DocumentSnapshot | null = null;
-        let oldQuantity = 0;
-
         const itemSnap = await transaction.get(itemRef);
+
         if (!itemSnap.exists()) {
           throw new Error("Item being updated not found.");
         }
         const currentItemData = itemSnap.data() as StockItem;
-        oldQuantity = currentItemData.quantity;
+        const oldQuantity = currentItemData.quantity;
+        const quantityDelta = updatedQuantityNum - oldQuantity;
 
+        // If it's a stall item with a master link, prepare to read master
+        let masterItemRef: DocumentReference | null = null;
+        let masterItemSnap: DocumentSnapshot | null = null;
         if (currentItemData.stallId && currentItemData.originalMasterItemId) {
           masterItemRef = doc(db, "stockItems", currentItemData.originalMasterItemId);
-          masterItemSnap = await transaction.get(masterItemRef);
+          masterItemSnap = await transaction.get(masterItemRef); // Read master
           if (!masterItemSnap?.exists()) {
             console.warn(`Master stock item ${currentItemData.originalMasterItemId} not found. Stall stock update will proceed, but master stock cannot be adjusted.`);
-            masterItemRef = null; // Nullify if not found
+            masterItemRef = null; // Nullify if not found, so no master update attempted
           }
         }
-        
+
+        // Perform writes after all reads
         transaction.update(itemRef, {
           quantity: updatedQuantityNum,
           lastUpdated: new Date().toISOString(),
@@ -174,12 +182,10 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
 
         if (masterItemRef && masterItemSnap && masterItemSnap.exists()) {
           const masterItemData = masterItemSnap.data() as StockItem;
-          const quantityDelta = updatedQuantityNum - oldQuantity; 
-          
-          let newMasterQuantity = masterItemData.quantity - quantityDelta;
+          const newMasterQuantity = masterItemData.quantity - quantityDelta; // if delta is positive (increase in stall), master decreases. if delta is negative (decrease in stall), master also effectively decreases by abs(delta)
 
           transaction.update(masterItemRef, {
-            quantity: Math.max(0, newMasterQuantity), 
+            quantity: Math.max(0, newMasterQuantity),
             lastUpdated: new Date().toISOString(),
           });
         }
@@ -187,11 +193,11 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
 
       toast({
         title: "Stock Updated",
-        description: `Stock quantity for "${stockUpdateItem.name}" updated to ${updatedQuantityNum}. Master stock (if applicable) adjusted.`,
+        description: `Stock quantity for "${stockUpdateItem.name}" updated to ${updatedQuantityNum}. Master stock (if applicable) adjusted accordingly.`,
       });
       setStockUpdateItem(null);
       setNewQuantity("");
-      onDataNeedsRefresh(); 
+      onDataNeedsRefresh();
     } catch (error: any) {
       console.error("Error updating stock:", error);
       toast({
@@ -203,6 +209,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       setIsUpdatingStock(false);
     }
   };
+
 
   const handleOpenAllocateDialog = (item: StockItem) => {
     setItemToAllocate(item);
@@ -236,51 +243,41 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         if (currentMasterStock.quantity < numQuantityToAllocate) {
           throw new Error(`Concurrent update: Not enough master stock. Available: ${currentMasterStock.quantity}`);
         }
-        
-        const stallItemsCollectionRef = collection(db, "stockItems");
-        const q = query(stallItemsCollectionRef,
-                        where("originalMasterItemId", "==", itemToAllocate.id),
-                        where("stallId", "==", targetStallIdForAllocation));
-        
-        // This getDocs needs to happen OUTSIDE the transaction or be replaced by transaction.get if we know the doc ID.
-        // For this pattern (check if exists, then create or update), it's complex.
-        // A simpler approach if a unique stall item per master item per stall is guaranteed:
-        // Attempt to read. If exists, update. If not, create.
-        // For now, we assume direct reads are okay if we accept potential (rare) race conditions or use a Function.
-        // A robust solution uses a specific structure or Cloud Function.
-        // Here, we'll try to read within transaction for existing, or prepare for new.
-        
-        const existingStallItemQuerySnap = await getDocs(q); // This is still outside transaction.
-                                                            // For strict transactionality, we'd need a different approach.
-                                                            // e.g. using a pre-defined ID for the stall item.
 
+        // Check if item already exists at target stall (linked to the same master item)
+        const stallItemsQuery = query(
+          collection(db, "stockItems"),
+          where("originalMasterItemId", "==", itemToAllocate.id),
+          where("stallId", "==", targetStallIdForAllocation)
+        );
+        // This getDocs is problematic inside a transaction. We'll query first, then read the specific doc inside.
+        // For a more robust solution, structure data so you can directly get the targetStallItemRef if it exists.
+        // Or, accept that this specific check for existing stall item happens outside strict transactionality for getDocs.
+        // A common pattern: try to get. If not found, create. If found, update. All within transaction.
+        const existingStallItemsSnap = await getDocs(stallItemsQuery); // Ideally, this is avoided or handled differently.
         let targetStallItemRef: DocumentReference;
-        let performStallItemUpdate = false;
         let existingStallItemData: StockItem | null = null;
 
-
-        if (!existingStallItemQuerySnap.empty) {
-          const existingStallItemDoc = existingStallItemQuerySnap.docs[0];
-          targetStallItemRef = existingStallItemDoc.ref;
-          // To be transactionally safe, re-read inside:
-          const existingStallItemSnapInsideTx = await transaction.get(targetStallItemRef);
-          if (existingStallItemSnapInsideTx.exists()) {
-            existingStallItemData = existingStallItemSnapInsideTx.data() as StockItem;
-            performStallItemUpdate = true;
-          } else {
-             // Item disappeared between query and transaction read, treat as new creation
-             targetStallItemRef = doc(collection(db, "stockItems")); 
-          }
+        if (!existingStallItemsSnap.empty) {
+            targetStallItemRef = existingStallItemsSnap.docs[0].ref;
+            const targetStallItemSnap = await transaction.get(targetStallItemRef);
+            if (targetStallItemSnap.exists()) {
+                existingStallItemData = targetStallItemSnap.data() as StockItem;
+            } else {
+                 // Discrepancy, item might have been deleted. Treat as new.
+                 targetStallItemRef = doc(collection(db, "stockItems"));
+            }
         } else {
-          targetStallItemRef = doc(collection(db, "stockItems")); 
+            targetStallItemRef = doc(collection(db, "stockItems"));
         }
-        
-        if (performStallItemUpdate && existingStallItemData) { 
+
+
+        if (existingStallItemData) {
             transaction.update(targetStallItemRef, {
                 quantity: existingStallItemData.quantity + numQuantityToAllocate,
                 lastUpdated: new Date().toISOString(),
             });
-        } else { 
+        } else {
             const newStallItemDataToSave: Omit<StockItem, 'id'> = {
                 name: currentMasterStock.name,
                 category: currentMasterStock.category,
@@ -309,7 +306,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       });
       setShowAllocateDialog(false);
       setItemToAllocate(null);
-      onDataNeedsRefresh(); 
+      onDataNeedsRefresh();
     } catch (error: any) {
       console.error("Error allocating stock:", error);
       toast({
@@ -324,7 +321,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
 
   const handleOpenReturnDialog = (item: StockItem) => {
     setItemToReturn(item);
-    setQuantityToReturn(1); 
+    setQuantityToReturn(1);
     setShowReturnDialog(true);
   };
 
@@ -361,7 +358,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         if (currentStallStock.quantity < numQuantityToReturn) {
           throw new Error(`Concurrent update: Not enough stall stock to return. Available: ${currentStallStock.quantity}`);
         }
-        
+
         transaction.update(masterItemRef, {
           quantity: currentMasterStock.quantity + numQuantityToReturn,
           lastUpdated: new Date().toISOString(),
@@ -380,7 +377,8 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       setShowReturnDialog(false);
       setItemToReturn(null);
       onDataNeedsRefresh();
-    } catch (error: any)
+    }
+    catch (error: any)
     {
       console.error("Error returning stock to master:", error);
       toast({
@@ -390,6 +388,104 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       });
     } finally {
       setIsReturning(false);
+    }
+  };
+
+  const handleOpenTransferDialog = (item: StockItem) => {
+    setItemToTransfer(item);
+    setQuantityToTransfer(1);
+    setDestinationStallId("");
+    setShowTransferDialog(true);
+  };
+
+  const handleConfirmTransfer = async () => {
+    if (!itemToTransfer || !itemToTransfer.stallId || !destinationStallId || quantityToTransfer === "" || Number(quantityToTransfer) <= 0) {
+      toast({ title: "Invalid Input", description: "Please select a destination stall and enter a valid quantity > 0.", variant: "destructive" });
+      return;
+    }
+    if (itemToTransfer.stallId === destinationStallId) {
+      toast({ title: "Invalid Destination", description: "Source and destination stalls cannot be the same.", variant: "destructive" });
+      return;
+    }
+    const numQuantityToTransfer = Number(quantityToTransfer);
+    if (numQuantityToTransfer > itemToTransfer.quantity) {
+      toast({ title: "Insufficient Stock", description: `Cannot transfer ${numQuantityToTransfer}. Only ${itemToTransfer.quantity} available at source stall.`, variant: "destructive" });
+      return;
+    }
+
+    setIsTransferring(true);
+    try {
+      await runTransaction(db, async (transaction) => {
+        const sourceItemRef = doc(db, "stockItems", itemToTransfer.id);
+        const sourceItemSnap = await transaction.get(sourceItemRef);
+
+        if (!sourceItemSnap.exists()) throw new Error("Source item not found.");
+        const sourceItemData = sourceItemSnap.data() as StockItem;
+        if (sourceItemData.quantity < numQuantityToTransfer) throw new Error(`Concurrent update: Not enough source stock. Available: ${sourceItemData.quantity}`);
+
+        let destinationItemRef: DocumentReference | null = null;
+        let destinationItemSnap: DocumentSnapshot | null = null;
+
+        // If source item has master link, try to find destination item with same master link
+        if (sourceItemData.originalMasterItemId) {
+          const q = query(
+            collection(db, "stockItems"),
+            where("stallId", "==", destinationStallId),
+            where("originalMasterItemId", "==", sourceItemData.originalMasterItemId)
+          );
+          // This getDocs is not ideal inside a transaction for finding the ref.
+          // If we knew the destination doc ID, we'd use transaction.get().
+          // For now, we'll query outside then read its ref inside. This has a small race condition window.
+          const destQuerySnap = await getDocs(q);
+          if (!destQuerySnap.empty) {
+            destinationItemRef = destQuerySnap.docs[0].ref;
+            destinationItemSnap = await transaction.get(destinationItemRef); // Read inside transaction
+          }
+        }
+        // If no originalMasterItemId, or if no item found via originalMasterItemId at destination,
+        // we'll create a new one or look for one by other means (simplified for now to create new).
+
+        // Writes
+        transaction.update(sourceItemRef, {
+          quantity: sourceItemData.quantity - numQuantityToTransfer,
+          lastUpdated: new Date().toISOString()
+        });
+
+        if (destinationItemSnap && destinationItemSnap.exists()) { // Found existing item at destination
+          const destItemData = destinationItemSnap.data() as StockItem;
+          transaction.update(destinationItemRef!, {
+            quantity: destItemData.quantity + numQuantityToTransfer,
+            lastUpdated: new Date().toISOString()
+          });
+        } else { // Create new item at destination
+          const newDestItemRef = doc(collection(db, "stockItems"));
+          transaction.set(newDestItemRef, {
+            name: sourceItemData.name,
+            category: sourceItemData.category,
+            quantity: numQuantityToTransfer,
+            unit: sourceItemData.unit,
+            price: sourceItemData.price,
+            lowStockThreshold: sourceItemData.lowStockThreshold,
+            imageUrl: sourceItemData.imageUrl,
+            siteId: sourceItemData.siteId,
+            stallId: destinationStallId,
+            originalMasterItemId: sourceItemData.originalMasterItemId || null, // Preserve link
+            lastUpdated: new Date().toISOString(),
+          });
+        }
+      });
+      toast({
+        title: "Transfer Successful",
+        description: `${numQuantityToTransfer} unit(s) of ${itemToTransfer.name} transferred.`,
+      });
+      setShowTransferDialog(false);
+      setItemToTransfer(null);
+      onDataNeedsRefresh();
+    } catch (error: any) {
+      console.error("Error transferring stock:", error);
+      toast({ title: "Transfer Failed", description: error.message, variant: "destructive" });
+    } finally {
+      setIsTransferring(false);
     }
   };
 
@@ -426,6 +522,11 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   const stallsForCurrentSite = itemToAllocate?.siteId
     ? availableStallsForAllocation.filter(s => s.siteId === itemToAllocate.siteId)
     : [];
+  
+  const destinationStallsForTransfer = itemToTransfer?.siteId
+    ? availableStallsForAllocation.filter(s => s.siteId === itemToTransfer.siteId && s.id !== itemToTransfer.stallId)
+    : [];
+
 
   return (
     <>
@@ -451,7 +552,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
               const isOutOfStock = item.quantity === 0;
 
               const siteNameDisplay = item.siteId ? (sitesMap[item.siteId] || `Site ID: ${item.siteId.substring(0,6)}...`) : "N/A";
-              
+
               let stallDisplayElement: React.ReactNode;
               if (item.stallId) {
                   const stallName = stallsMap[item.stallId] || `Stall ID: ${item.stallId.substring(0,6)}...`;
@@ -537,9 +638,14 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                               <PackageOpen className="mr-2 h-4 w-4" /> Update Stock
                             </DropdownMenuItem>
                           </DialogTrigger>
-                           {item.stallId === null && item.siteId && ( 
-                            <DropdownMenuItem onClick={() => handleOpenAllocateDialog(item)}>
+                           {item.stallId === null && item.siteId && (
+                            <DropdownMenuItem onClick={() => handleOpenAllocateDialog(item)} disabled={availableStallsForAllocation.filter(s => s.siteId === item.siteId).length === 0}>
                               <MoveRight className="mr-2 h-4 w-4" /> Allocate to Stall
+                            </DropdownMenuItem>
+                          )}
+                          {item.stallId !== null && (
+                            <DropdownMenuItem onClick={() => handleOpenTransferDialog(item)} disabled={availableStallsForAllocation.filter(s => s.siteId === item.siteId && s.id !== item.stallId).length === 0}>
+                                <Shuffle className="mr-2 h-4 w-4" /> Transfer to Stall
                             </DropdownMenuItem>
                           )}
                           {item.stallId !== null && item.originalMasterItemId && (
@@ -563,6 +669,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                                 <AlertDialogDescription>
                                   This action cannot be undone. This will permanently delete the item "{item.name}".
                                   If this is master stock, any allocated stall stock derived from it will NOT be automatically deleted.
+                                  If this is stall stock, the linked master stock will NOT be automatically adjusted by this deletion.
                                 </AlertDialogDescription>
                               </AlertDialogHeader>
                               <AlertDialogFooter>
@@ -581,7 +688,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                           <DialogTitle>Update Stock for {stockUpdateItem?.name}</DialogTitle>
                           <DialogDescription>
                             Current quantity: {stockUpdateItem?.quantity} {stockUpdateItem?.unit} (
-                              { stockUpdateItem?.stallId 
+                              { stockUpdateItem?.stallId
                                 ? stallsMap[stockUpdateItem.stallId] || `Stall ID: ${stockUpdateItem.stallId.substring(0,6)}...`
                                 : stockUpdateItem?.siteId ? "Master Stock" : "Unassigned"
                               }
@@ -634,13 +741,13 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             </AlertDialogHeader>
             <div className="space-y-4 py-2">
               <div>
-                <Label htmlFor="targetStall">Target Stall</Label>
+                <Label htmlFor="targetStallForAllocation">Target Stall</Label>
                 <Select
                   value={targetStallIdForAllocation}
                   onValueChange={setTargetStallIdForAllocation}
                   disabled={isAllocating || stallsForCurrentSite.length === 0}
                 >
-                  <SelectTrigger id="targetStall" className="bg-input">
+                  <SelectTrigger id="targetStallForAllocation" className="bg-input">
                     <SelectValue placeholder={stallsForCurrentSite.length === 0 ? "No stalls in this site" : "Select target stall"} />
                   </SelectTrigger>
                   <SelectContent>
@@ -704,8 +811,8 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             </div>
             <AlertDialogFooter>
               <AlertDialogCancel onClick={() => setShowReturnDialog(false)} disabled={isReturning}>Cancel</AlertDialogCancel>
-              <AlertDialogAction 
-                onClick={handleConfirmReturnToMaster} 
+              <AlertDialogAction
+                onClick={handleConfirmReturnToMaster}
                 disabled={isReturning || Number(quantityToReturn) <= 0 || Number(quantityToReturn) > itemToReturn.quantity}
               >
                 {isReturning && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -713,6 +820,65 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
+        </AlertDialog>
+      )}
+
+      {itemToTransfer && (
+        <AlertDialog open={showTransferDialog} onOpenChange={setShowTransferDialog}>
+            <AlertDialogContent>
+                <AlertDialogHeader>
+                    <AlertDialogTitle>Transfer Stock: {itemToTransfer.name}</AlertDialogTitle>
+                    <AlertDialogDescription>
+                        From: {stallsMap[itemToTransfer.stallId!] || 'Unknown Source Stall'} (Current Qty: {itemToTransfer.quantity} {itemToTransfer.unit})
+                        <br />
+                        Site: {sitesMap[itemToTransfer.siteId!] || 'Unknown Site'}
+                    </AlertDialogDescription>
+                </AlertDialogHeader>
+                <div className="space-y-4 py-2">
+                    <div>
+                        <Label htmlFor="destinationStall">Destination Stall</Label>
+                        <Select
+                            value={destinationStallId}
+                            onValueChange={setDestinationStallId}
+                            disabled={isTransferring || destinationStallsForTransfer.length === 0}
+                        >
+                            <SelectTrigger id="destinationStall" className="bg-input">
+                                <SelectValue placeholder={destinationStallsForTransfer.length === 0 ? "No other stalls in this site" : "Select destination stall"} />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {destinationStallsForTransfer.map((stall) => (
+                                    <SelectItem key={stall.id} value={stall.id}>
+                                        {stall.name} ({stall.stallType})
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div>
+                        <Label htmlFor="quantityToTransfer">Quantity to Transfer</Label>
+                        <Input
+                            id="quantityToTransfer"
+                            type="number"
+                            value={quantityToTransfer}
+                            onChange={(e) => setQuantityToTransfer(e.target.value)}
+                            min="1"
+                            max={itemToTransfer.quantity}
+                            className="bg-input"
+                            disabled={isTransferring}
+                        />
+                    </div>
+                </div>
+                <AlertDialogFooter>
+                    <AlertDialogCancel onClick={() => setShowTransferDialog(false)} disabled={isTransferring}>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                        onClick={handleConfirmTransfer}
+                        disabled={isTransferring || !destinationStallId || Number(quantityToTransfer) <= 0 || Number(quantityToTransfer) > itemToTransfer.quantity}
+                    >
+                        {isTransferring && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        Confirm Transfer
+                    </AlertDialogAction>
+                </AlertDialogFooter>
+            </AlertDialogContent>
         </AlertDialog>
       )}
     </>
