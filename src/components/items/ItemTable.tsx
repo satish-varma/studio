@@ -13,7 +13,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { StockItem, Stall } from "@/types";
-import { MoreHorizontal, Edit, Trash2, PackageOpen, Loader2, Building, Store, MoveRight } from "lucide-react";
+import { MoreHorizontal, Edit, Trash2, PackageOpen, Loader2, Building, Store, MoveRight, Undo2 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -60,7 +60,8 @@ import {
   where,
   getDocs,
   writeBatch,
-  serverTimestamp
+  serverTimestamp,
+  Timestamp
 } from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
@@ -96,6 +97,11 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   const [quantityToAllocate, setQuantityToAllocate] = useState<number | string>("");
   const [isAllocating, setIsAllocating] = useState(false);
 
+  const [itemToReturn, setItemToReturn] = useState<StockItem | null>(null);
+  const [showReturnDialog, setShowReturnDialog] = useState(false);
+  const [quantityToReturn, setQuantityToReturn] = useState<number | string>("");
+  const [isReturning, setIsReturning] = useState(false);
+
 
   const handleEdit = (itemId: string) => {
     router.push(`/items/${itemId}/edit`);
@@ -109,7 +115,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         title: "Item Deleted",
         description: `${itemName} has been successfully deleted.`,
       });
-      onDataNeedsRefresh(); // Refresh data
+      onDataNeedsRefresh(); 
     } catch (error: any) {
       console.error("Error deleting item:", error);
       toast({
@@ -145,7 +151,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       });
       setStockUpdateItemId(null);
       setNewQuantity("");
-      onDataNeedsRefresh(); // Refresh data
+      onDataNeedsRefresh(); 
     } catch (error: any) {
       console.error("Error updating stock:", error);
       toast({
@@ -195,7 +201,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         const q = query(stallItemsRef,
                         where("originalMasterItemId", "==", itemToAllocate.id),
                         where("stallId", "==", targetStallIdForAllocation));
-        const existingStallItemQuerySnap = await getDocs(q);
+        const existingStallItemQuerySnap = await getDocs(q); // Use getDocs, not transaction.get for queries
 
         let targetStallItemRef;
         let newStallItemQuantity = numQuantityToAllocate;
@@ -241,7 +247,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       });
       setShowAllocateDialog(false);
       setItemToAllocate(null);
-      onDataNeedsRefresh(); // Refresh data
+      onDataNeedsRefresh(); 
     } catch (error: any) {
       console.error("Error allocating stock:", error);
       toast({
@@ -253,6 +259,78 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       setIsAllocating(false);
     }
   };
+
+  const handleOpenReturnDialog = (item: StockItem) => {
+    setItemToReturn(item);
+    setQuantityToReturn(1); 
+    setShowReturnDialog(true);
+  };
+
+  const handleConfirmReturnToMaster = async () => {
+    if (!itemToReturn || !itemToReturn.originalMasterItemId || quantityToReturn === "" || Number(quantityToReturn) <= 0) {
+      toast({ title: "Invalid Input", description: "Please enter a valid quantity greater than 0 to return.", variant: "destructive" });
+      return;
+    }
+    const numQuantityToReturn = Number(quantityToReturn);
+    if (numQuantityToReturn > itemToReturn.quantity) {
+      toast({ title: "Insufficient Stall Stock", description: `Cannot return ${numQuantityToReturn}. Only ${itemToReturn.quantity} available in this stall.`, variant: "destructive" });
+      return;
+    }
+
+    setIsReturning(true);
+    try {
+      await runTransaction(db, async (transaction) => {
+        const stallItemRef = doc(db, "stockItems", itemToReturn.id);
+        const masterItemRef = doc(db, "stockItems", itemToReturn.originalMasterItemId!);
+
+        const stallItemSnap = await transaction.get(stallItemRef);
+        const masterItemSnap = await transaction.get(masterItemRef);
+
+        if (!stallItemSnap.exists()) {
+          throw new Error("Stall item not found. Cannot proceed with return.");
+        }
+        if (!masterItemSnap.exists()) {
+          throw new Error("Original master stock item not found. Cannot return to a non-existent master item.");
+        }
+
+        const currentStallStock = stallItemSnap.data() as StockItem;
+        const currentMasterStock = masterItemSnap.data() as StockItem;
+
+        if (currentStallStock.quantity < numQuantityToReturn) {
+          throw new Error(`Concurrent update: Not enough stall stock to return. Available: ${currentStallStock.quantity}`);
+        }
+        
+        transaction.update(masterItemRef, {
+          quantity: currentMasterStock.quantity + numQuantityToReturn,
+          lastUpdated: new Date().toISOString(),
+        });
+
+        transaction.update(stallItemRef, {
+          quantity: currentStallStock.quantity - numQuantityToReturn,
+          lastUpdated: new Date().toISOString(),
+        });
+      });
+
+      toast({
+        title: "Stock Returned to Master",
+        description: `${numQuantityToReturn} unit(s) of ${itemToReturn.name} returned to master stock.`,
+      });
+      setShowReturnDialog(false);
+      setItemToReturn(null);
+      onDataNeedsRefresh();
+    } catch (error: any)
+    {
+      console.error("Error returning stock to master:", error);
+      toast({
+        title: "Return Failed",
+        description: error.message || "Could not return stock to master. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsReturning(false);
+    }
+  };
+
 
   const formatDate = (dateString?: string) => {
     if (!dateString) return "N/A";
@@ -382,6 +460,11 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                               <MoveRight className="mr-2 h-4 w-4" /> Allocate to Stall
                             </DropdownMenuItem>
                           )}
+                          {item.stallId !== null && item.originalMasterItemId && (
+                             <DropdownMenuItem onClick={() => handleOpenReturnDialog(item)}>
+                              <Undo2 className="mr-2 h-4 w-4" /> Return to Master
+                            </DropdownMenuItem>
+                          )}
                           <DropdownMenuSeparator />
                           <DropdownMenuItem onClick={() => handleEdit(item.id)}>
                             <Edit className="mr-2 h-4 w-4" /> Edit Item
@@ -505,6 +588,47 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           </AlertDialogContent>
         </AlertDialog>
       )}
+
+      {itemToReturn && (
+        <AlertDialog open={showReturnDialog} onOpenChange={setShowReturnDialog}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Return to Master Stock: {itemToReturn.name}</AlertDialogTitle>
+              <AlertDialogDescription>
+                Currently at stall: {stallsMap[itemToReturn.stallId!] || 'Unknown Stall'} (Quantity: {itemToReturn.quantity} {itemToReturn.unit}).
+                Returning to Master Stock for Site: {sitesMap[itemToReturn.siteId!] || 'Unknown Site'}.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="space-y-4 py-2">
+               <div>
+                <Label htmlFor="quantityToReturn">Quantity to Return</Label>
+                <Input
+                  id="quantityToReturn"
+                  type="number"
+                  value={quantityToReturn}
+                  onChange={(e) => setQuantityToReturn(e.target.value)}
+                  min="1"
+                  max={itemToReturn.quantity}
+                  className="bg-input"
+                  disabled={isReturning}
+                />
+              </div>
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => setShowReturnDialog(false)} disabled={isReturning}>Cancel</AlertDialogCancel>
+              <AlertDialogAction 
+                onClick={handleConfirmReturnToMaster} 
+                disabled={isReturning || Number(quantityToReturn) <= 0 || Number(quantityToReturn) > itemToReturn.quantity}
+              >
+                {isReturning && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Confirm Return
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </>
   );
 }
+
+    
