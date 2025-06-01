@@ -112,13 +112,15 @@ export default function ItemsClientPage() {
     setIsExportingCsv(true);
     try {
       const stockItemsCollectionRef = collection(db, "stockItems");
-      const q = query(stockItemsCollectionRef, orderBy("name"));
-      const querySnapshot = await getDocs(q);
-      
-      const allStockItems: StockItem[] = [];
-      querySnapshot.forEach((doc) => {
-        allStockItems.push({ id: doc.id, ...doc.data() } as StockItem);
-      });
+      // No need to re-query, use the 'items' state which should be up-to-date
+      // If you need a full fresh export, then re-query as below:
+      // const q = query(stockItemsCollectionRef, orderBy("name"));
+      // const querySnapshot = await getDocs(q);
+      // const allStockItems: StockItem[] = [];
+      // querySnapshot.forEach((doc) => {
+      //   allStockItems.push({ id: doc.id, ...doc.data() } as StockItem);
+      // });
+      const allStockItems = items; // Use current items state
 
       if (allStockItems.length === 0) {
         toast({ title: "No Stock Data", description: "There are no stock items to export.", variant: "default" });
@@ -174,30 +176,34 @@ export default function ItemsClientPage() {
   };
 
   const callGoogleSheetsApiForItemActions = async (
-    action: string, 
+    action: "importStockItems" | "exportStockItems", 
     setLoadingState: React.Dispatch<React.SetStateAction<boolean>>
   ) => {
     setLoadingState(true);
+    const friendlyAction = action.replace(/([A-Z])/g, ' $1').toLowerCase();
     toast({
       title: "Processing Google Sheets Request...",
-      description: `Attempting to ${action.replace(/([A-Z])/g, ' $1').toLowerCase()} stock items...`,
+      description: `Attempting to ${friendlyAction}...`,
     });
 
     try {
       const idToken = await auth.currentUser?.getIdToken();
       if (!idToken) {
-        toast({ title: "Authentication Error", description: "User not authenticated.", variant: "destructive" });
+        toast({ title: "Authentication Error", description: "User not authenticated. Please re-login.", variant: "destructive" });
         setLoadingState(false);
         return;
       }
 
-      const sheetId = prompt(`Enter Google Sheet ID for ${action.replace(/([A-Z])/g, ' $1').toLowerCase()} stock items:`);
-      if (!sheetId && action.toLowerCase().includes('import')) {
-        toast({ title: "Sheet ID Required", description: "Please provide a Google Sheet ID to import from.", variant: "destructive" });
-        setLoadingState(false);
-        return;
+      let sheetId: string | null = null;
+      if (action.toLowerCase().includes('import') || action.toLowerCase().includes('export')) {
+         sheetId = prompt(`Enter Google Sheet ID for ${friendlyAction} (optional for export, a new sheet will be created if blank):`);
+          if (action.toLowerCase().includes('import') && !sheetId) {
+            toast({ title: "Sheet ID Required", description: "Please provide a Google Sheet ID to import from.", variant: "default" });
+            setLoadingState(false);
+            return;
+         }
       }
-
+      
       const response = await fetch('/api/google-sheets-proxy', {
         method: 'POST',
         headers: {
@@ -205,7 +211,7 @@ export default function ItemsClientPage() {
           'Authorization': `Bearer ${idToken}`,
         },
         body: JSON.stringify({
-          action: action, // e.g., "importStockItems", "exportStockItems"
+          action: action, 
           dataType: 'stock',
           sheetId: sheetId || undefined,
         }),
@@ -214,13 +220,27 @@ export default function ItemsClientPage() {
       const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.error || `Failed to ${action}.`);
+         if (result.needsAuth && result.authUrl) {
+          toast({ 
+            title: "Authorization Required", 
+            description: "Please authorize StallSync to access your Google Sheets. Redirecting...",
+            duration: 5000 
+          });
+          window.location.href = result.authUrl;
+        } else {
+          throw new Error(result.error || `Failed to ${friendlyAction}.`);
+        }
+      } else {
+         toast({ title: "Success", description: result.message || `${friendlyAction} completed.` });
       }
 
-      toast({ title: "Success", description: result.message || `${action} completed.` });
     } catch (error: any) {
-      console.error(`Error during Google Sheets ${action} for stock items:`, error);
-      toast({ title: "Error", description: error.message || `Failed to ${action}. Backend setup required.`, variant: "destructive" });
+      console.error(`Error during Google Sheets ${friendlyAction} for stock items:`, error);
+      toast({ 
+        title: "Error", 
+        description: error.message || `Failed to ${friendlyAction}. Ensure backend and OAuth are correctly set up.`, 
+        variant: "destructive" 
+      });
     } finally {
       setLoadingState(false);
     }
@@ -257,7 +277,7 @@ export default function ItemsClientPage() {
               variant="outline" 
               className="w-full" 
               onClick={exportStockItemsToCsvLocal}
-              disabled={isExportingCsv || loadingItems}
+              disabled={isExportingCsv || loadingItems || items.length === 0}
             >
               {isExportingCsv ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -293,7 +313,7 @@ export default function ItemsClientPage() {
                   variant="outline" 
                   className="w-full" 
                   onClick={() => callGoogleSheetsApiForItemActions("exportStockItems", setIsProcessingSheetsExport)}
-                  disabled={isProcessingSheetsImport || isProcessingSheetsExport || loadingItems}
+                  disabled={isProcessingSheetsImport || isProcessingSheetsExport || loadingItems || items.length === 0}
               >
                   {isProcessingSheetsExport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SheetIcon className="mr-2 h-4 w-4 text-green-700" />}
                   Export Stock to Sheets
@@ -301,7 +321,7 @@ export default function ItemsClientPage() {
           </CardContent>
           <CardFooter>
               <p className="text-xs text-muted-foreground">
-                Note: Requires backend API route development for Google Sheets API calls.
+                Note: Requires backend API setup, Google Cloud OAuth config, and Redirect URI.
               </p>
           </CardFooter>
         </Card>

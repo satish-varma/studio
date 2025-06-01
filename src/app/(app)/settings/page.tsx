@@ -195,33 +195,35 @@ export default function SettingsPage() {
   };
 
   const callGoogleSheetsApi = async (
-    action: string, // e.g., "importStock", "exportStock", "importSales", "exportSales"
+    action: string, // e.g., "importStockItems", "exportStockItems", "importSalesHistory", "exportSalesHistory"
     setLoadingState: React.Dispatch<React.SetStateAction<boolean>>,
-    dataType: 'stock' | 'sales' // To differentiate which API endpoint to call
+    dataType: 'stock' | 'sales'
   ) => {
     setLoadingState(true);
+    const friendlyAction = action.replace(/([A-Z])/g, ' $1').toLowerCase();
     toast({
       title: "Processing Google Sheets Request...",
-      description: `Attempting to ${action.replace(/([A-Z])/g, ' $1').toLowerCase()}...`,
+      description: `Attempting to ${friendlyAction} for ${dataType} data...`,
     });
 
     try {
       const idToken = await auth.currentUser?.getIdToken();
       if (!idToken) {
-        toast({ title: "Authentication Error", description: "User not authenticated.", variant: "destructive" });
+        toast({ title: "Authentication Error", description: "User not authenticated. Please re-login.", variant: "destructive" });
         setLoadingState(false);
         return;
       }
       
-      // For import, you might need to get a sheetId from the user
-      // For export, you might ask for a sheet name or create a new one.
-      // This is simplified for now.
-      const sheetId = prompt(`Enter Google Sheet ID for ${action}:`);
-      if (!sheetId && action.toLowerCase().includes('import')) {
-        toast({ title: "Sheet ID Required", description: "Please provide a Google Sheet ID to import from.", variant: "destructive" });
-        setLoadingState(false);
-        return;
+      let sheetId: string | null = null;
+      if (action.toLowerCase().includes('import') || action.toLowerCase().includes('export')) { // For export, sheetId might be optional to create a new one
+         sheetId = prompt(`Enter Google Sheet ID for ${friendlyAction} (optional for export, a new sheet will be created if blank):`);
+         if (action.toLowerCase().includes('import') && !sheetId) {
+            toast({ title: "Sheet ID Required", description: "Please provide a Google Sheet ID to import from.", variant: "default" });
+            setLoadingState(false);
+            return;
+         }
       }
+      
 
       const response = await fetch('/api/google-sheets-proxy', {
         method: 'POST',
@@ -230,23 +232,37 @@ export default function SettingsPage() {
           'Authorization': `Bearer ${idToken}`,
         },
         body: JSON.stringify({ 
-          action: action, // e.g., "importStockItems", "exportStockItems"
+          action: action, 
           dataType: dataType,
-          sheetId: sheetId || undefined, // Pass sheetId for operations that need it
-          // You might pass other parameters like specific data for export
+          sheetId: sheetId || undefined, 
         }),
       });
 
       const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.error || `Failed to ${action}.`);
+        if (result.needsAuth && result.authUrl) {
+          toast({ 
+            title: "Authorization Required", 
+            description: "Please authorize StallSync to access your Google Sheets. Redirecting...",
+            duration: 5000 
+          });
+          // In a real app, you might want to store the intended action and redirect back after auth
+          window.location.href = result.authUrl; 
+        } else {
+          throw new Error(result.error || `Failed to ${friendlyAction}.`);
+        }
+      } else {
+        toast({ title: "Success", description: result.message || `${friendlyAction} completed.` });
       }
 
-      toast({ title: "Success", description: result.message || `${action} completed.` });
     } catch (error: any) {
-      console.error(`Error during Google Sheets ${action}:`, error);
-      toast({ title: "Error", description: error.message || `Failed to ${action}. Backend setup required.`, variant: "destructive" });
+      console.error(`Error during Google Sheets ${friendlyAction}:`, error);
+      toast({ 
+        title: "Error", 
+        description: error.message || `Failed to ${friendlyAction}. Ensure backend and OAuth are correctly set up.`, 
+        variant: "destructive" 
+      });
     } finally {
       setLoadingState(false);
     }
@@ -354,7 +370,7 @@ export default function SettingsPage() {
                 Google Sheets Integration
             </CardTitle>
             <CardDescription>
-                Import or export data directly with Google Sheets. This requires setting up OAuth and backend API calls.
+                Import or export data directly with Google Sheets. This requires backend API, Google Cloud setup, and OAuth authorization.
             </CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -403,8 +419,8 @@ export default function SettingsPage() {
         </CardContent>
          <CardFooter>
             <p className="text-xs text-muted-foreground">
-              Note: Full Google Sheets integration requires backend API route development for OAuth and Google Sheets API calls.
-              The buttons above will call a placeholder API route.
+              Note: Full Google Sheets integration requires setting up OAuth 2.0 credentials, configuring a Redirect URI, 
+              and implementing the backend API route (`/api/google-sheets-proxy`) to handle Google API calls and token management.
             </p>
         </CardFooter>
       </Card>
