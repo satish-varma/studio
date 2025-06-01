@@ -1,3 +1,4 @@
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -11,10 +12,10 @@ body {
     --background: 207 89% 94%; /* Light blue #E3F2FD */
     --foreground: 210 20% 20%; /* Dark blue/grey for text */
 
-    --card: 207 89% 96%; /* Slightly lighter blue for cards */
+    --card: 0 0% 100%; /* White */
     --card-foreground: 210 20% 20%;
 
-    --popover: 207 89% 96%;
+    --popover: 0 0% 100%; /* White */
     --popover-foreground: 210 20% 20%;
 
     --primary: 217 89% 61%; /* Saturated blue #4285F4 */
@@ -33,10 +34,10 @@ body {
     --destructive-foreground: 0 0% 98%;
 
     --border: 207 40% 80%;
-    --input: 207 60% 90%; /* Input background - slightly off white/blue */
+    --input: 0 0% 97%; /* Off-white/very light grey for inputs */
     --ring: 217 89% 61%; /* Primary color for rings */
 
-    --radius: 0.5rem;
+    --radius: 0.75rem; /* Updated from 0.5rem */
 
     /* Sidebar specific colors */
     --sidebar-background: 207 80% 97%; /* Very light blue, slightly distinct from main bg */
@@ -60,7 +61,7 @@ body {
     --background: 210 20% 10%;
     --foreground: 207 80% 90%;
 
-    --card: 210 20% 12%;
+    --card: 210 20% 12%; /* Dark card for dark mode */
     --card-foreground: 207 80% 90%;
 
     --popover: 210 20% 10%;
@@ -82,15 +83,15 @@ body {
     --destructive-foreground: 0 0% 98%;
 
     --border: 210 20% 25%;
-    --input: 210 20% 18%;
+    --input: 210 20% 18%; /* Dark input for dark mode */
     --ring: 217 89% 61%;
 
     /* Dark Sidebar specific colors */
-    --sidebar-background: 210 20% 12%; 
+    --sidebar-background: 210 20% 12%;
     --sidebar-foreground: 207 80% 90%;
-    --sidebar-primary: 217 89% 61%; 
+    --sidebar-primary: 217 89% 61%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 210 20% 18%; 
+    --sidebar-accent: 210 20% 18%;
     --sidebar-accent-foreground: 217 89% 61%;
     --sidebar-border: 210 20% 22%;
     --sidebar-ring: 217 89% 61%;

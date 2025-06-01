@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
 import { useAuth } from '@/contexts/AuthContext';
 import { getFirestore, collection, query, where, onSnapshot, Timestamp, QueryConstraint, orderBy } from "firebase/firestore";
-import { firebaseConfig } from '@/lib/firebaseConfig'; 
+import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp } from 'firebase/app';
 import type { StockItem, SaleTransaction } from '@/types';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -31,7 +31,7 @@ const db = getFirestore();
 
 interface DashboardStats {
   totalItems: number;
-  totalSalesLast7Days: number; 
+  totalSalesLast7Days: number;
   itemsSoldToday: number;
   lowStockAlerts: number;
 }
@@ -44,7 +44,7 @@ interface SalesChartDataPoint {
 const chartConfig = {
   totalSales: {
     label: "Sales (₹)",
-    color: "hsl(var(--primary))", 
+    color: "hsl(var(--primary))",
   },
 } satisfies ChartConfig;
 
@@ -65,13 +65,13 @@ export default function DashboardPage() {
 
   useEffect(() => {
     document.title = "Dashboard - StallSync";
-    return () => { document.title = "StallSync - Stock Management"; } 
+    return () => { document.title = "StallSync - Stock Management"; }
   }, []);
 
   useEffect(() => {
     if (!user) {
       setLoading(false);
-      return; 
+      return;
     }
 
     if (user.role === 'admin' && !activeSiteId) {
@@ -79,10 +79,10 @@ export default function DashboardPage() {
       setStats({ totalItems: 0, totalSalesLast7Days: 0, itemsSoldToday: 0, lowStockAlerts: 0 });
       setRecentSales([]);
       setSalesChartData([]);
-      setError(null); 
+      setError(null);
       return;
     }
-    
+
     if (user.role !== 'admin' && !activeSiteId) {
         setLoading(false);
         setError("No active site context. Please check your profile or contact an administrator.");
@@ -107,15 +107,15 @@ export default function DashboardPage() {
       if (activeStallId) {
         stockItemsQueryConstraints.push(where("stallId", "==", activeStallId));
       }
-    } else { 
+    } else {
         setLoading(false);
         setError("Site context is missing for fetching stock items.");
         return;
     }
-    
+
     const stockItemsRef = collection(db, "stockItems");
     const stockQuery = query(stockItemsRef, ...stockItemsQueryConstraints);
-    
+
     const unsubscribeStock = onSnapshot(stockQuery, (snapshot) => {
       const items: StockItem[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as StockItem));
       const total = items.length;
@@ -143,23 +143,23 @@ export default function DashboardPage() {
         setError("Site context is missing for fetching sales transactions.");
         return;
     }
-    
+
     const salesTransactionsRef = collection(db, "salesTransactions");
     const salesQuery = query(salesTransactionsRef, ...salesQueryConstraints);
 
     const unsubscribeSales = onSnapshot(salesQuery, (snapshot) => {
       const transactions: SaleTransaction[] = snapshot.docs.map(doc => {
         const data = doc.data();
-        return { 
-          id: doc.id, 
+        return {
+          id: doc.id,
           ...data,
-          transactionDate: (data.transactionDate as Timestamp).toDate().toISOString() 
+          transactionDate: (data.transactionDate as Timestamp).toDate().toISOString()
         } as SaleTransaction;
       });
 
       let salesLast7Days = 0;
       let itemsToday = 0;
-      
+
       const dailySalesMap = new Map<string, number>();
       const dateRangeForChart = eachDayOfInterval({ start: sevenDaysAgo, end: now });
       dateRangeForChart.forEach(day => {
@@ -182,20 +182,20 @@ export default function DashboardPage() {
           });
         }
       });
-      
+
       setStats(prevStats => ({
         ...prevStats,
         totalSalesLast7Days: salesLast7Days,
         itemsSoldToday: itemsToday,
       }));
-      setRecentSales(transactions.slice(0, 3)); 
+      setRecentSales(transactions.slice(0, 3));
 
       const chartDataPoints: SalesChartDataPoint[] = Array.from(dailySalesMap.entries())
         .map(([date, totalSales]) => ({ date, totalSales }))
         .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()); // Sort by date
       setSalesChartData(chartDataPoints);
-      
-      setLoading(false); 
+
+      setLoading(false);
     }, (err) => {
       console.error("Error fetching sales transactions for dashboard:", err);
       setError("Failed to load sales transaction data.");
@@ -218,7 +218,7 @@ export default function DashboardPage() {
       </div>
     );
   }
-  
+
   if (user?.role === 'admin' && !activeSiteId) {
     return (
       <div className="space-y-6">
@@ -247,7 +247,7 @@ export default function DashboardPage() {
       </div>
     );
   }
-  
+
   const dashboardStatCards = [
     { title: "Total Items", value: stats.totalItems.toString(), icon: Package, change: "In current context", color: "text-primary" },
     { title: "Total Sales (Last 7 Days)", value: `₹${stats.totalSalesLast7Days.toFixed(2)}`, icon: IndianRupee, change: "In current context", color: "text-accent" },
@@ -258,21 +258,21 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Dashboard" description="Overview of your activity and stock levels for the selected site/stall." />
-      
+
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {dashboardStatCards.map((stat) => (
           <Card key={stat.title} className="shadow-lg hover:shadow-xl transition-shadow duration-300">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 border-b mb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 {stat.title}
               </CardTitle>
-              <stat.icon className={`h-5 w-5 ${stat.color}`} />
+              <stat.icon className={`h-6 w-6 ${stat.color}`} />
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-foreground">{stat.value}</div>
-              <p className="text-xs text-muted-foreground pt-1">
+              <CardDescription className="text-xs text-muted-foreground pt-1">
                 {stat.change}
-              </p>
+              </CardDescription>
             </CardContent>
           </Card>
         ))}
@@ -307,15 +307,15 @@ export default function DashboardPage() {
                 />
                 <ChartTooltip
                   cursor={false}
-                  content={<ChartTooltipContent 
-                    indicator="dot" 
+                  content={<ChartTooltipContent
+                    indicator="dot"
                     formatter={(value, name, props) => (
                         <div className="flex flex-col gap-0.5">
                             <span className="font-medium text-foreground">{format(new Date(props.payload.date), "MMM d, yyyy")}</span>
                             <span className="text-muted-foreground">Sales: <span className="font-semibold text-foreground">₹{Number(value).toFixed(2)}</span></span>
                         </div>
                     )}
-                    hideLabel 
+                    hideLabel
                   />}
                 />
                 <Bar dataKey="totalSales" fill="var(--color-totalSales)" radius={[4, 4, 0, 0]} />
@@ -362,25 +362,25 @@ export default function DashboardPage() {
             <CardDescription>Common tasks at your fingertips.</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col space-y-3 sm:flex-row sm:space-y-0 sm:space-x-3">
-            <Button 
+            <Button
               className="flex-1"
               onClick={() => router.push('/sales/record')}
-              disabled={!activeSiteId || !activeStallId} 
+              disabled={!activeSiteId || !activeStallId}
             >
               Record New Sale
             </Button>
-            <Button 
+            <Button
               variant="secondary"
               className="flex-1"
               onClick={() => router.push('/items/new')}
-              disabled={!activeSiteId || !activeStallId} 
+              disabled={!activeSiteId || !activeStallId}
             >
               Add New Item
             </Button>
           </CardContent>
           {(!activeSiteId || !activeStallId) && (
             <CardFooter className="pt-3 pb-4 justify-center">
-                <p className="text-xs text-muted-foreground text-center"> 
+                <p className="text-xs text-muted-foreground text-center">
                     Select a specific site and stall to enable quick actions.
                 </p>
             </CardFooter>

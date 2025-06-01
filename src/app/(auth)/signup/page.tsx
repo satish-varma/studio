@@ -6,9 +6,9 @@ import Link from 'next/link';
 export default function SignUpPage() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
-      <div className="w-full max-w-md space-y-8">
+      <div className="w-full max-w-md space-y-8 bg-card p-8 rounded-xl shadow-2xl border">
         <div className="text-center">
-          <Image 
+          <Image
             src="https://placehold.co/100x100.png?text=SS" // Placeholder for StallSync logo
             alt="StallSync Logo"
             data-ai-hint="logo abstract"
