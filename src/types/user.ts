@@ -8,4 +8,6 @@ export interface AppUser {
   photoURL?: string | null;
   role: UserRole;
   createdAt?: string; // ISO date string, set upon user creation
+  defaultSiteId?: string;
+  defaultStallId?: string;
 }
