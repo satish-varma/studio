@@ -45,7 +45,6 @@ import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
-// Initialize Firebase only if it hasn't been initialized yet
 if (!getApps().length) {
   try {
     initializeApp(firebaseConfig);
@@ -89,17 +88,18 @@ export default function RecordSaleForm() {
   });
 
   useEffect(() => {
-    if (!activeSiteId || !activeStallId) {
+    if (!activeSiteId || !activeStallId) { // A specific stall MUST be active for sales
       setAvailableItems([]);
       setLoadingItems(false);
       return;
     }
     setLoadingItems(true);
     const itemsCollectionRef = collection(db, "stockItems");
+    // Query for items specific to the active site AND stall
     const q = query(
       itemsCollectionRef, 
       where("siteId", "==", activeSiteId),
-      where("stallId", "==", activeStallId)
+      where("stallId", "==", activeStallId) // Ensure items are from the selected stall
     );
 
     const unsubscribe = onSnapshot(q, 
@@ -108,12 +108,14 @@ export default function RecordSaleForm() {
           id: doc.id,
           ...doc.data()
         } as StockItem));
+        // Only make items with quantity > 0 available for sale
         setAvailableItems(fetchedItems.filter(item => item.quantity > 0));
         setLoadingItems(false);
       },
       (error) => {
         console.error("Error fetching stock items for sale form:", error);
-        toast({ title: "Error", description: "Could not load items for the current site/stall. Please try again.", variant: "destructive"});
+        toast({ title: "Error", description: "Could not load items for the current stall. Please try again.", variant: "destructive"});
+        setAvailableItems([]);
         setLoadingItems(false);
       }
     );
@@ -138,8 +140,8 @@ export default function RecordSaleForm() {
       setIsSubmitting(false);
       return;
     }
-    if (!activeSiteId || !activeStallId) {
-      toast({ title: "Context Error", description: "Please select a site and stall from the header to record a sale.", variant: "destructive"});
+    if (!activeSiteId || !activeStallId) { // Double-check: Sale must be from a specific stall
+      toast({ title: "Context Error", description: "Please select an active site AND a specific stall from the header to record a sale.", variant: "destructive"});
       setIsSubmitting(false);
       return;
     }
@@ -153,12 +155,12 @@ export default function RecordSaleForm() {
           const stockItemRef = doc(db, "stockItems", formItem.itemId);
           const stockItemSnap = await transaction.get(stockItemRef);
           if (!stockItemSnap.exists()) {
-            throw new Error(`Item ${formItem.name} (ID: ${formItem.itemId}) not found in stock for site ${activeSiteId} and stall ${activeStallId}.`);
+            throw new Error(`Item ${formItem.name} (ID: ${formItem.itemId}) not found in stock.`);
           }
-          // Verify item belongs to current active site/stall - though query should handle this.
           const itemData = stockItemSnap.data() as StockItem;
+          // Crucially, verify item belongs to the active site and stall.
           if (itemData.siteId !== activeSiteId || itemData.stallId !== activeStallId) {
-             throw new Error(`Item ${formItem.name} does not belong to the active site/stall.`);
+             throw new Error(`Item ${formItem.name} does not belong to the currently active stall.`);
           }
           stockItemRefsAndData.push({ ref: stockItemRef, snapshot: stockItemSnap, formItem });
         }
@@ -196,8 +198,8 @@ export default function RecordSaleForm() {
           transactionDate: Timestamp.now(),
           staffId: user.uid,
           staffName: user.displayName || user.email,
-          siteId: activeSiteId, // Add active siteId
-          stallId: activeStallId, // Add active stallId
+          siteId: activeSiteId, 
+          stallId: activeStallId, 
           isDeleted: false,
         });
 
@@ -250,13 +252,13 @@ export default function RecordSaleForm() {
     }
   };
 
-  if (!activeSiteId || !activeStallId) {
+  if (!activeSiteId || !activeStallId) { // A specific stall must be active
     return (
       <Alert variant="default" className="max-w-2xl mx-auto shadow-lg border-primary/50">
         <Info className="h-4 w-4" />
-        <AlertTitle>Site & Stall Context Required</AlertTitle>
+        <AlertTitle>Site & Specific Stall Context Required</AlertTitle>
         <AlertDescription>
-          Please select an active Site and Stall from the dropdowns in the header bar to record a sale or view available items.
+          Please select an active Site AND a specific Stall from the dropdowns in the header bar to record a sale. Sales cannot be made from "Master Stock" or "All Stalls" views directly.
         </AlertDescription>
       </Alert>
     );
@@ -266,7 +268,7 @@ export default function RecordSaleForm() {
     return (
       <div className="flex justify-center items-center py-10">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <p className="ml-2">Loading items for sale at the current site/stall...</p>
+        <p className="ml-2">Loading items for sale at the current stall...</p>
       </div>
     );
   }
@@ -285,9 +287,9 @@ export default function RecordSaleForm() {
             {availableItems.length === 0 && !loadingItems && (
                <Alert variant="default">
                 <Info className="h-4 w-4" />
-                <AlertTitle>No Items Available</AlertTitle>
+                <AlertTitle>No Items Available at this Stall</AlertTitle>
                 <AlertDescription>
-                  There are no stock items available for sale at the currently selected site and stall, or all items are out of stock.
+                  There are no stock items available for sale at the currently selected stall, or all items are out of stock.
                 </AlertDescription>
               </Alert>
             )}
@@ -419,4 +421,3 @@ export default function RecordSaleForm() {
     </Card>
   );
 }
-

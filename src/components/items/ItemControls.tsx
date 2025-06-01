@@ -10,8 +10,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { PlusCircle, Search, Filter } from "lucide-react";
+import { PlusCircle, Search, Filter, Store } from "lucide-react";
 import { useRouter } from "next/navigation";
+import type { Stall } from "@/types";
 
 interface ItemControlsProps {
   searchTerm: string;
@@ -20,7 +21,11 @@ interface ItemControlsProps {
   onCategoryFilterChange: (category: string) => void;
   stockStatusFilter: string;
   onStockStatusFilterChange: (status: string) => void;
-  categories: string[]; // Unique categories from items
+  stallFilterOption: string; // "all", "master", or specific stallId
+  onStallFilterOptionChange: (option: string) => void;
+  categories: string[]; 
+  availableStalls: Stall[]; // Stalls for the currently active site
+  isSiteActive: boolean; // To enable/disable stall filter
 }
 
 export function ItemControls({
@@ -30,7 +35,11 @@ export function ItemControls({
   onCategoryFilterChange,
   stockStatusFilter,
   onStockStatusFilterChange,
+  stallFilterOption,
+  onStallFilterOptionChange,
   categories,
+  availableStalls,
+  isSiteActive,
 }: ItemControlsProps) {
   const router = useRouter();
 
@@ -79,9 +88,29 @@ export function ItemControls({
             <SelectItem value="out-of-stock">Out of Stock</SelectItem>
           </SelectContent>
         </Select>
+
+        <Select 
+          value={stallFilterOption} 
+          onValueChange={onStallFilterOptionChange}
+          disabled={!isSiteActive}
+        >
+          <SelectTrigger className="w-full sm:w-[220px] bg-input">
+             <Store className="h-4 w-4 mr-2 text-muted-foreground" />
+            <SelectValue placeholder={!isSiteActive ? "Select site for stall filter" : "Filter by stall/location"} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Stock (Site-wide)</SelectItem>
+            <SelectItem value="master">Master Stock (Site Level)</SelectItem>
+            {availableStalls.map((stall) => (
+              <SelectItem key={stall.id} value={stall.id}>
+                {stall.name} ({stall.stallType})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
-      <Button onClick={handleAddNewItem} className="w-full sm:w-auto">
+      <Button onClick={handleAddNewItem} className="w-full sm:w-auto" disabled={!isSiteActive}>
         <PlusCircle className="mr-2 h-5 w-5" /> Add New Item
       </Button>
     </div>

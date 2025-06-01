@@ -12,8 +12,8 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { StockItem } from "@/types";
-import { MoreHorizontal, Edit, Trash2, PackageOpen, Loader2 } from "lucide-react";
+import type { StockItem, Stall, Site } from "@/types";
+import { MoreHorizontal, Edit, Trash2, PackageOpen, Loader2, Building, Store } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,7 +29,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
   Dialog,
@@ -46,8 +45,8 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { getFirestore, doc, deleteDoc, updateDoc, Timestamp } from "firebase/firestore";
+import { useState, useMemo } from "react";
+import { getFirestore, doc, deleteDoc, updateDoc } from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 
@@ -62,9 +61,11 @@ const db = getFirestore();
 
 interface ItemTableProps {
   items: StockItem[];
+  sitesMap: Record<string, string>; // siteId -> siteName
+  stallsMap: Record<string, string>; // stallId -> stallName
 }
 
-export function ItemTable({ items }: ItemTableProps) {
+export function ItemTable({ items, sitesMap, stallsMap }: ItemTableProps) {
   const { toast } = useToast();
   const router = useRouter();
   const [isDeleting, setIsDeleting] = useState(false);
@@ -84,7 +85,6 @@ export function ItemTable({ items }: ItemTableProps) {
         title: "Item Deleted",
         description: `${itemName} has been successfully deleted.`,
       });
-      // Data will refresh due to onSnapshot in parent component
     } catch (error: any) {
       console.error("Error deleting item:", error);
       toast({
@@ -99,7 +99,7 @@ export function ItemTable({ items }: ItemTableProps) {
   
   const handleOpenUpdateStockDialog = (item: StockItem) => {
     setStockUpdateItemId(item.id);
-    setNewQuantity(item.quantity); // Pre-fill with current quantity
+    setNewQuantity(item.quantity); 
   };
 
   const handleStockQuantityChange = async () => {
@@ -116,9 +116,9 @@ export function ItemTable({ items }: ItemTableProps) {
       });
       toast({
         title: "Stock Updated",
-        description: `Stock quantity for item ID ${stockUpdateItemId.substring(0,6)}... updated to ${newQuantity}.`,
+        description: `Stock quantity updated to ${newQuantity}.`,
       });
-      setStockUpdateItemId(null); // Close dialog by resetting state
+      setStockUpdateItemId(null); 
       setNewQuantity("");
     } catch (error: any) {
       console.error("Error updating stock:", error);
@@ -132,7 +132,8 @@ export function ItemTable({ items }: ItemTableProps) {
     }
   };
   
-  const formatDate = (dateString: string) => {
+  const formatDate = (dateString?: string) => {
+    if (!dateString) return "N/A";
     try {
       return new Date(dateString).toLocaleDateString('en-US', {
         year: 'numeric',
@@ -145,7 +146,7 @@ export function ItemTable({ items }: ItemTableProps) {
   };
 
   if (items.length === 0) {
-    return <p className="text-center text-muted-foreground py-8">No items found.</p>;
+    return <p className="text-center text-muted-foreground py-8">No items found for the current filter.</p>;
   }
 
   return (
@@ -153,13 +154,13 @@ export function ItemTable({ items }: ItemTableProps) {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead className="w-[80px]">Image</TableHead>
+            <TableHead className="w-[64px]">Image</TableHead>
             <TableHead>Name</TableHead>
+            <TableHead>Location</TableHead>
             <TableHead>Category</TableHead>
             <TableHead className="text-right">Quantity</TableHead>
             <TableHead>Unit</TableHead>
             <TableHead className="text-right">Price</TableHead>
-            <TableHead className="text-right">Low Stock At</TableHead>
             <TableHead>Status</TableHead>
             <TableHead>Last Updated</TableHead>
             <TableHead className="text-right">Actions</TableHead>
@@ -169,6 +170,8 @@ export function ItemTable({ items }: ItemTableProps) {
           {items.map((item) => {
             const isLowStock = item.quantity <= item.lowStockThreshold;
             const isOutOfStock = item.quantity === 0;
+            const siteName = item.siteId ? sitesMap[item.siteId] || item.siteId.substring(0,6)+"..." : "N/A";
+            const stallName = item.stallId ? stallsMap[item.stallId] || item.stallId.substring(0,6)+"..." : "Master Stock";
             
             return (
               <TableRow key={item.id} className={cn(
@@ -179,12 +182,26 @@ export function ItemTable({ items }: ItemTableProps) {
                   <Image
                     src={item.imageUrl || `https://placehold.co/64x64.png?text=${item.name.substring(0,2)}`}
                     alt={item.name}
-                    width={48}
-                    height={48}
+                    width={40}
+                    height={40}
                     className="rounded-md object-cover"
                     data-ai-hint={`${item.category} item`}
                   />
-                </TableCell><TableCell className="font-medium text-foreground">{item.name}</TableCell><TableCell className="text-muted-foreground">{item.category}</TableCell><TableCell className="text-right text-foreground">{item.quantity}</TableCell><TableCell className="text-muted-foreground">{item.unit}</TableCell><TableCell className="text-right text-foreground">₹{item.price.toFixed(2)}</TableCell><TableCell className="text-right text-muted-foreground">{item.lowStockThreshold}</TableCell><TableCell>
+                </TableCell>
+                <TableCell className="font-medium text-foreground">{item.name}</TableCell>
+                <TableCell className="text-sm">
+                  <div className="flex items-center text-muted-foreground">
+                    <Building size={14} className="mr-1 text-primary/70" /> {siteName}
+                  </div>
+                  <div className="flex items-center text-xs text-muted-foreground/80">
+                    <Store size={12} className="mr-1 text-accent/70" /> {stallName}
+                  </div>
+                </TableCell>
+                <TableCell className="text-muted-foreground">{item.category}</TableCell>
+                <TableCell className="text-right text-foreground">{item.quantity}</TableCell>
+                <TableCell className="text-muted-foreground">{item.unit}</TableCell>
+                <TableCell className="text-right text-foreground">₹{item.price.toFixed(2)}</TableCell>
+                <TableCell>
                   <Badge
                     variant={
                       isOutOfStock ? "destructive" : isLowStock ? "outline" : "secondary"
@@ -196,7 +213,9 @@ export function ItemTable({ items }: ItemTableProps) {
                   >
                     {isOutOfStock ? "Out of Stock" : isLowStock ? "Low Stock" : "In Stock"}
                   </Badge>
-                </TableCell><TableCell className="text-muted-foreground">{formatDate(item.lastUpdated)}</TableCell><TableCell className="text-right">
+                </TableCell>
+                <TableCell className="text-muted-foreground text-xs">{formatDate(item.lastUpdated)}</TableCell>
+                <TableCell className="text-right">
                   <Dialog open={stockUpdateItemId === item.id} onOpenChange={(open) => !open && setStockUpdateItemId(null)}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -242,7 +261,7 @@ export function ItemTable({ items }: ItemTableProps) {
                       <DialogHeader>
                         <DialogTitle>Update Stock for {item.name}</DialogTitle>
                         <DialogDescription>
-                          Set the new quantity for this item. Current quantity: {item.quantity}.
+                          Current quantity: {item.quantity} {item.unit} ({item.stallId ? stallsMap[item.stallId] || 'Stall '+item.stallId.substring(0,4) : 'Master Stock'} at {item.siteId ? sitesMap[item.siteId] || 'Site '+item.siteId.substring(0,4) : 'N/A Site'}).
                         </DialogDescription>
                       </DialogHeader>
                       <div className="grid gap-4 py-4">

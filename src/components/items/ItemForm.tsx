@@ -14,7 +14,6 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-// import { Textarea } from "@/components/ui/textarea"; // Assuming Textarea might be useful for description in future
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { stockItemSchema, type StockItemFormValues } from "@/types/item";
 import { Loader2, Save } from "lucide-react";
@@ -25,6 +24,7 @@ import { firebaseConfig } from "@/lib/firebaseConfig";
 import { getApps, initializeApp } from "firebase/app";
 import type { StockItem } from "@/types";
 import { useState } from "react"; 
+import { useAuth } from "@/contexts/AuthContext";
 
 if (!getApps().length) {
   try {
@@ -36,13 +36,14 @@ if (!getApps().length) {
 const db = getFirestore();
 
 interface ItemFormProps {
-  initialData?: StockItem | null; // For editing
-  itemId?: string | null; // For editing
+  initialData?: StockItem | null; 
+  itemId?: string | null; 
 }
 
 export default function ItemForm({ initialData, itemId }: ItemFormProps) {
   const router = useRouter();
   const { toast } = useToast();
+  const { activeSiteId, activeStallId } = useAuth(); // Get context
   const [isSubmitting, setIsSubmitting] = useState(false);
   const isEditMode = !!initialData && !!itemId;
 
@@ -56,6 +57,8 @@ export default function ItemForm({ initialData, itemId }: ItemFormProps) {
       price: initialData.price,
       lowStockThreshold: initialData.lowStockThreshold,
       imageUrl: initialData.imageUrl || "",
+      // siteId and stallId are part of initialData if editing, but not directly editable here.
+      // For new items, they will be set from context.
     } : {
       name: "",
       category: "",
@@ -70,26 +73,42 @@ export default function ItemForm({ initialData, itemId }: ItemFormProps) {
   async function onSubmit(values: StockItemFormValues) {
     setIsSubmitting(true);
     try {
-      const itemDataToSave = {
+      const baseItemData = {
         ...values,
-        price: Number(values.price), // Ensure price is a number
-        quantity: Number(values.quantity), // Ensure quantity is a number
-        lowStockThreshold: Number(values.lowStockThreshold), // Ensure threshold is a number
+        price: Number(values.price), 
+        quantity: Number(values.quantity), 
+        lowStockThreshold: Number(values.lowStockThreshold), 
         lastUpdated: new Date().toISOString(),
       };
 
       if (isEditMode && itemId) {
         const itemRef = doc(db, "stockItems", itemId);
-        await setDoc(itemRef, itemDataToSave, { merge: true });
+        // When editing, we generally don't change siteId/stallId via this simple form.
+        // That would be a "move" operation. We merge to update other fields.
+        // We exclude siteId and stallId from `baseItemData` to avoid overriding them if they were set from `initialData`
+        // but not part of the form's explicit fields.
+        const { siteId: initialSiteId, stallId: initialStallId, ...editableValues } = baseItemData;
+        await setDoc(itemRef, editableValues, { merge: true });
         toast({
           title: "Item Updated",
           description: `${values.name} has been successfully updated.`,
         });
-      } else {
+      } else { // Creating a new item
+        if (!activeSiteId) {
+          toast({ title: "Site Context Missing", description: "Please select an active site from the header to add an item.", variant: "destructive" });
+          setIsSubmitting(false);
+          return;
+        }
+        // New item is associated with activeSiteId and activeStallId (which can be null for master stock)
+        const itemDataToSave = {
+          ...baseItemData,
+          siteId: activeSiteId,
+          stallId: activeStallId, // This can be null, creating "master stock" for the site
+        };
         await addDoc(collection(db, "stockItems"), itemDataToSave);
         toast({
           title: "Item Added",
-          description: `${values.name} has been successfully added to stock.`,
+          description: `${values.name} has been successfully added. ${activeStallId ? 'To stall.' : 'To site master stock.'}`,
         });
       }
       router.push("/items");
@@ -110,7 +129,7 @@ export default function ItemForm({ initialData, itemId }: ItemFormProps) {
     <Card className="w-full max-w-2xl mx-auto shadow-xl">
       <CardHeader>
         <CardTitle className="text-2xl">
-          {isEditMode ? "Edit Stock Item" : "Add New Stock Item"}
+          {isEditMode ? `Edit: ${initialData?.name}` : "Add New Stock Item"}
         </CardTitle>
       </CardHeader>
       <Form {...form}>
@@ -176,7 +195,7 @@ export default function ItemForm({ initialData, itemId }: ItemFormProps) {
                 name="price"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Price per Unit (₹)</FormLabel> {/* Updated currency symbol */}
+                    <FormLabel>Price per Unit (₹)</FormLabel>
                     <FormControl>
                       <Input type="number" step="0.01" placeholder="0.00" {...field} onChange={e => field.onChange(parseFloat(e.target.value) || 0)} disabled={isSubmitting} className="bg-input"/>
                     </FormControl>
