@@ -3,7 +3,7 @@
 
 import PageHeader from "@/components/shared/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
-import { Settings as SettingsIcon, Palette, BellRing, DatabaseZap, Download, Loader2, MailWarning } from "lucide-react";
+import { Settings as SettingsIcon, Palette, BellRing, DatabaseZap, Download, Loader2, MailWarning, SheetIcon } from "lucide-react"; // Added SheetIcon
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -28,6 +28,8 @@ export default function SettingsPage() {
   const { toast } = useToast();
   const [isExportingStock, setIsExportingStock] = useState(false);
   const [isExportingSales, setIsExportingSales] = useState(false);
+  const [isProcessingSheets, setIsProcessingSheets] = useState(false);
+
 
   const escapeCsvCell = (cellData: any): string => {
     if (cellData === null || cellData === undefined) {
@@ -60,7 +62,7 @@ export default function SettingsPage() {
 
       const headers = [
         "ID", "Name", "Category", "Quantity", "Unit", 
-        "Price (₹)", "Low Stock Threshold", "Image URL", "Last Updated"
+        "Price (₹)", "Low Stock Threshold", "Image URL", "Last Updated", "Site ID", "Stall ID"
       ];
       
       const csvRows = [headers.join(",")];
@@ -75,7 +77,9 @@ export default function SettingsPage() {
           escapeCsvCell(item.price.toFixed(2)),
           escapeCsvCell(item.lowStockThreshold),
           escapeCsvCell(item.imageUrl || ""),
-          escapeCsvCell(item.lastUpdated ? new Date(item.lastUpdated).toLocaleString('en-IN') : "")
+          escapeCsvCell(item.lastUpdated ? new Date(item.lastUpdated).toLocaleString('en-IN') : ""),
+          escapeCsvCell(item.siteId || ""),
+          escapeCsvCell(item.stallId || "")
         ];
         csvRows.push(row.join(","));
       });
@@ -107,10 +111,9 @@ export default function SettingsPage() {
     setIsExportingSales(true);
     try {
       const salesCollectionRef = collection(db, "salesTransactions");
-      // Fetch non-deleted sales, ordered by transaction date
       const q = query(
         salesCollectionRef,
-        where("isDeleted", "!=", true),
+        where("isDeleted", "==", false),
         orderBy("transactionDate", "desc")
       );
       const querySnapshot = await getDocs(q);
@@ -133,7 +136,7 @@ export default function SettingsPage() {
 
       const headers = [
         "Transaction ID", "Date", "Staff Name", "Staff ID", "Total Amount (₹)",
-        "Number of Item Types", "Total Quantity of Items", "Items Sold (JSON)"
+        "Number of Item Types", "Total Quantity of Items", "Site ID", "Stall ID", "Items Sold (JSON)"
       ];
       const csvRows = [headers.join(",")];
 
@@ -156,6 +159,8 @@ export default function SettingsPage() {
           escapeCsvCell(sale.totalAmount.toFixed(2)),
           escapeCsvCell(numberOfItemTypes),
           escapeCsvCell(totalQuantityOfItems),
+          escapeCsvCell(sale.siteId || ""),
+          escapeCsvCell(sale.stallId || ""),
           escapeCsvCell(itemsJson)
         ];
         csvRows.push(row.join(","));
@@ -182,6 +187,19 @@ export default function SettingsPage() {
     } finally {
       setIsExportingSales(false);
     }
+  };
+
+  // Placeholder functions for Google Sheets
+  const handleGoogleSheetsAction = async (actionType: string) => {
+    setIsProcessingSheets(true);
+    toast({
+      title: "Google Sheets Integration",
+      description: `${actionType} functionality requires backend implementation (Firebase Functions, OAuth, Google Sheets API). This is a UI placeholder.`,
+      duration: 7000,
+    });
+    // Simulate API call
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    setIsProcessingSheets(false);
   };
 
 
@@ -227,7 +245,6 @@ export default function SettingsPage() {
                 <MailWarning className="h-4 w-4 text-muted-foreground" />
                 <Label htmlFor="low-stock-alerts" className="text-sm font-medium">Low Stock Email Alerts</Label>
               </div>
-              {/* TODO: Backend implementation needed for this feature (e.g., Firebase Functions + Email service) */}
               <Switch id="low-stock-alerts" disabled />
             </div>
              <p className="text-xs text-center text-muted-foreground">(Email alert functionality requires backend setup)</p>
@@ -239,14 +256,15 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
       </div>
+
        <Card className="shadow-lg">
         <CardHeader>
           <CardTitle className="flex items-center">
             <DatabaseZap className="mr-2 h-5 w-5 text-primary" />
-            Data Management
+            Data Export (CSV)
           </CardTitle>
           <CardDescription>
-            Options for exporting your application data.
+            Download your application data in CSV format.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -277,14 +295,67 @@ export default function SettingsPage() {
             Export Sales Data (CSV)
           </Button>
         </CardContent>
+      </Card>
+
+      <Card className="shadow-lg">
+        <CardHeader>
+            <CardTitle className="flex items-center">
+                <SheetIcon className="mr-2 h-5 w-5 text-green-600" /> {/* Using a green color for Sheets icon */}
+                Google Sheets Integration
+            </CardTitle>
+            <CardDescription>
+                Import or export data directly with Google Sheets. (Requires backend setup)
+            </CardDescription>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-3 p-4 border rounded-md bg-muted/20">
+                <h4 className="font-medium text-foreground">Stock Items</h4>
+                <Button 
+                    variant="outline" 
+                    className="w-full" 
+                    onClick={() => handleGoogleSheetsAction("Import Stock from Google Sheets")}
+                    disabled={isProcessingSheets}
+                >
+                    {isProcessingSheets ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4 text-green-700" />}
+                    Import Stock from Sheets
+                </Button>
+                <Button 
+                    variant="outline" 
+                    className="w-full" 
+                    onClick={() => handleGoogleSheetsAction("Export Stock to Google Sheets")}
+                    disabled={isProcessingSheets}
+                >
+                    {isProcessingSheets ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SheetIcon className="mr-2 h-4 w-4 text-green-700" />}
+                    Export Stock to Sheets
+                </Button>
+            </div>
+            <div className="space-y-3 p-4 border rounded-md bg-muted/20">
+                <h4 className="font-medium text-foreground">Sales History</h4>
+                <Button 
+                    variant="outline" 
+                    className="w-full" 
+                    onClick={() => handleGoogleSheetsAction("Import Sales from Google Sheets")}
+                    disabled={isProcessingSheets}
+                >
+                     {isProcessingSheets ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4 text-green-700" />}
+                    Import Sales from Sheets
+                </Button>
+                <Button 
+                    variant="outline" 
+                    className="w-full" 
+                    onClick={() => handleGoogleSheetsAction("Export Sales to Google Sheets")}
+                    disabled={isProcessingSheets}
+                >
+                    {isProcessingSheets ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SheetIcon className="mr-2 h-4 w-4 text-green-700" />}
+                    Export Sales to Sheets
+                </Button>
+            </div>
+        </CardContent>
          <CardFooter>
             <p className="text-xs text-muted-foreground">More configuration options will be available here in future updates.</p>
         </CardFooter>
       </Card>
+
     </div>
   );
 }
-
-    
-
-    
