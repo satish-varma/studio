@@ -12,35 +12,37 @@ import { stockItemSchema } from '@/types/item'; // Import Zod schema for stock i
 let adminApp: AdminApp;
 let adminDb: ReturnType<typeof getAdminFirestore>;
 
+console.log("/api/google-sheets-proxy: Attempting Firebase Admin SDK initialization...");
 if (!getApps().length) {
   try {
-    // Attempt to use GOOGLE_APPLICATION_CREDENTIALS first if set in the environment
+    // Default initialization relies on GOOGLE_APPLICATION_CREDENTIALS env var
     adminApp = initializeApp();
-    console.log("Firebase Admin SDK initialized successfully in API proxy route (using GOOGLE_APPLICATION_CREDENTIALS or default discovery). Project ID:", adminApp.options.projectId);
+    console.log("/api/google-sheets-proxy: Firebase Admin SDK initialized successfully (using GOOGLE_APPLICATION_CREDENTIALS or default discovery).");
   } catch (e: any) {
-    console.warn("Firebase Admin SDK default initialization failed in API proxy route:", e.message, "Attempting with local credentials if available (ensure serviceAccountKey.json exists and path is correct if uncommented).");
+    console.error("/api/google-sheets-proxy: Firebase Admin SDK default initialization failed:", e.message);
     // Fallback for local development if serviceAccountKey.json is available
-    // IMPORTANT: Ensure 'serviceAccountKey.json' is in your .gitignore and NOT committed.
+    // Ensure 'serviceAccountKey.json' is in your .gitignore and NOT committed.
     // try {
-    //   const serviceAccount = require('../../../../serviceAccountKey.json'); // Adjust path as needed
+    //   const serviceAccount = require('../../../../service_account.json'); // Adjust path as needed
     //   adminApp = initializeApp({ credential: cert(serviceAccount) });
-    //   console.log("Firebase Admin SDK initialized successfully in API proxy route (using local serviceAccountKey.json). Project ID:", adminApp.options.projectId);
+    //   console.log("/api/google-sheets-proxy: Firebase Admin SDK initialized successfully (using local service_account.json).");
     // } catch (localInitError: any) {
-    //    console.error("CRITICAL: Firebase Admin SDK local initialization with serviceAccountKey.json also failed:", localInitError.message);
+    //    console.error("/api/google-sheets-proxy: CRITICAL - Firebase Admin SDK local initialization with service_account.json also failed:", localInitError.message);
     // }
     if (!adminApp!) { // Check if adminApp is still not initialized
-         console.error("CRITICAL: Firebase Admin SDK could not be initialized. Verify GOOGLE_APPLICATION_CREDENTIALS environment variable or local service account key setup.");
+         console.error("/api/google-sheets-proxy: CRITICAL - Firebase Admin SDK could not be initialized. Verify GOOGLE_APPLICATION_CREDENTIALS environment variable or local service account key setup.");
     }
   }
 } else {
   adminApp = getApp();
-  console.log("Firebase Admin SDK already initialized, got existing instance in API proxy route. Project ID:", adminApp.options.projectId);
+  console.log("/api/google-sheets-proxy: Firebase Admin SDK already initialized, got existing instance.");
 }
 
 if (adminApp!) {
     adminDb = getAdminFirestore(adminApp);
+    console.log("/api/google-sheets-proxy: Firestore Admin DB obtained for project:", adminApp.options.projectId || "Project ID not available in options");
 } else {
-    console.error("CRITICAL: Firebase Admin App is not initialized in API proxy. Firestore Admin DB cannot be obtained. Further operations will likely fail.");
+    console.error("/api/google-sheets-proxy: CRITICAL - Firebase Admin App is not initialized. Firestore Admin DB cannot be obtained. Further operations will likely fail.");
 }
 
 // Google OAuth2 Client Setup - Ensure these are set in your environment variables
@@ -55,9 +57,9 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET && GOOGLE_REDIRECT_URI) {
         GOOGLE_CLIENT_SECRET,
         GOOGLE_REDIRECT_URI
     );
-    console.log("Google OAuth2 client configured in API proxy route.");
+    console.log("/api/google-sheets-proxy: Google OAuth2 client configured.");
 } else {
-    console.error("CRITICAL: Google OAuth2 client credentials (ID, Secret, Redirect URI) are not configured in API proxy. Sheets API integration will not work. Check .env.local or environment variables.");
+    console.error("/api/google-sheets-proxy: CRITICAL - Google OAuth2 client credentials (ID, Secret, Redirect URI) are not configured. Sheets API integration will not work. Check .env.local or environment variables.");
 }
 
 const STOCK_ITEMS_HEADERS = ["ID", "Name", "Category", "Quantity", "Unit", "Price", "Low Stock Threshold", "Image URL", "Site ID", "Stall ID"];
@@ -67,11 +69,11 @@ const SALES_HISTORY_HEADERS = ["Transaction ID (Sheet)", "Date", "Staff Name", "
 export async function POST(request: NextRequest) {
   // Initial checks for critical services
   if (!adminApp || !adminDb) {
-    console.error("/api/google-sheets-proxy: Firebase Admin SDK not properly initialized on server.");
+    console.error("/api/google-sheets-proxy: Firebase Admin SDK not properly initialized on server when POST request received.");
     return NextResponse.json({ error: 'Server Error: Firebase Admin SDK not properly initialized.' }, { status: 500 });
   }
   if (!oauth2Client) {
-     console.error("/api/google-sheets-proxy: Google OAuth2 client not configured on server.");
+     console.error("/api/google-sheets-proxy: Google OAuth2 client not configured on server when POST request received.");
     return NextResponse.json({ error: 'Server Error: Google OAuth2 client not configured.' }, { status: 500 });
   }
 
@@ -79,6 +81,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { action, dataType, sheetId, sheetName = 'Sheet1' } = body;
+    console.log(`/api/google-sheets-proxy: Received action: ${action}, dataType: ${dataType}, sheetId: ${sheetId}`);
 
     const authorizationHeader = request.headers.get('Authorization');
     if (!authorizationHeader || !authorizationHeader.startsWith('Bearer ')) {
@@ -86,20 +89,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized: Missing or invalid Firebase ID token.' }, { status: 401 });
     }
     const idToken = authorizationHeader.split('Bearer ')[1];
+    console.log("/api/google-sheets-proxy: Received ID token from client (first 20 chars):", idToken.substring(0, 20) + "...");
 
     let decodedToken;
     try {
-      // Verify the ID token using the initialized adminApp
-      // CRITICAL: adminApp must be for the *same* Firebase project as the client app that generated the token.
       console.log("/api/google-sheets-proxy: Verifying ID token with Admin SDK for project:", adminApp.options.projectId);
       decodedToken = await getAdminAuth(adminApp).verifyIdToken(idToken);
-      console.log("/api/google-sheets-proxy: ID Token verified successfully for UID:", decodedToken.uid);
+      uid = decodedToken.uid;
+      console.log("/api/google-sheets-proxy: ID Token verified successfully for UID:", uid);
     } catch (error: any) {
-      console.error('Error verifying Firebase ID token in /api/google-sheets-proxy:', error.message);
-      console.error('Details:', error.code, error);
-      return NextResponse.json({ error: 'Unauthorized: Invalid Firebase ID token. Possible project mismatch or token issue.', details: error.message }, { status: 401 });
+      console.error('/api/google-sheets-proxy: Error verifying Firebase ID token:', error.message);
+      console.error('/api/google-sheets-proxy: Token verification error details:', error.code, error);
+      return NextResponse.json({ error: 'Unauthorized: Invalid Firebase ID token. Please re-authenticate.', details: error.message }, { status: 401 });
     }
-    uid = decodedToken.uid;
 
     // Retrieve user's Google OAuth tokens from Firestore
     const userGoogleTokensRef = adminDb.collection('userGoogleOAuthTokens').doc(uid);
@@ -110,7 +112,7 @@ export async function POST(request: NextRequest) {
       const authUrl = oauth2Client.generateAuthUrl({
         access_type: 'offline',
         scope: ['https://www.googleapis.com/auth/spreadsheets'],
-        prompt: 'consent', // Force consent screen to ensure refresh_token is granted
+        prompt: 'consent', 
         state: uid, // Pass Firebase UID to identify user in callback
       });
       return NextResponse.json({ error: 'Google Sheets authorization required.', needsAuth: true, authUrl: authUrl }, { status: 403 });
@@ -118,42 +120,41 @@ export async function POST(request: NextRequest) {
 
     let storedTokens = userTokensDoc.data() as UserGoogleOAuthTokens;
     oauth2Client.setCredentials(storedTokens);
+    console.log(`/api/google-sheets-proxy: Set stored Google OAuth credentials for user ${uid}.`);
 
     // Check if access token is expired and refresh if necessary
     if (storedTokens.expiry_date && storedTokens.expiry_date < (Date.now() + 60000)) { // 60-second buffer
       if (storedTokens.refresh_token) {
         try {
-          console.log(`/api/google-sheets-proxy: Access token for user ${uid} potentially expired, attempting refresh.`);
+          console.log(`/api/google-sheets-proxy: Access token for user ${uid} potentially expired (expiry: ${new Date(storedTokens.expiry_date).toISOString()}), attempting refresh.`);
           const { credentials } = await oauth2Client.refreshAccessToken();
-          console.log(`/api/google-sheets-proxy: Access token refreshed for user ${uid}.`);
+          console.log(`/api/google-sheets-proxy: Access token refreshed for user ${uid}. New expiry: ${credentials.expiry_date ? new Date(credentials.expiry_date).toISOString() : 'N/A'}`);
+          
           const updatedTokens: Partial<UserGoogleOAuthTokens> = {
             access_token: credentials.access_token,
             expiry_date: credentials.expiry_date,
-            // Google might provide a new refresh_token (rarely)
             ...(credentials.refresh_token && { refresh_token: credentials.refresh_token }),
             ...(credentials.id_token && { id_token: credentials.id_token }),
             ...(credentials.scope && { scope: credentials.scope }),
           };
           await userGoogleTokensRef.update(updatedTokens);
-          oauth2Client.setCredentials(credentials); // Update client with new credentials
-          storedTokens = { ...storedTokens, ...updatedTokens } as UserGoogleOAuthTokens; // Update local copy
+          oauth2Client.setCredentials(credentials); 
+          storedTokens = { ...storedTokens, ...updatedTokens } as UserGoogleOAuthTokens; 
+          console.log(`/api/google-sheets-proxy: Updated tokens stored in Firestore for user ${uid}.`);
         } catch (refreshError: any) {
           console.error(`/api/google-sheets-proxy: Failed to refresh access token for user ${uid}:`, refreshError.response?.data || refreshError.message);
           if (refreshError.response?.data?.error === 'invalid_grant') {
-            // The refresh token is invalid (e.g., revoked by user). Delete stored tokens and force re-auth.
             await userGoogleTokensRef.delete().catch(delErr => console.error("Failed to delete stale tokens:", delErr));
             const authUrl = oauth2Client.generateAuthUrl({ access_type: 'offline', scope: ['https://www.googleapis.com/auth/spreadsheets'], prompt: 'consent', state: uid });
-            return NextResponse.json({ error: 'Google authorization is invalid. Please re-authorize.', needsAuth: true, authUrl: authUrl }, { status: 403 });
+            return NextResponse.json({ error: 'Google authorization is invalid (refresh token). Please re-authorize.', needsAuth: true, authUrl: authUrl }, { status: 403 });
           }
-          // For other refresh errors, treat as a temporary issue
           return NextResponse.json({ error: 'Failed to refresh Google access token.', details: refreshError.message }, { status: 500 });
         }
       } else {
-        // No refresh token, and access token expired. Force re-auth.
         console.warn(`/api/google-sheets-proxy: Access token expired for user ${uid}, but no refresh token available. Forcing re-auth.`);
         await userGoogleTokensRef.delete().catch(delErr => console.error("Failed to delete stale tokens for re-auth:", delErr));
         const authUrl = oauth2Client.generateAuthUrl({ access_type: 'offline', scope: ['https://www.googleapis.com/auth/spreadsheets'], prompt: 'consent', state: uid });
-        return NextResponse.json({ error: 'Google authorization expired. Please re-authorize.', needsAuth: true, authUrl: authUrl }, { status: 403 });
+        return NextResponse.json({ error: 'Google authorization expired (no refresh token). Please re-authorize.', needsAuth: true, authUrl: authUrl }, { status: 403 });
       }
     }
     
@@ -166,14 +167,14 @@ export async function POST(request: NextRequest) {
         if (!sheetId) return NextResponse.json({ error: 'Sheet ID is required for import.' }, { status: 400 });
         try {
             console.log(`/api/google-sheets-proxy: Importing stock items from sheet ${sheetId} for user ${uid}.`);
-            const range = `${sheetName}!A:Z`; // Assuming data is in the first sheet, columns A-Z
+            const range = `${sheetName}!A:Z`; 
             const response = await sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range });
             const rows = response.data.values;
 
             if (!rows || rows.length === 0) {
                 return NextResponse.json({ message: 'No data found in the sheet.' });
             }
-            const headerRowFromSheet = rows[0].map(h => h.trim());
+            const headerRowFromSheet = rows[0].map(h => String(h || "").trim());
             if (JSON.stringify(headerRowFromSheet) !== JSON.stringify(STOCK_ITEMS_HEADERS)) {
                  const errorMsg = `Sheet header mismatch. Expected: [${STOCK_ITEMS_HEADERS.join(", ")}]. Found: [${headerRowFromSheet.join(", ")}]`;
                  console.error("/api/google-sheets-proxy: " + errorMsg);
@@ -186,41 +187,41 @@ export async function POST(request: NextRequest) {
 
             for (let i = 1; i < rows.length; i++) { // Start from 1 to skip header
                 const row = rows[i];
+                if (row.every(cell => cell === null || cell === undefined || String(cell).trim() === "")) continue; // Skip empty rows
+
                 try {
-                    const itemData: any = {};
+                    const itemDataFromSheet: Record<string, any> = {};
                     STOCK_ITEMS_HEADERS.forEach((header, index) => {
-                        // Normalize header to a key (e.g., "Low Stock Threshold" -> "lowStockThreshold")
                         const key = header.toLowerCase().replace(/\s\(.*\)/g, '').replace(/\s+/g, '_').replace(/_([a-z])/g, (g) => g[1].toUpperCase());
-                        itemData[key] = row[index] !== undefined ? row[index] : null;
+                        itemDataFromSheet[key] = row[index] !== undefined ? row[index] : null;
                     });
 
                     const parsedItem = {
-                        name: itemData.name || "",
-                        category: itemData.category || "",
-                        quantity: itemData.quantity !== null ? parseInt(itemData.quantity, 10) : 0,
-                        unit: itemData.unit || "pcs",
-                        price: itemData.price !== null ? parseFloat(itemData.price) : 0.0,
-                        lowStockThreshold: itemData.low_stock_threshold !== null ? parseInt(itemData.low_stock_threshold, 10) : 0,
-                        imageUrl: itemData.image_url || "",
-                        siteId: itemData.site_id || null, // Ensure these are handled if not present
-                        stallId: itemData.stall_id || null,
+                        name: String(itemDataFromSheet.name || ""),
+                        category: String(itemDataFromSheet.category || ""),
+                        quantity: itemDataFromSheet.quantity !== null ? parseInt(String(itemDataFromSheet.quantity), 10) : 0,
+                        unit: String(itemDataFromSheet.unit || "pcs"),
+                        price: itemDataFromSheet.price !== null ? parseFloat(String(itemDataFromSheet.price)) : 0.0,
+                        lowStockThreshold: itemDataFromSheet.lowStockThreshold !== null ? parseInt(String(itemDataFromSheet.lowStockThreshold), 10) : 0,
+                        imageUrl: String(itemDataFromSheet.imageUrl || ""),
+                        siteId: itemDataFromSheet.siteId ? String(itemDataFromSheet.siteId) : null, 
+                        stallId: itemDataFromSheet.stallId ? String(itemDataFromSheet.stallId) : null,
                     };
-
-                    // Validate using Zod (excluding 'id' and 'lastUpdated' from schema for create)
+                    
                     stockItemSchema.parse(parsedItem); // Zod will throw if invalid
 
                     const dataToSave = {
                         ...parsedItem,
-                        lastUpdated: AdminTimestamp.now().toDate().toISOString(), // Server-set timestamp
+                        lastUpdated: AdminTimestamp.now().toDate().toISOString(), 
                     };
                     
+                    const sheetProvidedId = itemDataFromSheet.id ? String(itemDataFromSheet.id).trim() : null;
                     let docRef;
-                    const sheetProvidedId = itemData.id ? String(itemData.id).trim() : null;
                     if (sheetProvidedId && sheetProvidedId !== "") {
                         docRef = adminDb.collection('stockItems').doc(sheetProvidedId);
-                        batch.set(docRef, dataToSave, { merge: true }); // Update or create if ID provided
+                        batch.set(docRef, dataToSave, { merge: true }); 
                     } else {
-                        docRef = adminDb.collection('stockItems').doc(); // Let Firestore auto-generate ID
+                        docRef = adminDb.collection('stockItems').doc(); 
                         batch.set(docRef, dataToSave);
                     }
                     importedCount++;
@@ -301,7 +302,7 @@ export async function POST(request: NextRequest) {
             if (!rows || rows.length === 0) {
                 return NextResponse.json({ message: 'No data found in the sheet.' });
             }
-            const headerRowFromSheet = rows[0].map(h => h.trim());
+            const headerRowFromSheet = rows[0].map(h => String(h || "").trim());
             if (JSON.stringify(headerRowFromSheet) !== JSON.stringify(SALES_HISTORY_HEADERS)) {
                  const errorMsg = `Sales sheet header mismatch. Expected: [${SALES_HISTORY_HEADERS.join(", ")}]. Found: [${headerRowFromSheet.join(", ")}]`;
                  console.error("/api/google-sheets-proxy: " + errorMsg);
@@ -314,34 +315,36 @@ export async function POST(request: NextRequest) {
 
             for (let i = 1; i < rows.length; i++) { // Start from 1 to skip header
                 const row = rows[i];
-                const saleData: any = {};
+                if (row.every(cell => cell === null || cell === undefined || String(cell).trim() === "")) continue; // Skip empty rows
+
+                const saleDataFromSheet: Record<string, any> = {};
                 SALES_HISTORY_HEADERS.forEach((header, index) => {
                      const key = header.toLowerCase().replace(/\s\(.*\)/g, '').replace(/\s+/g, '_').replace(/_([a-z])/g, (g) => g[1].toUpperCase());
-                     saleData[key] = row[index] !== undefined ? row[index] : null;
+                     saleDataFromSheet[key] = row[index] !== undefined ? row[index] : null;
                 });
 
                 try {
-                    if (!saleData.date || !saleData.staffId || !saleData.totalAmount || !saleData.itemsJson) {
+                    if (!saleDataFromSheet.date || !saleDataFromSheet.staffId || !saleDataFromSheet.totalAmount || !saleDataFromSheet.itemsJson) {
                         throw new Error("Missing required fields (Date, Staff ID, Total Amount, Items JSON).");
                     }
                     
                     let transactionDateTimestamp: AdminTimestamp;
                     try {
-                        const parsedDate = new Date(saleData.date);
+                        const parsedDate = new Date(String(saleDataFromSheet.date));
                         if (isNaN(parsedDate.getTime())) throw new Error("Invalid date format.");
                         transactionDateTimestamp = AdminTimestamp.fromDate(parsedDate);
                     } catch (dateError: any) {
-                        throw new Error(`Invalid Date: ${saleData.date}. ${dateError.message}`);
+                        throw new Error(`Invalid Date: ${saleDataFromSheet.date}. ${dateError.message}`);
                     }
                     
-                    const totalAmount = parseFloat(saleData.totalAmount);
-                    if (isNaN(totalAmount)) throw new Error(`Invalid Total Amount: ${saleData.totalAmount}.`);
+                    const totalAmount = parseFloat(String(saleDataFromSheet.totalAmount));
+                    if (isNaN(totalAmount)) throw new Error(`Invalid Total Amount: ${saleDataFromSheet.totalAmount}.`);
 
                     let items: SoldItem[];
                     try {
-                        items = JSON.parse(saleData.itemsJson);
+                        items = JSON.parse(String(saleDataFromSheet.itemsJson));
                         if (!Array.isArray(items)) throw new Error("Items JSON must be an array.");
-                        items.forEach((item, idx) => { // Basic validation for each sold item
+                        items.forEach((item, idx) => { 
                             if (typeof item.itemId !== 'string' || typeof item.name !== 'string' || 
                                 typeof item.quantity !== 'number' || isNaN(item.quantity) ||
                                 typeof item.pricePerUnit !== 'number' || isNaN(item.pricePerUnit) ||
@@ -350,21 +353,21 @@ export async function POST(request: NextRequest) {
                             }
                         });
                     } catch (jsonError: any) {
-                        throw new Error(`Error parsing Items JSON: ${jsonError.message}. Value: ${saleData.itemsJson}`);
+                        throw new Error(`Error parsing Items JSON: ${jsonError.message}. Value: ${saleDataFromSheet.itemsJson}`);
                     }
 
                     const dataToSave: Omit<SaleTransaction, 'id' | 'transactionDate'> & { transactionDate: AdminTimestamp } = {
                         transactionDate: transactionDateTimestamp,
-                        staffId: String(saleData.staffId),
-                        staffName: saleData.staffName ? String(saleData.staffName) : null,
+                        staffId: String(saleDataFromSheet.staffId),
+                        staffName: saleDataFromSheet.staffName ? String(saleDataFromSheet.staffName) : null,
                         totalAmount: totalAmount,
                         items: items,
                         isDeleted: false,
-                        siteId: saleData.siteId ? String(saleData.siteId) : null,
-                        stallId: saleData.stallId ? String(saleData.stallId) : null,
+                        siteId: saleDataFromSheet.siteId ? String(saleDataFromSheet.siteId) : null,
+                        stallId: saleDataFromSheet.stallId ? String(saleDataFromSheet.stallId) : null,
                     };
                     
-                    const saleDocRef = adminDb.collection('salesTransactions').doc(); // Always create new sale
+                    const saleDocRef = adminDb.collection('salesTransactions').doc(); 
                     batch.set(saleDocRef, dataToSave);
                     importedCount++;
                 } catch (e: any) {
@@ -396,7 +399,6 @@ export async function POST(request: NextRequest) {
                 return {
                   id: doc.id,
                   ...data,
-                  // Ensure transactionDate is converted to ISO string if it's a Firestore Timestamp
                   transactionDate: (data.transactionDate instanceof AdminTimestamp ? data.transactionDate.toDate() : new Date(data.transactionDate)).toISOString(),
                 } as SaleTransaction;
             });
@@ -404,14 +406,14 @@ export async function POST(request: NextRequest) {
             const values = [SALES_HISTORY_HEADERS];
             salesData.forEach(sale => {
                 values.push([
-                    sale.id, // Firestore ID as Transaction ID for export reference
-                    new Date(sale.transactionDate).toLocaleString('en-IN'), // Format date nicely
+                    sale.id, 
+                    new Date(sale.transactionDate).toLocaleString('en-IN'), 
                     sale.staffName || "N/A",
                     sale.staffId,
                     sale.totalAmount.toString(),
                     sale.siteId || "",
                     sale.stallId || "",
-                    JSON.stringify(sale.items) // Items as JSON string
+                    JSON.stringify(sale.items) 
                 ]);
             });
 
@@ -445,19 +447,17 @@ export async function POST(request: NextRequest) {
     }
 
   } catch (error: any) {
-    // General error handling for the entire request processing
-    console.error(`Error in Google Sheets proxy API for user ${uid || 'unknown_user'}:`, error.message, error.stack);
-    const currentUid = typeof uid === 'string' ? uid : "unknown_user_needs_reauth"; // Provide a default for state if uid is not yet set
+    console.error(`/api/google-sheets-proxy: General error for user ${uid || 'unknown_user'}:`, error.message, error.stack);
+    const currentUid = typeof uid === 'string' ? uid : "unknown_user_needs_reauth"; 
 
-    // Check for specific Google Auth errors that might require re-authentication
-    if (error.code === 401 || // Typically from our own checks
+    if (error.code === 401 || 
         error.message?.toLowerCase().includes('unauthorized') ||
         error.message?.toLowerCase().includes('token') ||
-        (error.response?.data?.error === 'invalid_grant') || // From Google
-        (error.response?.data?.error === 'unauthorized_client')) { // From Google
+        (error.response?.data?.error === 'invalid_grant') || 
+        (error.response?.data?.error === 'unauthorized_client')) {
         
         if (currentUid !== "unknown_user_needs_reauth" && adminDb && oauth2Client) {
-            // Attempt to delete potentially stale tokens to force re-auth on next attempt
+            console.warn(`/api/google-sheets-proxy: OAuth error encountered for user ${currentUid}. Error details:`, error.response?.data || error.message);
             await adminDb.collection('userGoogleOAuthTokens').doc(currentUid).delete().catch(delErr => console.error("Failed to delete stale tokens:", delErr));
             const authUrl = oauth2Client.generateAuthUrl({ 
                 access_type: 'offline', scope: ['https://www.googleapis.com/auth/spreadsheets'], prompt: 'consent', state: currentUid 
@@ -474,3 +474,4 @@ export async function POST(request: NextRequest) {
   }
 }
 
+    
