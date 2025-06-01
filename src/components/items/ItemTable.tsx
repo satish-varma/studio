@@ -13,7 +13,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { StockItem, Stall } from "@/types";
-import { MoreHorizontal, Edit, Trash2, PackageOpen, Loader2, Building, Store, MoveRight, Undo2, Link2Icon, Shuffle, CheckSquare, Square, Edit3 } from "lucide-react"; // Added Edit3 for batch update
+import { MoreHorizontal, Edit, Trash2, PackageOpen, Loader2, Building, Store, MoveRight, Undo2, Link2Icon, Shuffle, CheckSquare, Square, Edit3 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
@@ -31,7 +31,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
   Dialog,
@@ -120,16 +119,20 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   const [batchUpdateQuantity, setBatchUpdateQuantity] = useState<number | string>("");
   const [isBatchUpdatingStock, setIsBatchUpdatingStock] = useState(false);
 
+  const selectableItems = useMemo(() => items.filter(item => !!item.stallId), [items]);
 
   const handleSelectAll = (checked: boolean | 'indeterminate') => {
     if (checked === true) {
-      setSelectedItems(items.map(item => item.id));
+      setSelectedItems(selectableItems.map(item => item.id));
     } else {
       setSelectedItems([]);
     }
   };
 
   const handleSelectItem = (itemId: string, checked: boolean | 'indeterminate') => {
+    const item = items.find(i => i.id === itemId);
+    if (item && !item.stallId) return; // Prevent selecting master stock items
+
     if (checked === true) {
       setSelectedItems(prev => [...prev, itemId]);
     } else {
@@ -145,10 +148,34 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   const handleDelete = async (itemId: string, itemName: string) => {
     setIsDeleting(true);
     try {
-      await deleteDoc(doc(db, "stockItems", itemId));
+      const itemRef = doc(db, "stockItems", itemId);
+      const itemDoc = await getDoc(itemRef);
+      if (!itemDoc.exists()) {
+        throw new Error("Item not found for deletion.");
+      }
+      const itemData = itemDoc.data() as StockItem;
+
+      await runTransaction(db, async (transaction) => {
+        if (itemData.stallId && itemData.originalMasterItemId) {
+          // If it's a stall item linked to master, return its quantity to master
+          const masterItemRef = doc(db, "stockItems", itemData.originalMasterItemId);
+          const masterItemSnap = await transaction.get(masterItemRef);
+          if (masterItemSnap.exists()) {
+            const masterData = masterItemSnap.data() as StockItem;
+            transaction.update(masterItemRef, {
+              quantity: masterData.quantity + itemData.quantity,
+              lastUpdated: new Date().toISOString(),
+            });
+          } else {
+            console.warn(`Master item ${itemData.originalMasterItemId} not found during deletion of stall item ${itemData.id}. Master stock not adjusted.`);
+          }
+        }
+        transaction.delete(itemRef);
+      });
+
       toast({
         title: "Item Deleted",
-        description: `${itemName} has been successfully deleted.`,
+        description: `${itemName} has been successfully deleted. Master stock (if applicable) adjusted.`,
       });
       onDataNeedsRefresh();
       setSelectedItems(prev => prev.filter(id => id !== itemId));
@@ -187,39 +214,36 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         }
         const currentItemData = itemSnap.data() as StockItem;
         const oldQuantity = currentItemData.quantity;
-        const quantityDelta = updatedQuantityNum - oldQuantity; 
-
-        let masterItemRef: DocumentReference | null = null;
-        let masterItemSnap: DocumentSnapshot | null = null;
-
-        if (currentItemData.stallId && currentItemData.originalMasterItemId) {
-          masterItemRef = doc(db, "stockItems", currentItemData.originalMasterItemId);
-          masterItemSnap = await transaction.get(masterItemRef);
-          if (!masterItemSnap?.exists()) {
-            console.warn(`Master stock item ${currentItemData.originalMasterItemId} not found. Stall stock will update, but master cannot be adjusted for this change.`);
-            masterItemRef = null; 
-          }
-        }
         
+        // Update the primary item (stall or master)
         transaction.update(itemRef, {
           quantity: updatedQuantityNum,
           lastUpdated: new Date().toISOString(),
         });
 
-        if (masterItemRef && masterItemSnap?.exists()) {
-          const masterItemData = masterItemSnap.data() as StockItem;
-          const newMasterQuantity = masterItemData.quantity - quantityDelta;
-          
-          transaction.update(masterItemRef, {
-            quantity: Math.max(0, newMasterQuantity), 
-            lastUpdated: new Date().toISOString(),
-          });
+        // If it's a stall item linked to a master item, adjust master stock
+        if (currentItemData.stallId && currentItemData.originalMasterItemId) {
+          const quantityDelta = updatedQuantityNum - oldQuantity; // Positive if increased, negative if decreased
+          const masterItemRef = doc(db, "stockItems", currentItemData.originalMasterItemId);
+          const masterItemSnap = await transaction.get(masterItemRef);
+
+          if (masterItemSnap.exists()) {
+            const masterItemData = masterItemSnap.data() as StockItem;
+            const newMasterQuantity = masterItemData.quantity - quantityDelta; // Subtract delta: if stall increases, master decreases; if stall decreases, master increases.
+            
+            transaction.update(masterItemRef, {
+              quantity: Math.max(0, newMasterQuantity), // Ensure master stock doesn't go below zero
+              lastUpdated: new Date().toISOString(),
+            });
+          } else {
+            console.warn(`Master stock item ${currentItemData.originalMasterItemId} not found. Stall stock updated, but master cannot be adjusted.`);
+          }
         }
       });
 
       toast({
         title: "Stock Updated",
-        description: `Stock quantity for "${stockUpdateItem.name}" updated to ${updatedQuantityNum}. Master stock (if applicable) adjusted.`,
+        description: `Stock for "${stockUpdateItem.name}" updated to ${updatedQuantityNum}. Master stock (if applicable) adjusted.`,
       });
       setStockUpdateItem(null);
       setNewQuantity("");
@@ -449,7 +473,9 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             where("originalMasterItemId", "==", sourceItemData.originalMasterItemId || null) 
         );
         
-        const destQuerySnap = await getDocs(q);
+        const destQuerySnap = await getDocs(q); // This needs to be outside transaction for non-transactional read, or handled carefully.
+                                                 // For now, assuming it's okay to query outside, or we fetch it non-transactionally first.
+                                                 // For strict transaction, fetch outside, then use `transaction.get(ref)`
         if (!destQuerySnap.empty) {
             destinationItemRef = destQuerySnap.docs[0].ref;
             destinationItemSnap = await transaction.get(destinationItemRef);
@@ -501,7 +527,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
 
   const handleOpenBatchDeleteDialog = () => {
     if (selectedItems.length === 0) {
-      toast({ title: "No Items Selected", description: "Please select items to delete.", variant: "default" });
+      toast({ title: "No Items Selected", description: "Please select stall items to delete.", variant: "default" });
       return;
     }
     setShowBatchDeleteDialog(true);
@@ -509,39 +535,74 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
 
   const handleConfirmBatchDelete = async () => {
     setIsBatchDeleting(true);
-    const batch = writeBatch(db);
-    selectedItems.forEach(itemId => {
-      const itemRef = doc(db, "stockItems", itemId);
-      batch.delete(itemRef);
-    });
+    let successCount = 0;
+    let errorCount = 0;
 
-    try {
-      await batch.commit();
+    for (const itemId of selectedItems) {
+      const itemToDelete = items.find(i => i.id === itemId);
+      if (!itemToDelete || !itemToDelete.stallId) { // Ensure it's a stall item
+        console.warn(`Skipping non-stall item or missing item in batch delete: ${itemId}`);
+        continue;
+      }
+
+      try {
+        await runTransaction(db, async (transaction) => {
+          const stallItemRef = doc(db, "stockItems", itemToDelete.id);
+          const stallItemSnap = await transaction.get(stallItemRef);
+
+          if (!stallItemSnap.exists()) {
+            throw new Error(`Stall item ${itemToDelete.name} not found.`);
+          }
+          const stallItemData = stallItemSnap.data() as StockItem;
+
+          if (stallItemData.originalMasterItemId) {
+            const masterItemRef = doc(db, "stockItems", stallItemData.originalMasterItemId);
+            const masterItemSnap = await transaction.get(masterItemRef);
+            if (masterItemSnap.exists()) {
+              const masterData = masterItemSnap.data() as StockItem;
+              transaction.update(masterItemRef, {
+                quantity: masterData.quantity + stallItemData.quantity, // Return quantity to master
+                lastUpdated: new Date().toISOString(),
+              });
+            } else {
+              console.warn(`Master item ${stallItemData.originalMasterItemId} for stall item ${stallItemData.id} not found. Master stock not adjusted.`);
+            }
+          }
+          transaction.delete(stallItemRef);
+        });
+        successCount++;
+      } catch (error: any) {
+        console.error(`Error deleting item ${itemId} in batch:`, error);
+        errorCount++;
+      }
+    }
+
+    if (successCount > 0) {
       toast({
-        title: "Batch Delete Successful",
-        description: `${selectedItems.length} item(s) have been deleted.`,
+        title: "Batch Delete Processed",
+        description: `${successCount} stall item(s) deleted. Master stock (if applicable) adjusted.`,
       });
-      onDataNeedsRefresh();
-      setSelectedItems([]);
-    } catch (error: any) {
-      console.error("Error during batch delete:", error);
+    }
+    if (errorCount > 0) {
       toast({
-        title: "Batch Delete Failed",
-        description: error.message || "Could not delete selected items.",
+        title: "Batch Delete Errors",
+        description: `${errorCount} item(s) could not be deleted. Check console for details.`,
         variant: "destructive",
       });
-    } finally {
-      setIsBatchDeleting(false);
-      setShowBatchDeleteDialog(false);
     }
+    
+    onDataNeedsRefresh();
+    setSelectedItems([]);
+    setIsBatchDeleting(false);
+    setShowBatchDeleteDialog(false);
   };
 
   const handleOpenBatchUpdateStockDialog = () => {
     if (selectedItems.length === 0) {
-      toast({ title: "No Items Selected", description: "Please select items to update.", variant: "default" });
+      toast({ title: "No Stall Items Selected", description: "Please select stall items to update.", variant: "default" });
       return;
     }
-    setBatchUpdateQuantity(""); // Reset quantity
+    setBatchUpdateQuantity(""); 
     setShowBatchUpdateStockDialog(true);
   };
 
@@ -551,36 +612,75 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       return;
     }
     setIsBatchUpdatingStock(true);
-    const newBatchQuantity = Number(batchUpdateQuantity);
-    const batch = writeBatch(db);
+    const newBatchQtyNum = Number(batchUpdateQuantity);
+    let successCount = 0;
+    let errorCount = 0;
 
-    selectedItems.forEach(itemId => {
-      const itemRef = doc(db, "stockItems", itemId);
-      batch.update(itemRef, {
-        quantity: newBatchQuantity,
-        lastUpdated: new Date().toISOString(),
-      });
-    });
+    for (const itemId of selectedItems) {
+      const itemToUpdate = items.find(i => i.id === itemId);
+      if (!itemToUpdate || !itemToUpdate.stallId) { // Ensure it's a stall item
+         console.warn(`Skipping non-stall item or missing item in batch update: ${itemId}`);
+        continue;
+      }
 
-    try {
-      await batch.commit();
+      try {
+        await runTransaction(db, async (transaction) => {
+          const stallItemRef = doc(db, "stockItems", itemToUpdate.id);
+          const stallItemSnap = await transaction.get(stallItemRef);
+
+          if (!stallItemSnap.exists()) {
+            throw new Error(`Stall item ${itemToUpdate.name} not found.`);
+          }
+          const currentStallData = stallItemSnap.data() as StockItem;
+          const oldStallQuantity = currentStallData.quantity;
+          
+          transaction.update(stallItemRef, {
+            quantity: newBatchQtyNum,
+            lastUpdated: new Date().toISOString(),
+          });
+
+          if (currentStallData.originalMasterItemId) {
+            const quantityDelta = newBatchQtyNum - oldStallQuantity;
+            const masterItemRef = doc(db, "stockItems", currentStallData.originalMasterItemId);
+            const masterItemSnap = await transaction.get(masterItemRef);
+
+            if (masterItemSnap.exists()) {
+              const masterData = masterItemSnap.data() as StockItem;
+              const newMasterQuantity = masterData.quantity - quantityDelta;
+              transaction.update(masterItemRef, {
+                quantity: Math.max(0, newMasterQuantity),
+                lastUpdated: new Date().toISOString(),
+              });
+            } else {
+              console.warn(`Master item ${currentStallData.originalMasterItemId} for stall item ${currentStallData.id} not found. Master stock not adjusted.`);
+            }
+          }
+        });
+        successCount++;
+      } catch (error: any) {
+        console.error(`Error batch updating stock for item ${itemId}:`, error);
+        errorCount++;
+      }
+    }
+    
+    if (successCount > 0) {
       toast({
-        title: "Batch Stock Update Successful",
-        description: `${selectedItems.length} item(s) quantity set to ${newBatchQuantity}.`,
+        title: "Batch Stock Update Processed",
+        description: `${successCount} stall item(s) quantity set to ${newBatchQtyNum}. Master stock (if applicable) adjusted.`,
       });
-      onDataNeedsRefresh();
-      setSelectedItems([]);
-    } catch (error: any) {
-      console.error("Error during batch stock update:", error);
-      toast({
-        title: "Batch Update Failed",
-        description: error.message || "Could not update stock for selected items.",
+    }
+    if (errorCount > 0) {
+       toast({
+        title: "Batch Update Errors",
+        description: `${errorCount} item(s) could not be updated. Check console for details.`,
         variant: "destructive",
       });
-    } finally {
-      setIsBatchUpdatingStock(false);
-      setShowBatchUpdateStockDialog(false);
     }
+
+    onDataNeedsRefresh();
+    setSelectedItems([]);
+    setIsBatchUpdatingStock(false);
+    setShowBatchUpdateStockDialog(false);
   };
 
 
@@ -597,8 +697,8 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     }
   };
 
-  const isAllSelected = useMemo(() => items.length > 0 && selectedItems.length === items.length, [items, selectedItems]);
-  const isIndeterminate = useMemo(() => selectedItems.length > 0 && selectedItems.length < items.length, [items, selectedItems]);
+  const isAllSelected = useMemo(() => selectableItems.length > 0 && selectedItems.length === selectableItems.length, [selectableItems, selectedItems]);
+  const isIndeterminate = useMemo(() => selectedItems.length > 0 && selectedItems.length < selectableItems.length, [selectableItems, selectedItems]);
 
 
   if (items.length === 0 && selectedItems.length === 0) { 
@@ -631,7 +731,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       {selectedItems.length > 0 && (
         <div className="mb-4 p-3 bg-accent/10 border border-accent/30 rounded-md flex items-center justify-between">
           <p className="text-sm text-accent-foreground">
-            {selectedItems.length} item(s) selected.
+            {selectedItems.length} stall item(s) selected.
           </p>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -666,9 +766,10 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                 <Checkbox
                   checked={isAllSelected || isIndeterminate}
                   onCheckedChange={handleSelectAll}
-                  aria-label="Select all items"
+                  aria-label="Select all stall items"
                   className={isIndeterminate ? '[&_svg]:hidden indeterminate-checkbox' : ''}
                   data-state={isIndeterminate ? 'indeterminate' : (isAllSelected ? 'checked' : 'unchecked')}
+                  disabled={selectableItems.length === 0}
                 />
                  {isIndeterminate && <Square className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-2.5 w-2.5 text-primary fill-current pointer-events-none" />}
               </TableHead>
@@ -688,6 +789,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             {items.map((item) => {
               const isLowStock = item.quantity <= item.lowStockThreshold;
               const isOutOfStock = item.quantity === 0;
+              const isMasterStock = !item.stallId;
               const isSelected = selectedItems.includes(item.id);
 
               const siteNameDisplay = item.siteId ? (sitesMap[item.siteId] || `Site ID: ${item.siteId.substring(0,6)}...`) : "N/A";
@@ -725,13 +827,13 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
               return (
                 <TableRow 
                     key={item.id} 
-                    data-state={isSelected ? "selected" : ""}
+                    data-state={isSelected && !isMasterStock ? "selected" : ""}
                     className={cn(
-                        isSelected && "bg-primary/5 hover:bg-primary/10",
+                        isSelected && !isMasterStock && "bg-primary/5 hover:bg-primary/10",
                         isLowStock && !isOutOfStock && "bg-orange-500/10 hover:bg-orange-500/20",
                         isOutOfStock && "bg-destructive/10 hover:bg-destructive/20",
-                        isSelected && isLowStock && !isOutOfStock && "bg-orange-500/20 hover:bg-orange-500/25",
-                        isSelected && isOutOfStock && "bg-destructive/20 hover:bg-destructive/25",
+                        isSelected && !isMasterStock && isLowStock && !isOutOfStock && "bg-orange-500/20 hover:bg-orange-500/25",
+                        isSelected && !isMasterStock && isOutOfStock && "bg-destructive/20 hover:bg-destructive/25",
                     )}
                 >
                   <TableCell>
@@ -739,6 +841,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                         checked={isSelected}
                         onCheckedChange={(checked) => handleSelectItem(item.id, checked)}
                         aria-label={`Select item ${item.name}`}
+                        disabled={isMasterStock} // Disable checkbox for master stock items
                       />
                   </TableCell>
                   <TableCell>
@@ -823,8 +926,8 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                                 <AlertDialogTitle>Are you sure?</AlertDialogTitle>
                                 <AlertDialogDescription>
                                   This action cannot be undone. This will permanently delete the item "{item.name}".
-                                  If this is master stock, any allocated stall stock derived from it will NOT be automatically deleted.
-                                  If this is stall stock, the linked master stock will NOT be automatically adjusted by this deletion.
+                                  If this is a stall item linked to master stock, its quantity will be returned to the master stock.
+                                  If this is master stock, any stall stock items linked to it will NOT be automatically deleted and will become orphaned.
                                 </AlertDialogDescription>
                               </AlertDialogHeader>
                               <AlertDialogFooter>
@@ -891,8 +994,8 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           <AlertDialogHeader>
             <AlertDialogTitle>Confirm Batch Delete</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete {selectedItems.length} selected item(s)? This action cannot be undone.
-              This will permanently delete the selected items. Associated master/stall stock links will not be automatically reconciled by this batch operation.
+              Are you sure you want to delete {selectedItems.length} selected stall item(s)? This action cannot be undone.
+              For each deleted stall item linked to master stock, its quantity will be returned to the master stock.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -909,12 +1012,11 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       <AlertDialog open={showBatchUpdateStockDialog} onOpenChange={setShowBatchUpdateStockDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Batch Update Stock Quantity</AlertDialogTitle>
+            <AlertDialogTitle>Batch Update Stock Quantity for Stall Items</AlertDialogTitle>
             <AlertDialogDescription>
-              This will set the quantity for all {selectedItems.length} selected items to the new value entered below.
-              <br />
-              <strong>Important:</strong> This operation will NOT automatically adjust linked master stock for any selected stall items.
-              For master stock reconciliation, please use individual item updates or the allocate/return features.
+              This will set the quantity for all {selectedItems.length} selected stall items to the new value.
+              If a stall item is linked to master stock, the change in its quantity will be reflected in the master stock
+              (e.g., if stall quantity increases, master quantity decreases by the same amount, and vice-versa).
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="grid gap-4 py-4">
