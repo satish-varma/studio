@@ -240,7 +240,8 @@ export default function ItemsClientPage() {
       try {
         result = await response.json();
       } catch (parseError: any) {
-        console.error(`Error parsing JSON response from /api/google-sheets-proxy. Status: ${response.status}`, await response.text().catch(() => "Could not read response text."));
+        const responseText = await response.text().catch(() => "Could not read response text.");
+        console.error(`Error parsing JSON response from /api/google-sheets-proxy. Status: ${response.status}. Response text: ${responseText}`, parseError);
         toast({
           title: "API Communication Error",
           description: `Failed to process request. Server responded with status ${response.status} and non-JSON content. Check console for details.`,
@@ -317,6 +318,7 @@ export default function ItemsClientPage() {
         categories={uniqueCategories}
       />
       
+      {/*
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
         <Card className="shadow-md">
           <CardHeader>
@@ -343,7 +345,6 @@ export default function ItemsClientPage() {
           </CardContent>
         </Card>
 
-        {/* 
         <Card className="shadow-md">
           <CardHeader>
               <CardTitle className="flex items-center text-lg">
@@ -380,8 +381,8 @@ export default function ItemsClientPage() {
               </p>
           </CardFooter>
         </Card>
-        */}
       </div>
+      */}
       
       {loadingItems && (
         <div className="flex justify-center items-center py-10">
@@ -437,3 +438,4 @@ export default function ItemsClientPage() {
   );
 }
     
+
