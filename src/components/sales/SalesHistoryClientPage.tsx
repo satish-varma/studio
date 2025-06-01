@@ -21,7 +21,7 @@ import {
     getDocs,
     doc,
     updateDoc,
-    QueryConstraint // Import QueryConstraint
+    QueryConstraint 
 } from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
@@ -30,7 +30,6 @@ import { Loader2, Info } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
-// Initialize Firebase only if it hasn't been initialized yet
 if (!getApps().length) {
   try {
     initializeApp(firebaseConfig);
@@ -47,7 +46,7 @@ export default function SalesHistoryClientPage() {
     from: subDays(new Date(), 29),
     to: new Date(),
   });
-  const [staffFilter, setStaffFilter] = useState("all"); // 'all' or a staff UID
+  const [staffFilter, setStaffFilter] = useState("all"); 
   
   const [transactions, setTransactions] = useState<SaleTransaction[]>([]);
   const [loadingTransactions, setLoadingTransactions] = useState(true);
@@ -63,7 +62,6 @@ export default function SalesHistoryClientPage() {
         setLoadingStaff(true);
         try {
           const usersCollectionRef = collection(db, "users");
-          // Fetch all users who can make sales (staff, manager, admin)
           const qUsers = query(usersCollectionRef, where("role", "in", ["staff", "manager", "admin"]));
           const querySnapshot = await getDocs(qUsers);
           const fetchedStaff: AppUser[] = [];
@@ -92,14 +90,10 @@ export default function SalesHistoryClientPage() {
       return;
     }
 
-    // For admins, if no site is selected, don't fetch all sales from all sites by default.
-    // Prompt them to select a site first, or have a different view for "All Sites" if truly needed (can be very broad).
-    // For simplicity now, if activeSiteId is null for an admin, show a message.
-    // Staff/Managers should always have an activeSiteId from their default settings.
     if (user.role === 'admin' && !activeSiteId) {
       setLoadingTransactions(false);
-      setErrorTransactions(null); // Not an error, but a state to show message
-      setTransactions([]); // Clear transactions
+      setErrorTransactions(null); 
+      setTransactions([]); 
       return;
     }
     if (!activeSiteId && (user.role === 'staff' || user.role === 'manager')) {
@@ -109,38 +103,33 @@ export default function SalesHistoryClientPage() {
         return;
     }
 
-
     setLoadingTransactions(true);
     setErrorTransactions(null);
     
     const salesCollectionRef = collection(db, "salesTransactions");
-    let salesQueryConstraints: QueryConstraint[] = [ // Use QueryConstraint[] type
+    let salesQueryConstraints: QueryConstraint[] = [
         orderBy("transactionDate", "desc"),
-        where("isDeleted", "!=", true)
+        where("isDeleted", "==", false) // Changed from "!=" to "==" for better indexing
     ];
 
-    // Site and Stall filtering
     if (activeSiteId) {
         salesQueryConstraints.push(where("siteId", "==", activeSiteId));
         if (activeStallId) {
             salesQueryConstraints.push(where("stallId", "==", activeStallId));
         }
-    } else if (user.role !== 'admin') { // Staff/Manager must have a siteId
+    } else if (user.role !== 'admin') { 
         setLoadingTransactions(false);
         setErrorTransactions("Site context is missing for your role.");
         setTransactions([]);
         return;
     }
 
-
-    // Staff filtering (applies on top of site/stall)
     if (user.role === 'staff') {
       salesQueryConstraints.push(where("staffId", "==", user.uid));
     } else if (isManagerOrAdmin && staffFilter !== "all") {
       salesQueryConstraints.push(where("staffId", "==", staffFilter));
     }
     
-    // Date range filtering
     if (dateRange?.from) {
       salesQueryConstraints.push(where("transactionDate", ">=", Timestamp.fromDate(startOfDay(dateRange.from))));
     }
@@ -163,11 +152,10 @@ export default function SalesHistoryClientPage() {
         setTransactions(fetchedTransactions);
         setLoadingTransactions(false);
       },
-      (error) => {
+      (error: any) => {
         console.error("Error fetching sales transactions:", error);
-        // Check for specific Firestore index error
-        if (error.message.includes("requires an index")) {
-          setErrorTransactions(`Query requires a Firestore index. Please create it in the Firebase console. Details: ${error.message}`);
+        if (error.code === 'failed-precondition' && error.message.includes("requires an index")) {
+          setErrorTransactions(`Query requires a Firestore index. Please create it using the link in the Firebase error details, or directly in the Firebase console. Full error: ${error.message}`);
         } else {
           setErrorTransactions("Failed to load sales history. Please try again later.");
         }
@@ -264,3 +252,4 @@ export default function SalesHistoryClientPage() {
     </div>
   );
 }
+
