@@ -62,7 +62,8 @@ import {
   writeBatch,
   serverTimestamp,
   Timestamp,
-  DocumentReference
+  DocumentReference,
+  DocumentSnapshot
 } from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
@@ -152,27 +153,41 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         const oldQuantity = currentItemData.quantity;
         const updatedQuantity = Number(newQuantity);
 
+        let masterItemRef: DocumentReference | null = null;
+        let masterItemSnap: DocumentSnapshot | null = null;
+        let masterItemData: StockItem | null = null;
+        let quantityDifference = 0;
+
+        // Determine if master stock needs reading (must happen before any writes)
+        const needsMasterStockUpdate = 
+          currentItemData.stallId && // It's a stall item
+          currentItemData.originalMasterItemId && // It's linked to a master item
+          updatedQuantity < oldQuantity; // The quantity was decreased
+
+        if (needsMasterStockUpdate) {
+          quantityDifference = oldQuantity - updatedQuantity;
+          masterItemRef = doc(db, "stockItems", currentItemData.originalMasterItemId!);
+          masterItemSnap = await transaction.get(masterItemRef);
+          if (masterItemSnap.exists()) {
+            masterItemData = masterItemSnap.data() as StockItem;
+          } else {
+            // This case should ideally not happen if data integrity is maintained
+            console.warn(`Master stock item ${currentItemData.originalMasterItemId} not found when trying to reflect stall stock decrease. Proceeding with stall item update only.`);
+          }
+        }
+
+        // Now perform writes
         transaction.update(itemRef, {
           quantity: updatedQuantity,
           lastUpdated: new Date().toISOString(),
         });
 
-        // If it's a stall item, and its quantity decreased, and it has a master item link
-        if (currentItemData.stallId && currentItemData.originalMasterItemId && updatedQuantity < oldQuantity) {
-          const quantityDifference = oldQuantity - updatedQuantity;
-          const masterItemRef = doc(db, "stockItems", currentItemData.originalMasterItemId);
-          const masterItemSnap = await transaction.get(masterItemRef);
-
-          if (masterItemSnap.exists()) {
-            const masterItemData = masterItemSnap.data() as StockItem;
-            const newMasterQuantity = Math.max(0, masterItemData.quantity - quantityDifference);
-            transaction.update(masterItemRef, {
-              quantity: newMasterQuantity,
-              lastUpdated: new Date().toISOString(),
-            });
-          } else {
-            console.warn(`Master stock item ${currentItemData.originalMasterItemId} not found when trying to reflect stall stock decrease.`);
-          }
+        if (needsMasterStockUpdate && masterItemRef && masterItemData) {
+          const newMasterQuantity = Math.max(0, masterItemData.quantity - quantityDifference);
+          transaction.update(masterItemRef, {
+            quantity: newMasterQuantity,
+            lastUpdated: new Date().toISOString(),
+          });
         }
       });
 
@@ -227,55 +242,49 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         if (currentMasterStock.quantity < numQuantityToAllocate) {
           throw new Error(`Concurrent update: Not enough master stock. Available: ${currentMasterStock.quantity}`);
         }
-
-        // For querying within a transaction, you must use transaction.get() on DocumentReferences.
-        // Complex queries (like where clauses) are not directly supported on the transaction object.
-        // So, we'll get all docs and filter, or structure data to allow direct gets if performance critical.
-        // For now, we'll fetch outside and validate inside, or adjust logic for direct gets if possible.
-        // Let's try to construct the stall item doc ID if predictable or query then get with transaction.
-        // A common pattern is to have a subcollection or a predictable ID.
-        // If not, we query for the stall item first (outside transaction for query, inside for get)
         
         const stallItemsCollectionRef = collection(db, "stockItems");
         const q = query(stallItemsCollectionRef,
                         where("originalMasterItemId", "==", itemToAllocate.id),
                         where("stallId", "==", targetStallIdForAllocation));
         
-        // Execute the query outside the transaction to get potential document IDs
-        const existingStallItemQuerySnap = await getDocs(q);
+        const existingStallItemQuerySnap = await getDocs(q); // Query outside transaction
         let targetStallItemRef: DocumentReference;
         let newStallItemQuantity = numQuantityToAllocate;
+        let existingStallItemData: StockItem | null = null;
 
         if (!existingStallItemQuerySnap.empty) {
           const existingStallItemDoc = existingStallItemQuerySnap.docs[0];
-          targetStallItemRef = existingStallItemDoc.ref; // Get ref to use in transaction
+          targetStallItemRef = existingStallItemDoc.ref;
           const existingStallItemSnap = await transaction.get(targetStallItemRef); // Read within transaction
           if(!existingStallItemSnap.exists()) throw new Error("Stall item disappeared during transaction.");
-
-          const existingStallItemData = existingStallItemSnap.data() as StockItem;
+          existingStallItemData = existingStallItemSnap.data() as StockItem;
           newStallItemQuantity = existingStallItemData.quantity + numQuantityToAllocate;
-
-          transaction.update(targetStallItemRef, {
-            quantity: newStallItemQuantity,
-            lastUpdated: new Date().toISOString(),
-          });
-
         } else {
-          targetStallItemRef = doc(collection(db, "stockItems")); // Create new ref
-          const newStallItemData: Omit<StockItem, 'id'> = {
-            name: currentMasterStock.name,
-            category: currentMasterStock.category,
-            quantity: newStallItemQuantity,
-            unit: currentMasterStock.unit,
-            price: currentMasterStock.price,
-            lowStockThreshold: currentMasterStock.lowStockThreshold,
-            imageUrl: currentMasterStock.imageUrl,
-            siteId: currentMasterStock.siteId,
-            stallId: targetStallIdForAllocation,
-            originalMasterItemId: itemToAllocate.id,
-            lastUpdated: new Date().toISOString(),
-          };
-          transaction.set(targetStallItemRef, newStallItemData);
+          targetStallItemRef = doc(collection(db, "stockItems")); 
+        }
+        
+        // Writes
+        if (existingStallItemData) { // Update existing stall item
+            transaction.update(targetStallItemRef, {
+                quantity: newStallItemQuantity,
+                lastUpdated: new Date().toISOString(),
+            });
+        } else { // Create new stall item
+            const newStallItemDataToSave: Omit<StockItem, 'id'> = {
+                name: currentMasterStock.name,
+                category: currentMasterStock.category,
+                quantity: newStallItemQuantity,
+                unit: currentMasterStock.unit,
+                price: currentMasterStock.price,
+                lowStockThreshold: currentMasterStock.lowStockThreshold,
+                imageUrl: currentMasterStock.imageUrl,
+                siteId: currentMasterStock.siteId,
+                stallId: targetStallIdForAllocation,
+                originalMasterItemId: itemToAllocate.id,
+                lastUpdated: new Date().toISOString(),
+            };
+            transaction.set(targetStallItemRef, newStallItemDataToSave);
         }
 
         transaction.update(masterStockRef, {
@@ -326,6 +335,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         const stallItemRef = doc(db, "stockItems", itemToReturn.id);
         const masterItemRef = doc(db, "stockItems", itemToReturn.originalMasterItemId!);
 
+        // Read Phase
         const stallItemSnap = await transaction.get(stallItemRef);
         const masterItemSnap = await transaction.get(masterItemRef);
 
@@ -343,6 +353,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           throw new Error(`Concurrent update: Not enough stall stock to return. Available: ${currentStallStock.quantity}`);
         }
         
+        // Write Phase
         transaction.update(masterItemRef, {
           quantity: currentMasterStock.quantity + numQuantityToReturn,
           lastUpdated: new Date().toISOString(),
@@ -673,7 +684,3 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     </>
   );
 }
-
-    
-
-    
