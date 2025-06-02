@@ -33,7 +33,7 @@ import { updateProfile as updateFirebaseProfile } from "firebase/auth";
 import { firebaseConfig } from "@/lib/firebaseConfig";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import type { Site, Stall, StockItem } from "@/types";
+import type { Site, Stall, StockItem, AppUser } from "@/types"; // Added AppUser import
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { CalendarIcon } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
@@ -446,3 +446,4 @@ export default function ProfilePage() {
     </div>
   );
 }
+
