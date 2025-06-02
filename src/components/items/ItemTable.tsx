@@ -31,7 +31,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger, // Kept for other dialogs if any, but not used for single delete trigger now
+  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
   Dialog,
@@ -61,6 +61,7 @@ import {
   query,
   where,
   getDocs,
+  getDoc, // Added getDoc
   writeBatch,
   serverTimestamp,
   Timestamp,
@@ -159,6 +160,27 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         throw new Error("Item not found for deletion.");
       }
       const itemData = itemDocSnap.data() as StockItem;
+
+      if (itemData.stallId === null && itemData.siteId) { // It's a master item
+          const linkedStallsQuery = query(
+            collection(db, "stockItems"),
+            where("originalMasterItemId", "==", itemId)
+          );
+          const linkedStallsSnap = await getDocs(linkedStallsQuery);
+          if (!linkedStallsSnap.empty) {
+            toast({
+              title: "Deletion Prevented",
+              description: `Master item "${itemName}" cannot be deleted because ${linkedStallsSnap.size} stall item(s) are still allocated from it. Please return or re-allocate stock from these stalls first.`,
+              variant: "destructive",
+              duration: 7000,
+            });
+            setIsDeleting(false);
+            setShowSingleDeleteDialog(false);
+            setItemForSingleDelete(null);
+            return;
+          }
+      }
+
 
       await runTransaction(db, async (transaction) => {
         if (itemData.stallId && itemData.originalMasterItemId) {
@@ -1055,7 +1077,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                 <AlertDialogDescription>
                 This action cannot be undone. This will permanently delete the item "{itemForSingleDelete.name}".
                 If this is a stall item linked to master stock, its quantity will be returned to the master stock.
-                If this is master stock, any stall stock items linked to it will NOT be automatically deleted and will become orphaned.
+                If this is master stock, any stall stock items linked to it will NOT be automatically deleted and will become orphaned (unless this check prevents deletion).
                 </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
