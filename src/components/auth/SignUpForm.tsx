@@ -14,26 +14,18 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Loader2, UserPlus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import type { UserRole } from "@/types";
 
 const signUpFormSchema = z.object({
   displayName: z.string().min(2, { message: "Display name must be at least 2 characters." }),
   email: z.string().email({ message: "Invalid email address." }),
   password: z.string().min(6, { message: "Password must be at least 6 characters." }),
   confirmPassword: z.string().min(6, { message: "Password must be at least 6 characters." }),
-  role: z.enum(['staff', 'manager', 'admin'], { required_error: "Please select a role." }),
+  // Role field removed from schema
 }).refine((data) => data.password === data.confirmPassword, {
   message: "Passwords don't match",
   path: ["confirmPassword"], // path to error
@@ -54,17 +46,18 @@ export function SignUpForm() {
       email: "",
       password: "",
       confirmPassword: "",
-      role: "staff",
+      // Role default value removed
     },
   });
 
   async function onSubmit(values: SignUpFormValues) {
     setIsLoading(true);
     try {
-      await signUp(values.email, values.password, values.displayName, values.role as UserRole);
+      // Call signUp without the role argument; AuthContext will handle default role
+      await signUp(values.email, values.password, values.displayName);
       toast({
         title: "Sign Up Successful",
-        description: "Your account has been created. Please log in.",
+        description: "Your account has been created with a default role. Please log in.",
       });
       router.push("/login"); 
     } catch (error: any) {
@@ -163,28 +156,7 @@ export function SignUpForm() {
             </FormItem>
           )}
         />
-        <FormField
-          control={form.control}
-          name="role"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Role</FormLabel>
-              <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isLoading}>
-                <FormControl>
-                  <SelectTrigger className="bg-input">
-                    <SelectValue placeholder="Select a role for testing" />
-                  </SelectTrigger>
-                </FormControl>
-                <SelectContent>
-                  <SelectItem value="staff">Staff</SelectItem>
-                  <SelectItem value="manager">Manager</SelectItem>
-                  <SelectItem value="admin">Admin</SelectItem>
-                </SelectContent>
-              </Select>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
+        {/* Role Select FormField removed */}
         <Button type="submit" className="w-full" disabled={isLoading}>
           {isLoading ? (
             <Loader2 className="animate-spin" />

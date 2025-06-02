@@ -58,7 +58,7 @@ interface AuthContextType {
   user: AppUser | null;
   loading: boolean;
   signIn: (email: string, pass: string) => Promise<AppUser | null>;
-  signUp: (email: string, pass: string, displayName: string, role?: UserRole) => Promise<AppUser | null>; 
+  signUp: (email: string, pass: string, displayName: string) => Promise<AppUser | null>; // Role removed
   signOutUser: () => Promise<void>;
   setUser: React.Dispatch<React.SetStateAction<AppUser | null>>;
   activeSiteId: string | null;
@@ -165,7 +165,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             const defaultUserData = { 
               uid: firebaseUser.uid,
               email: firebaseUser.email, 
-              role: 'staff', 
+              role: 'staff', // Default role on creation if Firestore doc is missing
               displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User",
               createdAt: new Date().toISOString(),
               defaultSiteId: null,
@@ -227,7 +227,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         const defaultUserData = {
             uid: firebaseUser.uid,
             email: firebaseUser.email, 
-            role: 'staff',
+            role: 'staff', // Default role
             displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User",
             createdAt: new Date().toISOString(),
             defaultSiteId: null,
@@ -251,7 +251,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   }, []);
   
-  const signUp = useCallback(async (email: string, pass: string, displayName: string, role: UserRole = 'staff'): Promise<AppUser | null> => {
+  // Modified signUp to always assign 'staff' role
+  const signUp = useCallback(async (email: string, pass: string, displayName: string): Promise<AppUser | null> => {
     if (!auth || !db) throw new Error("Firebase not initialized for signUp.");
     setLoading(true);
     try {
@@ -261,7 +262,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const newUserDocData = {
         uid: firebaseUser.uid,
         email: firebaseUser.email,
-        role: role,
+        role: 'staff' as UserRole, // Default role is 'staff'
         displayName: displayName,
         createdAt: new Date().toISOString(),
         defaultSiteId: null, 
@@ -271,6 +272,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       await setDoc(userDocRef, newUserDocData);
 
       const appUser = mapFirestoreDataToAppUser(firebaseUser, newUserDocData);
+      // New users don't get an active site/stall set initially, they can set defaults in profile
       setUser(appUser); 
       setActiveSiteState(null);
       setActiveStallState(null);
