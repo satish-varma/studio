@@ -39,13 +39,14 @@ import {
   DocumentSnapshot,
   query,
   where,
-  getDoc // Added getDoc here
+  getDoc
 } from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { logStockMovement } from "@/lib/stockLogger";
+import Link from "next/link"; // Added Link import
 
 if (!getApps().length) {
   try {
@@ -141,12 +142,14 @@ export default function RecordSaleForm() {
       return;
     }
     if (!activeSiteId || !activeStallId) { 
-      toast({ title: "Context Error", description: "Please select an active site AND a specific stall from the header to record a sale.", variant: "destructive"});
+      // This check is more for admins; staff/managers should be guided by profile settings.
+      // The UI already prevents form submission if this is true, but as a safeguard:
+      toast({ title: "Context Error", description: "Cannot record sale without an active site and specific stall context.", variant: "destructive"});
       setIsSubmitting(false);
       return;
     }
     setIsSubmitting(true);
-    const saleTransactionId = doc(collection(db, "salesTransactions")).id; // Generate ID upfront for logging
+    const saleTransactionId = doc(collection(db, "salesTransactions")).id; 
 
     try {
       await runTransaction(db, async (transaction) => {
@@ -201,7 +204,6 @@ export default function RecordSaleForm() {
           });
           calculatedTotalAmount += formItem.quantity * pricePerUnit;
 
-          // Prepare stall stock update
           stockUpdatesAndLogs.push({
             ref: stockItemSnap.ref,
             newQuantity: currentStockData.quantity - formItem.quantity,
@@ -215,10 +217,9 @@ export default function RecordSaleForm() {
             originalData: currentStockData,
           });
           
-          // Prepare master stock update if linked
           if (currentStockData.originalMasterItemId) {
             const masterStockRef = doc(db, "stockItems", currentStockData.originalMasterItemId);
-            const masterStockSnap = await transaction.get(masterStockRef); // Read master item
+            const masterStockSnap = await transaction.get(masterStockRef); 
             if (masterStockSnap.exists()) {
               const masterItemData = { id: masterStockSnap.id, ...masterStockSnap.data() } as StockItem;
               masterStockUpdatesAndLogs.push({
@@ -271,10 +272,9 @@ export default function RecordSaleForm() {
         });
       });
 
-      // Post-transaction logging
       const stockItemsProcessedForLogging = new Set<string>();
       for (const formItem of values.items) {
-          const soldStallItem = availableItems.find(i => i.id === formItem.itemId); // Get full item data
+          const soldStallItem = availableItems.find(i => i.id === formItem.itemId); 
           if (soldStallItem && !stockItemsProcessedForLogging.has(soldStallItem.id)) {
               await logStockMovement(user, {
                   stockItemId: soldStallItem.id,
@@ -283,7 +283,7 @@ export default function RecordSaleForm() {
                   masterStockItemIdForContext: soldStallItem.originalMasterItemId,
                   type: 'SALE_FROM_STALL',
                   quantityChange: -formItem.quantity,
-                  quantityBefore: soldStallItem.quantity, // This is pre-transaction qty
+                  quantityBefore: soldStallItem.quantity, 
                   quantityAfter: soldStallItem.quantity - formItem.quantity,
                   notes: `Sale ID: ${saleTransactionId}`,
                   relatedTransactionId: saleTransactionId,
@@ -291,22 +291,17 @@ export default function RecordSaleForm() {
               stockItemsProcessedForLogging.add(soldStallItem.id);
 
               if (soldStallItem.originalMasterItemId) {
-                  // Need to fetch master item's state *before* this sale for accurate logging
-                  // This might be complex if multiple items in sale link to same master
-                  // For simplicity, we might log based on inferred master state or skip detailed master log here
-                  // and rely on a separate process or direct master item updates to log their own changes.
-                  // We can create a log for the master item based on the info we have.
                    const masterItemDoc = await getDoc(doc(db, "stockItems", soldStallItem.originalMasterItemId));
                    if(masterItemDoc.exists()){
                        const masterItemData = masterItemDoc.data() as StockItem;
                         await logStockMovement(user, {
                             stockItemId: soldStallItem.originalMasterItemId,
                             siteId: masterItemData.siteId!,
-                            stallId: null, // Master stock
+                            stallId: null, 
                             type: 'SALE_AFFECTS_MASTER',
                             quantityChange: -formItem.quantity,
-                            quantityBefore: masterItemData.quantity + formItem.quantity, // Approximate before this specific sale item's effect
-                            quantityAfter: masterItemData.quantity, // Current quantity after transaction
+                            quantityBefore: masterItemData.quantity + formItem.quantity, 
+                            quantityAfter: masterItemData.quantity, 
                             notes: `Linked to sale of stall item ${soldStallItem.name} (ID: ${soldStallItem.id}), Sale ID: ${saleTransactionId}`,
                             relatedTransactionId: saleTransactionId,
                             linkedStockItemId: soldStallItem.id,
@@ -315,7 +310,6 @@ export default function RecordSaleForm() {
               }
           }
       }
-
 
       toast({
         title: "Sale Recorded Successfully!",
@@ -355,16 +349,40 @@ export default function RecordSaleForm() {
     }
   };
 
-  if (!activeSiteId || !activeStallId) { 
+  if (!user) {
+    // This case should ideally be handled by the AppLayout redirecting to /login
     return (
-      <Alert variant="default" className="max-w-2xl mx-auto shadow-lg border-primary/50">
-        <Info className="h-4 w-4" />
-        <AlertTitle>Site & Specific Stall Context Required</AlertTitle>
-        <AlertDescription>
-          Please select an active Site AND a specific Stall from the dropdowns in the header bar to record a sale. Sales cannot be made from "Master Stock" or "All Stalls" views directly.
-        </AlertDescription>
-      </Alert>
+        <div className="flex justify-center items-center py-10">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <p className="ml-2">Loading user data...</p>
+        </div>
     );
+  }
+
+  if (!activeSiteId || !activeStallId) { 
+    if (user.role === 'admin') {
+        return (
+          <Alert variant="default" className="max-w-2xl mx-auto shadow-lg border-primary/50">
+            <Info className="h-4 w-4" />
+            <AlertTitle>Admin: Site & Specific Stall Context Required</AlertTitle>
+            <AlertDescription>
+              Please select an active Site AND a specific Stall from the dropdowns in the header bar to record a sale. Sales cannot be made from "Master Stock" or "All Stalls" views directly.
+            </AlertDescription>
+          </Alert>
+        );
+    } else { // Staff or Manager
+        return (
+          <Alert variant="default" className="max-w-2xl mx-auto shadow-lg border-primary/50">
+            <Info className="h-4 w-4" />
+            <AlertTitle>Default Site & Stall Required</AlertTitle>
+            <AlertDescription>
+              To record a sale, you need a default site and stall assigned to your profile.
+              Please go to your <Link href="/profile" className="text-primary hover:underline font-medium">Profile Page</Link> to set your default operational context.
+              If defaults are set, ensure they are valid and that stock items exist for that stall.
+            </AlertDescription>
+          </Alert>
+        );
+    }
   }
 
   if (loadingItems) {
@@ -392,7 +410,7 @@ export default function RecordSaleForm() {
                 <Info className="h-4 w-4" />
                 <AlertTitle>No Items Available at this Stall</AlertTitle>
                 <AlertDescription>
-                  There are no stock items available for sale at the currently selected stall, or all items are out of stock.
+                  There are no stock items available for sale at the currently selected stall, or all items are out of stock. Ensure stock is allocated or added to this stall.
                 </AlertDescription>
               </Alert>
             )}
@@ -524,3 +542,6 @@ export default function RecordSaleForm() {
     </Card>
   );
 }
+
+
+    
