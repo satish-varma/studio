@@ -13,10 +13,11 @@ import {
   deleteDoc,
   QuerySnapshot,
   DocumentData,
-  getDocs, // Added getDocs
-  query // Added query
+  getDocs, 
+  query,
+  orderBy // Correctly imported here
 } from "firebase/firestore";
-import { getApps, initializeApp } from 'firebase/app';
+import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
 import { Loader2, ShieldAlert } from "lucide-react";
@@ -40,7 +41,7 @@ export default function UserManagementClientPage() {
   const [users, setUsers] = useState<AppUser[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
   const [stalls, setStalls] = useState<Stall[]>([]);
-  const [loadingData, setLoadingData] = useState(true); // Combined loading state
+  const [loadingData, setLoadingData] = useState(true); 
   const [errorData, setErrorData] = useState<string | null>(null);
 
   useEffect(() => {
@@ -55,18 +56,19 @@ export default function UserManagementClientPage() {
     const fetchInitialData = async () => {
       setLoadingData(true);
       setErrorData(null);
+      let unsubscribeUsersSnapshot: (() => void) | null = null;
       try {
-        // Fetch Users
+        
         const usersCollectionRef = collection(db, "users");
-        const unsubscribeUsers = onSnapshot(usersCollectionRef, 
+        unsubscribeUsersSnapshot = onSnapshot(usersCollectionRef, 
           (snapshot: QuerySnapshot<DocumentData>) => {
             const fetchedUsers: AppUser[] = snapshot.docs
               .map(docSnapshot => ({
                 uid: docSnapshot.id,
                 ...docSnapshot.data()
               } as AppUser))
-              .filter(u => u.uid && typeof u.uid === 'string' && u.uid.trim() !== "");
-            setUsers(fetchedUsers.sort((a,b) => (a.displayName || "").localeCompare(b.displayName || "")));
+              .filter(u => u.uid && typeof u.uid === 'string' && u.uid.trim() !== ""); 
+            setUsers(fetchedUsers.sort((a,b) => (a.displayName || a.email || "").localeCompare(b.displayName || b.email || "")));
           },
           (error) => {
             console.error("Error fetching users:", error);
@@ -74,31 +76,30 @@ export default function UserManagementClientPage() {
           }
         );
 
-        // Fetch Sites
+        
         const sitesCollectionRef = collection(db, "sites");
         const sitesSnapshot = await getDocs(query(sitesCollectionRef, orderBy("name")));
         const fetchedSites: Site[] = sitesSnapshot.docs.map(docSnapshot => ({ id: docSnapshot.id, ...docSnapshot.data() } as Site));
         setSites(fetchedSites);
 
-        // Fetch Stalls
+        
         const stallsCollectionRef = collection(db, "stalls");
         const stallsSnapshot = await getDocs(query(stallsCollectionRef, orderBy("name")));
         const fetchedStalls: Stall[] = stallsSnapshot.docs.map(docSnapshot => ({ id: docSnapshot.id, ...docSnapshot.data() } as Stall));
         setStalls(fetchedStalls);
         
         setLoadingData(false);
-        return unsubscribeUsers; // Return users listener for cleanup
       } catch (error: any) {
         console.error("Error fetching initial data for User Management:", error);
-        setErrorData("Failed to load page data. Please try again.");
+        setErrorData("Failed to load page data. Please try again. Error: " + error.message);
         setLoadingData(false);
-        return () => {}; // Return empty cleanup function on error
       }
+      return unsubscribeUsersSnapshot;
     };
     
-    let unsubscribe: (() => void) | undefined;
+    let unsubscribe: (() => void) | null = null;
     fetchInitialData().then(unsub => {
-      unsubscribe = unsub;
+      if (unsub) unsubscribe = unsub;
     });
 
     return () => {
@@ -145,7 +146,7 @@ export default function UserManagementClientPage() {
     try {
         await updateDoc(userDocRef, { 
             defaultSiteId: newSiteId,
-            // If site is cleared, stall must also be cleared
+            
             ...(newSiteId === null && { defaultStallId: null }) 
         });
         toast({ title: "Default Site Updated", description: `User's default site has been ${newSiteId ? 'set' : 'cleared'}.` });
@@ -162,9 +163,9 @@ export default function UserManagementClientPage() {
     }
     if (!db || !userId) return;
     const userDocRef = doc(db, "users", userId);
+    const userSnap = await getDoc(userDocRef);
     try {
-        // Ensure a site is selected if a stall is being set
-        const userSnap = await getDoc(userDocRef);
+        
         if (newStallId && (!userSnap.exists() || !userSnap.data()?.defaultSiteId)) {
             toast({ title: "Site Required", description: "A default site must be selected before assigning a default stall.", variant: "default"});
             return;
