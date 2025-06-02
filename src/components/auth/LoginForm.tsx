@@ -1,3 +1,4 @@
+
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -50,9 +51,15 @@ export function LoginForm() {
       });
       router.push("/dashboard");
     } catch (error: any) {
+      let errorMessage = "An unexpected error occurred. Please try again.";
+      if (error.code === "auth/invalid-credential" || error.code === "auth/user-not-found" || error.code === "auth/wrong-password") {
+        errorMessage = "Invalid email or password. Please check your credentials and try again.";
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
       toast({
         title: "Login Failed",
-        description: error.message || "An unexpected error occurred. Please try again.",
+        description: errorMessage,
         variant: "destructive",
       });
       console.error("Login failed:", error);
