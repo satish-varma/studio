@@ -52,15 +52,15 @@ const auth = getAuth(getApp());
 const profileFormSchema = z.object({
   displayName: z.string().min(2, { message: "Display name must be at least 2 characters." }),
   email: z.string().email().optional(),
-  defaultSiteId: z.string().optional().nullable(),
-  defaultStallId: z.string().optional().nullable(),
-  defaultItemSearchTerm: z.string().optional().nullable(),
-  defaultItemCategoryFilter: z.string().optional().nullable(),
-  defaultItemStockStatusFilter: z.string().optional().nullable(),
-  defaultItemStallFilterOption: z.string().optional().nullable(),
-  defaultSalesDateRangeFrom: z.string().optional().nullable(), 
-  defaultSalesDateRangeTo: z.string().optional().nullable(),   
-  defaultSalesStaffFilter: z.string().optional().nullable(),
+  defaultSiteId: z.string().nullable().optional(),
+  defaultStallId: z.string().nullable().optional(),
+  defaultItemSearchTerm: z.string().nullable().optional(),
+  defaultItemCategoryFilter: z.string().nullable().optional(),
+  defaultItemStockStatusFilter: z.string().nullable().optional(),
+  defaultItemStallFilterOption: z.string().nullable().optional(),
+  defaultSalesDateRangeFrom: z.string().nullable().optional(),
+  defaultSalesDateRangeTo: z.string().nullable().optional(),
+  defaultSalesStaffFilter: z.string().nullable().optional(),
 });
 
 type ProfileFormValues = z.infer<typeof profileFormSchema>;
@@ -86,12 +86,12 @@ export default function ProfilePage() {
       defaultSiteId: null,
       defaultStallId: null,
       defaultItemSearchTerm: null,
-      defaultItemCategoryFilter: null, // Use null for "all"
-      defaultItemStockStatusFilter: null, // Use null for "all"
-      defaultItemStallFilterOption: null, // Use null for "all"
+      defaultItemCategoryFilter: null, 
+      defaultItemStockStatusFilter: null, 
+      defaultItemStallFilterOption: null, 
       defaultSalesDateRangeFrom: null,
       defaultSalesDateRangeTo: null,
-      defaultSalesStaffFilter: null, // Use null for "all"
+      defaultSalesStaffFilter: null, 
     },
   });
 
@@ -117,7 +117,7 @@ export default function ProfilePage() {
         const categoriesSet = new Set<string>();
         itemsSnapshot.forEach(doc => {
             const item = doc.data() as StockItem;
-            if (item.category) categoriesSet.add(item.category);
+            if (item.category && item.category.trim() !== "") categoriesSet.add(item.category.trim());
         });
         setItemCategories(Array.from(categoriesSet).sort());
 
@@ -159,7 +159,7 @@ export default function ProfilePage() {
         setStallsForSelectedSite([]);
         form.setValue("defaultStallId", null); 
         if(form.getValues("defaultItemStallFilterOption") !== 'all' && form.getValues("defaultItemStallFilterOption") !== 'master') {
-            form.setValue("defaultItemStallFilterOption", null); // "all" is now null
+            form.setValue("defaultItemStallFilterOption", null); 
         }
         return;
       }
@@ -176,7 +176,7 @@ export default function ProfilePage() {
         }
         const currentItemStallFilter = form.getValues("defaultItemStallFilterOption");
         if (currentItemStallFilter && currentItemStallFilter !== 'all' && currentItemStallFilter !== 'master' && !fetchedStalls.find(s => s.id === currentItemStallFilter)) {
-            form.setValue("defaultItemStallFilterOption", null); // "all" is now null
+            form.setValue("defaultItemStallFilterOption", null); 
         }
       } catch (error) {
         console.error("Error fetching stalls for profile:", error);
@@ -197,20 +197,19 @@ export default function ProfilePage() {
     }
     setIsSubmitting(true);
     try {
-      // Prepare data ensuring empty strings for text inputs become null
       const dataToUpdate: Partial<AppUser> = { 
         displayName: values.displayName,
         ...(isStaffUser ? {} : {
             defaultSiteId: values.defaultSiteId ? values.defaultSiteId : null,
             defaultStallId: (values.defaultSiteId && values.defaultStallId) ? values.defaultStallId : null,
         }),
-        defaultItemSearchTerm: values.defaultItemSearchTerm ? values.defaultItemSearchTerm : null,
-        defaultItemCategoryFilter: values.defaultItemCategoryFilter, // Already string or null from form
-        defaultItemStockStatusFilter: values.defaultItemStockStatusFilter, // Already string or null
-        defaultItemStallFilterOption: values.defaultItemStallFilterOption, // Already string or null
+        defaultItemSearchTerm: values.defaultItemSearchTerm && values.defaultItemSearchTerm.trim() !== "" ? values.defaultItemSearchTerm.trim() : null,
+        defaultItemCategoryFilter: values.defaultItemCategoryFilter, 
+        defaultItemStockStatusFilter: values.defaultItemStockStatusFilter, 
+        defaultItemStallFilterOption: values.defaultItemStallFilterOption, 
         defaultSalesDateRangeFrom: dateRange?.from ? dateRange.from.toISOString() : null,
         defaultSalesDateRangeTo: dateRange?.to ? dateRange.to.toISOString() : null,
-        defaultSalesStaffFilter: values.defaultSalesStaffFilter, // Already string or null
+        defaultSalesStaffFilter: values.defaultSalesStaffFilter, 
       };
 
       if (isStaffUser) {
@@ -274,7 +273,7 @@ export default function ProfilePage() {
   }
 
   const itemStallFilterOptions = [
-    { value: "all", label: "All Stock (Site-wide)"}, // "all" will be treated as null
+    { value: "all", label: "All Stock (Site-wide)"}, 
     { value: "master", label: "Master Stock (Site Level)"},
     ...stallsForSelectedSite.map(s => ({ value: s.id, label: `${s.name} (${s.stallType})`}))
   ];
@@ -445,7 +444,7 @@ export default function ProfilePage() {
                         </Popover>
                     </FormItem>
                   {(user.role === 'admin' || user.role === 'manager') && (
-                    <FormField control={form.control} name="defaultSalesStaffFilter" render={({ field }) => ( <FormItem><FormLabel>Staff Member</FormLabel><Select onValueChange={(v) => field.onChange(v === "all" ? null : v)} value={field.value || "all"} disabled={isSubmitting}><FormControl><SelectTrigger className="bg-input"><SelectValue placeholder="All Staff" /></SelectTrigger></FormControl><SelectContent><SelectItem value="all">All Staff</SelectItem>{allUsersForStaffFilter.map(staff => <SelectItem key={staff.uid} value={staff.uid}>{staff.displayName || staff.email}</SelectItem>)}</SelectContent></Select></FormItem> )} />
+                    <FormField control={form.control} name="defaultSalesStaffFilter" render={({ field }) => ( <FormItem><FormLabel>Staff Member</FormLabel><Select onValueChange={(v) => field.onChange(v === "all" ? null : v)} value={field.value || "all"} disabled={isSubmitting}><FormControl><SelectTrigger className="bg-input"><SelectValue placeholder="All Staff" /></SelectTrigger></FormControl><SelectContent><SelectItem value="all">All Staff</SelectItem>{allUsersForStaffFilter.filter(staff => staff.uid && staff.uid.trim() !== "").map(staff => <SelectItem key={staff.uid} value={staff.uid}>{staff.displayName || staff.email}</SelectItem>)}</SelectContent></Select></FormItem> )} />
                   )}
                 </CardContent>
               </Card>
