@@ -28,7 +28,7 @@ export default function SiteStallSelector() {
   const { user, activeSiteId, activeStallId, setActiveSite, setActiveStall } = useAuth();
   const [sites, setSites] = useState<Site[]>([]);
   const [stalls, setStalls] = useState<Stall[]>([]);
-  const [loadingSites, setLoadingSites] = useState(false);
+  const [loadingSites, setLoadingSites] = useState(false); // Default to false, set true only when fetching
   const [loadingStalls, setLoadingStalls] = useState(false);
 
   // Fetch sites
@@ -38,15 +38,28 @@ export default function SiteStallSelector() {
         setLoadingSites(false);
         return;
     }
+
+    // Only fetch all sites if the user is an admin
+    if (user.role !== 'admin') {
+        setSites([]); // Ensure sites are cleared if user is not admin
+        setLoadingSites(false);
+        // If an admin was previously logged in and selected a site, clear it if the new user is not admin
+        if (activeSiteId) {
+            // setActiveSite(null); // This might be too aggressive, depends on desired UX
+        }
+        return; // Don't attempt to fetch sites if not an admin
+    }
+
     setLoadingSites(true);
-    // For admins, load all sites.
+    // This query is now only run if user IS an admin
     const sitesQuery = query(collection(db, "sites"));
     const unsubscribe = onSnapshot(sitesQuery, (snapshot: QuerySnapshot<DocumentData>) => {
       const fetchedSites = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Site));
       setSites(fetchedSites.sort((a,b) => a.name.localeCompare(b.name)));
 
+      // If activeSiteId exists but is not in the fetched list (e.g., site deleted), clear it.
       if (activeSiteId && !fetchedSites.find(s => s.id === activeSiteId)) {
-        setActiveSite(null); 
+        setActiveSite(null);
       }
       setLoadingSites(false);
     }, (error) => {
@@ -55,7 +68,7 @@ export default function SiteStallSelector() {
       setSites([]);
     });
     return () => unsubscribe();
-  }, [user, activeSiteId, setActiveSite]);
+  }, [user, activeSiteId, setActiveSite]); // user dependency is crucial here
 
   // Fetch stalls when activeSiteId changes
   useEffect(() => {
@@ -67,6 +80,13 @@ export default function SiteStallSelector() {
       }
       return;
     }
+    // Only try to fetch stalls if the user is an admin, as the selector is only for them
+    if (user.role !== 'admin') {
+        setStalls([]);
+        setLoadingStalls(false);
+        return;
+    }
+
     setLoadingStalls(true);
     const stallsQuery = query(collection(db, "stalls"), where("siteId", "==", activeSiteId));
     const unsubscribe = onSnapshot(stallsQuery, (snapshot: QuerySnapshot<DocumentData>) => {
@@ -83,7 +103,7 @@ export default function SiteStallSelector() {
       setStalls([]);
     });
     return () => unsubscribe();
-  }, [user, activeSiteId, activeStallId, setActiveStall]);
+  }, [user, activeSiteId, activeStallId, setActiveStall]); // user dependency
 
   const handleSiteChange = (newSiteId: string) => {
     if (newSiteId === "all-sites" || newSiteId === "") {
@@ -101,10 +121,9 @@ export default function SiteStallSelector() {
     }
   };
 
-  // Only render the selector for admin roles for now.
-  // Non-admins will rely on their defaultSiteId/defaultStallId from profile.
+  // Only render the selector for admin roles.
   if (!user || user.role !== 'admin') {
-    return null; 
+    return null;
   }
 
   return (
