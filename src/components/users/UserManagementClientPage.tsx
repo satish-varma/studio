@@ -51,10 +51,13 @@ export default function UserManagementClientPage() {
     const usersCollectionRef = collection(db, "users");
     const unsubscribe = onSnapshot(usersCollectionRef, 
       (snapshot: QuerySnapshot<DocumentData>) => {
-        const fetchedUsers: AppUser[] = snapshot.docs.map(docSnapshot => ({
-          uid: docSnapshot.id,
-          ...docSnapshot.data()
-        } as AppUser));
+        const fetchedUsers: AppUser[] = snapshot.docs
+          .map(docSnapshot => ({
+            uid: docSnapshot.id,
+            ...docSnapshot.data()
+          } as AppUser))
+          .filter(u => u.uid && typeof u.uid === 'string' && u.uid.trim() !== ""); // Filter out users with invalid UIDs
+        
         setUsers(fetchedUsers);
         setLoadingUsers(false);
         setErrorUsers(null);
@@ -78,13 +81,13 @@ export default function UserManagementClientPage() {
       toast({ title: "Action Not Allowed", description: "Admins cannot change their own role via this interface.", variant: "destructive"});
       return;
     }
+     if (!db) {
+      toast({ title: "Database Error", description: "Firestore not initialized. Cannot update role.", variant: "destructive"});
+      return;
+    }
     if (!userId || typeof userId !== 'string' || userId.trim() === "") {
       console.error("handleRoleChange called with invalid userId:", userId);
       toast({ title: "Internal Error", description: "User ID is invalid for role change. Please refresh and try again.", variant: "destructive"});
-      return;
-    }
-    if (!db) {
-      toast({ title: "Database Error", description: "Firestore not initialized. Cannot update role.", variant: "destructive"});
       return;
     }
 
@@ -107,13 +110,13 @@ export default function UserManagementClientPage() {
       toast({ title: "Action Not Allowed", description: "Admins cannot delete their own account via this interface.", variant: "destructive"});
       return;
     }
+     if (!db) {
+      toast({ title: "Database Error", description: "Firestore not initialized. Cannot delete user.", variant: "destructive"});
+      return;
+    }
     if (!userId || typeof userId !== 'string' || userId.trim() === "") {
       console.error("handleDeleteUser called with invalid userId:", userId);
       toast({ title: "Internal Error", description: "User ID is invalid for deletion. Please refresh and try again.", variant: "destructive"});
-      return;
-    }
-    if (!db) {
-      toast({ title: "Database Error", description: "Firestore not initialized. Cannot delete user.", variant: "destructive"});
       return;
     }
     
