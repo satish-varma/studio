@@ -13,21 +13,15 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    // Safer getUserRole
-    function getUserRole() {
-      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid));
-      if (!userDoc.exists || !('role' in userDoc.data)) {
-        return null; // Return null if doc or role field doesn't exist
-      }
-      return userDoc.data.role;
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
-    
-    function getUserData() { // Used for defaultSiteId/defaultStallId checks
-      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid));
-      if (!userDoc.exists) {
-        return {}; // Return empty map if doc doesn't exist, to avoid .data access errors
-      }
-      return userDoc.data;
+
+    // Corrected: Firestore functions should be more expression-based
+    function getUserRole() {
+      // If the user document or 'role' field doesn't exist,
+      // comparisons like (getUserRole() == 'admin') will correctly evaluate to false.
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
     }
 
     function isAdmin() {
@@ -35,53 +29,40 @@ service cloud.firestore {
     }
 
     function isManager() {
-      let role = getUserRole();
-      // An admin is also considered a manager for many permissions
-      return isSignedIn() && (role == 'manager' || role == 'admin');
+      // A user is a manager if their role is 'manager' OR 'admin'
+      return isSignedIn() && (getUserRole() == 'manager' || getUserRole() == 'admin');
     }
 
-    function isStaffRole() { // Specifically 'staff' role
-      return isSignedIn() && getUserRole() == 'staff';
-    }
-    
-    function isStaff() { // General permission for staff, manager, or admin
-      let role = getUserRole();
-      return isSignedIn() && (role == 'staff' || role == 'manager' || role == 'admin');
+    function isStaff() {
+      // A user is considered staff if their role is 'staff', 'manager', OR 'admin' (hierarchical)
+      return isSignedIn() && (getUserRole() == 'staff' || getUserRole() == 'manager' || getUserRole() == 'admin');
     }
 
     // --- Users Collection (/users/{userId}) ---
     match /users/{userId} {
-      // Read: User can read their own. Admin/Manager can read any.
-      allow read: if isUser(userId) || isAdmin() || isManager();
+      // Read: User can read their own data. Admin/Manager can read any user's data.
+      allow read: if isUser(userId) || isManager();
 
       // Create: Only during signup, new user gets 'staff' role.
+      // User must be creating their own document.
       allow create: if isUser(userId) &&
                        request.resource.data.uid == request.auth.uid &&
                        request.resource.data.email == request.auth.token.email &&
                        request.resource.data.role == 'staff' &&
-                       !('defaultSiteId' in request.resource.data) &&
-                       !('defaultStallId' in request.resource.data);
+                       // Ensure defaultSiteId/StallId are not set during initial user creation by user
+                       !(request.resource.data.keys().hasAny(['defaultSiteId', 'defaultStallId']));
+
 
       // Update:
-      allow update: if
-        // Admins can update any field on any user
-        (isAdmin()) ||
-        // Managers can update their own profile, but not their role or critical IDs
-        (isUser(userId) && isManager() && // Check if acting as a manager on own doc
-          !("role" in request.resource.data) &&
-          !("uid" in request.resource.data) &&
-          !("email" in request.resource.data) &&
-          !("createdAt" in request.resource.data)
-        ) ||
-        // Staff can update their own profile, but not role, critical IDs, or their default site/stall
-        (isUser(userId) && isStaffRole() &&
-          !("role" in request.resource.data) &&
-          !("uid" in request.resource.data) &&
-          !("email" in request.resource.data) &&
-          !("createdAt" in request.resource.data) &&
-          !("defaultSiteId" in request.resource.data) &&
-          !("defaultStallId" in request.resource.data)
-        );
+      // 1. User can update their own non-critical fields.
+      // 2. Admin can update any user's fields (primarily for 'role' and defaults).
+      // 3. Manager can update their own non-critical fields.
+      allow update: if (isUser(userId) &&
+                        // User cannot change their own role, uid, email, or createdAt
+                        !request.resource.data.keys().hasAny(['role', 'uid', 'email', 'createdAt']) &&
+                        // Staff cannot change their defaultSiteId or defaultStallId
+                        (getUserRole() != 'staff' || !request.resource.data.keys().hasAny(['defaultSiteId', 'defaultStallId']))
+                       ) || isAdmin(); // Admin can update any field
 
       // Delete: Admin can delete any user *except themselves*.
       allow delete: if isAdmin() && request.auth.uid != userId;
@@ -89,51 +70,61 @@ service cloud.firestore {
 
     // --- Sites Collection (/sites/{siteId}) ---
     match /sites/{siteId} {
-      allow read: if isSignedIn(); // Managers need to read all sites for profile dropdown
+      // Read: Any authenticated user can read site information.
+      allow read: if isSignedIn();
+
+      // Create, Update, Delete: Only Admins.
       allow create, update, delete: if isAdmin();
     }
 
     // --- Stalls Collection (/stalls/{stallId}) ---
     match /stalls/{stallId} {
-      allow read: if isSignedIn(); // Managers need to read stalls for profile dropdown (after site selection)
+      // Read: Any authenticated user can read stall information.
+      allow read: if isSignedIn();
+
+      // Create, Update, Delete: Only Admins.
       allow create, update, delete: if isAdmin();
     }
 
     // --- StockItems Collection (/stockItems/{itemId}) ---
     match /stockItems/{itemId} {
-      allow read: if isStaff(); // All authenticated users can read stock items (for category derivation in profile)
+      // Read: Any staff, manager, or admin.
+      allow read: if isStaff();
 
-      // Create logic relies on getUserData().defaultSiteId/StallId or admin override
+      // Create:
       allow create: if isStaff() &&
                        request.resource.data.siteId != null &&
                        (
-                         isAdmin() ||
-                         (isManager() && request.resource.data.siteId == getUserData().defaultSiteId) ||
-                         (isStaffRole() && request.resource.data.siteId == getUserData().defaultSiteId &&
-                                      request.resource.data.stallId == getUserData().defaultStallId)
+                         isAdmin() || // Admin can create for any site/stall
+                         (isManager() && request.resource.data.siteId == getUserData().defaultSiteId) || // Manager for their default site
+                         (isStaff() && request.resource.data.siteId == getUserData().defaultSiteId &&
+                                      request.resource.data.stallId == getUserData().defaultStallId) // Staff for their default site & stall
                        ) &&
                        request.resource.data.name is string && request.resource.data.name.size() > 0 &&
                        request.resource.data.quantity is number && request.resource.data.quantity >= 0 &&
                        request.resource.data.price is number && request.resource.data.price >= 0 &&
                        request.resource.data.lastUpdated is string;
 
-      // Update logic also relies on getUserData() or admin override
+      // Update:
       allow update: if isStaff() &&
                        resource.data.siteId != null &&
                        (
                          isAdmin() ||
                          (isManager() && resource.data.siteId == getUserData().defaultSiteId) ||
-                         (isStaffRole() && resource.data.siteId == getUserData().defaultSiteId &&
+                         (isStaff() && resource.data.siteId == getUserData().defaultSiteId &&
                                       resource.data.stallId == getUserData().defaultStallId)
                        ) &&
                        request.resource.data.lastUpdated is string;
 
+
+      // Delete:
       allow delete: if isAdmin() ||
                        (isManager() && resource.data.siteId == getUserData().defaultSiteId);
     }
 
     // --- SalesTransactions Collection (/salesTransactions/{transactionId}) ---
     match /salesTransactions/{transactionId} {
+      // Create:
       allow create: if isStaff() &&
                        request.resource.data.staffId == request.auth.uid &&
                        request.resource.data.siteId != null &&
@@ -141,7 +132,7 @@ service cloud.firestore {
                        (
                          isAdmin() ||
                          (isManager() && request.resource.data.siteId == getUserData().defaultSiteId && request.resource.data.stallId != null) ||
-                         (isStaffRole() && request.resource.data.siteId == getUserData().defaultSiteId &&
+                         (isStaff() && request.resource.data.siteId == getUserData().defaultSiteId &&
                                       request.resource.data.stallId == getUserData().defaultStallId)
                        ) &&
                        request.resource.data.isDeleted == false &&
@@ -149,24 +140,27 @@ service cloud.firestore {
                        request.resource.data.totalAmount is number && request.resource.data.totalAmount > 0 &&
                        request.resource.data.transactionDate is timestamp;
 
-      allow read: if (isStaffRole() && resource.data.staffId == request.auth.uid) ||
-                     (isManager() && resource.data.siteId == getUserData().defaultSiteId) || 
-                     isAdmin();
+      // Read:
+      allow read: if (isStaff() && resource.data.staffId == request.auth.uid) || // Staff can read their own sales
+                     (isManager() && resource.data.siteId == getUserData().defaultSiteId) || // Manager can read sales for their default site
+                     isAdmin(); // Admin can read all sales
 
+      // Update (for soft delete by Admin only):
       allow update: if isAdmin() &&
                        request.resource.data.isDeleted == true &&
                        request.resource.data.deletedBy == request.auth.uid &&
                        request.resource.data.deletionJustification is string &&
-                       !('items' in request.resource.data && request.resource.data.items != resource.data.items) &&
-                       !('totalAmount' in request.resource.data && request.resource.data.totalAmount != resource.data.totalAmount) &&
-                       !('transactionDate' in request.resource.data && request.resource.data.transactionDate != resource.data.transactionDate) &&
-                       !('staffId' in request.resource.data && request.resource.data.staffId != resource.data.staffId);
+                       // Prevent changing other critical fields during a soft delete
+                       !request.resource.data.keys().hasAny(['items', 'totalAmount', 'transactionDate', 'staffId']);
 
+
+      // Hard Delete: Disallowed for audit trail.
       allow delete: if false;
     }
 
     // --- StockMovementLogs Collection (/stockMovementLogs/{logId}) ---
     match /stockMovementLogs/{logId} {
+      // Create: Authenticated user performing an action; userId in log must match.
       allow create: if isSignedIn() &&
                        request.resource.data.userId == request.auth.uid &&
                        request.resource.data.stockItemId is string &&
@@ -177,14 +171,17 @@ service cloud.firestore {
                        request.resource.data.quantityAfter is number &&
                        request.resource.data.timestamp is string;
 
+      // Read:
       allow read: if isAdmin() ||
                      (isManager() && resource.data.siteId == getUserData().defaultSiteId);
 
+      // Update, Delete: Disallowed to maintain log integrity.
       allow update, delete: if false;
     }
 
     // --- userGoogleOAuthTokens Collection (/userGoogleOAuthTokens/{userId}) ---
     match /userGoogleOAuthTokens/{userId} {
+      // Only the user themselves can read/write/delete their own tokens.
       allow read, write, delete: if isUser(userId);
       allow create: if isUser(userId) &&
                       request.resource.data.access_token is string &&
@@ -192,4 +189,5 @@ service cloud.firestore {
     }
   }
 }
+
     
