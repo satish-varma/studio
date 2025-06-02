@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import type { AppUser, UserRole, Site, Stall } from "@/types";
-import { Trash2, MoreHorizontal, Loader2 } from "lucide-react";
+import { Trash2, MoreHorizontal, Loader2, Info } from "lucide-react"; // Added Info
 import {
   AlertDialog,
   AlertDialogAction,
@@ -34,6 +34,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuLabel,
+  DropdownMenuSeparator
 } from "@/components/ui/dropdown-menu";
 import { useState, useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -44,8 +46,9 @@ interface UserTableProps {
   stalls: Stall[];
   onRoleChange: (userId: string, newRole: UserRole) => Promise<void>;
   onDeleteUser: (userId: string, userName: string) => Promise<void>;
-  onDefaultSiteChange: (userId: string, newSiteId: string | null) => Promise<void>;
-  onDefaultStallChange: (userId: string, newStallId: string | null) => Promise<void>;
+  onDefaultSiteChange: (userId: string, newSiteId: string | null) => Promise<void>; // For staff
+  onDefaultStallChange: (userId: string, newStallId: string | null) => Promise<void>; // For staff
+  // We'll assume managedSiteIds for managers are handled directly in Firestore by admin for now
   currentUserId?: string;
 }
 
@@ -67,13 +70,15 @@ export function UserTable({
   const handleRoleChangeInternal = async (userId: string, newRole: UserRole) => {
     setIsUpdatingRole(userId);
     await onRoleChange(userId, newRole);
+    // If role changes to/from manager, their site/stall assignment logic changes.
+    // For now, we'll let the parent component handle Firestore updates directly.
+    // A refresh of data might be needed or the parent handles state update.
     setIsUpdatingRole(null);
   };
 
   const handleDefaultSiteChangeInternal = async (userId: string, newSiteId: string) => {
     setIsUpdatingSiteStall(userId);
     await onDefaultSiteChange(userId, newSiteId === "none" ? null : newSiteId);
-    // If site is set to none, stall should also be none
     if (newSiteId === "none") {
       await onDefaultStallChange(userId, null);
     }
@@ -120,8 +125,8 @@ export function UserTable({
               <TableHead>Display Name</TableHead>
               <TableHead>Email</TableHead>
               <TableHead>Role</TableHead>
-              <TableHead>Default Site</TableHead>
-              <TableHead>Default Stall</TableHead>
+              <TableHead>Site Assignment(s)</TableHead>
+              <TableHead>Default Stall (Staff)</TableHead>
               <TableHead>Joined On</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
@@ -129,7 +134,10 @@ export function UserTable({
           <TableBody>
             {users.map((user) => {
               const isCurrentUserBeingManaged = user.uid === currentUserId;
-              const stallsForSelectedSite = user.defaultSiteId
+              const isManager = user.role === 'manager';
+              const isStaff = user.role === 'staff';
+
+              const stallsForSelectedSite = (isStaff && user.defaultSiteId)
                 ? stalls.filter(s => s.siteId === user.defaultSiteId)
                 : [];
 
@@ -160,44 +168,73 @@ export function UserTable({
                   </TableCell>
                   <TableCell>
                     {isUpdatingSiteStall === user.uid ? (
-                        <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                    ) : (
-                        <Select
+                      <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                    ) : isManager ? (
+                      user.managedSiteIds && user.managedSiteIds.length > 0 ? (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="outline" size="sm" className="h-8 text-xs">
+                              {user.managedSiteIds.length} Site(s) <Info size={12} className="ml-1" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent>
+                            <DropdownMenuLabel>Managed Sites</DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            {user.managedSiteIds.map(siteId => (
+                              <DropdownMenuItem key={siteId} disabled>
+                                {sites.find(s => s.id === siteId)?.name || siteId}
+                              </DropdownMenuItem>
+                            ))}
+                             <DropdownMenuSeparator />
+                            <DropdownMenuItem disabled className="text-xs text-muted-foreground">
+                                Manage via Firestore
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      ) : (
+                        <Badge variant="outline">No sites assigned</Badge>
+                      )
+                    ) : isStaff ? ( // Staff user
+                      <Select
                         value={user.defaultSiteId || "none"}
                         onValueChange={(newSiteId) => handleDefaultSiteChangeInternal(user.uid, newSiteId)}
                         disabled={isCurrentUserBeingManaged || isUpdatingSiteStall === user.uid || sites.length === 0}
-                        >
+                      >
                         <SelectTrigger className="w-[160px] bg-input text-xs h-8" disabled={isCurrentUserBeingManaged}>
-                            <SelectValue placeholder={sites.length === 0 ? "No sites" : "Select site"} />
+                          <SelectValue placeholder={sites.length === 0 ? "No sites" : "Select default site"} />
                         </SelectTrigger>
                         <SelectContent>
-                            <SelectItem value="none">(None)</SelectItem>
-                            {sites.map(site => (
+                          <SelectItem value="none">(None)</SelectItem>
+                          {sites.map(site => (
                             <SelectItem key={site.id} value={site.id}>{site.name}</SelectItem>
-                            ))}
+                          ))}
                         </SelectContent>
-                        </Select>
+                      </Select>
+                    ) : ( // Admin
+                      <Badge variant="secondary">All Access</Badge>
                     )}
                   </TableCell>
                   <TableCell>
-                    {isUpdatingSiteStall === user.uid && user.defaultSiteId ? ( // Show loader only if a site is selected and being processed
-                        <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                    ) : (
-                        <Select
+                    {isUpdatingSiteStall === user.uid && isStaff && user.defaultSiteId ? (
+                      <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                    ) : isStaff ? (
+                      <Select
                         value={user.defaultStallId || "none"}
                         onValueChange={(newStallId) => handleDefaultStallChangeInternal(user.uid, newStallId)}
                         disabled={isCurrentUserBeingManaged || isUpdatingSiteStall === user.uid || !user.defaultSiteId || stallsForSelectedSite.length === 0}
-                        >
+                      >
                         <SelectTrigger className="w-[170px] bg-input text-xs h-8" disabled={isCurrentUserBeingManaged || !user.defaultSiteId}>
-                            <SelectValue placeholder={!user.defaultSiteId ? "Select site first" : (stallsForSelectedSite.length === 0 ? "No stalls in site" : "Select stall")} />
+                          <SelectValue placeholder={!user.defaultSiteId ? "Select site first" : (stallsForSelectedSite.length === 0 ? "No stalls in site" : "Select default stall")} />
                         </SelectTrigger>
                         <SelectContent>
-                            <SelectItem value="none">(None)</SelectItem>
-                            {stallsForSelectedSite.map(stall => (
+                          <SelectItem value="none">(None)</SelectItem>
+                          {stallsForSelectedSite.map(stall => (
                             <SelectItem key={stall.id} value={stall.id}>{stall.name} ({stall.stallType})</SelectItem>
-                            ))}
+                          ))}
                         </SelectContent>
-                        </Select>
+                      </Select>
+                    ) : ( // Manager or Admin
+                      <Badge variant="outline">N/A</Badge>
                     )}
                   </TableCell>
                   <TableCell className="text-muted-foreground text-xs">{formatDate(user.createdAt as string | undefined)}</TableCell>
@@ -255,5 +292,3 @@ export function UserTable({
     </>
   );
 }
-
-    

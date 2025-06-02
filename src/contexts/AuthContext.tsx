@@ -62,9 +62,9 @@ interface AuthContextType {
   signOutUser: () => Promise<void>;
   setUser: React.Dispatch<React.SetStateAction<AppUser | null>>;
   activeSiteId: string | null;
-  activeStallId: string | null;
+  activeStallId: string | null; // Will typically be null for managers with new model
   setActiveSite: (siteId: string | null) => void;
-  setActiveStall: (stallId: string | null) => void;
+  setActiveStall: (stallId: string | null) => void; // For admins/staff using specific stalls
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -87,18 +87,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const setActiveSite = (siteId: string | null) => {
     setActiveSiteState(siteId);
-    setActiveStallState(null); 
+    // For managers, activeStallId should likely remain null or "all-stalls" conceptually
+    // For staff/admins selecting a specific site, clearing stall is fine.
+    if (user?.role !== 'manager') {
+        setActiveStallState(null); 
+    }
     if (typeof window !== 'undefined') {
       if (siteId) {
         localStorage.setItem('activeSiteId', siteId);
       } else {
         localStorage.removeItem('activeSiteId');
       }
-      localStorage.removeItem('activeStallId'); 
+      if (user?.role !== 'manager') {
+        localStorage.removeItem('activeStallId'); 
+      }
     }
   };
 
   const setActiveStall = (stallId: string | null) => {
+    // Managers typically operate at site level, so this might be less relevant for them
+    // or always be 'null' or a special value.
+    // This function is more for Admins and Staff.
     setActiveStallState(stallId);
     if (typeof window !== 'undefined') {
       if (stallId) {
@@ -117,8 +126,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       photoURL: firebaseUser.photoURL,
       role: userDataFromFirestore.role || 'staff',
       createdAt: userDataFromFirestore.createdAt || new Date().toISOString(),
+      // Staff/generic defaults
       defaultSiteId: userDataFromFirestore.defaultSiteId ?? null,
       defaultStallId: userDataFromFirestore.defaultStallId ?? null,
+      // Manager specific
+      managedSiteIds: userDataFromFirestore.managedSiteIds ?? null, 
+      // Preferences
       defaultItemSearchTerm: userDataFromFirestore.defaultItemSearchTerm ?? null,
       defaultItemCategoryFilter: userDataFromFirestore.defaultItemCategoryFilter ?? null,
       defaultItemStockStatusFilter: userDataFromFirestore.defaultItemStockStatusFilter ?? null,
@@ -150,37 +163,46 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             const userData = userDocSnap.data();
             appUser = mapFirestoreDataToAppUser(firebaseUser, userData);
 
-             if (appUser.role === 'admin') {
-                const storedSiteId = typeof window !== 'undefined' ? localStorage.getItem('activeSiteId') : null;
-                const storedStallId = typeof window !== 'undefined' ? localStorage.getItem('activeStallId') : null;
+            const storedSiteId = typeof window !== 'undefined' ? localStorage.getItem('activeSiteId') : null;
+            const storedStallId = typeof window !== 'undefined' ? localStorage.getItem('activeStallId') : null;
+
+            if (appUser.role === 'admin') {
                 setActiveSiteState(storedSiteId);
                 setActiveStallState(storedSiteId ? storedStallId : null); 
-            } else { 
-                setActiveSiteState(appUser.defaultSiteId); // Already null if not set
+            } else if (appUser.role === 'manager') {
+                // If manager has managed sites, check if storedSiteId is one of them.
+                // If not, or if no storedSiteId, set to first managed site or null.
+                if (appUser.managedSiteIds && appUser.managedSiteIds.length > 0) {
+                    if (storedSiteId && appUser.managedSiteIds.includes(storedSiteId)) {
+                        setActiveSiteState(storedSiteId);
+                    } else {
+                        setActiveSiteState(appUser.managedSiteIds[0]); // Default to first managed site
+                    }
+                } else {
+                    setActiveSiteState(null); // No sites managed
+                }
+                setActiveStallState(null); // Managers operate at site level, so stall is null (all stalls)
+            } else { // Staff
+                setActiveSiteState(appUser.defaultSiteId); 
                 setActiveStallState(appUser.defaultSiteId ? appUser.defaultStallId : null); 
             }
 
           } else {
             console.warn(`AuthContext: User document not found for UID: ${firebaseUser.uid} during auth state change. Creating one with default role 'staff'.`);
-            const defaultUserData: AppUser = { 
+            const defaultUserData: Partial<AppUser> = { // Using Partial as some fields are role-dependent
               uid: firebaseUser.uid,
               email: firebaseUser.email, 
               role: 'staff', 
               displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User",
               createdAt: new Date().toISOString(),
-              defaultSiteId: null,
-              defaultStallId: null,
-              defaultItemSearchTerm: null,
-              defaultItemCategoryFilter: null,
-              defaultItemStockStatusFilter: null,
-              defaultItemStallFilterOption: null,
-              defaultSalesDateRangeFrom: null,
-              defaultSalesDateRangeTo: null,
-              defaultSalesStaffFilter: null,
+              defaultSiteId: null, // Staff specific
+              defaultStallId: null, // Staff specific
+              managedSiteIds: null, // Manager specific
+              // preferences null by default
             };
             await setDoc(userDocRef, defaultUserData);
             appUser = mapFirestoreDataToAppUser(firebaseUser, defaultUserData);
-            setActiveSiteState(null);
+            setActiveSiteState(null); // New staff has no default site yet
             setActiveStallState(null);
           }
           setUser(appUser);
@@ -220,18 +242,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         const userData = userDocSnap.data();
         appUser = mapFirestoreDataToAppUser(firebaseUser, userData);
 
+        const storedSiteId = typeof window !== 'undefined' ? localStorage.getItem('activeSiteId') : null;
+        const storedStallId = typeof window !== 'undefined' ? localStorage.getItem('activeStallId') : null;
+
         if (appUser.role === 'admin') {
-            const storedSiteId = typeof window !== 'undefined' ? localStorage.getItem('activeSiteId') : null;
-            const storedStallId = typeof window !== 'undefined' ? localStorage.getItem('activeStallId') : null;
             setActiveSiteState(storedSiteId);
             setActiveStallState(storedSiteId ? storedStallId : null);
-        } else { 
+        } else if (appUser.role === 'manager') {
+             if (appUser.managedSiteIds && appUser.managedSiteIds.length > 0) {
+                if (storedSiteId && appUser.managedSiteIds.includes(storedSiteId)) {
+                    setActiveSiteState(storedSiteId);
+                } else {
+                    setActiveSiteState(appUser.managedSiteIds[0]);
+                }
+            } else {
+                setActiveSiteState(null);
+            }
+            setActiveStallState(null); // Managers operate at site level
+        } else { // Staff
             setActiveSiteState(appUser.defaultSiteId);
             setActiveStallState(appUser.defaultSiteId ? appUser.defaultStallId : null);
         }
       } else {
-        console.warn(`AuthContext: User document not found for UID: ${firebaseUser.uid} during sign-in. Assigning default role 'staff'.`);
-        const defaultUserData: AppUser = {
+        console.warn(`AuthContext: User document not found for UID: ${firebaseUser.uid} during sign-in. Creating default staff user.`);
+        const defaultUserData: Partial<AppUser> = {
             uid: firebaseUser.uid,
             email: firebaseUser.email, 
             role: 'staff', 
@@ -239,13 +273,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             createdAt: new Date().toISOString(),
             defaultSiteId: null,
             defaultStallId: null,
-            defaultItemSearchTerm: null,
-            defaultItemCategoryFilter: null,
-            defaultItemStockStatusFilter: null,
-            defaultItemStallFilterOption: null,
-            defaultSalesDateRangeFrom: null,
-            defaultSalesDateRangeTo: null,
-            defaultSalesStaffFilter: null,
+            managedSiteIds: null,
         };
          await setDoc(userDocRef, defaultUserData);
         appUser = mapFirestoreDataToAppUser(firebaseUser, defaultUserData);
@@ -272,7 +300,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
       const firebaseUser = userCredential.user;
       
-      const newUserDocData: AppUser = {
+      const newUserDocData: AppUser = { // Ensure all fields are initialized
         uid: firebaseUser.uid,
         email: firebaseUser.email,
         role: 'staff' as UserRole, 
@@ -280,6 +308,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         createdAt: new Date().toISOString(),
         defaultSiteId: null, 
         defaultStallId: null,
+        managedSiteIds: null, // Initialize for managers
         defaultItemSearchTerm: null,
         defaultItemCategoryFilter: null,
         defaultItemStockStatusFilter: null,
@@ -293,7 +322,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       const appUser = mapFirestoreDataToAppUser(firebaseUser, newUserDocData);
       setUser(appUser); 
-      setActiveSiteState(null);
+      setActiveSiteState(null); // New users start with no active site/stall
       setActiveStallState(null);
       return appUser;
     } catch (error) {
@@ -355,4 +384,3 @@ export const useAuth = (): AuthContextType => {
   }
   return context;
 };
-

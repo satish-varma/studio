@@ -2,16 +2,21 @@
 export type UserRole = 'staff' | 'manager' | 'admin';
 
 export interface AppUser {
-  uid: string; // Changed from id to uid to align with Firebase
+  uid: string;
   email: string | null;
   displayName?: string | null;
   photoURL?: string | null;
   role: UserRole;
   createdAt?: string; // ISO date string, set upon user creation
-  defaultSiteId: string | null;
-  defaultStallId: string | null;
+  
+  // For Staff:
+  defaultSiteId: string | null; // Remains for staff
+  defaultStallId: string | null; // Remains for staff
 
-  // New fields for default filters, changed to string | null
+  // For Managers:
+  managedSiteIds: string[] | null; // New: Array of site IDs a manager is responsible for
+
+  // For all users (preferences):
   defaultItemSearchTerm: string | null;
   defaultItemCategoryFilter: string | null;
   defaultItemStockStatusFilter: string | null;
@@ -23,10 +28,9 @@ export interface AppUser {
 
 export interface UserGoogleOAuthTokens {
   access_token: string;
-  refresh_token: string; // Typically only provided on the first authorization
-  scope?: string | undefined; 
-  token_type: string; // Usually "Bearer"
-  expiry_date?: number | null | undefined; // Timestamp (milliseconds since epoch) when the access_token expires
-  id_token?: string | null | undefined; // If 'openid' scope was requested, can be null
+  refresh_token: string;
+  scope?: string | undefined;
+  token_type: string;
+  expiry_date?: number | null | undefined;
+  id_token?: string | null | undefined;
 }
-
