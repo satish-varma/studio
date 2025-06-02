@@ -4,7 +4,7 @@ import type { NextRequest } from 'next/server';
 import { initializeApp, getApps, getApp, App as AdminApp } from 'firebase-admin/app';
 import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
 import { google, Auth } from 'googleapis';
-import type { UserGoogleOAuthTokens } from '@/types'; // Will create this type
+import type { UserGoogleOAuthTokens } from '@/types'; 
 
 // Ensure Firebase Admin SDK is initialized
 let adminApp: AdminApp;
@@ -80,9 +80,9 @@ export async function GET(request: NextRequest) {
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       scope: tokens.scope,
-      token_type: tokens.token_type,
+      token_type: tokens.token_type!, // Assuming token_type is always present
       expiry_date: tokens.expiry_date,
-      // Potentially store id_token if needed and requested in scope (e.g., 'openid')
+      id_token: tokens.id_token,
     };
 
     // Store tokens in Firestore
@@ -104,3 +104,4 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL(`/settings?error=${errorQueryParam}`, request.nextUrl.origin), { status: 302 });
   }
 }
+

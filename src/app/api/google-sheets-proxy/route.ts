@@ -119,27 +119,34 @@ export async function POST(request: NextRequest) {
     }
 
     let storedTokens = userTokensDoc.data() as UserGoogleOAuthTokens;
-    oauth2Client.setCredentials(storedTokens);
+    oauth2Client.setCredentials({
+      access_token: storedTokens.access_token,
+      refresh_token: storedTokens.refresh_token,
+      scope: storedTokens.scope,
+      token_type: storedTokens.token_type,
+      expiry_date: storedTokens.expiry_date,
+    });
     console.log(`/api/google-sheets-proxy: Set stored Google OAuth credentials for user ${uid}.`);
 
     // Check if access token is expired and refresh if necessary
     if (storedTokens.expiry_date && storedTokens.expiry_date < (Date.now() + 60000)) { // 60-second buffer
       if (storedTokens.refresh_token) {
         try {
-          console.log(`/api/google-sheets-proxy: Access token for user ${uid} potentially expired (expiry: ${new Date(storedTokens.expiry_date).toISOString()}), attempting refresh.`);
+          console.log(`/api/google-sheets-proxy: Access token for user ${uid} potentially expired (expiry: ${storedTokens.expiry_date ? new Date(storedTokens.expiry_date).toISOString() : 'N/A'}), attempting refresh.`);
           const { credentials } = await oauth2Client.refreshAccessToken();
           console.log(`/api/google-sheets-proxy: Access token refreshed for user ${uid}. New expiry: ${credentials.expiry_date ? new Date(credentials.expiry_date).toISOString() : 'N/A'}`);
           
-          const updatedTokens: Partial<UserGoogleOAuthTokens> = {
-            access_token: credentials.access_token,
+          const updatedTokens: UserGoogleOAuthTokens = {
+            access_token: credentials.access_token!,
+            refresh_token: credentials.refresh_token || storedTokens.refresh_token, // Preserve old refresh token if new one isn't provided
+            scope: credentials.scope,
+            token_type: credentials.token_type!,
             expiry_date: credentials.expiry_date,
-            ...(credentials.refresh_token && { refresh_token: credentials.refresh_token }),
-            ...(credentials.id_token && { id_token: credentials.id_token }),
-            ...(credentials.scope && { scope: credentials.scope }),
+            id_token: credentials.id_token,
           };
-          await userGoogleTokensRef.update(updatedTokens);
+          await userGoogleTokensRef.set(updatedTokens, { merge: true }); // Use set with merge to update or create
           oauth2Client.setCredentials(credentials); 
-          storedTokens = { ...storedTokens, ...updatedTokens } as UserGoogleOAuthTokens; 
+          storedTokens = updatedTokens; 
           console.log(`/api/google-sheets-proxy: Updated tokens stored in Firestore for user ${uid}.`);
         } catch (refreshError: any) {
           console.error(`/api/google-sheets-proxy: Failed to refresh access token for user ${uid}:`, refreshError.response?.data || refreshError.message);
@@ -206,6 +213,7 @@ export async function POST(request: NextRequest) {
                         imageUrl: String(itemDataFromSheet.imageUrl || ""),
                         siteId: itemDataFromSheet.siteId ? String(itemDataFromSheet.siteId) : null, 
                         stallId: itemDataFromSheet.stallId ? String(itemDataFromSheet.stallId) : null,
+                        originalMasterItemId: null, // Assume new items from sheet are master or direct stall, not allocations
                     };
                     
                     stockItemSchema.parse(parsedItem); // Zod will throw if invalid
@@ -264,6 +272,7 @@ export async function POST(request: NextRequest) {
                     item.imageUrl || "",
                     item.siteId || "",
                     item.stallId || ""
+                    // item.originalMasterItemId is not in STOCK_ITEMS_HEADERS
                 ]);
             });
 
