@@ -15,7 +15,8 @@ import {
   DocumentData,
   getDocs, 
   query,
-  orderBy // Correctly imported here
+  orderBy,
+  getDoc // Added getDoc here
 } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
