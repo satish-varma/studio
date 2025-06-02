@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import type { AppUser, UserRole, Site, Stall } from "@/types";
-import { Trash2, MoreHorizontal, Loader2, Info } from "lucide-react"; // Added Info
+import { Trash2, MoreHorizontal, Loader2, Info, Edit3 } from "lucide-react"; // Added Edit3
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,6 +30,20 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogClose,
+} from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Label } from "@/components/ui/label";
+
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -37,7 +51,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator
 } from "@/components/ui/dropdown-menu";
-import { useState, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 
 interface UserTableProps {
@@ -46,9 +60,9 @@ interface UserTableProps {
   stalls: Stall[];
   onRoleChange: (userId: string, newRole: UserRole) => Promise<void>;
   onDeleteUser: (userId: string, userName: string) => Promise<void>;
-  onDefaultSiteChange: (userId: string, newSiteId: string | null) => Promise<void>; // For staff
-  onDefaultStallChange: (userId: string, newStallId: string | null) => Promise<void>; // For staff
-  // We'll assume managedSiteIds for managers are handled directly in Firestore by admin for now
+  onDefaultSiteChange: (userId: string, newSiteId: string | null) => Promise<void>;
+  onDefaultStallChange: (userId: string, newStallId: string | null) => Promise<void>;
+  onManagedSitesChange: (userId: string, managedSiteIds: string[]) => Promise<void>; // New prop
   currentUserId?: string;
 }
 
@@ -60,35 +74,39 @@ export function UserTable({
   onDeleteUser,
   onDefaultSiteChange,
   onDefaultStallChange,
+  onManagedSitesChange, // New prop
   currentUserId,
 }: UserTableProps) {
   const [isUpdatingRole, setIsUpdatingRole] = useState<string | null>(null);
-  const [isUpdatingSiteStall, setIsUpdatingSiteStall] = useState<string | null>(null);
+  const [isUpdatingAssignment, setIsUpdatingAssignment] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [userToDelete, setUserToDelete] = useState<AppUser | null>(null);
+
+  const [showManageSitesDialog, setShowManageSitesDialog] = useState(false);
+  const [currentUserForSiteManagement, setCurrentUserForSiteManagement] = useState<AppUser | null>(null);
+  const [selectedManagedSites, setSelectedManagedSites] = useState<string[]>([]);
+  const [isSavingManagedSites, setIsSavingManagedSites] = useState(false);
+
 
   const handleRoleChangeInternal = async (userId: string, newRole: UserRole) => {
     setIsUpdatingRole(userId);
     await onRoleChange(userId, newRole);
-    // If role changes to/from manager, their site/stall assignment logic changes.
-    // For now, we'll let the parent component handle Firestore updates directly.
-    // A refresh of data might be needed or the parent handles state update.
     setIsUpdatingRole(null);
   };
 
   const handleDefaultSiteChangeInternal = async (userId: string, newSiteId: string) => {
-    setIsUpdatingSiteStall(userId);
+    setIsUpdatingAssignment(userId);
     await onDefaultSiteChange(userId, newSiteId === "none" ? null : newSiteId);
     if (newSiteId === "none") {
       await onDefaultStallChange(userId, null);
     }
-    setIsUpdatingSiteStall(null);
+    setIsUpdatingAssignment(null);
   };
 
   const handleDefaultStallChangeInternal = async (userId: string, newStallId: string) => {
-    setIsUpdatingSiteStall(userId);
+    setIsUpdatingAssignment(userId);
     await onDefaultStallChange(userId, newStallId === "none" ? null : newStallId);
-    setIsUpdatingSiteStall(null);
+    setIsUpdatingAssignment(null);
   };
   
   const handleDeleteInternal = async () => {
@@ -97,6 +115,21 @@ export function UserTable({
     await onDeleteUser(userToDelete.uid, userToDelete.displayName || userToDelete.email || "Unknown User");
     setIsDeleting(false);
     setUserToDelete(null);
+  };
+
+  const openManageSitesDialog = (user: AppUser) => {
+    setCurrentUserForSiteManagement(user);
+    setSelectedManagedSites(user.managedSiteIds || []);
+    setShowManageSitesDialog(true);
+  };
+
+  const handleSaveManagedSites = async () => {
+    if (!currentUserForSiteManagement) return;
+    setIsSavingManagedSites(true);
+    await onManagedSitesChange(currentUserForSiteManagement.uid, selectedManagedSites);
+    setIsSavingManagedSites(false);
+    setShowManageSitesDialog(false);
+    setCurrentUserForSiteManagement(null);
   };
   
   const formatDate = (dateString?: string) => {
@@ -167,38 +200,29 @@ export function UserTable({
                     {isCurrentUserBeingManaged && <Badge variant="outline" className="mt-1 text-xs border-primary text-primary">Current Admin</Badge>}
                   </TableCell>
                   <TableCell>
-                    {isUpdatingSiteStall === user.uid ? (
+                    {isUpdatingAssignment === user.uid && (isStaff || isManager) ? (
                       <Loader2 className="h-5 w-5 animate-spin text-primary" />
                     ) : isManager ? (
-                      user.managedSiteIds && user.managedSiteIds.length > 0 ? (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="outline" size="sm" className="h-8 text-xs">
-                              {user.managedSiteIds.length} Site(s) <Info size={12} className="ml-1" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent>
-                            <DropdownMenuLabel>Managed Sites</DropdownMenuLabel>
-                            <DropdownMenuSeparator />
-                            {user.managedSiteIds.map(siteId => (
-                              <DropdownMenuItem key={siteId} disabled>
-                                {sites.find(s => s.id === siteId)?.name || siteId}
-                              </DropdownMenuItem>
-                            ))}
-                             <DropdownMenuSeparator />
-                            <DropdownMenuItem disabled className="text-xs text-muted-foreground">
-                                Manage via Firestore
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      ) : (
-                        <Badge variant="outline">No sites assigned</Badge>
-                      )
-                    ) : isStaff ? ( // Staff user
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary" className="text-xs">
+                          Manages {user.managedSiteIds?.length || 0} site(s)
+                        </Badge>
+                        <Button 
+                          variant="outline" 
+                          size="icon" 
+                          className="h-7 w-7"
+                          onClick={() => openManageSitesDialog(user)}
+                          disabled={isCurrentUserBeingManaged || isUpdatingAssignment === user.uid}
+                        >
+                          <Edit3 size={14}/>
+                          <span className="sr-only">Edit Managed Sites</span>
+                        </Button>
+                      </div>
+                    ) : isStaff ? ( 
                       <Select
                         value={user.defaultSiteId || "none"}
                         onValueChange={(newSiteId) => handleDefaultSiteChangeInternal(user.uid, newSiteId)}
-                        disabled={isCurrentUserBeingManaged || isUpdatingSiteStall === user.uid || sites.length === 0}
+                        disabled={isCurrentUserBeingManaged || isUpdatingAssignment === user.uid || sites.length === 0}
                       >
                         <SelectTrigger className="w-[160px] bg-input text-xs h-8" disabled={isCurrentUserBeingManaged}>
                           <SelectValue placeholder={sites.length === 0 ? "No sites" : "Select default site"} />
@@ -210,18 +234,18 @@ export function UserTable({
                           ))}
                         </SelectContent>
                       </Select>
-                    ) : ( // Admin
+                    ) : ( 
                       <Badge variant="secondary">All Access</Badge>
                     )}
                   </TableCell>
                   <TableCell>
-                    {isUpdatingSiteStall === user.uid && isStaff && user.defaultSiteId ? (
+                    {isUpdatingAssignment === user.uid && isStaff && user.defaultSiteId ? (
                       <Loader2 className="h-5 w-5 animate-spin text-primary" />
                     ) : isStaff ? (
                       <Select
                         value={user.defaultStallId || "none"}
                         onValueChange={(newStallId) => handleDefaultStallChangeInternal(user.uid, newStallId)}
-                        disabled={isCurrentUserBeingManaged || isUpdatingSiteStall === user.uid || !user.defaultSiteId || stallsForSelectedSite.length === 0}
+                        disabled={isCurrentUserBeingManaged || isUpdatingAssignment === user.uid || !user.defaultSiteId || stallsForSelectedSite.length === 0}
                       >
                         <SelectTrigger className="w-[170px] bg-input text-xs h-8" disabled={isCurrentUserBeingManaged || !user.defaultSiteId}>
                           <SelectValue placeholder={!user.defaultSiteId ? "Select site first" : (stallsForSelectedSite.length === 0 ? "No stalls in site" : "Select default stall")} />
@@ -233,7 +257,7 @@ export function UserTable({
                           ))}
                         </SelectContent>
                       </Select>
-                    ) : ( // Manager or Admin
+                    ) : ( 
                       <Badge variant="outline">N/A</Badge>
                     )}
                   </TableCell>
@@ -288,6 +312,59 @@ export function UserTable({
             </AlertDialogFooter>
             </AlertDialogContent>
         </AlertDialog>
+      )}
+
+      {currentUserForSiteManagement && (
+        <Dialog open={showManageSitesDialog} onOpenChange={(open) => {
+            if (!open) {
+                setCurrentUserForSiteManagement(null);
+                setSelectedManagedSites([]);
+            }
+            setShowManageSitesDialog(open);
+        }}>
+            <DialogContent className="sm:max-w-[480px]">
+                <DialogHeader>
+                    <DialogTitle>Manage Sites for {currentUserForSiteManagement.displayName || currentUserForSiteManagement.email}</DialogTitle>
+                    <DialogDescription>
+                        Select the sites this manager is responsible for.
+                    </DialogDescription>
+                </DialogHeader>
+                <ScrollArea className="max-h-[300px] my-4 pr-3 border rounded-md">
+                    <div className="p-4 space-y-2">
+                        {sites.length > 0 ? sites.map(site => (
+                            <div key={site.id} className="flex items-center space-x-2">
+                                <Checkbox
+                                    id={`site-${site.id}`}
+                                    checked={selectedManagedSites.includes(site.id)}
+                                    onCheckedChange={(checked) => {
+                                        setSelectedManagedSites(prev => 
+                                            checked === true 
+                                            ? [...prev, site.id] 
+                                            : prev.filter(id => id !== site.id)
+                                        );
+                                    }}
+                                    disabled={isSavingManagedSites}
+                                />
+                                <Label htmlFor={`site-${site.id}`} className="font-normal text-sm">
+                                    {site.name}
+                                </Label>
+                            </div>
+                        )) : (
+                            <p className="text-sm text-muted-foreground text-center py-4">No sites available to assign.</p>
+                        )}
+                    </div>
+                </ScrollArea>
+                <DialogFooter>
+                    <DialogClose asChild>
+                        <Button type="button" variant="outline" disabled={isSavingManagedSites}>Cancel</Button>
+                    </DialogClose>
+                    <Button type="button" onClick={handleSaveManagedSites} disabled={isSavingManagedSites}>
+                        {isSavingManagedSites && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        Save Changes
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
       )}
     </>
   );

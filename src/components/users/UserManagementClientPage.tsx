@@ -16,7 +16,7 @@ import {
   getDocs, 
   query,
   orderBy,
-  getDoc // Added getDoc here
+  getDoc 
 } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
@@ -129,8 +129,21 @@ export default function UserManagementClientPage() {
 
     const userDocRef = doc(db, "users", userId);
     try {
-      await updateDoc(userDocRef, { role: newRole });
-      toast({ title: "Role Updated", description: `User role successfully changed to ${newRole}.` });
+      // When changing role, clear role-specific assignments
+      const updates: Record<string, any> = { role: newRole };
+      if (newRole === 'staff') {
+        updates.managedSiteIds = null; // Clear manager-specific field
+      } else if (newRole === 'manager') {
+        updates.defaultSiteId = null; // Clear staff-specific field
+        updates.defaultStallId = null; // Clear staff-specific field
+         // managedSiteIds should be set via its own UI
+      } else if (newRole === 'admin') {
+        updates.defaultSiteId = null;
+        updates.defaultStallId = null;
+        updates.managedSiteIds = null;
+      }
+      await updateDoc(userDocRef, updates);
+      toast({ title: "Role Updated", description: `User role successfully changed to ${newRole}. Associated site/stall assignments may have been reset.` });
     } catch (error: any) {
       console.error("Error updating role:", error);
       toast({ title: "Update Failed", description: error.message || "Could not update user role.", variant: "destructive" });
@@ -147,7 +160,6 @@ export default function UserManagementClientPage() {
     try {
         await updateDoc(userDocRef, { 
             defaultSiteId: newSiteId,
-            
             ...(newSiteId === null && { defaultStallId: null }) 
         });
         toast({ title: "Default Site Updated", description: `User's default site has been ${newSiteId ? 'set' : 'cleared'}.` });
@@ -164,7 +176,7 @@ export default function UserManagementClientPage() {
     }
     if (!db || !userId) return;
     const userDocRef = doc(db, "users", userId);
-    const userSnap = await getDoc(userDocRef);
+    const userSnap = await getDoc(userDocRef); // Ensure getDoc is imported and used
     try {
         
         if (newStallId && (!userSnap.exists() || !userSnap.data()?.defaultSiteId)) {
@@ -176,6 +188,27 @@ export default function UserManagementClientPage() {
     } catch (error: any) {
         console.error("Error updating default stall:", error);
         toast({ title: "Update Failed", description: error.message || "Could not update default stall.", variant: "destructive" });
+    }
+  };
+
+  const handleUpdateManagedSites = async (userId: string, newManagedSiteIds: string[]) => {
+    if (!currentUser || currentUser.role !== 'admin') {
+        toast({ title: "Permission Denied", description: "Only admins can change managed sites.", variant: "destructive"});
+        return;
+    }
+    if (!db || !userId) return;
+    const userDocRef = doc(db, "users", userId);
+    try {
+        await updateDoc(userDocRef, { 
+            managedSiteIds: newManagedSiteIds,
+            // Also clear staff-specific defaults if setting managed sites
+            defaultSiteId: null, 
+            defaultStallId: null
+        });
+        toast({ title: "Managed Sites Updated", description: `Manager's site assignments have been updated.` });
+    } catch (error: any) {
+        console.error("Error updating managed sites:", error);
+        toast({ title: "Update Failed", description: error.message || "Could not update managed sites.", variant: "destructive" });
     }
   };
 
@@ -259,9 +292,8 @@ export default function UserManagementClientPage() {
         onDeleteUser={handleDeleteUser}
         onDefaultSiteChange={handleDefaultSiteChange}
         onDefaultStallChange={handleDefaultStallChange}
+        onManagedSitesChange={handleUpdateManagedSites} // Pass new handler
         currentUserId={currentUser?.uid}
     />
   );
 }
-
-    
