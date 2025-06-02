@@ -38,7 +38,8 @@ import {
   DocumentReference,
   DocumentSnapshot,
   query,
-  where
+  where,
+  getDoc // Added getDoc here
 } from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
@@ -294,7 +295,6 @@ export default function RecordSaleForm() {
                   // This might be complex if multiple items in sale link to same master
                   // For simplicity, we might log based on inferred master state or skip detailed master log here
                   // and rely on a separate process or direct master item updates to log their own changes.
-                  // Let's assume for now the SALE_AFFECTS_MASTER log is handled if master's qty is directly updated.
                   // We can create a log for the master item based on the info we have.
                    const masterItemDoc = await getDoc(doc(db, "stockItems", soldStallItem.originalMasterItemId));
                    if(masterItemDoc.exists()){
