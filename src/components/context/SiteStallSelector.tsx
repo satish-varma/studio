@@ -9,6 +9,7 @@ import { getApps, initializeApp, getApp } from 'firebase/app';
 import type { Site, Stall } from '@/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2 } from 'lucide-react';
+import { Badge } from '@/components/ui/badge'; // Ensure Badge is imported
 
 let db: ReturnType<typeof getFirestore> | undefined;
 if (!getApps().length) {
