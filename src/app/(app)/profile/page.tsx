@@ -30,10 +30,9 @@ import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { getFirestore, doc, updateDoc, collection, getDocs, query, where } from "firebase/firestore";
 import { updateProfile as updateFirebaseProfile } from "firebase/auth";
-import { firebaseConfig } from "@/lib/firebaseConfig";
+import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-import type { Site, Stall, StockItem, AppUser } from "@/types"; // Added AppUser import
+import type { Site, Stall, AppUser } from '@/types';
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { CalendarIcon } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
@@ -98,6 +97,7 @@ export default function ProfilePage() {
   });
 
   const selectedSiteId = form.watch("defaultSiteId");
+  const isStaffUser = user?.role === 'staff';
 
   useEffect(() => {
     const fetchInitialData = async () => {
@@ -203,8 +203,11 @@ export default function ProfilePage() {
     try {
       const dataToUpdate: Partial<AppUser> = { 
         displayName: values.displayName,
-        defaultSiteId: values.defaultSiteId || undefined,
-        defaultStallId: values.defaultSiteId ? (values.defaultStallId || undefined) : undefined,
+        // Only include defaultSiteId and defaultStallId if user is not staff
+        ...(isStaffUser ? {} : {
+            defaultSiteId: values.defaultSiteId || undefined,
+            defaultStallId: values.defaultSiteId ? (values.defaultStallId || undefined) : undefined,
+        }),
         defaultItemSearchTerm: values.defaultItemSearchTerm || undefined,
         defaultItemCategoryFilter: values.defaultItemCategoryFilter || undefined,
         defaultItemStockStatusFilter: values.defaultItemStockStatusFilter || undefined,
@@ -213,6 +216,14 @@ export default function ProfilePage() {
         defaultSalesDateRangeTo: dateRange?.to ? dateRange.to.toISOString() : undefined,
         defaultSalesStaffFilter: values.defaultSalesStaffFilter || undefined,
       };
+
+      // If user is staff, ensure defaultSiteId and defaultStallId are not part of the update object
+      // by potentially overwriting them if they somehow slipped in (should not happen if fields are disabled)
+      if (isStaffUser) {
+        delete (dataToUpdate as any).defaultSiteId; // Use 'any' for type assertion if needed, or be more specific
+        delete (dataToUpdate as any).defaultStallId;
+      }
+
 
       const userDocRef = doc(db, "users", user.uid);
       await updateDoc(userDocRef, dataToUpdate);
@@ -228,8 +239,13 @@ export default function ProfilePage() {
         } : null);
       }
       
-      setActiveSite(dataToUpdate.defaultSiteId || null);
-      setActiveStall(dataToUpdate.defaultSiteId ? (dataToUpdate.defaultStallId || null) : null);
+      // Only update active context if user is not staff OR if admin is changing context.
+      // Staff's active context is set by their defaults (which they now can't change here).
+      if (!isStaffUser) {
+        setActiveSite(dataToUpdate.defaultSiteId || null);
+        setActiveStall(dataToUpdate.defaultSiteId ? (dataToUpdate.defaultStallId || null) : null);
+      }
+
 
       toast({
         title: "Profile Updated",
@@ -290,6 +306,7 @@ export default function ProfilePage() {
                 </CardTitle>
                 <CardDescription>
                   Your email is used for login and cannot be changed here.
+                  {isStaffUser && " Default site/stall are assigned by an administrator."}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
@@ -334,11 +351,16 @@ export default function ProfilePage() {
                       <Select 
                           onValueChange={(value) => field.onChange(value === "none" ? null : value)} 
                           value={field.value || "none"}
-                          disabled={isSubmitting || sites.length === 0}
+                          disabled={isSubmitting || sites.length === 0 || isStaffUser}
                       >
                         <FormControl>
-                          <SelectTrigger className="bg-input">
-                            <SelectValue placeholder={sites.length === 0 ? "No sites available" : "Select your default site"} />
+                          <SelectTrigger className="bg-input" disabled={isStaffUser}>
+                            <SelectValue placeholder={
+                                isStaffUser && field.value ? (sites.find(s => s.id === field.value)?.name || "Assigned Site") :
+                                isStaffUser && !field.value ? "Not Assigned" :
+                                sites.length === 0 ? "No sites available" : 
+                                "Select your default site"
+                            } />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
@@ -350,6 +372,7 @@ export default function ProfilePage() {
                           ))}
                         </SelectContent>
                       </Select>
+                      {isStaffUser && !field.value && <FormDescription>Your default site is assigned by an administrator.</FormDescription>}
                       <FormMessage />
                     </FormItem>
                   )}
@@ -363,11 +386,13 @@ export default function ProfilePage() {
                       <Select 
                           onValueChange={(value) => field.onChange(value === "none" ? null : value)} 
                           value={field.value || "none"}
-                          disabled={isSubmitting || !selectedSiteId || stallsForSelectedSite.length === 0}
+                          disabled={isSubmitting || !selectedSiteId || stallsForSelectedSite.length === 0 || isStaffUser}
                       >
                         <FormControl>
-                          <SelectTrigger className="bg-input">
+                          <SelectTrigger className="bg-input" disabled={isStaffUser}>
                             <SelectValue placeholder={
+                              isStaffUser && field.value ? (stallsForSelectedSite.find(s => s.id === field.value)?.name || "Assigned Stall") :
+                              isStaffUser && !field.value ? "Not Assigned" :
                               !selectedSiteId ? "Select a site first" : 
                               stallsForSelectedSite.length === 0 ? "No stalls for this site" : 
                               "Select your default stall"
@@ -383,6 +408,7 @@ export default function ProfilePage() {
                           ))}
                         </SelectContent>
                       </Select>
+                      {isStaffUser && !field.value && <FormDescription>Your default stall is assigned by an administrator.</FormDescription>}
                       <FormMessage />
                     </FormItem>
                   )}
