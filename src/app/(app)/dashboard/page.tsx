@@ -129,7 +129,7 @@ export default function DashboardPage() {
 
     // --- Sales Transactions Listener (Last 7 Days) ---
     let salesQueryConstraints: QueryConstraint[] = [
-        where("isDeleted", "!=", true),
+        where("isDeleted", "==", false), // Query for non-deleted sales
         where("transactionDate", ">=", Timestamp.fromDate(sevenDaysAgo)),
         orderBy("transactionDate", "desc")
     ];
@@ -142,6 +142,11 @@ export default function DashboardPage() {
         setLoading(false);
         setError("Site context is missing for fetching sales transactions.");
         return;
+    }
+
+    // If user is staff, only fetch their sales
+    if (user.role === 'staff') {
+        salesQueryConstraints.push(where("staffId", "==", user.uid));
     }
 
     const salesTransactionsRef = collection(db, "salesTransactions");
@@ -198,7 +203,7 @@ export default function DashboardPage() {
       setLoading(false);
     }, (err) => {
       console.error("Error fetching sales transactions for dashboard:", err);
-      setError("Failed to load sales transaction data.");
+      setError("Failed to load sales transaction data. Check Firestore security rules and query constraints.");
       setLoading(false);
     });
 
