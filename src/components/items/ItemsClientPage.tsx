@@ -20,6 +20,7 @@ import { firebaseConfig } from '@/lib/firebaseConfig';
 import { Loader2, Info } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import Link from "next/link"; // Ensure Link is imported
 
 let db: ReturnType<typeof getFirestore> | undefined;
 if (!getApps().length) {
@@ -41,9 +42,6 @@ export default function ItemsClientPage() {
   const [categoryFilter, setCategoryFilter] = useState(() => user?.defaultItemCategoryFilter || "all");
   const [stockStatusFilter, setStockStatusFilter] = useState(() => user?.defaultItemStockStatusFilter || "all");
   const [stallFilterOption, setStallFilterOption] = useState(() => {
-    // If user has a default stall, and it's for the *current* active site, use it.
-    // Otherwise, use their general default, or "all".
-    // This logic might need refinement if activeSiteId changes and defaultStallOption is for a different site.
     return user?.defaultItemStallFilterOption || "all";
   });
 
@@ -61,7 +59,6 @@ export default function ItemsClientPage() {
       setSearchTerm(user.defaultItemSearchTerm || "");
       setCategoryFilter(user.defaultItemCategoryFilter || "all");
       setStockStatusFilter(user.defaultItemStockStatusFilter || "all");
-      // Potentially more complex logic for stallFilterOption if it depends on activeSiteId synchronicity
       setStallFilterOption(user.defaultItemStallFilterOption || "all");
     }
   }, [user]);
@@ -110,21 +107,28 @@ export default function ItemsClientPage() {
         fetchedStalls.sort((a, b) => a.name.localeCompare(b.name));
         setStallsForFilterDropdown(fetchedStalls);
         
-        // If current stallFilterOption is a specific stall ID that's not in the new list for this site, reset it
         if (stallFilterOption !== 'all' && stallFilterOption !== 'master' && !fetchedStalls.find(s => s.id === stallFilterOption)) {
-            setStallFilterOption('all'); // Or user.defaultItemStallFilterOption if that's also for this site
+            setStallFilterOption('all'); 
         }
 
       } else {
         setStallsForFilterDropdown([]);
         if (stallFilterOption !== 'all' && stallFilterOption !== 'master') {
-             setStallFilterOption('all'); // Reset if no active site but a specific stall was selected
+             setStallFilterOption('all'); 
         }
       }
 
       if (!activeSiteId) {
         setItems([]);
-        setErrorData(user.role === 'admin' ? "Admin: Please select a site to view its stock." : "Please select an active site to view stock items.");
+        let message = "Please select an active site to view stock items.";
+        if (user.role === 'admin') {
+          message = "Admin: Please select a site from the header to view its stock.";
+        } else if (user.role === 'staff') {
+          message = "Your account does not have a default site assigned, or it's not yet active. Please contact an administrator to assign one. If a site was recently assigned, you might need to log out and log back in.";
+        } else if (user.role === 'manager') {
+          message = "Manager: Please select one of your managed sites from the header to view its stock.";
+        }
+        setErrorData(message);
       } else {
         const itemsCollectionRef = collection(db, "stockItems");
         let qConstraints: QueryConstraint[] = [
@@ -158,11 +162,11 @@ export default function ItemsClientPage() {
     } finally {
       setLoadingData(false);
     }
-  }, [user, activeSiteId, stallFilterOption, db]); // stallFilterOption is a dependency now
+  }, [user, activeSiteId, stallFilterOption, db]); 
 
   useEffect(() => {
     fetchSupportingDataAndItems();
-  }, [fetchSupportingDataAndItems]); // fetchSupportingDataAndItems itself changes when its deps change.
+  }, [fetchSupportingDataAndItems]);
 
 
   const uniqueCategories = useMemo(() => {
@@ -218,8 +222,26 @@ export default function ItemsClientPage() {
       {errorData && !loadingData && (
         <Alert variant="default" className="border-primary/30">
             <Info className="h-4 w-4" />
-            <AlertTitle>Information / Error</AlertTitle>
-            <AlertDescription>{errorData}</AlertDescription>
+            <AlertTitle>Information</AlertTitle>
+            <AlertDescription>
+              {errorData.includes("contact an administrator") ? (
+                <>
+                  {errorData.split("contact an administrator")[0]}
+                  contact an administrator
+                  {errorData.split("contact an administrator")[1].includes("log out and log back in") ? (
+                    <>
+                      {errorData.split("contact an administrator")[1].split("log out and log back in")[0]}
+                      <Link href="/profile" className="text-primary hover:underline">log out and log back in</Link>
+                      {errorData.split("log out and log back in")[1]}
+                    </>
+                  ): (
+                     errorData.split("contact an administrator")[1]
+                  )}
+                </>
+              ) : (
+                errorData
+              )}
+            </AlertDescription>
         </Alert>
       )}
       {!loadingData && !errorData && (
@@ -234,3 +256,5 @@ export default function ItemsClientPage() {
     </div>
   );
 }
+
+    
