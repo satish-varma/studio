@@ -368,12 +368,12 @@ export async function POST(request: NextRequest) {
                     const dataToSave: Omit<SaleTransaction, 'id' | 'transactionDate'> & { transactionDate: AdminTimestamp } = {
                         transactionDate: transactionDateTimestamp,
                         staffId: String(saleDataFromSheet.staffId),
-                        staffName: saleDataFromSheet.staffName ? String(saleDataFromSheet.staffName) : null,
+                        staffName: saleDataFromSheet.staffName ? String(saleDataFromSheet.staffName) : undefined,
                         totalAmount: totalAmount,
                         items: items,
                         isDeleted: false,
-                        siteId: saleDataFromSheet.siteId ? String(saleDataFromSheet.siteId) : null,
-                        stallId: saleDataFromSheet.stallId ? String(saleDataFromSheet.stallId) : null,
+                        siteId: saleDataFromSheet.siteId ? String(saleDataFromSheet.siteId) : undefined,
+                        stallId: saleDataFromSheet.stallId ? String(saleDataFromSheet.stallId) : undefined,
                     };
                     
                     const saleDocRef = adminDb.collection('salesTransactions').doc(); 
