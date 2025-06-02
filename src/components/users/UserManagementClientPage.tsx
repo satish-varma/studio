@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from "react";
 import { UserTable } from "@/components/users/UserTable";
-import type { AppUser, UserRole } from "@/types";
+import type { AppUser, UserRole, Site, Stall } from "@/types";
 import { 
   getFirestore, 
   collection, 
@@ -12,14 +12,16 @@ import {
   updateDoc, 
   deleteDoc,
   QuerySnapshot,
-  DocumentData
+  DocumentData,
+  getDocs, // Added getDocs
+  query // Added query
 } from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
 import { Loader2, ShieldAlert } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 
 if (!getApps().length) {
@@ -36,40 +38,72 @@ export default function UserManagementClientPage() {
   const { toast } = useToast();
   
   const [users, setUsers] = useState<AppUser[]>([]);
-  const [loadingUsers, setLoadingUsers] = useState(true);
-  const [errorUsers, setErrorUsers] = useState<string | null>(null);
+  const [sites, setSites] = useState<Site[]>([]);
+  const [stalls, setStalls] = useState<Stall[]>([]);
+  const [loadingData, setLoadingData] = useState(true); // Combined loading state
+  const [errorData, setErrorData] = useState<string | null>(null);
 
   useEffect(() => {
-    if (authLoading) return; // Wait for auth state to resolve
+    if (authLoading) return;
 
     if (!currentUser || currentUser.role !== 'admin') {
-      setLoadingUsers(false);
-      setErrorUsers("Access Denied: You do not have permission to view this page.");
+      setLoadingData(false);
+      setErrorData("Access Denied: You do not have permission to view this page.");
       return;
     }
 
-    const usersCollectionRef = collection(db, "users");
-    const unsubscribe = onSnapshot(usersCollectionRef, 
-      (snapshot: QuerySnapshot<DocumentData>) => {
-        const fetchedUsers: AppUser[] = snapshot.docs
-          .map(docSnapshot => ({
-            uid: docSnapshot.id,
-            ...docSnapshot.data()
-          } as AppUser))
-          .filter(u => u.uid && typeof u.uid === 'string' && u.uid.trim() !== ""); // Filter out users with invalid UIDs
-        
-        setUsers(fetchedUsers);
-        setLoadingUsers(false);
-        setErrorUsers(null);
-      },
-      (error) => {
-        console.error("Error fetching users:", error);
-        setErrorUsers("Failed to load users. Please try again later.");
-        setLoadingUsers(false);
-      }
-    );
+    const fetchInitialData = async () => {
+      setLoadingData(true);
+      setErrorData(null);
+      try {
+        // Fetch Users
+        const usersCollectionRef = collection(db, "users");
+        const unsubscribeUsers = onSnapshot(usersCollectionRef, 
+          (snapshot: QuerySnapshot<DocumentData>) => {
+            const fetchedUsers: AppUser[] = snapshot.docs
+              .map(docSnapshot => ({
+                uid: docSnapshot.id,
+                ...docSnapshot.data()
+              } as AppUser))
+              .filter(u => u.uid && typeof u.uid === 'string' && u.uid.trim() !== "");
+            setUsers(fetchedUsers.sort((a,b) => (a.displayName || "").localeCompare(b.displayName || "")));
+          },
+          (error) => {
+            console.error("Error fetching users:", error);
+            setErrorData(prev => prev ? `${prev}\nFailed to load users.` : "Failed to load users.");
+          }
+        );
 
-    return () => unsubscribe();
+        // Fetch Sites
+        const sitesCollectionRef = collection(db, "sites");
+        const sitesSnapshot = await getDocs(query(sitesCollectionRef, orderBy("name")));
+        const fetchedSites: Site[] = sitesSnapshot.docs.map(docSnapshot => ({ id: docSnapshot.id, ...docSnapshot.data() } as Site));
+        setSites(fetchedSites);
+
+        // Fetch Stalls
+        const stallsCollectionRef = collection(db, "stalls");
+        const stallsSnapshot = await getDocs(query(stallsCollectionRef, orderBy("name")));
+        const fetchedStalls: Stall[] = stallsSnapshot.docs.map(docSnapshot => ({ id: docSnapshot.id, ...docSnapshot.data() } as Stall));
+        setStalls(fetchedStalls);
+        
+        setLoadingData(false);
+        return unsubscribeUsers; // Return users listener for cleanup
+      } catch (error: any) {
+        console.error("Error fetching initial data for User Management:", error);
+        setErrorData("Failed to load page data. Please try again.");
+        setLoadingData(false);
+        return () => {}; // Return empty cleanup function on error
+      }
+    };
+    
+    let unsubscribe: (() => void) | undefined;
+    fetchInitialData().then(unsub => {
+      unsubscribe = unsub;
+    });
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, [currentUser, authLoading]);
 
   const handleRoleChange = async (userId: string, newRole: UserRole) => {
@@ -101,6 +135,48 @@ export default function UserManagementClientPage() {
     }
   };
 
+  const handleDefaultSiteChange = async (userId: string, newSiteId: string | null) => {
+    if (!currentUser || currentUser.role !== 'admin') {
+        toast({ title: "Permission Denied", description: "Only admins can change default sites.", variant: "destructive"});
+        return;
+    }
+    if (!db || !userId) return;
+    const userDocRef = doc(db, "users", userId);
+    try {
+        await updateDoc(userDocRef, { 
+            defaultSiteId: newSiteId,
+            // If site is cleared, stall must also be cleared
+            ...(newSiteId === null && { defaultStallId: null }) 
+        });
+        toast({ title: "Default Site Updated", description: `User's default site has been ${newSiteId ? 'set' : 'cleared'}.` });
+    } catch (error: any) {
+        console.error("Error updating default site:", error);
+        toast({ title: "Update Failed", description: error.message || "Could not update default site.", variant: "destructive" });
+    }
+  };
+
+  const handleDefaultStallChange = async (userId: string, newStallId: string | null) => {
+    if (!currentUser || currentUser.role !== 'admin') {
+        toast({ title: "Permission Denied", description: "Only admins can change default stalls.", variant: "destructive"});
+        return;
+    }
+    if (!db || !userId) return;
+    const userDocRef = doc(db, "users", userId);
+    try {
+        // Ensure a site is selected if a stall is being set
+        const userSnap = await getDoc(userDocRef);
+        if (newStallId && (!userSnap.exists() || !userSnap.data()?.defaultSiteId)) {
+            toast({ title: "Site Required", description: "A default site must be selected before assigning a default stall.", variant: "default"});
+            return;
+        }
+        await updateDoc(userDocRef, { defaultStallId: newStallId });
+        toast({ title: "Default Stall Updated", description: `User's default stall has been ${newStallId ? 'set' : 'cleared'}.` });
+    } catch (error: any) {
+        console.error("Error updating default stall:", error);
+        toast({ title: "Update Failed", description: error.message || "Could not update default stall.", variant: "destructive" });
+    }
+  };
+
   const handleDeleteUser = async (userId: string, userName: string) => {
      if (!currentUser || currentUser.role !== 'admin') {
       toast({ title: "Permission Denied", description: "You cannot delete users.", variant: "destructive"});
@@ -124,24 +200,22 @@ export default function UserManagementClientPage() {
     try {
       await deleteDoc(userDocRef);
       toast({ title: "User Deleted", description: `User ${userName} has been deleted from Firestore.` });
-      // TODO: Implement Firebase Function to delete user from Firebase Authentication
-      // Deleting from Auth is a privileged operation and should be handled securely.
     } catch (error: any) {
       console.error("Error deleting user:", error);
       toast({ title: "Deletion Failed", description: error.message || "Could not delete user.", variant: "destructive" });
     }
   };
   
-  if (authLoading || loadingUsers) {
+  if (authLoading || loadingData) {
     return (
       <div className="flex justify-center items-center py-10">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <p className="ml-2">Loading user data...</p>
+        <p className="ml-2">Loading user data and context...</p>
       </div>
     );
   }
 
-  if (errorUsers) {
+  if (errorData) {
     return (
       <Card className="shadow-lg border-destructive">
         <CardHeader>
@@ -151,7 +225,7 @@ export default function UserManagementClientPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-center py-10 text-destructive">{errorUsers}</p>
+          <p className="text-center py-10 text-destructive">{errorData}</p>
         </CardContent>
       </Card>
     );
@@ -177,10 +251,15 @@ export default function UserManagementClientPage() {
   return (
     <UserTable 
         users={users} 
+        sites={sites}
+        stalls={stalls}
         onRoleChange={handleRoleChange} 
         onDeleteUser={handleDeleteUser}
+        onDefaultSiteChange={handleDefaultSiteChange}
+        onDefaultStallChange={handleDefaultStallChange}
         currentUserId={currentUser?.uid}
     />
   );
 }
 
+    
