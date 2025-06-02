@@ -67,6 +67,8 @@ const SALES_HISTORY_HEADERS = ["Transaction ID (Sheet)", "Date", "Staff Name", "
 
 
 export async function POST(request: NextRequest) {
+  let uid: string | undefined = undefined; // Declare and initialize uid here
+
   // Initial checks for critical services
   if (!adminApp || !adminDb) {
     console.error("/api/google-sheets-proxy: Firebase Admin SDK not properly initialized on server when POST request received.");
@@ -77,7 +79,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Server Error: Google OAuth2 client not configured.' }, { status: 500 });
   }
 
-  let uid: string;
   try {
     const body = await request.json();
     const { action, dataType, sheetId, sheetName = 'Sheet1' } = body;
@@ -95,7 +96,7 @@ export async function POST(request: NextRequest) {
     try {
       console.log("/api/google-sheets-proxy: Verifying ID token with Admin SDK for project:", adminApp.options.projectId);
       decodedToken = await getAdminAuth(adminApp).verifyIdToken(idToken);
-      uid = decodedToken.uid;
+      uid = decodedToken.uid; // uid is assigned here
       console.log("/api/google-sheets-proxy: ID Token verified successfully for UID:", uid);
     } catch (error: any) {
       console.error('/api/google-sheets-proxy: Error verifying Firebase ID token:', error.message);
@@ -104,7 +105,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Retrieve user's Google OAuth tokens from Firestore
-    const userGoogleTokensRef = adminDb.collection('userGoogleOAuthTokens').doc(uid);
+    const userGoogleTokensRef = adminDb.collection('userGoogleOAuthTokens').doc(uid); // uid is now definitely assigned if we reach here
     const userTokensDoc = await userGoogleTokensRef.get();
 
     if (!userTokensDoc.exists || !userTokensDoc.data()?.access_token) {
