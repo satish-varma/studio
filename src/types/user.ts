@@ -24,9 +24,8 @@ export interface AppUser {
 export interface UserGoogleOAuthTokens {
   access_token: string;
   refresh_token: string; // Typically only provided on the first authorization
-  scope?: string | undefined; // Updated to allow undefined
+  scope?: string | undefined; 
   token_type: string; // Usually "Bearer"
-  expiry_date: number | null | undefined; // Timestamp (milliseconds since epoch) when the access_token expires
-  id_token?: string; // If 'openid' scope was requested
+  expiry_date?: number | null | undefined; // Timestamp (milliseconds since epoch) when the access_token expires
+  id_token?: string | null | undefined; // If 'openid' scope was requested, can be null
 }
-
