@@ -58,7 +58,7 @@ interface AuthContextType {
   user: AppUser | null;
   loading: boolean;
   signIn: (email: string, pass: string) => Promise<AppUser | null>;
-  signUp: (email: string, pass: string, displayName: string) => Promise<AppUser | null>; // Role removed
+  signUp: (email: string, pass: string, displayName: string) => Promise<AppUser | null>;
   signOutUser: () => Promise<void>;
   setUser: React.Dispatch<React.SetStateAction<AppUser | null>>;
   activeSiteId: string | null;
@@ -117,15 +117,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       photoURL: firebaseUser.photoURL,
       role: userDataFromFirestore.role || 'staff',
       createdAt: userDataFromFirestore.createdAt || new Date().toISOString(),
-      defaultSiteId: userDataFromFirestore.defaultSiteId || undefined,
-      defaultStallId: userDataFromFirestore.defaultStallId || undefined,
-      defaultItemSearchTerm: userDataFromFirestore.defaultItemSearchTerm || undefined,
-      defaultItemCategoryFilter: userDataFromFirestore.defaultItemCategoryFilter || undefined,
-      defaultItemStockStatusFilter: userDataFromFirestore.defaultItemStockStatusFilter || undefined,
-      defaultItemStallFilterOption: userDataFromFirestore.defaultItemStallFilterOption || undefined,
-      defaultSalesDateRangeFrom: userDataFromFirestore.defaultSalesDateRangeFrom || undefined,
-      defaultSalesDateRangeTo: userDataFromFirestore.defaultSalesDateRangeTo || undefined,
-      defaultSalesStaffFilter: userDataFromFirestore.defaultSalesStaffFilter || undefined,
+      defaultSiteId: userDataFromFirestore.defaultSiteId ?? null,
+      defaultStallId: userDataFromFirestore.defaultStallId ?? null,
+      defaultItemSearchTerm: userDataFromFirestore.defaultItemSearchTerm ?? null,
+      defaultItemCategoryFilter: userDataFromFirestore.defaultItemCategoryFilter ?? null,
+      defaultItemStockStatusFilter: userDataFromFirestore.defaultItemStockStatusFilter ?? null,
+      defaultItemStallFilterOption: userDataFromFirestore.defaultItemStallFilterOption ?? null,
+      defaultSalesDateRangeFrom: userDataFromFirestore.defaultSalesDateRangeFrom ?? null,
+      defaultSalesDateRangeTo: userDataFromFirestore.defaultSalesDateRangeTo ?? null,
+      defaultSalesStaffFilter: userDataFromFirestore.defaultSalesStaffFilter ?? null,
     };
   };
 
@@ -156,20 +156,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 setActiveSiteState(storedSiteId);
                 setActiveStallState(storedSiteId ? storedStallId : null); 
             } else { 
-                setActiveSiteState(appUser.defaultSiteId || null);
-                setActiveStallState(appUser.defaultSiteId ? (appUser.defaultStallId || null) : null); 
+                setActiveSiteState(appUser.defaultSiteId); // Already null if not set
+                setActiveStallState(appUser.defaultSiteId ? appUser.defaultStallId : null); 
             }
 
           } else {
             console.warn(`AuthContext: User document not found for UID: ${firebaseUser.uid} during auth state change. Creating one with default role 'staff'.`);
-            const defaultUserData = { 
+            const defaultUserData: AppUser = { 
               uid: firebaseUser.uid,
               email: firebaseUser.email, 
-              role: 'staff', // Default role on creation if Firestore doc is missing
+              role: 'staff', 
               displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User",
               createdAt: new Date().toISOString(),
               defaultSiteId: null,
               defaultStallId: null,
+              defaultItemSearchTerm: null,
+              defaultItemCategoryFilter: null,
+              defaultItemStockStatusFilter: null,
+              defaultItemStallFilterOption: null,
+              defaultSalesDateRangeFrom: null,
+              defaultSalesDateRangeTo: null,
+              defaultSalesStaffFilter: null,
             };
             await setDoc(userDocRef, defaultUserData);
             appUser = mapFirestoreDataToAppUser(firebaseUser, defaultUserData);
@@ -179,7 +186,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           setUser(appUser);
         } catch (error) {
           console.error("AuthContext: Error fetching/creating user data from Firestore:", error);
-          const fallbackUser = mapFirestoreDataToAppUser(firebaseUser); // Create with defaults
+          const fallbackUser = mapFirestoreDataToAppUser(firebaseUser); 
           setUser(fallbackUser);
           setActiveSiteState(null);
           setActiveStallState(null);
@@ -219,19 +226,26 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             setActiveSiteState(storedSiteId);
             setActiveStallState(storedSiteId ? storedStallId : null);
         } else { 
-            setActiveSiteState(appUser.defaultSiteId || null);
-            setActiveStallState(appUser.defaultSiteId ? (appUser.defaultStallId || null) : null);
+            setActiveSiteState(appUser.defaultSiteId);
+            setActiveStallState(appUser.defaultSiteId ? appUser.defaultStallId : null);
         }
       } else {
         console.warn(`AuthContext: User document not found for UID: ${firebaseUser.uid} during sign-in. Assigning default role 'staff'.`);
-        const defaultUserData = {
+        const defaultUserData: AppUser = {
             uid: firebaseUser.uid,
             email: firebaseUser.email, 
-            role: 'staff', // Default role
+            role: 'staff', 
             displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User",
             createdAt: new Date().toISOString(),
             defaultSiteId: null,
             defaultStallId: null,
+            defaultItemSearchTerm: null,
+            defaultItemCategoryFilter: null,
+            defaultItemStockStatusFilter: null,
+            defaultItemStallFilterOption: null,
+            defaultSalesDateRangeFrom: null,
+            defaultSalesDateRangeTo: null,
+            defaultSalesStaffFilter: null,
         };
          await setDoc(userDocRef, defaultUserData);
         appUser = mapFirestoreDataToAppUser(firebaseUser, defaultUserData);
@@ -251,7 +265,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   }, []);
   
-  // Modified signUp to always assign 'staff' role
   const signUp = useCallback(async (email: string, pass: string, displayName: string): Promise<AppUser | null> => {
     if (!auth || !db) throw new Error("Firebase not initialized for signUp.");
     setLoading(true);
@@ -259,20 +272,26 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
       const firebaseUser = userCredential.user;
       
-      const newUserDocData = {
+      const newUserDocData: AppUser = {
         uid: firebaseUser.uid,
         email: firebaseUser.email,
-        role: 'staff' as UserRole, // Default role is 'staff'
+        role: 'staff' as UserRole, 
         displayName: displayName,
         createdAt: new Date().toISOString(),
         defaultSiteId: null, 
         defaultStallId: null,
+        defaultItemSearchTerm: null,
+        defaultItemCategoryFilter: null,
+        defaultItemStockStatusFilter: null,
+        defaultItemStallFilterOption: null,
+        defaultSalesDateRangeFrom: null,
+        defaultSalesDateRangeTo: null,
+        defaultSalesStaffFilter: null,
       };
       const userDocRef = doc(db as Firestore, "users", firebaseUser.uid);
       await setDoc(userDocRef, newUserDocData);
 
       const appUser = mapFirestoreDataToAppUser(firebaseUser, newUserDocData);
-      // New users don't get an active site/stall set initially, they can set defaults in profile
       setUser(appUser); 
       setActiveSiteState(null);
       setActiveStallState(null);
@@ -336,3 +355,4 @@ export const useAuth = (): AuthContextType => {
   }
   return context;
 };
+

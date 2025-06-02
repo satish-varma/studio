@@ -29,10 +29,10 @@ import { Loader2, Save, UserCircle, FilterIcon, HistoryIcon, PackageIcon } from 
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { getFirestore, doc, updateDoc, collection, getDocs, query, where } from "firebase/firestore";
-import { updateProfile as updateFirebaseProfile, getAuth } from "firebase/auth"; // Added getAuth here
+import { updateProfile as updateFirebaseProfile, getAuth } from "firebase/auth";
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
-import type { Site, Stall, AppUser, StockItem } from '@/types'; // Added StockItem
+import type { Site, Stall, AppUser, StockItem } from '@/types';
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { CalendarIcon } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
@@ -54,13 +54,12 @@ const profileFormSchema = z.object({
   email: z.string().email().optional(),
   defaultSiteId: z.string().optional().nullable(),
   defaultStallId: z.string().optional().nullable(),
-  // New default filter fields
   defaultItemSearchTerm: z.string().optional().nullable(),
   defaultItemCategoryFilter: z.string().optional().nullable(),
   defaultItemStockStatusFilter: z.string().optional().nullable(),
   defaultItemStallFilterOption: z.string().optional().nullable(),
-  defaultSalesDateRangeFrom: z.string().optional().nullable(), // Stored as ISO string
-  defaultSalesDateRangeTo: z.string().optional().nullable(),   // Stored as ISO string
+  defaultSalesDateRangeFrom: z.string().optional().nullable(), 
+  defaultSalesDateRangeTo: z.string().optional().nullable(),   
   defaultSalesStaffFilter: z.string().optional().nullable(),
 });
 
@@ -87,12 +86,12 @@ export default function ProfilePage() {
       defaultSiteId: null,
       defaultStallId: null,
       defaultItemSearchTerm: null,
-      defaultItemCategoryFilter: "all",
-      defaultItemStockStatusFilter: "all",
-      defaultItemStallFilterOption: "all",
+      defaultItemCategoryFilter: null, // Use null for "all"
+      defaultItemStockStatusFilter: null, // Use null for "all"
+      defaultItemStallFilterOption: null, // Use null for "all"
       defaultSalesDateRangeFrom: null,
       defaultSalesDateRangeTo: null,
-      defaultSalesStaffFilter: "all",
+      defaultSalesStaffFilter: null, // Use null for "all"
     },
   });
 
@@ -104,19 +103,16 @@ export default function ProfilePage() {
       if (!db || !user) return;
       setLoadingContextData(true);
       try {
-        // Sites
         const sitesSnapshot = await getDocs(collection(db, "sites"));
         const fetchedSites: Site[] = sitesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Site));
         setSites(fetchedSites.sort((a, b) => a.name.localeCompare(b.name)));
 
-        // Users for staff filter (if admin/manager)
         if (user.role === 'admin' || user.role === 'manager') {
           const usersSnapshot = await getDocs(query(collection(db, "users"), where("role", "in", ["staff", "manager", "admin"])));
           const fetchedUsers: AppUser[] = usersSnapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser));
           setAllUsersForStaffFilter(fetchedUsers.sort((a,b) => (a.displayName || "").localeCompare(b.displayName || "")));
         }
 
-        // Item Categories (from all items - could be slow if many items, consider dedicated categories collection)
         const itemsSnapshot = await getDocs(collection(db, "stockItems"));
         const categoriesSet = new Set<string>();
         itemsSnapshot.forEach(doc => {
@@ -140,22 +136,22 @@ export default function ProfilePage() {
       form.reset({
         displayName: user.displayName || "",
         email: user.email || "",
-        defaultSiteId: user.defaultSiteId || null,
-        defaultStallId: user.defaultStallId || null,
-        defaultItemSearchTerm: user.defaultItemSearchTerm || "",
-        defaultItemCategoryFilter: user.defaultItemCategoryFilter || "all",
-        defaultItemStockStatusFilter: user.defaultItemStockStatusFilter || "all",
-        defaultItemStallFilterOption: user.defaultItemStallFilterOption || "all",
-        defaultSalesDateRangeFrom: user.defaultSalesDateRangeFrom || null,
-        defaultSalesDateRangeTo: user.defaultSalesDateRangeTo || null,
-        defaultSalesStaffFilter: user.defaultSalesStaffFilter || "all",
+        defaultSiteId: user.defaultSiteId ?? null,
+        defaultStallId: user.defaultStallId ?? null,
+        defaultItemSearchTerm: user.defaultItemSearchTerm ?? null,
+        defaultItemCategoryFilter: user.defaultItemCategoryFilter ?? null,
+        defaultItemStockStatusFilter: user.defaultItemStockStatusFilter ?? null,
+        defaultItemStallFilterOption: user.defaultItemStallFilterOption ?? null,
+        defaultSalesDateRangeFrom: user.defaultSalesDateRangeFrom ?? null,
+        defaultSalesDateRangeTo: user.defaultSalesDateRangeTo ?? null,
+        defaultSalesStaffFilter: user.defaultSalesStaffFilter ?? null,
       });
        setDateRange({
           from: user.defaultSalesDateRangeFrom ? parseISO(user.defaultSalesDateRangeFrom) : undefined,
           to: user.defaultSalesDateRangeTo ? parseISO(user.defaultSalesDateRangeTo) : undefined,
       });
     }
-  }, [user, form, sites]); // Added sites dependency to ensure reset happens after sites are loaded for select
+  }, [user, form, sites]);
 
   useEffect(() => {
     const fetchStalls = async () => {
@@ -163,11 +159,11 @@ export default function ProfilePage() {
         setStallsForSelectedSite([]);
         form.setValue("defaultStallId", null); 
         if(form.getValues("defaultItemStallFilterOption") !== 'all' && form.getValues("defaultItemStallFilterOption") !== 'master') {
-            form.setValue("defaultItemStallFilterOption", "all");
+            form.setValue("defaultItemStallFilterOption", null); // "all" is now null
         }
         return;
       }
-      setLoadingContextData(true); // Use a more general loading state
+      setLoadingContextData(true);
       try {
         const q = query(collection(db, "stalls"), where("siteId", "==", selectedSiteId));
         const stallsSnapshot = await getDocs(q);
@@ -180,7 +176,7 @@ export default function ProfilePage() {
         }
         const currentItemStallFilter = form.getValues("defaultItemStallFilterOption");
         if (currentItemStallFilter && currentItemStallFilter !== 'all' && currentItemStallFilter !== 'master' && !fetchedStalls.find(s => s.id === currentItemStallFilter)) {
-            form.setValue("defaultItemStallFilterOption", 'all');
+            form.setValue("defaultItemStallFilterOption", null); // "all" is now null
         }
       } catch (error) {
         console.error("Error fetching stalls for profile:", error);
@@ -201,29 +197,26 @@ export default function ProfilePage() {
     }
     setIsSubmitting(true);
     try {
+      // Prepare data ensuring empty strings for text inputs become null
       const dataToUpdate: Partial<AppUser> = { 
         displayName: values.displayName,
-        // Only include defaultSiteId and defaultStallId if user is not staff
         ...(isStaffUser ? {} : {
-            defaultSiteId: values.defaultSiteId || undefined,
-            defaultStallId: values.defaultSiteId ? (values.defaultStallId || undefined) : undefined,
+            defaultSiteId: values.defaultSiteId ? values.defaultSiteId : null,
+            defaultStallId: (values.defaultSiteId && values.defaultStallId) ? values.defaultStallId : null,
         }),
-        defaultItemSearchTerm: values.defaultItemSearchTerm || undefined,
-        defaultItemCategoryFilter: values.defaultItemCategoryFilter || undefined,
-        defaultItemStockStatusFilter: values.defaultItemStockStatusFilter || undefined,
-        defaultItemStallFilterOption: values.defaultItemStallFilterOption || undefined,
-        defaultSalesDateRangeFrom: dateRange?.from ? dateRange.from.toISOString() : undefined,
-        defaultSalesDateRangeTo: dateRange?.to ? dateRange.to.toISOString() : undefined,
-        defaultSalesStaffFilter: values.defaultSalesStaffFilter || undefined,
+        defaultItemSearchTerm: values.defaultItemSearchTerm ? values.defaultItemSearchTerm : null,
+        defaultItemCategoryFilter: values.defaultItemCategoryFilter, // Already string or null from form
+        defaultItemStockStatusFilter: values.defaultItemStockStatusFilter, // Already string or null
+        defaultItemStallFilterOption: values.defaultItemStallFilterOption, // Already string or null
+        defaultSalesDateRangeFrom: dateRange?.from ? dateRange.from.toISOString() : null,
+        defaultSalesDateRangeTo: dateRange?.to ? dateRange.to.toISOString() : null,
+        defaultSalesStaffFilter: values.defaultSalesStaffFilter, // Already string or null
       };
 
-      // If user is staff, ensure defaultSiteId and defaultStallId are not part of the update object
-      // by potentially overwriting them if they somehow slipped in (should not happen if fields are disabled)
       if (isStaffUser) {
-        delete (dataToUpdate as any).defaultSiteId; // Use 'any' for type assertion if needed, or be more specific
+        delete (dataToUpdate as any).defaultSiteId;
         delete (dataToUpdate as any).defaultStallId;
       }
-
 
       const userDocRef = doc(db, "users", user.uid);
       await updateDoc(userDocRef, dataToUpdate);
@@ -235,17 +228,14 @@ export default function ProfilePage() {
       if (setAuthUser) {
          setAuthUser(prevUser => prevUser ? {
             ...prevUser, 
-            ...dataToUpdate, // Spread the updated fields
+            ...dataToUpdate,
         } : null);
       }
       
-      // Only update active context if user is not staff OR if admin is changing context.
-      // Staff's active context is set by their defaults (which they now can't change here).
       if (!isStaffUser) {
         setActiveSite(dataToUpdate.defaultSiteId || null);
         setActiveStall(dataToUpdate.defaultSiteId ? (dataToUpdate.defaultStallId || null) : null);
       }
-
 
       toast({
         title: "Profile Updated",
@@ -284,7 +274,7 @@ export default function ProfilePage() {
   }
 
   const itemStallFilterOptions = [
-    { value: "all", label: "All Stock (Site-wide)"},
+    { value: "all", label: "All Stock (Site-wide)"}, // "all" will be treated as null
     { value: "master", label: "Master Stock (Site Level)"},
     ...stallsForSelectedSite.map(s => ({ value: s.id, label: `${s.name} (${s.stallType})`}))
   ];
@@ -330,7 +320,7 @@ export default function ProfilePage() {
                     <FormItem>
                       <FormLabel>Display Name</FormLabel>
                       <FormControl>
-                        <Input placeholder="Your Name" {...field} disabled={isSubmitting} className="bg-input"/>
+                        <Input placeholder="Your Name" {...field} value={field.value || ""} disabled={isSubmitting} className="bg-input"/>
                       </FormControl>
                       <FormMessage />
                     </FormItem>

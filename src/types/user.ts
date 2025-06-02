@@ -8,17 +8,17 @@ export interface AppUser {
   photoURL?: string | null;
   role: UserRole;
   createdAt?: string; // ISO date string, set upon user creation
-  defaultSiteId?: string;
-  defaultStallId?: string;
+  defaultSiteId: string | null;
+  defaultStallId: string | null;
 
-  // New fields for default filters
-  defaultItemSearchTerm?: string;
-  defaultItemCategoryFilter?: string;
-  defaultItemStockStatusFilter?: string;
-  defaultItemStallFilterOption?: string; // "all", "master", or stallId
-  defaultSalesDateRangeFrom?: string; // ISO date string
-  defaultSalesDateRangeTo?: string; // ISO date string
-  defaultSalesStaffFilter?: string; // "all" or staff UID
+  // New fields for default filters, changed to string | null
+  defaultItemSearchTerm: string | null;
+  defaultItemCategoryFilter: string | null;
+  defaultItemStockStatusFilter: string | null;
+  defaultItemStallFilterOption: string | null; // "all", "master", or stallId
+  defaultSalesDateRangeFrom: string | null; // ISO date string
+  defaultSalesDateRangeTo: string | null; // ISO date string
+  defaultSalesStaffFilter: string | null; // "all" or staff UID
 }
 
 export interface UserGoogleOAuthTokens {
@@ -29,3 +29,4 @@ export interface UserGoogleOAuthTokens {
   expiry_date?: number | null | undefined; // Timestamp (milliseconds since epoch) when the access_token expires
   id_token?: string | null | undefined; // If 'openid' scope was requested, can be null
 }
+
