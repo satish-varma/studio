@@ -29,10 +29,10 @@ import { Loader2, Save, UserCircle, FilterIcon, HistoryIcon, PackageIcon } from 
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { getFirestore, doc, updateDoc, collection, getDocs, query, where } from "firebase/firestore";
-import { updateProfile as updateFirebaseProfile } from "firebase/auth";
+import { updateProfile as updateFirebaseProfile, getAuth } from "firebase/auth"; // Added getAuth here
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
-import type { Site, Stall, AppUser } from '@/types';
+import type { Site, Stall, AppUser, StockItem } from '@/types'; // Added StockItem
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { CalendarIcon } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
