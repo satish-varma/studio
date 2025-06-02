@@ -14,7 +14,7 @@ import {
   type Auth, 
   type User as FirebaseUser 
 } from 'firebase/auth';
-import { getFirestore, doc, getDoc, setDoc, type Firestore } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, setDoc, onSnapshot, type Firestore } from 'firebase/firestore'; // Added onSnapshot
 import { firebaseConfig } from '@/lib/firebaseConfig'; 
 
 console.log("AuthContext: Initializing with Firebase Config:", firebaseConfig);
@@ -62,15 +62,15 @@ interface AuthContextType {
   signOutUser: () => Promise<void>;
   setUser: React.Dispatch<React.SetStateAction<AppUser | null>>;
   activeSiteId: string | null;
-  activeStallId: string | null; // Will typically be null for managers with new model
+  activeStallId: string | null; 
   setActiveSite: (siteId: string | null) => void;
-  setActiveStall: (stallId: string | null) => void; // For admins/staff using specific stalls
+  setActiveStall: (stallId: string | null) => void; 
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<AppUser | null>(null);
+  const [user, setUserState] = useState<AppUser | null>(null); // Renamed for clarity
   const [loading, setLoading] = useState(true);
   const [activeSiteId, setActiveSiteState] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
@@ -85,10 +85,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return null;
   });
 
+  // Wrapper for setUser to log changes if needed
+  const setUser: React.Dispatch<React.SetStateAction<AppUser | null>> = (newUser) => {
+    // console.log("AuthContext: setUser called with:", newUser);
+    setUserState(newUser);
+  };
+
+
   const setActiveSite = (siteId: string | null) => {
     setActiveSiteState(siteId);
-    // For managers, activeStallId should likely remain null or "all-stalls" conceptually
-    // For staff/admins selecting a specific site, clearing stall is fine.
     if (user?.role !== 'manager') {
         setActiveStallState(null); 
     }
@@ -105,9 +110,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const setActiveStall = (stallId: string | null) => {
-    // Managers typically operate at site level, so this might be less relevant for them
-    // or always be 'null' or a special value.
-    // This function is more for Admins and Staff.
     setActiveStallState(stallId);
     if (typeof window !== 'undefined') {
       if (stallId) {
@@ -126,12 +128,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       photoURL: firebaseUser.photoURL,
       role: userDataFromFirestore.role || 'staff',
       createdAt: userDataFromFirestore.createdAt || new Date().toISOString(),
-      // Staff/generic defaults
       defaultSiteId: userDataFromFirestore.defaultSiteId ?? null,
       defaultStallId: userDataFromFirestore.defaultStallId ?? null,
-      // Manager specific
       managedSiteIds: userDataFromFirestore.managedSiteIds ?? null, 
-      // Preferences
       defaultItemSearchTerm: userDataFromFirestore.defaultItemSearchTerm ?? null,
       defaultItemCategoryFilter: userDataFromFirestore.defaultItemCategoryFilter ?? null,
       defaultItemStockStatusFilter: userDataFromFirestore.defaultItemStockStatusFilter ?? null,
@@ -142,78 +141,84 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     };
   };
 
+  // This effect handles initial auth state and listens for user document changes
   useEffect(() => {
     if (!auth || !db) {
       setLoading(false);
-      console.error(
-        "AuthContext: CRITICAL - Firebase Auth or Firestore service is not available in the onAuthStateChanged listener. This will prevent user authentication and data fetching. Ensure Firebase is correctly initialized with valid configuration. This is a common cause for 'Missing or insufficient permissions' errors if subsequent operations are attempted without a valid authenticated user.",
-      );
+      console.error("AuthContext: Firebase Auth or Firestore service is not available.");
       return;
     }
 
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
-      if (firebaseUser) {
-        try {
-          const userDocRef = doc(db as Firestore, "users", firebaseUser.uid);
-          const userDocSnap = await getDoc(userDocRef);
-          
-          let appUser: AppUser;
+    let userDocUnsubscribe: (() => void) | null = null;
 
+    const authUnsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
+      // Clean up previous user document listener if any
+      if (userDocUnsubscribe) {
+        userDocUnsubscribe();
+        userDocUnsubscribe = null;
+      }
+
+      if (firebaseUser) {
+        const userDocRef = doc(db as Firestore, "users", firebaseUser.uid);
+        
+        // Set up a real-time listener for the user's document
+        userDocUnsubscribe = onSnapshot(userDocRef, (userDocSnap) => {
+          let appUser: AppUser;
           if (userDocSnap.exists()) {
             const userData = userDocSnap.data();
             appUser = mapFirestoreDataToAppUser(firebaseUser, userData);
-
+            
+            // Update active site/stall based on potentially new user data
             const storedSiteId = typeof window !== 'undefined' ? localStorage.getItem('activeSiteId') : null;
             const storedStallId = typeof window !== 'undefined' ? localStorage.getItem('activeStallId') : null;
 
             if (appUser.role === 'admin') {
-                setActiveSiteState(storedSiteId);
+                setActiveSiteState(storedSiteId); 
                 setActiveStallState(storedSiteId ? storedStallId : null); 
             } else if (appUser.role === 'manager') {
-                // If manager has managed sites, check if storedSiteId is one of them.
-                // If not, or if no storedSiteId, set to first managed site or null.
                 if (appUser.managedSiteIds && appUser.managedSiteIds.length > 0) {
                     if (storedSiteId && appUser.managedSiteIds.includes(storedSiteId)) {
                         setActiveSiteState(storedSiteId);
                     } else {
-                        setActiveSiteState(appUser.managedSiteIds[0]); // Default to first managed site
+                        setActiveSiteState(appUser.managedSiteIds[0]); 
                     }
                 } else {
-                    setActiveSiteState(null); // No sites managed
+                    setActiveSiteState(null); 
                 }
-                setActiveStallState(null); // Managers operate at site level, so stall is null (all stalls)
+                setActiveStallState(null); 
             } else { // Staff
                 setActiveSiteState(appUser.defaultSiteId); 
                 setActiveStallState(appUser.defaultSiteId ? appUser.defaultStallId : null); 
             }
-
+            setUser(appUser); // This will trigger re-renders in consuming components
           } else {
-            console.warn(`AuthContext: User document not found for UID: ${firebaseUser.uid} during auth state change. Creating one with default role 'staff'.`);
-            const defaultUserData: Partial<AppUser> = { // Using Partial as some fields are role-dependent
-              uid: firebaseUser.uid,
-              email: firebaseUser.email, 
-              role: 'staff', 
+            // This case should be rare if signUp/signIn handles doc creation,
+            // but as a fallback, create the doc.
+            console.warn(`AuthContext: User document not found for UID: ${firebaseUser.uid} in onSnapshot. Creating default.`);
+            const defaultUserData: Partial<AppUser> = {
+              uid: firebaseUser.uid, email: firebaseUser.email, role: 'staff',
               displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User",
-              createdAt: new Date().toISOString(),
-              defaultSiteId: null, // Staff specific
-              defaultStallId: null, // Staff specific
-              managedSiteIds: null, // Manager specific
-              // preferences null by default
+              createdAt: new Date().toISOString(), defaultSiteId: null, defaultStallId: null, managedSiteIds: null,
             };
-            await setDoc(userDocRef, defaultUserData);
-            appUser = mapFirestoreDataToAppUser(firebaseUser, defaultUserData);
-            setActiveSiteState(null); // New staff has no default site yet
-            setActiveStallState(null);
+            setDoc(userDocRef, defaultUserData).then(() => {
+                 // The onSnapshot listener will fire again once the doc is created.
+            }).catch(error => {
+                 console.error("AuthContext: Error creating user document in onSnapshot fallback:", error);
+                 // If doc creation fails, map with FirebaseUser data only
+                 appUser = mapFirestoreDataToAppUser(firebaseUser);
+                 setUser(appUser);
+            });
           }
-          setUser(appUser);
-        } catch (error) {
-          console.error("AuthContext: Error fetching/creating user data from Firestore:", error);
-          const fallbackUser = mapFirestoreDataToAppUser(firebaseUser); 
+        }, (error) => {
+          console.error("AuthContext: Error in user document onSnapshot listener:", error);
+          // Fallback to mapping only FirebaseUser data if Firestore listener errors
+          const fallbackUser = mapFirestoreDataToAppUser(firebaseUser);
           setUser(fallbackUser);
           setActiveSiteState(null);
           setActiveStallState(null);
-        }
-      } else {
+        });
+
+      } else { // User logged out
         setUser(null);
         setActiveSiteState(null);
         setActiveStallState(null);
@@ -222,10 +227,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             localStorage.removeItem('activeStallId');
         }
       }
-      setLoading(false);
+      setLoading(false); // Set loading to false after initial auth check and listener setup/teardown
     });
-    return () => unsubscribe();
-  }, []); 
+
+    return () => {
+      authUnsubscribe();
+      if (userDocUnsubscribe) {
+        userDocUnsubscribe();
+      }
+    };
+  }, []); // Empty dependency array means this effect runs once on mount and cleans up on unmount
 
   const signIn = useCallback(async (email: string, pass: string): Promise<AppUser | null> => {
     if (!auth || !db) throw new Error("Firebase not initialized for signIn.");
@@ -234,59 +245,34 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const userCredential = await signInWithEmailAndPassword(auth, email, pass);
       const firebaseUser = userCredential.user;
       
+      // The onSnapshot listener set up in useEffect will handle fetching/updating user data and setting activeSite/Stall
+      // So, we don't need to duplicate that logic here explicitly.
+      // We just need to ensure the firebaseUser is available for the listener to pick up.
+
+      // We can, however, try to get the user document once to return it,
+      // but the primary source of truth for the context's `user` state will be the onSnapshot listener.
       const userDocRef = doc(db as Firestore, "users", firebaseUser.uid);
       const userDocSnap = await getDoc(userDocRef);
-      
-      let appUser: AppUser;
+      let appUserToReturn: AppUser;
+
       if (userDocSnap.exists()) {
-        const userData = userDocSnap.data();
-        appUser = mapFirestoreDataToAppUser(firebaseUser, userData);
-
-        const storedSiteId = typeof window !== 'undefined' ? localStorage.getItem('activeSiteId') : null;
-        const storedStallId = typeof window !== 'undefined' ? localStorage.getItem('activeStallId') : null;
-
-        if (appUser.role === 'admin') {
-            setActiveSiteState(storedSiteId);
-            setActiveStallState(storedSiteId ? storedStallId : null);
-        } else if (appUser.role === 'manager') {
-             if (appUser.managedSiteIds && appUser.managedSiteIds.length > 0) {
-                if (storedSiteId && appUser.managedSiteIds.includes(storedSiteId)) {
-                    setActiveSiteState(storedSiteId);
-                } else {
-                    setActiveSiteState(appUser.managedSiteIds[0]);
-                }
-            } else {
-                setActiveSiteState(null);
-            }
-            setActiveStallState(null); // Managers operate at site level
-        } else { // Staff
-            setActiveSiteState(appUser.defaultSiteId);
-            setActiveStallState(appUser.defaultSiteId ? appUser.defaultStallId : null);
-        }
+        appUserToReturn = mapFirestoreDataToAppUser(firebaseUser, userDocSnap.data());
       } else {
+        // If doc doesn't exist here, create it (though onSnapshot would also handle this)
         console.warn(`AuthContext: User document not found for UID: ${firebaseUser.uid} during sign-in. Creating default staff user.`);
         const defaultUserData: Partial<AppUser> = {
-            uid: firebaseUser.uid,
-            email: firebaseUser.email, 
-            role: 'staff', 
+            uid: firebaseUser.uid, email: firebaseUser.email, role: 'staff',
             displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User",
-            createdAt: new Date().toISOString(),
-            defaultSiteId: null,
-            defaultStallId: null,
-            managedSiteIds: null,
+            createdAt: new Date().toISOString(), defaultSiteId: null, defaultStallId: null, managedSiteIds: null,
         };
-         await setDoc(userDocRef, defaultUserData);
-        appUser = mapFirestoreDataToAppUser(firebaseUser, defaultUserData);
-        setActiveSiteState(null);
-        setActiveStallState(null);
+        await setDoc(userDocRef, defaultUserData);
+        appUserToReturn = mapFirestoreDataToAppUser(firebaseUser, defaultUserData);
       }
-      setUser(appUser);
-      return appUser;
+      // The setUser and activeSite/Stall updates will be handled by the onSnapshot listener triggered by auth change.
+      return appUserToReturn; 
     } catch (error) {
       console.error("Sign in error:", error);
-      setUser(null);
-      setActiveSiteState(null);
-      setActiveStallState(null);
+      // State clearing will be handled by onAuthStateChanged if sign-in fails and user becomes null
       throw error; 
     } finally {
       setLoading(false);
@@ -300,36 +286,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
       const firebaseUser = userCredential.user;
       
-      const newUserDocData: AppUser = { // Ensure all fields are initialized
-        uid: firebaseUser.uid,
-        email: firebaseUser.email,
-        role: 'staff' as UserRole, 
-        displayName: displayName,
-        createdAt: new Date().toISOString(),
-        defaultSiteId: null, 
-        defaultStallId: null,
-        managedSiteIds: null, // Initialize for managers
-        defaultItemSearchTerm: null,
-        defaultItemCategoryFilter: null,
-        defaultItemStockStatusFilter: null,
-        defaultItemStallFilterOption: null,
-        defaultSalesDateRangeFrom: null,
-        defaultSalesDateRangeTo: null,
-        defaultSalesStaffFilter: null,
+      const newUserDocData: AppUser = { 
+        uid: firebaseUser.uid, email: firebaseUser.email, role: 'staff' as UserRole, 
+        displayName: displayName, createdAt: new Date().toISOString(), defaultSiteId: null, 
+        defaultStallId: null, managedSiteIds: null, defaultItemSearchTerm: null,
+        defaultItemCategoryFilter: null, defaultItemStockStatusFilter: null,
+        defaultItemStallFilterOption: null, defaultSalesDateRangeFrom: null,
+        defaultSalesDateRangeTo: null, defaultSalesStaffFilter: null,
       };
       const userDocRef = doc(db as Firestore, "users", firebaseUser.uid);
       await setDoc(userDocRef, newUserDocData);
-
-      const appUser = mapFirestoreDataToAppUser(firebaseUser, newUserDocData);
-      setUser(appUser); 
-      setActiveSiteState(null); // New users start with no active site/stall
-      setActiveStallState(null);
-      return appUser;
+      // The onSnapshot listener will pick up this new user and set context state.
+      return mapFirestoreDataToAppUser(firebaseUser, newUserDocData);
     } catch (error) {
       console.error("Sign up error:", error);
-      setUser(null); 
-      setActiveSiteState(null);
-      setActiveStallState(null);
       throw error;
     } finally {
       setLoading(false);
@@ -341,16 +311,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.error("AuthContext: Firebase Auth not initialized for signOut.");
       return;
     }
-    setLoading(true);
+    setLoading(true); // Should be brief
     try {
       await firebaseSignOut(auth);
-      setUser(null);
-      setActiveSiteState(null);
-      setActiveStallState(null);
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem('activeSiteId');
-        localStorage.removeItem('activeStallId');
-      }
+      // User state, activeSiteId, activeStallId will be cleared by the onAuthStateChanged listener.
       console.log("AuthContext: User signed out successfully.");
     } catch (error) {
       console.error("Sign out error:", error);
@@ -366,7 +330,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       signIn, 
       signUp, 
       signOutUser, 
-      setUser,
+      setUser, // Expose the wrapped setUser
       activeSiteId,
       activeStallId,
       setActiveSite,
@@ -384,3 +348,4 @@ export const useAuth = (): AuthContextType => {
   }
   return context;
 };
+
