@@ -11,6 +11,7 @@ import {
   doc, 
   updateDoc, 
   deleteDoc,
+  setDoc, // Added setDoc for creating user
   QuerySnapshot,
   DocumentData,
   getDocs, 
@@ -21,10 +22,12 @@ import {
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
-import { Loader2, ShieldAlert } from "lucide-react";
+import { Loader2, ShieldAlert, PlusCircle } from "lucide-react"; // Added PlusCircle
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-
+import PageHeader from "@/components/shared/PageHeader"; // Ensure PageHeader is imported
+import { Button } from "@/components/ui/button"; // Ensure Button is imported
+import CreateUserDialog from "@/components/users/CreateUserDialog"; // Import the new dialog
 
 if (!getApps().length) {
   try {
@@ -44,24 +47,40 @@ export default function UserManagementClientPage() {
   const [stalls, setStalls] = useState<Stall[]>([]);
   const [loadingData, setLoadingData] = useState(true); 
   const [errorData, setErrorData] = useState<string | null>(null);
+  const [showCreateUserDialog, setShowCreateUserDialog] = useState(false);
 
   useEffect(() => {
-    if (authLoading) return;
-
-    if (!currentUser || currentUser.role !== 'admin') {
-      setLoadingData(false);
-      setErrorData("Access Denied: You do not have permission to view this page.");
+    if (authLoading) {
+      setLoadingData(true);
       return;
     }
 
+    if (!currentUser) {
+      setLoadingData(false);
+      setErrorData("Please log in to manage users.");
+      setUsers([]);
+      setSites([]);
+      setStalls([]);
+      return;
+    }
+
+    if (currentUser.role !== 'admin') {
+      setLoadingData(false);
+      setErrorData("Access Denied: You do not have permission to view this page.");
+      setUsers([]);
+      setSites([]);
+      setStalls([]);
+      return;
+    }
+    
+    setLoadingData(true);
+    setErrorData(null);
+    let unsubscribeUsers: (() => void) | null = null;
+
     const fetchInitialData = async () => {
-      setLoadingData(true);
-      setErrorData(null);
-      let unsubscribeUsersSnapshot: (() => void) | null = null;
       try {
-        
         const usersCollectionRef = collection(db, "users");
-        unsubscribeUsersSnapshot = onSnapshot(usersCollectionRef, 
+        unsubscribeUsers = onSnapshot(usersCollectionRef, 
           (snapshot: QuerySnapshot<DocumentData>) => {
             const fetchedUsers: AppUser[] = snapshot.docs
               .map(docSnapshot => ({
@@ -77,36 +96,81 @@ export default function UserManagementClientPage() {
           }
         );
 
-        
         const sitesCollectionRef = collection(db, "sites");
         const sitesSnapshot = await getDocs(query(sitesCollectionRef, orderBy("name")));
         const fetchedSites: Site[] = sitesSnapshot.docs.map(docSnapshot => ({ id: docSnapshot.id, ...docSnapshot.data() } as Site));
         setSites(fetchedSites);
 
-        
         const stallsCollectionRef = collection(db, "stalls");
         const stallsSnapshot = await getDocs(query(stallsCollectionRef, orderBy("name")));
         const fetchedStalls: Stall[] = stallsSnapshot.docs.map(docSnapshot => ({ id: docSnapshot.id, ...docSnapshot.data() } as Stall));
         setStalls(fetchedStalls);
         
-        setLoadingData(false);
       } catch (error: any) {
         console.error("Error fetching initial data for User Management:", error);
         setErrorData("Failed to load page data. Please try again. Error: " + error.message);
+      } finally {
         setLoadingData(false);
       }
-      return unsubscribeUsersSnapshot;
     };
     
-    let unsubscribe: (() => void) | null = null;
-    fetchInitialData().then(unsub => {
-      if (unsub) unsubscribe = unsub;
-    });
+    fetchInitialData();
 
     return () => {
-      if (unsubscribe) unsubscribe();
+      if (unsubscribeUsers) unsubscribeUsers();
     };
   }, [currentUser, authLoading]);
+
+  const handleCreateUser = async (newUserData: Omit<AppUser, 'createdAt'>) => {
+    if (!currentUser || currentUser.role !== 'admin') {
+      toast({ title: "Permission Denied", description: "Only admins can create users.", variant: "destructive"});
+      return false;
+    }
+    if (!db) {
+      toast({ title: "Database Error", description: "Firestore not initialized.", variant: "destructive"});
+      return false;
+    }
+    if (!newUserData.uid || !newUserData.email || !newUserData.role) {
+        toast({ title: "Missing Required Fields", description: "UID, Email, and Role are required to create a user document.", variant: "destructive"});
+        return false;
+    }
+
+    const userDocRef = doc(db, "users", newUserData.uid);
+    try {
+      const docSnap = await getDoc(userDocRef);
+      if (docSnap.exists()) {
+        toast({ title: "User Exists", description: `A user document with UID ${newUserData.uid} already exists.`, variant: "destructive" });
+        return false;
+      }
+
+      const fullUserData: AppUser = {
+        ...newUserData,
+        displayName: newUserData.displayName || newUserData.email?.split('@')[0] || "New User",
+        createdAt: new Date().toISOString(),
+        defaultSiteId: newUserData.defaultSiteId || null,
+        defaultStallId: newUserData.defaultStallId || null,
+        managedSiteIds: newUserData.managedSiteIds || null,
+        // Initialize preference fields to null
+        defaultItemSearchTerm: null,
+        defaultItemCategoryFilter: null,
+        defaultItemStockStatusFilter: null,
+        defaultItemStallFilterOption: null,
+        defaultSalesDateRangeFrom: null,
+        defaultSalesDateRangeTo: null,
+        defaultSalesStaffFilter: null,
+      };
+
+      await setDoc(userDocRef, fullUserData);
+      toast({ title: "User Document Created", description: `Firestore document for ${newUserData.email} created successfully.` });
+      setShowCreateUserDialog(false); // Close dialog on success
+      return true;
+    } catch (error: any) {
+      console.error("Error creating user document:", error);
+      toast({ title: "Creation Failed", description: error.message || "Could not create user document.", variant: "destructive" });
+      return false;
+    }
+  };
+
 
   const handleRoleChange = async (userId: string, newRole: UserRole) => {
     if (!currentUser || currentUser.role !== 'admin') {
@@ -129,14 +193,12 @@ export default function UserManagementClientPage() {
 
     const userDocRef = doc(db, "users", userId);
     try {
-      // When changing role, clear role-specific assignments
       const updates: Record<string, any> = { role: newRole };
       if (newRole === 'staff') {
-        updates.managedSiteIds = null; // Clear manager-specific field
+        updates.managedSiteIds = null; 
       } else if (newRole === 'manager') {
-        updates.defaultSiteId = null; // Clear staff-specific field
-        updates.defaultStallId = null; // Clear staff-specific field
-         // managedSiteIds should be set via its own UI
+        updates.defaultSiteId = null; 
+        updates.defaultStallId = null;
       } else if (newRole === 'admin') {
         updates.defaultSiteId = null;
         updates.defaultStallId = null;
@@ -176,9 +238,8 @@ export default function UserManagementClientPage() {
     }
     if (!db || !userId) return;
     const userDocRef = doc(db, "users", userId);
-    const userSnap = await getDoc(userDocRef); // Ensure getDoc is imported and used
+    const userSnap = await getDoc(userDocRef);
     try {
-        
         if (newStallId && (!userSnap.exists() || !userSnap.data()?.defaultSiteId)) {
             toast({ title: "Site Required", description: "A default site must be selected before assigning a default stall.", variant: "default"});
             return;
@@ -201,7 +262,6 @@ export default function UserManagementClientPage() {
     try {
         await updateDoc(userDocRef, { 
             managedSiteIds: newManagedSiteIds,
-            // Also clear staff-specific defaults if setting managed sites
             defaultSiteId: null, 
             defaultStallId: null
         });
@@ -234,10 +294,11 @@ export default function UserManagementClientPage() {
     const userDocRef = doc(db, "users", userId);
     try {
       await deleteDoc(userDocRef);
-      toast({ title: "User Deleted", description: `User ${userName} has been deleted from Firestore.` });
+      toast({ title: "User Document Deleted", description: `Firestore document for ${userName} has been deleted.` });
+      // Note: This does NOT delete the Firebase Authentication user. That must be done from Firebase Console.
     } catch (error: any) {
-      console.error("Error deleting user:", error);
-      toast({ title: "Deletion Failed", description: error.message || "Could not delete user.", variant: "destructive" });
+      console.error("Error deleting user document:", error);
+      toast({ title: "Deletion Failed", description: error.message || "Could not delete user document.", variant: "destructive" });
     }
   };
   
@@ -252,48 +313,82 @@ export default function UserManagementClientPage() {
 
   if (errorData) {
     return (
-      <Card className="shadow-lg border-destructive">
-        <CardHeader>
-          <CardTitle className="flex items-center text-destructive">
-            <ShieldAlert className="mr-2 h-5 w-5" />
-            Access Restricted or Error
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-center py-10 text-destructive">{errorData}</p>
-        </CardContent>
-      </Card>
+       <div className="space-y-6">
+        <PageHeader
+          title="User Management"
+          description="View, edit roles, and manage user accounts. (Admins Only)"
+          actions={
+            <Button onClick={() => setShowCreateUserDialog(true)} disabled={loadingData}>
+              <PlusCircle className="mr-2 h-5 w-5" /> Create New User Document
+            </Button>
+          }
+        />
+        <Card className="shadow-lg border-destructive">
+          <CardHeader>
+            <CardTitle className="flex items-center text-destructive">
+              <ShieldAlert className="mr-2 h-5 w-5" />
+              Access Restricted or Error
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-center py-10 text-destructive">{errorData}</p>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
   
   if (!currentUser || currentUser.role !== 'admin') {
      return (
-      <Card className="shadow-lg border-destructive">
-        <CardHeader>
-          <CardTitle className="flex items-center text-destructive">
-            <ShieldAlert className="mr-2 h-5 w-5" />
-            Access Denied
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-center py-10 text-destructive">You do not have permission to view this page.</p>
-        </CardContent>
-      </Card>
+      <div className="space-y-6">
+        <PageHeader
+          title="User Management"
+          description="View, edit roles, and manage user accounts. (Admins Only)"
+        />
+        <Card className="shadow-lg border-destructive">
+          <CardHeader>
+            <CardTitle className="flex items-center text-destructive">
+              <ShieldAlert className="mr-2 h-5 w-5" />
+              Access Denied
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-center py-10 text-destructive">You do not have permission to view this page.</p>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
-
   return (
-    <UserTable 
-        users={users} 
-        sites={sites}
-        stalls={stalls}
-        onRoleChange={handleRoleChange} 
-        onDeleteUser={handleDeleteUser}
-        onDefaultSiteChange={handleDefaultSiteChange}
-        onDefaultStallChange={handleDefaultStallChange}
-        onManagedSitesChange={handleUpdateManagedSites} // Pass new handler
-        currentUserId={currentUser?.uid}
-    />
+    <div className="space-y-6">
+       <PageHeader
+        title="User Management"
+        description="Create and manage user documents, roles, and assignments. (Admins Only)"
+        actions={
+          <Button onClick={() => setShowCreateUserDialog(true)} disabled={loadingData}>
+            <PlusCircle className="mr-2 h-5 w-5" /> Create New User Document
+          </Button>
+        }
+      />
+      <UserTable 
+          users={users} 
+          sites={sites}
+          stalls={stalls}
+          onRoleChange={handleRoleChange} 
+          onDeleteUser={handleDeleteUser}
+          onDefaultSiteChange={handleDefaultSiteChange}
+          onDefaultStallChange={handleDefaultStallChange}
+          onManagedSitesChange={handleUpdateManagedSites}
+          currentUserId={currentUser?.uid}
+      />
+      <CreateUserDialog
+        isOpen={showCreateUserDialog}
+        onClose={() => setShowCreateUserDialog(false)}
+        onCreateUser={handleCreateUser}
+        sites={sites} // Pass sites for selection
+        stalls={stalls} // Pass stalls for selection
+      />
+    </div>
   );
 }

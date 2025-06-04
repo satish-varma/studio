@@ -24,15 +24,15 @@ export default function LoginPage() {
           </p>
         </div>
         <LoginForm />
-        <p className="text-center text-sm text-muted-foreground">
-          Hint: Try staff@example.com, manager@example.com, or admin@example.com with password 'password'.
-        </p>
+        {/* Sign-up link removed as per new requirement */}
+        {/* 
         <p className="text-center text-sm text-muted-foreground">
           Don&apos;t have an account?{' '}
           <Link href="/signup" className="font-medium text-primary hover:underline">
             Sign Up
           </Link>
-        </p>
+        </p> 
+        */}
       </div>
     </div>
   );
