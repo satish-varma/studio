@@ -11,7 +11,7 @@ import {
   doc, 
   updateDoc, 
   deleteDoc,
-  setDoc, // Added setDoc for creating user
+  setDoc, 
   QuerySnapshot,
   DocumentData,
   getDocs, 
@@ -22,12 +22,12 @@ import {
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
-import { Loader2, ShieldAlert, PlusCircle } from "lucide-react"; // Added PlusCircle
+import { Loader2, ShieldAlert, PlusCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import PageHeader from "@/components/shared/PageHeader"; // Ensure PageHeader is imported
-import { Button } from "@/components/ui/button"; // Ensure Button is imported
-import CreateUserDialog from "@/components/users/CreateUserDialog"; // Import the new dialog
+import PageHeader from "@/components/shared/PageHeader";
+import { Button } from "@/components/ui/button";
+import CreateUserDialog from "@/components/users/CreateUserDialog";
 
 if (!getApps().length) {
   try {
@@ -121,7 +121,7 @@ export default function UserManagementClientPage() {
     };
   }, [currentUser, authLoading]);
 
-  const handleCreateUser = async (newUserData: Omit<AppUser, 'createdAt'>) => {
+  const handleCreateUserFirestoreDoc = async (uid: string, newUserData: Omit<AppUser, 'createdAt' | 'uid'>) => {
     if (!currentUser || currentUser.role !== 'admin') {
       toast({ title: "Permission Denied", description: "Only admins can create users.", variant: "destructive"});
       return false;
@@ -130,43 +130,32 @@ export default function UserManagementClientPage() {
       toast({ title: "Database Error", description: "Firestore not initialized.", variant: "destructive"});
       return false;
     }
-    if (!newUserData.uid || !newUserData.email || !newUserData.role) {
+    if (!uid || !newUserData.email || !newUserData.role) {
         toast({ title: "Missing Required Fields", description: "UID, Email, and Role are required to create a user document.", variant: "destructive"});
         return false;
     }
 
-    const userDocRef = doc(db, "users", newUserData.uid);
+    const userDocRef = doc(db, "users", uid);
     try {
       const docSnap = await getDoc(userDocRef);
       if (docSnap.exists()) {
-        toast({ title: "User Exists", description: `A user document with UID ${newUserData.uid} already exists.`, variant: "destructive" });
+        toast({ title: "User Document Exists", description: `A Firestore document for UID ${uid} already exists.`, variant: "destructive" });
         return false;
       }
 
       const fullUserData: AppUser = {
+        uid: uid,
         ...newUserData,
-        displayName: newUserData.displayName || newUserData.email?.split('@')[0] || "New User",
         createdAt: new Date().toISOString(),
-        defaultSiteId: newUserData.defaultSiteId || null,
-        defaultStallId: newUserData.defaultStallId || null,
-        managedSiteIds: newUserData.managedSiteIds || null,
-        // Initialize preference fields to null
-        defaultItemSearchTerm: null,
-        defaultItemCategoryFilter: null,
-        defaultItemStockStatusFilter: null,
-        defaultItemStallFilterOption: null,
-        defaultSalesDateRangeFrom: null,
-        defaultSalesDateRangeTo: null,
-        defaultSalesStaffFilter: null,
       };
 
       await setDoc(userDocRef, fullUserData);
-      toast({ title: "User Document Created", description: `Firestore document for ${newUserData.email} created successfully.` });
-      setShowCreateUserDialog(false); // Close dialog on success
+      // Toast for success is handled in CreateUserDialog after both Auth and Firestore steps.
+      setShowCreateUserDialog(false); 
       return true;
     } catch (error: any) {
-      console.error("Error creating user document:", error);
-      toast({ title: "Creation Failed", description: error.message || "Could not create user document.", variant: "destructive" });
+      console.error("Error creating user document in Firestore:", error);
+      toast({ title: "Firestore Document Creation Failed", description: error.message || "Could not create user document in Firestore.", variant: "destructive" });
       return false;
     }
   };
@@ -294,7 +283,7 @@ export default function UserManagementClientPage() {
     const userDocRef = doc(db, "users", userId);
     try {
       await deleteDoc(userDocRef);
-      toast({ title: "User Document Deleted", description: `Firestore document for ${userName} has been deleted.` });
+      toast({ title: "User Document Deleted", description: `Firestore document for ${userName} has been deleted. The Firebase Authentication user must be deleted separately from the Firebase Console.` });
       // Note: This does NOT delete the Firebase Authentication user. That must be done from Firebase Console.
     } catch (error: any) {
       console.error("Error deleting user document:", error);
@@ -319,7 +308,7 @@ export default function UserManagementClientPage() {
           description="View, edit roles, and manage user accounts. (Admins Only)"
           actions={
             <Button onClick={() => setShowCreateUserDialog(true)} disabled={loadingData}>
-              <PlusCircle className="mr-2 h-5 w-5" /> Create New User Document
+              <PlusCircle className="mr-2 h-5 w-5" /> Create New User
             </Button>
           }
         />
@@ -364,10 +353,10 @@ export default function UserManagementClientPage() {
     <div className="space-y-6">
        <PageHeader
         title="User Management"
-        description="Create and manage user documents, roles, and assignments. (Admins Only)"
+        description="Create users, manage their documents, roles, and assignments. (Admins Only)"
         actions={
           <Button onClick={() => setShowCreateUserDialog(true)} disabled={loadingData}>
-            <PlusCircle className="mr-2 h-5 w-5" /> Create New User Document
+            <PlusCircle className="mr-2 h-5 w-5" /> Create New User
           </Button>
         }
       />
@@ -385,10 +374,12 @@ export default function UserManagementClientPage() {
       <CreateUserDialog
         isOpen={showCreateUserDialog}
         onClose={() => setShowCreateUserDialog(false)}
-        onCreateUser={handleCreateUser}
-        sites={sites} // Pass sites for selection
-        stalls={stalls} // Pass stalls for selection
+        onCreateUserFirestoreDoc={handleCreateUserFirestoreDoc}
+        sites={sites} 
+        stalls={stalls}
       />
     </div>
   );
 }
+
+    

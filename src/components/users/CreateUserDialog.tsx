@@ -32,38 +32,50 @@ import {
 } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, UserPlus } from "lucide-react";
+import { Loader2, UserPlus, Eye, EyeOff } from "lucide-react"; // Added Eye, EyeOff
 import type { AppUser, UserRole, Site, Stall } from "@/types";
+import { getFunctions, httpsCallable } from 'firebase/functions'; // Firebase Functions import
+import { getApp } from 'firebase/app'; // To get Firebase app instance
+import { useToast } from '@/hooks/use-toast';
 
-const createUserSchema = z.object({
-  uid: z.string().min(1, { message: "Firebase Auth UID is required." }),
+// Schema for the form data sent to the callable function and then to Firestore
+const createUserFormSchema = z.object({
   email: z.string().email({ message: "Invalid email address." }),
+  password: z.string().min(6, { message: "Password must be at least 6 characters." }),
+  confirmPassword: z.string().min(6, { message: "Please confirm the password." }),
   displayName: z.string().min(2, { message: "Display name must be at least 2 characters." }),
   role: z.enum(['staff', 'manager', 'admin'], { required_error: "Role is required." }),
   defaultSiteId: z.string().nullable().optional(),
   defaultStallId: z.string().nullable().optional(),
   managedSiteIds: z.array(z.string()).nullable().optional(),
+}).refine(data => data.password === data.confirmPassword, {
+  message: "Passwords don't match",
+  path: ["confirmPassword"],
 });
 
-type CreateUserFormValues = z.infer<typeof createUserSchema>;
+type CreateUserFormValues = z.infer<typeof createUserFormSchema>;
 
 interface CreateUserDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreateUser: (userData: Omit<AppUser, 'createdAt'>) => Promise<boolean>;
+  onCreateUserFirestoreDoc: (uid: string, userData: Omit<AppUser, 'createdAt' | 'uid'>) => Promise<boolean>;
   sites: Site[];
   stalls: Stall[];
 }
 
-export default function CreateUserDialog({ isOpen, onClose, onCreateUser, sites, stalls }: CreateUserDialogProps) {
+export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestoreDoc, sites, stalls }: CreateUserDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [stallsForSelectedSite, setStallsForSelectedSite] = useState<Stall[]>([]);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const { toast } = useToast();
 
   const form = useForm<CreateUserFormValues>({
-    resolver: zodResolver(createUserSchema),
+    resolver: zodResolver(createUserFormSchema),
     defaultValues: {
-      uid: "",
       email: "",
+      password: "",
+      confirmPassword: "",
       displayName: "",
       role: "staff",
       defaultSiteId: null,
@@ -85,36 +97,66 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUser, sites,
         form.setValue('defaultSiteId', null);
         form.setValue('defaultStallId', null);
     }
-    if (selectedRole !== 'manager') {
+     if (selectedRole !== 'manager') {
         form.setValue('managedSiteIds', []);
     }
   }, [selectedRole, selectedDefaultSiteId, stalls, form]);
 
   const handleSubmit = async (values: CreateUserFormValues) => {
     setIsSubmitting(true);
-    const userData: Omit<AppUser, 'createdAt'> = {
-      uid: values.uid,
-      email: values.email,
-      displayName: values.displayName,
-      role: values.role as UserRole,
-      defaultSiteId: values.role === 'staff' ? values.defaultSiteId : null,
-      defaultStallId: values.role === 'staff' && values.defaultSiteId ? values.defaultStallId : null,
-      managedSiteIds: values.role === 'manager' ? values.managedSiteIds : null,
-       // Preferences will be initialized to null by the parent handler
-      defaultItemSearchTerm: null,
-      defaultItemCategoryFilter: null,
-      defaultItemStockStatusFilter: null,
-      defaultItemStallFilterOption: null,
-      defaultSalesDateRangeFrom: null,
-      defaultSalesDateRangeTo: null,
-      defaultSalesStaffFilter: null,
-    };
-    const success = await onCreateUser(userData);
-    if (success) {
-      form.reset();
-      onClose();
+
+    try {
+      const functions = getFunctions(getApp()); // Get Firebase Functions instance
+      const createAuthUserCallable = httpsCallable(functions, 'createAuthUser'); // Make sure 'createAuthUser' matches your deployed function name
+      
+      const authResult = await createAuthUserCallable({
+        email: values.email,
+        password: values.password,
+        displayName: values.displayName,
+      });
+
+      const authData = authResult.data as { uid: string; email: string; displayName: string };
+      if (!authData.uid) {
+        throw new Error("Firebase Auth user creation failed to return UID.");
+      }
+
+      const firestoreUserData: Omit<AppUser, 'createdAt' | 'uid'> = {
+        email: authData.email, // Use email from auth creation
+        displayName: authData.displayName, // Use displayName from auth creation
+        role: values.role as UserRole,
+        defaultSiteId: values.role === 'staff' ? values.defaultSiteId : null,
+        defaultStallId: values.role === 'staff' && values.defaultSiteId ? values.defaultStallId : null,
+        managedSiteIds: values.role === 'manager' ? values.managedSiteIds : null,
+        defaultItemSearchTerm: null,
+        defaultItemCategoryFilter: null,
+        defaultItemStockStatusFilter: null,
+        defaultItemStallFilterOption: null,
+        defaultSalesDateRangeFrom: null,
+        defaultSalesDateRangeTo: null,
+        defaultSalesStaffFilter: null,
+      };
+
+      const firestoreSuccess = await onCreateUserFirestoreDoc(authData.uid, firestoreUserData);
+      
+      if (firestoreSuccess) {
+        toast({ title: "User Created", description: `User ${authData.email} created successfully.`});
+        form.reset();
+        onClose();
+      } else {
+        // Firestore doc creation might have failed, onCreateUserFirestoreDoc should toast.
+        // Consider if admin needs to delete the Auth user if Firestore doc fails. (Advanced scenario)
+      }
+
+    } catch (error: any) {
+      console.error("Error creating user (callable or Firestore):", error);
+      toast({
+        title: "User Creation Failed",
+        description: error.message || "An unexpected error occurred.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
     }
-    setIsSubmitting(false);
   };
 
   if (!isOpen) return null;
@@ -123,21 +165,20 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUser, sites,
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) { form.reset(); onClose(); } }}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Create New User Document</DialogTitle>
+          <DialogTitle>Create New User</DialogTitle>
           <DialogDescription>
-            Manually create a Firestore user document. Ensure the user (with the provided UID)
-            has already been created in Firebase Authentication.
+            This will create a Firebase Authentication user and their Firestore document.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4 py-2 max-h-[70vh] overflow-y-auto pr-2">
+          <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-3 py-2 max-h-[70vh] overflow-y-auto pr-2">
             <FormField
               control={form.control}
-              name="uid"
+              name="displayName"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Firebase Auth UID <span className="text-destructive">*</span></FormLabel>
-                  <FormControl><Input placeholder="Enter UID from Firebase Console" {...field} disabled={isSubmitting} className="bg-input" /></FormControl>
+                  <FormLabel>Display Name <span className="text-destructive">*</span></FormLabel>
+                  <FormControl><Input placeholder="User's Full Name" {...field} disabled={isSubmitting} className="bg-input" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )}
@@ -153,16 +194,69 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUser, sites,
                 </FormItem>
               )}
             />
+             <FormField
+                control={form.control}
+                name="password"
+                render={({ field }) => (
+                    <FormItem>
+                    <FormLabel>Password <span className="text-destructive">*</span></FormLabel>
+                    <FormControl>
+                        <div className="relative">
+                        <Input
+                            type={showPassword ? "text" : "password"}
+                            placeholder="Min. 6 characters"
+                            {...field}
+                            disabled={isSubmitting}
+                            className="bg-input pr-10"
+                        />
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 text-muted-foreground"
+                            onClick={() => setShowPassword(!showPassword)}
+                            tabIndex={-1}
+                        >
+                            {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                            <span className="sr-only">{showPassword ? "Hide password" : "Show password"}</span>
+                        </Button>
+                        </div>
+                    </FormControl>
+                    <FormMessage />
+                    </FormItem>
+                )}
+            />
             <FormField
-              control={form.control}
-              name="displayName"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Display Name <span className="text-destructive">*</span></FormLabel>
-                  <FormControl><Input placeholder="User's Full Name" {...field} disabled={isSubmitting} className="bg-input" /></FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
+                control={form.control}
+                name="confirmPassword"
+                render={({ field }) => (
+                    <FormItem>
+                    <FormLabel>Confirm Password <span className="text-destructive">*</span></FormLabel>
+                    <FormControl>
+                        <div className="relative">
+                        <Input
+                            type={showConfirmPassword ? "text" : "password"}
+                            placeholder="Confirm password"
+                            {...field}
+                            disabled={isSubmitting}
+                            className="bg-input pr-10"
+                        />
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 text-muted-foreground"
+                            onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                            tabIndex={-1}
+                        >
+                            {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                            <span className="sr-only">{showConfirmPassword ? "Hide password" : "Show password"}</span>
+                        </Button>
+                        </div>
+                    </FormControl>
+                    <FormMessage />
+                    </FormItem>
+                )}
             />
             <FormField
               control={form.control}
@@ -272,7 +366,7 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUser, sites,
               </Button>
               <Button type="submit" disabled={isSubmitting}>
                 {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserPlus className="mr-2 h-4 w-4" />}
-                Create User Document
+                Create User
               </Button>
             </DialogFooter>
           </form>
@@ -281,3 +375,5 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUser, sites,
     </Dialog>
   );
 }
+
+    
