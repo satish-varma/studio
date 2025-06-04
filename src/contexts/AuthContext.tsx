@@ -14,7 +14,7 @@ import {
   type Auth, 
   type User as FirebaseUser 
 } from 'firebase/auth';
-import { getFirestore, doc, getDoc, setDoc, onSnapshot, type Firestore } from 'firebase/firestore'; // Added onSnapshot
+import { getFirestore, doc, getDoc, setDoc, onSnapshot, type Firestore } from 'firebase/firestore';
 import { firebaseConfig } from '@/lib/firebaseConfig'; 
 
 console.log("AuthContext: Initializing with Firebase Config:", firebaseConfig);
@@ -70,8 +70,8 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUserState] = useState<AppUser | null>(null); // Renamed for clarity
-  const [loading, setLoading] = useState(true);
+  const [user, setUserState] = useState<AppUser | null>(null);
+  const [loading, setLoading] = useState(true); // Start with loading true
   const [activeSiteId, setActiveSiteState] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('activeSiteId');
@@ -85,9 +85,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return null;
   });
 
-  // Wrapper for setUser to log changes if needed
   const setUser: React.Dispatch<React.SetStateAction<AppUser | null>> = (newUser) => {
-    // console.log("AuthContext: setUser called with:", newUser);
     setUserState(newUser);
   };
 
@@ -141,7 +139,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     };
   };
 
-  // This effect handles initial auth state and listens for user document changes
   useEffect(() => {
     if (!auth || !db) {
       setLoading(false);
@@ -152,23 +149,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     let userDocUnsubscribe: (() => void) | null = null;
 
     const authUnsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
-      // Clean up previous user document listener if any
       if (userDocUnsubscribe) {
         userDocUnsubscribe();
         userDocUnsubscribe = null;
       }
+      // Keep loading true until user data is confirmed or user is confirmed null
+      setLoading(true); 
 
       if (firebaseUser) {
         const userDocRef = doc(db as Firestore, "users", firebaseUser.uid);
         
-        // Set up a real-time listener for the user's document
         userDocUnsubscribe = onSnapshot(userDocRef, (userDocSnap) => {
           let appUser: AppUser;
           if (userDocSnap.exists()) {
             const userData = userDocSnap.data();
             appUser = mapFirestoreDataToAppUser(firebaseUser, userData);
             
-            // Update active site/stall based on potentially new user data
             const storedSiteId = typeof window !== 'undefined' ? localStorage.getItem('activeSiteId') : null;
             const storedStallId = typeof window !== 'undefined' ? localStorage.getItem('activeStallId') : null;
 
@@ -190,32 +186,31 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 setActiveSiteState(appUser.defaultSiteId); 
                 setActiveStallState(appUser.defaultSiteId ? appUser.defaultStallId : null); 
             }
-            setUser(appUser); // This will trigger re-renders in consuming components
+            setUser(appUser);
           } else {
-            // This case should be rare if signUp/signIn handles doc creation,
-            // but as a fallback, create the doc.
-            console.warn(`AuthContext: User document not found for UID: ${firebaseUser.uid} in onSnapshot. Creating default.`);
+            console.warn(`AuthContext: User document not found for UID: ${firebaseUser.uid}. Attempting to create default.`);
             const defaultUserData: Partial<AppUser> = {
               uid: firebaseUser.uid, email: firebaseUser.email, role: 'staff',
               displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User",
               createdAt: new Date().toISOString(), defaultSiteId: null, defaultStallId: null, managedSiteIds: null,
             };
-            setDoc(userDocRef, defaultUserData).then(() => {
-                 // The onSnapshot listener will fire again once the doc is created.
-            }).catch(error => {
+            // Set doc and expect this onSnapshot listener to fire again with the new data
+            setDoc(userDocRef, defaultUserData).catch(error => {
                  console.error("AuthContext: Error creating user document in onSnapshot fallback:", error);
-                 // If doc creation fails, map with FirebaseUser data only
-                 appUser = mapFirestoreDataToAppUser(firebaseUser);
-                 setUser(appUser);
+                 // If doc creation fails, map with FirebaseUser data only and stop loading
+                 setUser(mapFirestoreDataToAppUser(firebaseUser));
+                 setLoading(false); 
             });
+            // Don't set loading false yet, wait for onSnapshot to re-fire with created doc or error out
+            return; 
           }
+          setLoading(false); // Firestore data for user processed, set loading to false
         }, (error) => {
           console.error("AuthContext: Error in user document onSnapshot listener:", error);
-          // Fallback to mapping only FirebaseUser data if Firestore listener errors
-          const fallbackUser = mapFirestoreDataToAppUser(firebaseUser);
-          setUser(fallbackUser);
+          setUser(mapFirestoreDataToAppUser(firebaseUser)); // Fallback
           setActiveSiteState(null);
           setActiveStallState(null);
+          setLoading(false); // Error occurred, stop loading
         });
 
       } else { // User logged out
@@ -226,8 +221,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             localStorage.removeItem('activeSiteId');
             localStorage.removeItem('activeStallId');
         }
+        setLoading(false); // No user, stop loading
       }
-      setLoading(false); // Set loading to false after initial auth check and listener setup/teardown
+      // setLoading(false) was here, moved inside or to else block
     });
 
     return () => {
@@ -236,7 +232,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         userDocUnsubscribe();
       }
     };
-  }, []); // Empty dependency array means this effect runs once on mount and cleans up on unmount
+  }, []); 
 
   const signIn = useCallback(async (email: string, pass: string): Promise<AppUser | null> => {
     if (!auth || !db) throw new Error("Firebase not initialized for signIn.");
@@ -245,12 +241,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const userCredential = await signInWithEmailAndPassword(auth, email, pass);
       const firebaseUser = userCredential.user;
       
-      // The onSnapshot listener set up in useEffect will handle fetching/updating user data and setting activeSite/Stall
-      // So, we don't need to duplicate that logic here explicitly.
-      // We just need to ensure the firebaseUser is available for the listener to pick up.
-
-      // We can, however, try to get the user document once to return it,
-      // but the primary source of truth for the context's `user` state will be the onSnapshot listener.
+      // The onSnapshot listener will handle setting user, activeSite/Stall, and setLoading(false)
+      // We can optimistically fetch the doc here for return, but context update relies on listener
       const userDocRef = doc(db as Firestore, "users", firebaseUser.uid);
       const userDocSnap = await getDoc(userDocRef);
       let appUserToReturn: AppUser;
@@ -258,25 +250,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (userDocSnap.exists()) {
         appUserToReturn = mapFirestoreDataToAppUser(firebaseUser, userDocSnap.data());
       } else {
-        // If doc doesn't exist here, create it (though onSnapshot would also handle this)
-        console.warn(`AuthContext: User document not found for UID: ${firebaseUser.uid} during sign-in. Creating default staff user.`);
+        console.warn(`AuthContext: User document not found for UID: ${firebaseUser.uid} during sign-in. Creating default staff user (onSnapshot will also do this).`);
         const defaultUserData: Partial<AppUser> = {
             uid: firebaseUser.uid, email: firebaseUser.email, role: 'staff',
             displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User",
             createdAt: new Date().toISOString(), defaultSiteId: null, defaultStallId: null, managedSiteIds: null,
         };
-        await setDoc(userDocRef, defaultUserData);
+        await setDoc(userDocRef, defaultUserData); // This will trigger the onSnapshot
         appUserToReturn = mapFirestoreDataToAppUser(firebaseUser, defaultUserData);
       }
-      // The setUser and activeSite/Stall updates will be handled by the onSnapshot listener triggered by auth change.
       return appUserToReturn; 
     } catch (error) {
       console.error("Sign in error:", error);
-      // State clearing will be handled by onAuthStateChanged if sign-in fails and user becomes null
+      setLoading(false); // Ensure loading is false on error
       throw error; 
-    } finally {
-      setLoading(false);
     }
+    // setLoading(false) will be handled by the onSnapshot listener
   }, []);
   
   const signUp = useCallback(async (email: string, pass: string, displayName: string): Promise<AppUser | null> => {
@@ -296,14 +285,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       };
       const userDocRef = doc(db as Firestore, "users", firebaseUser.uid);
       await setDoc(userDocRef, newUserDocData);
-      // The onSnapshot listener will pick up this new user and set context state.
+      // The onSnapshot listener will pick up this new user and set context state, including setLoading(false).
       return mapFirestoreDataToAppUser(firebaseUser, newUserDocData);
     } catch (error) {
       console.error("Sign up error:", error);
+      setLoading(false); // Ensure loading is false on error
       throw error;
-    } finally {
-      setLoading(false);
     }
+    // setLoading(false) will be handled by the onSnapshot listener
   }, []);
 
   const signOutUser = useCallback(async () => {
@@ -311,16 +300,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.error("AuthContext: Firebase Auth not initialized for signOut.");
       return;
     }
-    setLoading(true); // Should be brief
+    // setLoading(true) not strictly needed here as onAuthStateChanged will handle it
     try {
       await firebaseSignOut(auth);
-      // User state, activeSiteId, activeStallId will be cleared by the onAuthStateChanged listener.
       console.log("AuthContext: User signed out successfully.");
     } catch (error) {
       console.error("Sign out error:", error);
-    } finally {
-      setLoading(false);
     }
+    // setLoading(false) and state clearing will be handled by onAuthStateChanged listener
   }, []);
 
   return (
@@ -330,7 +317,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       signIn, 
       signUp, 
       signOutUser, 
-      setUser, // Expose the wrapped setUser
+      setUser,
       activeSiteId,
       activeStallId,
       setActiveSite,
