@@ -1,10 +1,9 @@
-
 rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions
+    // --- Helper Functions (ensure these are as in your latest correct version) ---
     function isSignedIn() {
       return request.auth != null;
     }
@@ -13,144 +12,182 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function getUserData(userId) {
+      let userDocPath = /databases/$(database)/documents/users/$(userId);
+      return exists(userDocPath) ? get(userDocPath).data : null;
+    }
+
     function getAuthenticatedUserData() {
-      // Returns the data of the currently authenticated user.
-      // Checks for document existence before accessing data.
-      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid));
-      return userDoc.exists ? userDoc.data : null;
+      return isSignedIn() ? getUserData(request.auth.uid) : null;
     }
 
     function getAuthenticatedUserRole() {
-      // Returns the role of the currently authenticated user.
-      // Returns null if user document or role doesn't exist.
       let userData = getAuthenticatedUserData();
-      return userData != null && userData.role != null ? userData.role : null;
+      return userData != null ? userData.role : null;
     }
 
     function isAdmin() {
-      return isSignedIn() && getAuthenticatedUserRole() == 'admin';
+      return getAuthenticatedUserRole() == 'admin';
     }
 
     function isManagerRole() {
-      return isSignedIn() && getAuthenticatedUserRole() == 'manager';
+      return getAuthenticatedUserRole() == 'manager';
     }
-    
+
     function isStaffRole() {
-      return isSignedIn() && getAuthenticatedUserRole() == 'staff';
+      return getAuthenticatedUserRole() == 'staff';
     }
 
-    // Function to check if current user is a manager or admin
-    function isManagerOrAdmin() {
-      let role = getAuthenticatedUserRole();
-      return isSignedIn() && (role == 'manager' || role == 'admin');
-    }
-
-    // Function to check if current user is staff, manager or admin
-    function isStaffManagerOrAdmin() {
-      let role = getAuthenticatedUserRole();
-      return isSignedIn() && (role == 'staff' || role == 'manager' || role == 'admin');
-    }
-    
     function isManagerOfSite(siteId) {
       let userData = getAuthenticatedUserData();
       return isManagerRole() &&
              userData != null &&
              userData.managedSiteIds != null &&
-             userData.managedSiteIds.hasAny([siteId]); // Use hasAny for list membership
+             siteId in userData.managedSiteIds;
     }
 
-    // --- Users Collection (/users/{userId}) ---
+    // Checks if the current user is a staff member assigned to the given site AND stall
+    function isStaffAssignedTo(siteId, stallId) {
+      let userData = getAuthenticatedUserData();
+      return isStaffRole() &&
+             userData != null &&
+             userData.defaultSiteId == siteId &&
+             userData.defaultStallId == stallId;
+    }
+    
+    // Checks if the current user is staff assigned to the given site (for master stock operations)
+    function isStaffAssignedToSiteOnly(siteId) {
+      let userData = getAuthenticatedUserData();
+      return isStaffRole() &&
+             userData != null &&
+             userData.defaultSiteId == siteId;
+    }
+
+    // --- Collections Rules ---
+
+    // Users Collection (/users/{userId})
     match /users/{userId} {
       allow read: if isUser(userId) || isAdmin() || isManagerRole();
-
-      // Admin creating a user document after Auth user is created by callable function
-      allow create: if isAdmin() && 
-                       request.resource.data.uid == userId && // Doc ID must match uid field
-                       request.resource.data.email is string &&
-                       request.resource.data.role is string && (request.resource.data.role == 'staff' || request.resource.data.role == 'manager' || request.resource.data.role == 'admin') &&
-                       request.resource.data.keys().hasOnly([
-                         'uid', 'email', 'role', 'displayName', 'createdAt', 
-                         'defaultSiteId', 'defaultStallId', 'managedSiteIds',
-                         'defaultItemSearchTerm', 'defaultItemCategoryFilter', 'defaultItemStockStatusFilter',
-                         'defaultItemStallFilterOption', 'defaultSalesDateRangeFrom', 'defaultSalesDateRangeTo',
-                         'defaultSalesStaffFilter', 'photoURL' // Added photoURL as it might be set
-                        ]) &&
-                       (request.resource.data.defaultSiteId == null || request.resource.data.defaultSiteId is string) &&
-                       (request.resource.data.defaultStallId == null || request.resource.data.defaultStallId is string) &&
-                       (request.resource.data.managedSiteIds == null || request.resource.data.managedSiteIds is list) &&
-                       (request.resource.data.defaultItemSearchTerm == null || request.resource.data.defaultItemSearchTerm is string) &&
-                       (request.resource.data.defaultItemCategoryFilter == null || request.resource.data.defaultItemCategoryFilter is string) &&
-                       (request.resource.data.defaultItemStockStatusFilter == null || request.resource.data.defaultItemStockStatusFilter is string) &&
-                       (request.resource.data.defaultItemStallFilterOption == null || request.resource.data.defaultItemStallFilterOption is string) &&
-                       (request.resource.data.defaultSalesDateRangeFrom == null || request.resource.data.defaultSalesDateRangeFrom is string) &&
-                       (request.resource.data.defaultSalesDateRangeTo == null || request.resource.data.defaultSalesDateRangeTo is string) &&
-                       (request.resource.data.defaultSalesStaffFilter == null || request.resource.data.defaultSalesStaffFilter is string) &&
-                       (request.resource.data.photoURL == null || request.resource.data.photoURL is string);
-
-
+      allow create: if isAdmin(); 
       allow update: if (isUser(userId) &&
-                        !request.resource.data.keys().hasAny(['role', 'uid', 'email', 'createdAt', 'managedSiteIds']) &&
-                        (getAuthenticatedUserRole() != 'staff' || !request.resource.data.keys().hasAny(['defaultSiteId', 'defaultStallId']))
+                        !request.resource.data.keys().hasAny(['role', 'uid', 'email', 'createdAt']) &&
+                        (getAuthenticatedUserRole() == 'admin' || 
+                          (getAuthenticatedUserRole() == 'manager' && !request.resource.data.keys().hasAny(['managedSiteIds', 'defaultSiteId', 'defaultStallId'])) ||
+                          (getAuthenticatedUserRole() == 'staff' && !request.resource.data.keys().hasAny(['managedSiteIds', 'defaultSiteId', 'defaultStallId']))
+                        )
                        ) || isAdmin();
-
       allow delete: if isAdmin() && request.auth.uid != userId;
     }
+    match /users {
+      allow list: if isAdmin() || isManagerRole();
+    }
 
-    // --- Sites Collection (/sites/{siteId}) ---
+    // Sites Collection (/sites/{siteId})
     match /sites/{siteId} {
       allow read: if isSignedIn();
       allow create, update, delete: if isAdmin();
     }
+    match /sites {
+      allow list: if isSignedIn();
+    }
 
-    // --- Stalls Collection (/stalls/{stallId}) ---
+    // Stalls Collection (/stalls/{stallId})
     match /stalls/{stallId} {
       allow read: if isSignedIn();
       allow create, update, delete: if isAdmin();
     }
+    match /stalls {
+      allow list: if isSignedIn();
+    }
 
-    // --- StockItems Collection (/stockItems/{itemId}) ---
+    // StockItems Collection (/stockItems/{itemId})
     match /stockItems/{itemId} {
-      allow read: if isStaffManagerOrAdmin(); 
+      allow read: if isSignedIn();
 
-      allow create: if isStaffManagerOrAdmin() && 
-                       request.resource.data.siteId != null &&
+      allow create: if request.resource.data.siteId != null &&
+                       (isAdmin() ||
+                        (isManagerRole() && isManagerOfSite(request.resource.data.siteId)) ||
+                        (isStaffRole() && 
+                          ( (request.resource.data.stallId != null && isStaffAssignedTo(request.resource.data.siteId, request.resource.data.stallId)) || 
+                            (request.resource.data.stallId == null && isStaffAssignedToSiteOnly(request.resource.data.siteId)) 
+                          )
+                        )
+                       ) &&
                        request.resource.data.name is string && request.resource.data.name.size() > 0 &&
                        request.resource.data.quantity is number && request.resource.data.quantity >= 0 &&
                        request.resource.data.price is number && request.resource.data.price >= 0 &&
-                       request.resource.data.lastUpdated is string;
+                       request.resource.data.lastUpdated == request.time.toMillis().toString();
 
-      allow update: if isStaffManagerOrAdmin() && 
-                       resource.data.siteId != null && 
-                       request.resource.data.lastUpdated is string;
+      allow update: if resource.data.siteId != null && // Must have a siteId
+                       (isAdmin() || // Admins can update any
+                        (isManagerRole() && isManagerOfSite(resource.data.siteId)) || // Managers can update items in their sites
+                        (isStaffRole() && // Staff can update items if:
+                          (
+                            // Case 1: It's their assigned stall item
+                            (resource.data.stallId != null && isStaffAssignedTo(resource.data.siteId, resource.data.stallId)) 
+                            || 
+                            // Case 2: It's MASTER stock for THEIR ASSIGNED SITE (stallId is null)
+                            // AND they are only attempting to change 'quantity' and 'lastUpdated'
+                            (resource.data.stallId == null && 
+                             isStaffAssignedToSiteOnly(resource.data.siteId) &&
+                             // Check that no fields other than quantity and lastUpdated are being modified
+                             request.resource.data.diff(resource.data).affectedKeys().hasOnly(['quantity', 'lastUpdated'])
+                            )
+                          )
+                        )
+                       ) &&
+                       request.resource.data.lastUpdated == request.time.toMillis().toString() && // Enforce server timestamp for lastUpdated
+                       request.resource.data.quantity is number && request.resource.data.quantity >=0; // Ensure quantity is valid
 
-      allow delete: if isManagerOrAdmin() || (isStaffRole() && resource.data.siteId == getAuthenticatedUserData().defaultSiteId);
+      allow delete: if resource.data.siteId != null &&
+                       (isAdmin() ||
+                        (isManagerRole() && isManagerOfSite(resource.data.siteId)) ||
+                        (isStaffRole() && 
+                          ( (resource.data.stallId != null && isStaffAssignedTo(resource.data.siteId, resource.data.stallId)) ||
+                            (resource.data.stallId == null && isStaffAssignedToSiteOnly(resource.data.siteId))
+                          )
+                        )
+                       );
+    }
+    match /stockItems {
+        allow list: if isSignedIn();
     }
 
-    // --- SalesTransactions Collection (/salesTransactions/{transactionId}) ---
+
+    // SalesTransactions Collection (/salesTransactions/{transactionId})
     match /salesTransactions/{transactionId} {
-      allow create: if isStaffManagerOrAdmin() && 
-                       request.resource.data.staffId == request.auth.uid &&
-                       request.resource.data.siteId != null &&
-                       request.resource.data.stallId != null &&
+      allow create: if isSignedIn() && 
+                       request.resource.data.staffId == request.auth.uid && 
+                       request.resource.data.siteId != null && 
+                       request.resource.data.stallId != null && 
+                       (isAdmin() || 
+                        (isManagerRole() && isManagerOfSite(request.resource.data.siteId) && request.resource.data.stallId != null) || 
+                        (isStaffRole() && isStaffAssignedTo(request.resource.data.siteId, request.resource.data.stallId)) 
+                       ) &&
                        request.resource.data.isDeleted == false &&
                        request.resource.data.items is list && request.resource.data.items.size() > 0 &&
-                       request.resource.data.totalAmount is number && request.resource.data.totalAmount > 0 &&
-                       request.resource.data.transactionDate is timestamp;
+                       request.resource.data.totalAmount is number && request.resource.data.totalAmount >= 0 &&
+                       request.resource.data.transactionDate == request.time;
 
-      allow read: if (getAuthenticatedUserRole() == 'staff' && resource.data.staffId == request.auth.uid) ||
-                     (isManagerRole() && resource.data.siteId in getAuthenticatedUserData().managedSiteIds) ||
+      allow read: if (isStaffRole() && resource.data.staffId == request.auth.uid) || 
+                     (isManagerRole() && isManagerOfSite(resource.data.siteId)) ||
                      isAdmin();
 
       allow update: if isAdmin() &&
                        request.resource.data.isDeleted == true &&
+                       resource.data.isDeleted == false && 
                        request.resource.data.deletedBy == request.auth.uid &&
-                       request.resource.data.deletionJustification is string &&
-                       !request.resource.data.keys().hasAny(['items', 'totalAmount', 'transactionDate', 'staffId', 'siteId', 'stallId']);
+                       request.resource.data.deletionJustification is string && request.resource.data.deletionJustification.size() > 0 &&
+                       request.resource.data.deletedAt == request.time.toMillis().toString() &&
+                       !request.resource.data.keys().hasAny(['items', 'totalAmount', 'transactionDate', 'staffId', 'siteId', 'stallId', 'staffName']);
 
       allow delete: if false;
     }
+    match /salesTransactions {
+        allow list: if isSignedIn();
+    }
 
-    // --- StockMovementLogs Collection (/stockMovementLogs/{logId}) ---
+    // StockMovementLogs Collection (/stockMovementLogs/{logId})
     match /stockMovementLogs/{logId} {
       allow create: if isSignedIn() &&
                        request.resource.data.userId == request.auth.uid &&
@@ -160,23 +197,23 @@ service cloud.firestore {
                        request.resource.data.quantityChange is number &&
                        request.resource.data.quantityBefore is number &&
                        request.resource.data.quantityAfter is number &&
-                       request.resource.data.timestamp is string;
+                       request.resource.data.timestamp == request.time.toMillis().toString(); 
 
-      allow read: if isAdmin() ||
-                     (isManagerRole() && resource.data.siteId in getAuthenticatedUserData().managedSiteIds);
+      allow read: if isAdmin() || 
+                     (isManagerRole() && isManagerOfSite(resource.data.siteId));
 
       allow update, delete: if false;
     }
-    
-    // --- userGoogleOAuthTokens Collection (/userGoogleOAuthTokens/{userId}) ---
-    // These tokens are sensitive and should only be accessible by the user themselves.
+    match /stockMovementLogs {
+        allow list: if isAdmin() || isManagerRole();
+    }
+
+    // UserGoogleOAuthTokens Collection (/userGoogleOAuthTokens/{userId})
     match /userGoogleOAuthTokens/{userId} {
-      allow read, write, delete: if isUser(userId); // Only the user can manage their own tokens
-      // Stricter create rule, ensuring essential token fields are present
+      allow read, write, delete: if isUser(userId);
       allow create: if isUser(userId) &&
                       request.resource.data.access_token is string &&
-                      (request.resource.data.refresh_token is string || request.resource.data.refresh_token == null) && // Refresh token might not always be present initially
-                      request.resource.data.token_type is string;
+                      request.resource.data.refresh_token is string;
     }
   }
 }
