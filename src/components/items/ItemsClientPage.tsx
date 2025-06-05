@@ -5,7 +5,7 @@ import { useState, useMemo, useEffect, useCallback } from "react";
 import { ItemControls } from "@/components/items/ItemControls";
 import { ItemTable } from "@/components/items/ItemTable";
 import PageHeader from "@/components/shared/PageHeader";
-import type { StockItem, Stall, Site } from "@/types";
+import type { StockItem, Stall, Site, UserRole } from "@/types";
 import {
   getFirestore,
   collection,
@@ -35,12 +35,12 @@ if (!getApps().length) {
 }
 
 export default function ItemsClientPage() {
-  const { user, activeSiteId, loading: authLoading } = useAuth(); 
+  const { user, activeSiteId, activeStallId, loading: authLoading } = useAuth(); 
 
   const [searchTerm, setSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [stockStatusFilter, setStockStatusFilter] = useState("all");
-  const [stallFilterOption, setStallFilterOption] = useState("all");
+  const [stallFilterOption, setStallFilterOption] = useState("all"); // For admin/manager
 
   const [items, setItems] = useState<StockItem[]>([]);
   const [stallsForFilterDropdown, setStallsForFilterDropdown] = useState<Stall[]>([]);
@@ -55,14 +55,17 @@ export default function ItemsClientPage() {
       setSearchTerm(user.defaultItemSearchTerm || "");
       setCategoryFilter(user.defaultItemCategoryFilter || "all");
       setStockStatusFilter(user.defaultItemStockStatusFilter || "all");
-      setStallFilterOption(user.defaultItemStallFilterOption || "all");
+      // For admin/manager, use their preference. Staff's view is fixed by their activeStallId context.
+      if (user.role !== 'staff') {
+        setStallFilterOption(user.defaultItemStallFilterOption || "all");
+      }
       console.log("ItemsClientPage: User defaults applied to filters.", { defaultSearch: user.defaultItemSearchTerm, activeSiteIdFromAuth: activeSiteId });
     }
-  }, [user, authLoading, activeSiteId]); // Added activeSiteId to re-evaluate if it changes
+  }, [user, authLoading, activeSiteId]);
 
 
   const fetchSupportingDataAndItems = useCallback(async () => {
-    console.log(`ItemsClientPage: fetchSupportingDataAndItems called. AuthLoading: ${authLoading}, User: ${!!user}, ActiveSiteId: ${activeSiteId}`);
+    console.log(`ItemsClientPage: fetchSupportingDataAndItems called. AuthLoading: ${authLoading}, User: ${!!user}, ActiveSiteId: ${activeSiteId}, ActiveStallId (for staff): ${user?.role === 'staff' ? activeStallId : 'N/A'}`);
     if (authLoading) { 
         setLoadingPageData(true); 
         return;
@@ -94,7 +97,6 @@ export default function ItemsClientPage() {
         newSitesMap[doc.id] = (doc.data() as Site).name;
       });
       setSitesMap(newSitesMap);
-      console.log("ItemsClientPage: Sites map fetched.", newSitesMap);
 
       const allStallsCollectionRef = collection(db, "stalls");
       const allStallsSnapshot = await getDocs(allStallsCollectionRef);
@@ -103,27 +105,21 @@ export default function ItemsClientPage() {
         newStallsMap[doc.id] = (doc.data() as Stall).name;
       });
       setStallsMap(newStallsMap);
-      console.log("ItemsClientPage: Stalls map fetched.", newStallsMap);
 
-
-      if (activeSiteId) {
-        console.log(`ItemsClientPage: Active site ID is ${activeSiteId}. Fetching its stalls.`);
+      if (activeSiteId && user.role !== 'staff') { // Fetch stalls for dropdown only for admin/manager
         const qStalls = query(collection(db, "stalls"), where("siteId", "==", activeSiteId));
         const querySnapshotStalls = await getDocs(qStalls);
         const fetchedStalls = querySnapshotStalls.docs.map(doc => ({ id: doc.id, ...doc.data() } as Stall));
         fetchedStalls.sort((a, b) => a.name.localeCompare(b.name));
         setStallsForFilterDropdown(fetchedStalls);
-        console.log("ItemsClientPage: Stalls for filter dropdown fetched for site.", activeSiteId, fetchedStalls);
         
+        // Reset stallFilterOption if current selection is not in the new site's stalls (for admin/manager)
         if (stallFilterOption !== 'all' && stallFilterOption !== 'master' && !fetchedStalls.find(s => s.id === stallFilterOption)) {
-            console.log("ItemsClientPage: Current stallFilterOption not in new site's stalls, resetting to 'all'.");
             setStallFilterOption('all'); 
         }
       } else {
-        console.log("ItemsClientPage: No active site ID. Clearing stalls for filter dropdown.");
-        setStallsForFilterDropdown([]);
-        if (stallFilterOption !== 'all' && stallFilterOption !== 'master') {
-             console.log("ItemsClientPage: No active site, resetting stallFilterOption to 'all'.");
+        setStallsForFilterDropdown([]); // Staff don't use this dropdown to filter stalls
+         if (user.role !== 'staff' && stallFilterOption !== 'all' && stallFilterOption !== 'master') {
              setStallFilterOption('all'); 
         }
       }
@@ -131,28 +127,41 @@ export default function ItemsClientPage() {
       if (!activeSiteId) {
         setItems([]);
         let message = "Please select an active site to view stock items.";
-        if (user.role === 'staff') {
+        // ... (error message logic remains the same)
+         if (user.role === 'staff') {
           message = "Your account does not have a default site assigned, or it's not yet active. Please contact an administrator to assign one. If a site was recently assigned, you might need to log out and log back in.";
         } else if (user.role === 'admin') {
           message = "Admin: Please select a site from the header to view its stock.";
         } else if (user.role === 'manager') {
           message = "Manager: Please select one of your managed sites from the header to view its stock.";
         }
-        console.log("ItemsClientPage: No active site, setting error message:", message);
         setErrorPageData(message);
       } else {
-        console.log(`ItemsClientPage: Fetching items for site: ${activeSiteId}, stallFilter: ${stallFilterOption}`);
         const itemsCollectionRef = collection(db, "stockItems");
         let qConstraints: QueryConstraint[] = [
           where("siteId", "==", activeSiteId)
         ];
 
-        if (stallFilterOption === "master") {
-          qConstraints.push(where("stallId", "==", null));
-        } else if (stallFilterOption !== "all" && stallFilterOption !== "master") {
-          qConstraints.push(where("stallId", "==", stallFilterOption));
+        if (user.role === 'staff') {
+          // Staff are strictly filtered by their AuthContext's activeStallId (which is their defaultStallId)
+          if (activeStallId) { // Specific stall assigned
+            qConstraints.push(where("stallId", "==", activeStallId));
+            console.log(`ItemsClientPage (Staff): Querying for site ${activeSiteId}, specific stall ${activeStallId}`);
+          } else { // Staff assigned to site-level/master stock (activeStallId is null)
+            qConstraints.push(where("stallId", "==", null));
+            console.log(`ItemsClientPage (Staff): Querying for site ${activeSiteId}, master stock (stallId is null)`);
+          }
+        } else { // Admin or Manager can use the stallFilterOption from state
+          if (stallFilterOption === "master") {
+            qConstraints.push(where("stallId", "==", null));
+            console.log(`ItemsClientPage (Admin/Mgr): Querying for site ${activeSiteId}, master stock`);
+          } else if (stallFilterOption !== "all" && stallFilterOption !== "master") {
+            qConstraints.push(where("stallId", "==", stallFilterOption));
+            console.log(`ItemsClientPage (Admin/Mgr): Querying for site ${activeSiteId}, specific stall ${stallFilterOption}`);
+          } else { // stallFilterOption is "all"
+            console.log(`ItemsClientPage (Admin/Mgr): Querying for site ${activeSiteId}, all stalls`);
+          }
         }
-        console.log("ItemsClientPage: Query constraints for items:", qConstraints);
 
         const finalItemsQuery = query(itemsCollectionRef, ...qConstraints);
         const itemsSnapshot = await getDocs(finalItemsQuery);
@@ -162,26 +171,25 @@ export default function ItemsClientPage() {
         } as StockItem));
         fetchedItems.sort((a, b) => a.name.localeCompare(b.name));
         setItems(fetchedItems);
-        console.log("ItemsClientPage: Items fetched:", fetchedItems.length, fetchedItems);
+        console.log("ItemsClientPage: Items fetched:", fetchedItems.length);
       }
 
     } catch (error: any) {
       console.error("ItemsClientPage: Error fetching data:", error);
       const errorMessage = error.message && error.message.includes("requires an index")
-          ? `Query requires a Firestore index. Please create it using the link in the console: ${error.message.substring(error.message.indexOf('https://'))}`
+          ? `Query requires a Firestore index. Please create it. Details: ${error.message.substring(error.message.indexOf('https://'))}`
           : "Failed to load data. Error: " + error.message;
       setErrorPageData(errorMessage);
       setItems([]);
       setStallsForFilterDropdown([]);
     } finally {
       setLoadingPageData(false);
-      console.log("ItemsClientPage: fetchSupportingDataAndItems finished. LoadingPageData: false.");
     }
-  }, [user, activeSiteId, stallFilterOption, db, authLoading]); 
+  }, [user, activeSiteId, activeStallId, stallFilterOption, db, authLoading]); // Added activeStallId for staff context
 
   useEffect(() => {
     fetchSupportingDataAndItems();
-  }, [fetchSupportingDataAndItems]); // fetchSupportingDataAndItems is memoized and its dependencies include activeSiteId, user, authLoading etc.
+  }, [fetchSupportingDataAndItems]);
 
 
   const uniqueCategories = useMemo(() => {
@@ -190,6 +198,8 @@ export default function ItemsClientPage() {
   }, [items]);
 
   const filteredItems = useMemo(() => {
+    // The main site/stall filtering now happens in the Firestore query itself.
+    // This client-side filter is for search term, category, and stock status on the already fetched items.
     return items.filter(item => {
       const matchesSearchTerm = item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                                 (item.category && item.category.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -230,10 +240,16 @@ export default function ItemsClientPage() {
         onCategoryFilterChange={setCategoryFilter}
         stockStatusFilter={stockStatusFilter}
         onStockStatusFilterChange={setStockStatusFilter}
-        stallFilterOption={stallFilterOption}
+        
+        // Stall filter specific props
+        userRole={user?.role}
+        stallFilterOption={user?.role === 'staff' ? (activeStallId || "master") : stallFilterOption}
         onStallFilterOptionChange={setStallFilterOption}
+        staffsEffectiveStallId={user?.role === 'staff' ? activeStallId : undefined} // Pass activeStallId for staff's fixed context
+        staffsAssignedStallName={user?.role === 'staff' && activeStallId ? stallsMap[activeStallId] : undefined}
+        
         categories={uniqueCategories}
-        availableStalls={stallsForFilterDropdown}
+        availableStalls={stallsForFilterDropdown} // Only relevant for admin/manager
         isSiteActive={!!activeSiteId}
       />
 
@@ -267,7 +283,7 @@ export default function ItemsClientPage() {
             items={filteredItems}
             sitesMap={sitesMap}
             stallsMap={stallsMap}
-            availableStallsForAllocation={stallsForFilterDropdown}
+            availableStallsForAllocation={stallsForFilterDropdown} // For allocation dialogs, might need adjustment based on role
             onDataNeedsRefresh={fetchSupportingDataAndItems} 
         />
       )}

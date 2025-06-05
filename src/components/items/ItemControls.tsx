@@ -10,9 +10,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { PlusCircle, Search, Filter, Store } from "lucide-react";
+import { PlusCircle, Search, Filter, Store, Building } from "lucide-react"; // Added Building
 import { useRouter } from "next/navigation";
-import type { Stall } from "@/types";
+import type { Stall, UserRole } from "@/types";
+import { Badge } from "@/components/ui/badge";
 
 interface ItemControlsProps {
   searchTerm: string;
@@ -21,11 +22,16 @@ interface ItemControlsProps {
   onCategoryFilterChange: (category: string) => void;
   stockStatusFilter: string;
   onStockStatusFilterChange: (status: string) => void;
+  
+  userRole?: UserRole; // To determine if user is staff
   stallFilterOption: string; // "all", "master", or specific stallId
   onStallFilterOptionChange: (option: string) => void;
+  staffsEffectiveStallId?: string | null; // If staff, their actual stallId (or null for master)
+  staffsAssignedStallName?: string; // Name of the staff's assigned stall (if specific)
+
   categories: string[]; 
-  availableStalls: Stall[]; // Stalls for the currently active site
-  isSiteActive: boolean; // To enable/disable stall filter
+  availableStalls: Stall[]; 
+  isSiteActive: boolean;
 }
 
 export function ItemControls({
@@ -35,17 +41,34 @@ export function ItemControls({
   onCategoryFilterChange,
   stockStatusFilter,
   onStockStatusFilterChange,
+  
+  userRole,
   stallFilterOption,
   onStallFilterOptionChange,
+  staffsEffectiveStallId,
+  staffsAssignedStallName,
+
   categories,
   availableStalls,
   isSiteActive,
 }: ItemControlsProps) {
   const router = useRouter();
+  const isStaff = userRole === 'staff';
 
   const handleAddNewItem = () => {
     router.push('/items/new');
   };
+
+  let staffStallContextDisplay = "";
+  if (isStaff) {
+    if (staffsEffectiveStallId) {
+      staffStallContextDisplay = staffsAssignedStallName ? `Stall: ${staffsAssignedStallName}` : `Stall ID: ${staffsEffectiveStallId.substring(0,6)}...`;
+    } else if (isSiteActive) { // Staff assigned to master stock (stallId is null but siteId active)
+      staffStallContextDisplay = "Location: Site Master Stock";
+    } else {
+      staffStallContextDisplay = "No specific stall assigned";
+    }
+  }
 
   return (
     <div className="mb-6 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
@@ -89,25 +112,32 @@ export function ItemControls({
           </SelectContent>
         </Select>
 
-        <Select 
-          value={stallFilterOption} 
-          onValueChange={onStallFilterOptionChange}
-          disabled={!isSiteActive}
-        >
-          <SelectTrigger className="w-full sm:w-[220px] bg-input">
-             <Store className="h-4 w-4 mr-2 text-muted-foreground" />
-            <SelectValue placeholder={!isSiteActive ? "Select site for stall filter" : "Filter by stall/location"} />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Stock (Site-wide)</SelectItem>
-            <SelectItem value="master">Master Stock (Site Level)</SelectItem>
-            {availableStalls.map((stall) => (
-              <SelectItem key={stall.id} value={stall.id}>
-                {stall.name} ({stall.stallType})
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {isStaff && isSiteActive ? (
+          <div className="flex items-center justify-center h-10 px-3 rounded-md border border-input bg-muted/50 text-sm text-muted-foreground w-full sm:w-[220px]">
+             {staffsEffectiveStallId ? <Store className="h-4 w-4 mr-2 text-muted-foreground" /> : <Building className="h-4 w-4 mr-2 text-muted-foreground" />}
+             {staffStallContextDisplay}
+          </div>
+        ) : (
+          <Select 
+            value={stallFilterOption} 
+            onValueChange={onStallFilterOptionChange}
+            disabled={!isSiteActive || isStaff} // Disable if not site active OR if staff
+          >
+            <SelectTrigger className="w-full sm:w-[220px] bg-input">
+              <Store className="h-4 w-4 mr-2 text-muted-foreground" />
+              <SelectValue placeholder={!isSiteActive ? "Select site for stall filter" : "Filter by stall/location"} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Stock (Site-wide)</SelectItem>
+              <SelectItem value="master">Master Stock (Site Level)</SelectItem>
+              {availableStalls.map((stall) => (
+                <SelectItem key={stall.id} value={stall.id}>
+                  {stall.name} ({stall.stallType})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </div>
 
       <Button onClick={handleAddNewItem} className="w-full sm:w-auto" disabled={!isSiteActive}>
