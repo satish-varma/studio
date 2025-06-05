@@ -11,9 +11,10 @@ import {
   Users,
   Settings,
   LucideIcon,
-  UserCircle, 
+  UserCircle,
   LifeBuoy,
   Building, // Icon for Sites
+  BarChart3, // Icon for Reports
 } from "lucide-react";
 import {
   SidebarMenu,
@@ -36,8 +37,9 @@ const navItems: NavItem[] = [
   { href: "/items", label: "Stock Items", icon: Package, roles: ['staff', 'manager', 'admin'] },
   { href: "/sales/record", label: "Record Sale", icon: ShoppingCart, roles: ['staff', 'manager', 'admin'] },
   { href: "/sales/history", label: "Sales History", icon: History, roles: ['staff', 'manager', 'admin'] },
+  { href: "/reports", label: "Reports", icon: BarChart3, roles: ['manager', 'admin'] },
   { href: "/users", label: "User Management", icon: Users, roles: ['admin'] },
-  { href: "/admin/sites", label: "Manage Sites & Stalls", icon: Building, roles: ['admin'] }, 
+  { href: "/admin/sites", label: "Manage Sites & Stalls", icon: Building, roles: ['admin'] },
   { href: "/profile", label: "My Profile", icon: UserCircle, roles: ['staff', 'manager', 'admin'] },
   { href: "/settings", label: "Settings", icon: Settings, roles: ['manager', 'admin'] },
   { href: "/support", label: "Support", icon: LifeBuoy, roles: ['staff', 'manager', 'admin'] },
@@ -49,7 +51,7 @@ export function AppSidebarNav() {
 
   const userRole = user?.role || 'staff'; // Default to staff if role is undefined
 
-  const filteredNavItems = navItems.filter(item => 
+  const filteredNavItems = navItems.filter(item =>
     !item.roles || item.roles.includes(userRole)
   );
 
