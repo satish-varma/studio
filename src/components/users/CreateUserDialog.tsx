@@ -36,8 +36,8 @@ import { Loader2, UserPlus, Eye, EyeOff } from "lucide-react";
 import type { AppUser, UserRole, Site, Stall } from "@/types";
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
-import { getAuth, type User as FirebaseUser } from 'firebase/auth'; // Import getAuth and FirebaseUser
-import { getApp } from 'firebase/app'; // Import getApp
+import { getAuth, type User as FirebaseUser } from 'firebase/auth';
+import { getApp } from 'firebase/app';
 
 const createUserFormSchema = z.object({
   email: z.string().email({ message: "Invalid email address." }),
@@ -107,7 +107,7 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
   const handleSubmit = async (values: CreateUserFormValues) => {
     setIsSubmitting(true);
 
-    const currentFirebaseUser: FirebaseUser | null = auth.currentUser; // Get current Firebase User
+    const currentFirebaseUser: FirebaseUser | null = auth.currentUser; 
 
     if (!adminAppUser || adminAuthLoading || !currentFirebaseUser) {
         toast({ title: "Error", description: "Admin user not loaded or not authenticated. Please try again.", variant: "destructive" });
@@ -116,7 +116,7 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
     }
 
     try {
-      const idToken = await currentFirebaseUser.getIdToken(); // Get admin's ID token
+      const idToken = await currentFirebaseUser.getIdToken(true); // Force refresh token
 
       const response = await fetch('/api/admin/create-user', {
         method: 'POST',
@@ -134,7 +134,19 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
       const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.error || `Failed to create auth user via API. Status: ${response.status}`);
+        // Construct a more detailed error message from the API response
+        let apiErrorMsg = `Failed to create auth user via API. Status: ${response.status}.`;
+        if (result.error) {
+          apiErrorMsg += ` Message: ${result.error}`;
+        }
+        if (result.details) {
+          apiErrorMsg += ` Details: ${result.details}`;
+        }
+        if (result.code) {
+          apiErrorMsg += ` Code: ${result.code}`;
+        }
+        console.error("API Error Response:", result);
+        throw new Error(apiErrorMsg);
       }
       
       const authData = result as { uid: string; email: string; displayName: string };
@@ -165,15 +177,19 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
         form.reset();
         onClose();
       } else {
-         toast({ title: "Partial Success", description: `User ${authData.email} created in Auth, but Firestore document creation failed. Please check user list and try again.`, variant: "default" });
+         // This case should ideally be handled by onCreateUserFirestoreDoc throwing an error if it fails,
+         // which would be caught by the catch block below.
+         // If it returns false without throwing, this toast is a fallback.
+         toast({ title: "Auth User Created, Firestore Failed", description: `User ${authData.email} created in Auth, but Firestore document creation failed. Please check user list and try again or manually create the Firestore doc.`, variant: "destructive", duration: 10000 });
       }
 
     } catch (error: any) {
-      console.error("Error creating user (callable or Firestore):", error);
+      console.error("Error creating user (API call or Firestore doc):", error);
       toast({
         title: "User Creation Failed",
         description: error.message || "An unexpected error occurred.",
         variant: "destructive",
+        duration: 10000,
       });
     } finally {
       setIsSubmitting(false);
@@ -396,4 +412,3 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
     </Dialog>
   );
 }
-
