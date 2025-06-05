@@ -37,7 +37,7 @@ export default function SiteStallSelector() {
     if (!db || !user) {
         setSitesForSelector([]);
         setLoadingSites(false);
-        if (activeSiteId !== null && !user) { 
+        if (activeSiteId !== null && !user) {
             console.log("SiteStallSelector (useEffect sites): No user, clearing activeSiteId.");
             setActiveSite(null);
         }
@@ -63,17 +63,15 @@ export default function SiteStallSelector() {
          console.log("SiteStallSelector (useEffect sites): Manager role, fetching managed sites (<=30):", user.managedSiteIds);
       } else {
         // For managers with >30 sites, fetch all and filter client-side.
-        // This is less ideal for very large numbers of total sites but handles Firestore limits.
-        sitesQuery = query(collection(db, "sites")); 
+        sitesQuery = query(collection(db, "sites"));
         console.warn("SiteStallSelector (useEffect sites): Manager has >30 managed sites, fetching all sites for selector. Client-side filter will apply.");
       }
-    } else { 
+    } else {
       console.log(`SiteStallSelector (useEffect sites): User role ${user.role} has no applicable sites for selector. Clearing sitesForSelector.`);
       setSitesForSelector([]);
       setLoadingSites(false);
       // If a manager had a site selected but now has no sites (e.g., manager unassigned from all)
-      // Admins wouldn't hit this 'else' if they have 0 sites, as their query is just collection(db, "sites")
-      if (activeSiteId !== null && user.role === 'manager') { 
+      if (activeSiteId !== null && user.role === 'manager') {
             console.log(`SiteStallSelector (useEffect sites): No sites for manager ${user.uid}, clearing activeSiteId.`);
             setActiveSite(null);
       }
@@ -83,7 +81,7 @@ export default function SiteStallSelector() {
     const unsubscribe = onSnapshot(sitesQuery, (snapshot: QuerySnapshot<DocumentData>) => {
       let fetchedSites = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Site));
       console.log("SiteStallSelector (useEffect sites): Raw fetched sites count:", fetchedSites.length);
-      
+
       // Client-side filter for manager with >30 sites
       if (user.role === 'manager' && user.managedSiteIds && user.managedSiteIds.length > 30) {
           fetchedSites = fetchedSites.filter(site => user.managedSiteIds!.includes(site.id));
@@ -108,7 +106,7 @@ export default function SiteStallSelector() {
       setSitesForSelector([]);
     });
     return () => unsubscribe();
-  }, [user, db, setActiveSite]); 
+  }, [user, db, setActiveSite, activeSiteId]); // Added activeSiteId to dependency array
 
   // Fetch stalls when activeSiteId changes (for any user who can select a site: admin or manager)
   useEffect(() => {
@@ -116,19 +114,19 @@ export default function SiteStallSelector() {
     if (!db || !user || !activeSiteId) {
       setStallsForSelector([]);
       setLoadingStalls(false);
-      if (!activeSiteId && activeStallId !== null) { 
+      if (!activeSiteId && activeStallId !== null) {
           console.log("SiteStallSelector (useEffect stalls): No activeSiteId, clearing activeStallId.");
           setActiveStall(null);
       }
       return;
     }
-    
+
     if (user.role === 'manager') {
         console.log("SiteStallSelector (useEffect stalls): User is manager, setting stallsForSelector to empty and activeStall to null.");
-        setStallsForSelector([]); 
+        setStallsForSelector([]);
         setLoadingStalls(false);
         if (activeStallId !== null) {
-            setActiveStall(null); 
+            setActiveStall(null);
         }
         return;
     }
@@ -156,20 +154,20 @@ export default function SiteStallSelector() {
 
     if (user.role === 'staff') {
         console.log("SiteStallSelector (useEffect stalls): User is staff, not fetching stalls for this selector.");
-        setStallsForSelector([]); 
+        setStallsForSelector([]);
         setLoadingStalls(false);
         return;
     }
-    
-  }, [user, activeSiteId, db, setActiveStall]); 
+
+  }, [user, activeSiteId, db, setActiveStall, activeStallId]); // Added activeStallId to dependency array
 
   const handleSiteChange = (newSiteId: string) => {
     console.log(`SiteStallSelector: handleSiteChange called with newSiteId: ${newSiteId}. Current activeSiteId: ${activeSiteId}`);
-    if (newSiteId === activeSiteId) return; 
+    if (newSiteId === activeSiteId) return;
 
     if (newSiteId === "all-sites" || newSiteId === "") {
         console.log("SiteStallSelector: handleSiteChange - setting active site to null.");
-        setActiveSite(null); 
+        setActiveSite(null);
     } else {
         console.log(`SiteStallSelector: handleSiteChange - setting active site to: ${newSiteId}.`);
         setActiveSite(newSiteId);
@@ -178,7 +176,7 @@ export default function SiteStallSelector() {
 
   const handleStallChange = (newStallId: string) => {
     console.log(`SiteStallSelector: handleStallChange called with newStallId: ${newStallId}. Current activeStallId: ${activeStallId}`);
-    if (newStallId === activeStallId) return; 
+    if (newStallId === activeStallId) return;
 
     if (newStallId === "all-stalls" || newStallId === "") {
         console.log("SiteStallSelector: handleStallChange - setting active stall to null.");
@@ -193,7 +191,7 @@ export default function SiteStallSelector() {
     console.log("SiteStallSelector: Not rendering, user role is not admin or manager. Role:", user?.role);
     return null;
   }
-  
+
   if (user.role === 'manager' && (!user.managedSiteIds || user.managedSiteIds.length === 0)) {
       console.log("SiteStallSelector: Not rendering, manager has no assigned sites.");
       return <span className="text-xs text-muted-foreground">Not assigned to any sites.</span>;
@@ -201,15 +199,24 @@ export default function SiteStallSelector() {
 
   console.log("SiteStallSelector: Rendering selector. ActiveSiteId:", activeSiteId, "ActiveStallId:", activeStallId, "Sites for selector:", sitesForSelector.length);
 
+  const getSitePlaceholder = () => {
+    if (loadingSites) return "Loading sites...";
+    if (sitesForSelector.length === 0) {
+      if (user.role === 'manager') return "No sites managed";
+      return "No sites available"; // Implicitly admin
+    }
+    return "Select Site";
+  };
+
   return (
     <div className="flex items-center gap-2">
       <Select
-        value={activeSiteId || "all-sites"} 
+        value={activeSiteId || "all-sites"}
         onValueChange={handleSiteChange}
         disabled={loadingSites || (user.role !== 'admin' && sitesForSelector.length === 0)}
       >
         <SelectTrigger className="w-[180px] h-9 text-xs bg-input">
-          <SelectValue placeholder={loadingSites ? "Loading sites..." : (sitesForSelector.length === 0 && user.role !== 'staff' ? "No sites " + (user.role === 'manager' ? 'managed' : 'available') : "Select Site")} />
+          <SelectValue placeholder={getSitePlaceholder()} />
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="all-sites">(All Sites / None)</SelectItem>
@@ -247,4 +254,3 @@ export default function SiteStallSelector() {
     </div>
   );
 }
-
