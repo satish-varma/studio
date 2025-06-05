@@ -21,7 +21,7 @@ import {
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
-import { Loader2, Info, IndianRupee, Package, TrendingUp, AlertTriangle, Percent } from "lucide-react";
+import { Loader2, Info, IndianRupee, Package, TrendingUp, AlertTriangle, Percent, ShoppingCart } from "lucide-react"; // Added ShoppingCart
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -45,7 +45,7 @@ interface ReportSummaryData {
 }
 
 export default function SalesSummaryReportClientPage() {
-  const { user, activeSiteId, activeStallId, loading: authLoading } = useAuth();
+  const { user, activeSiteId, activeStallId, loading: authLoading, activeSite, activeStall } = useAuth(); // Added activeSite and activeStall
   const [dateRange, setDateRange] = useState<DateRange | undefined>(() => {
     const today = new Date();
     return { from: subDays(startOfDay(today), 29), to: endOfDay(today) };
@@ -245,8 +245,8 @@ export default function SalesSummaryReportClientPage() {
                 <CardTitle>Sales Summary</CardTitle>
                 <CardDescription>
                     Overview of sales performance for the selected period
-                    {activeSiteId ? ` at site: ${auth.activeSite?.name || activeSiteId.substring(0,6)}...` : '.'}
-                    {activeStallId ? ` (Stall: ${auth.activeStall?.name || activeStallId.substring(0,6)}...)` : activeSiteId ? ' (All Stalls).' : ''}
+                    {activeSiteId ? ` at site: ${activeSite?.name || activeSiteId.substring(0,6)}...` : '.'}
+                    {activeStallId ? ` (Stall: ${activeStall?.name || activeStallId.substring(0,6)}...)` : activeSiteId ? ' (All Stalls).' : ''}
 
                 </CardDescription>
             </CardHeader>
