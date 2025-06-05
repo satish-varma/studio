@@ -9,29 +9,29 @@ body {
 
 @layer base {
   :root {
-    --background: 210 40% 98%; /* Very light cool gray */
-    --foreground: 210 10% 23%; /* Dark cool gray for text */
+    --background: 210 40% 98%; /* Very light cool gray - USER LIKES THIS */
+    --foreground: 210 10% 18%; /* UPDATED: Very dark, neutral cool gray for high contrast */
 
     --card: 0 0% 100%; /* White */
-    --card-foreground: 210 10% 23%;
+    --card-foreground: 210 10% 18%; /* UPDATED: Consistent with main foreground */
 
     --popover: 0 0% 100%; /* White */
-    --popover-foreground: 210 10% 23%;
+    --popover-foreground: 210 10% 18%; /* UPDATED: Consistent with main foreground */
 
-    --primary: 217 91% 60%; /* Vibrant blue (e.g., Tailwind blue-600) */
-    --primary-foreground: 0 0% 100%; /* White */
+    --primary: 217 91% 60%; /* Vibrant blue */
+    --primary-foreground: 0 0% 100%; /* White - good for contrast on blue */
 
-    --secondary: 210 40% 92%; /* Lighter, softer primary */
-    --secondary-foreground: 210 10% 30%;
+    --secondary: 210 40% 92%; /* Lighter, softer primary related color */
+    --secondary-foreground: 210 10% 25%; /* UPDATED: Darker text for secondary backgrounds */
 
-    --muted: 210 40% 90%; /* Muted cool gray */
-    --muted-foreground: 210 10% 45%; /* Darker muted text */
+    --muted: 210 40% 90%; /* Muted cool gray for backgrounds */
+    --muted-foreground: 210 10% 40%; /* UPDATED: Mid-tone gray for less prominent text */
 
     --accent: 170 70% 45%; /* Modern Teal/Cyan */
-    --accent-foreground: 0 0% 100%; /* White */
+    --accent-foreground: 0 0% 100%; /* White - good for contrast on teal */
 
     --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
+    --destructive-foreground: 0 0% 98%; /* Light text for destructive buttons */
 
     --border: 210 40% 90%; /* Softer border */
     --input: 210 40% 96%; /* Off-white/light gray for inputs */
@@ -41,7 +41,7 @@ body {
 
     /* Sidebar specific colors */
     --sidebar-background: 210 30% 96%; /* Slightly darker light cool gray for sidebar */
-    --sidebar-foreground: 210 10% 30%; /* Dark text for sidebar */
+    --sidebar-foreground: 210 10% 25%; /* UPDATED: Dark text for sidebar */
     --sidebar-primary: 217 91% 60%; /* Main primary blue for active items */
     --sidebar-primary-foreground: 0 0% 100%; /* White text on active sidebar items */
     --sidebar-accent: 210 30% 92%; /* Hover state - slightly darker than sidebar bg */
@@ -58,22 +58,22 @@ body {
 
   .dark {
     --background: 210 10% 15%; /* Dark cool gray */
-    --foreground: 210 40% 90%; /* Light cool gray text */
+    --foreground: 210 40% 90%; /* Light cool gray text - KEPT */
 
     --card: 210 10% 12%; /* Darker card for dark mode */
-    --card-foreground: 210 40% 90%;
+    --card-foreground: 210 40% 90%; /* KEPT */
 
     --popover: 210 10% 10%;
-    --popover-foreground: 210 40% 90%;
+    --popover-foreground: 210 40% 90%; /* KEPT */
 
     --primary: 217 91% 60%; /* Vibrant blue */
     --primary-foreground: 0 0% 100%; /* White */
 
     --secondary: 210 15% 30%; /* Darker secondary */
-    --secondary-foreground: 210 40% 85%;
+    --secondary-foreground: 210 40% 85%; /* Light text for dark secondary bg */
 
     --muted: 210 10% 22%; /* Muted dark gray */
-    --muted-foreground: 210 25% 65%;
+    --muted-foreground: 210 25% 65%; /* Lighter muted text for dark mode - KEPT */
 
     --accent: 170 65% 50%; /* Brighter Teal/Cyan for dark mode */
     --accent-foreground: 0 0% 100%; /* White */
@@ -87,7 +87,7 @@ body {
 
     /* Dark Sidebar specific colors */
     --sidebar-background: 210 10% 10%; /* Very dark sidebar */
-    --sidebar-foreground: 210 40% 85%;
+    --sidebar-foreground: 210 40% 85%; /* Light text for dark sidebar - KEPT */
     --sidebar-primary: 217 91% 60%;
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 210 10% 20%; /* Hover state for dark sidebar */
