@@ -37,20 +37,17 @@ export default function SiteStallSelector() {
     if (!db || !user) {
         setSitesForSelector([]);
         setLoadingSites(false);
-        if (activeSiteId !== null && !user) { // Only clear if no user AND it was previously set
+        if (activeSiteId !== null && !user) { 
             console.log("SiteStallSelector (useEffect sites): No user, clearing activeSiteId.");
             setActiveSite(null);
         }
         return;
     }
 
-    // Staff users do not use this component to select their site; it's set by AuthContext.
-    // So, if the user is staff, we don't need to fetch sites for *this selector*.
     if (user.role === 'staff') {
         console.log("SiteStallSelector (useEffect sites): User is staff, not fetching sites for this selector.");
         setSitesForSelector([]);
         setLoadingSites(false);
-        // Crucially, DO NOT call setActiveSite(null) here for staff, as AuthContext manages their default.
         return;
     }
 
@@ -61,20 +58,23 @@ export default function SiteStallSelector() {
       sitesQuery = query(collection(db, "sites"));
       console.log("SiteStallSelector (useEffect sites): Admin role, preparing to fetch all sites.");
     } else if (user.role === 'manager' && user.managedSiteIds && user.managedSiteIds.length > 0) {
-      if (user.managedSiteIds.length <= 30) {
+      if (user.managedSiteIds.length <= 30) { // Firestore 'in' query limit
          sitesQuery = query(collection(db, "sites"), where("__name__", "in", user.managedSiteIds));
          console.log("SiteStallSelector (useEffect sites): Manager role, fetching managed sites (<=30):", user.managedSiteIds);
       } else {
+        // For managers with >30 sites, fetch all and filter client-side.
+        // This is less ideal for very large numbers of total sites but handles Firestore limits.
         sitesQuery = query(collection(db, "sites")); 
         console.warn("SiteStallSelector (useEffect sites): Manager has >30 managed sites, fetching all sites for selector. Client-side filter will apply.");
       }
-    } else { // Manager with no managed sites, or unexpected role
+    } else { 
       console.log(`SiteStallSelector (useEffect sites): User role ${user.role} has no applicable sites for selector. Clearing sitesForSelector.`);
       setSitesForSelector([]);
       setLoadingSites(false);
-      // If an admin/manager had a site selected but now has no sites (e.g., manager unassigned from all)
-      if (activeSiteId !== null && (user.role === 'admin' || user.role === 'manager')) {
-            console.log(`SiteStallSelector (useEffect sites): No sites for ${user.role}, clearing activeSiteId.`);
+      // If a manager had a site selected but now has no sites (e.g., manager unassigned from all)
+      // Admins wouldn't hit this 'else' if they have 0 sites, as their query is just collection(db, "sites")
+      if (activeSiteId !== null && user.role === 'manager') { 
+            console.log(`SiteStallSelector (useEffect sites): No sites for manager ${user.uid}, clearing activeSiteId.`);
             setActiveSite(null);
       }
       return;
@@ -84,6 +84,7 @@ export default function SiteStallSelector() {
       let fetchedSites = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Site));
       console.log("SiteStallSelector (useEffect sites): Raw fetched sites count:", fetchedSites.length);
       
+      // Client-side filter for manager with >30 sites
       if (user.role === 'manager' && user.managedSiteIds && user.managedSiteIds.length > 30) {
           fetchedSites = fetchedSites.filter(site => user.managedSiteIds!.includes(site.id));
           console.log("SiteStallSelector (useEffect sites): Manager client-side filtered sites count:", fetchedSites.length);
@@ -91,7 +92,6 @@ export default function SiteStallSelector() {
       setSitesForSelector(fetchedSites.sort((a,b) => a.name.localeCompare(b.name)));
 
       // For Admin/Manager: If their currently active site is no longer in the list they are allowed to see, then clear it.
-      // This should NOT affect staff users whose activeSiteId is their default.
       if ((user.role === 'admin' || user.role === 'manager') && activeSiteId && !fetchedSites.find(s => s.id === activeSiteId)) {
         console.log(`SiteStallSelector (useEffect sites): Active site ${activeSiteId} not in fetched list for ${user.role}, clearing.`);
         setActiveSite(null);
@@ -108,7 +108,7 @@ export default function SiteStallSelector() {
       setSitesForSelector([]);
     });
     return () => unsubscribe();
-  }, [user, db, setActiveSite]); // activeSiteId was removed from here as per previous reasoning.
+  }, [user, db, setActiveSite]); 
 
   // Fetch stalls when activeSiteId changes (for any user who can select a site: admin or manager)
   useEffect(() => {
@@ -116,25 +116,23 @@ export default function SiteStallSelector() {
     if (!db || !user || !activeSiteId) {
       setStallsForSelector([]);
       setLoadingStalls(false);
-      if (!activeSiteId && activeStallId !== null) { // If site becomes null, stall must also become null
+      if (!activeSiteId && activeStallId !== null) { 
           console.log("SiteStallSelector (useEffect stalls): No activeSiteId, clearing activeStallId.");
           setActiveStall(null);
       }
       return;
     }
     
-    // Manager always sees "All Stalls" for their selected site context, does not pick a specific stall here.
     if (user.role === 'manager') {
         console.log("SiteStallSelector (useEffect stalls): User is manager, setting stallsForSelector to empty and activeStall to null.");
         setStallsForSelector([]); 
         setLoadingStalls(false);
         if (activeStallId !== null) {
-            setActiveStall(null); // Ensure manager's active stall is always null
+            setActiveStall(null); 
         }
         return;
     }
 
-    // Admin can select specific stalls
     if (user.role === 'admin') {
         setLoadingStalls(true);
         const stallsQuery = query(collection(db, "stalls"), where("siteId", "==", activeSiteId));
@@ -143,7 +141,6 @@ export default function SiteStallSelector() {
           setStallsForSelector(fetchedStalls.sort((a,b) => a.name.localeCompare(b.name)));
           console.log("SiteStallSelector (useEffect stalls): Fetched stalls for admin for site", activeSiteId, ":", fetchedStalls.length);
 
-          // If admin had a stall selected that's not in the new site's stall list, clear it.
           if (activeStallId && !fetchedStalls.find(s => s.id === activeStallId)) {
              console.log(`SiteStallSelector (useEffect stalls): Active stall ${activeStallId} not in new list for admin, clearing.`);
              setActiveStall(null);
@@ -157,24 +154,22 @@ export default function SiteStallSelector() {
         return () => unsubscribe();
     }
 
-    // Staff's activeStallId is managed by AuthContext based on their default.
-    // This component shouldn't try to fetch or clear it for staff.
     if (user.role === 'staff') {
         console.log("SiteStallSelector (useEffect stalls): User is staff, not fetching stalls for this selector.");
-        setStallsForSelector([]); // Staff don't use this to pick stalls
+        setStallsForSelector([]); 
         setLoadingStalls(false);
         return;
     }
     
-  }, [user, activeSiteId, db, setActiveStall]); // activeStallId removed from deps
+  }, [user, activeSiteId, db, setActiveStall]); 
 
   const handleSiteChange = (newSiteId: string) => {
     console.log(`SiteStallSelector: handleSiteChange called with newSiteId: ${newSiteId}. Current activeSiteId: ${activeSiteId}`);
-    if (newSiteId === activeSiteId) return; // No change
+    if (newSiteId === activeSiteId) return; 
 
     if (newSiteId === "all-sites" || newSiteId === "") {
         console.log("SiteStallSelector: handleSiteChange - setting active site to null.");
-        setActiveSite(null); // This will also clear activeStall via AuthContext logic if not manager
+        setActiveSite(null); 
     } else {
         console.log(`SiteStallSelector: handleSiteChange - setting active site to: ${newSiteId}.`);
         setActiveSite(newSiteId);
@@ -183,7 +178,7 @@ export default function SiteStallSelector() {
 
   const handleStallChange = (newStallId: string) => {
     console.log(`SiteStallSelector: handleStallChange called with newStallId: ${newStallId}. Current activeStallId: ${activeStallId}`);
-    if (newStallId === activeStallId) return; // No change
+    if (newStallId === activeStallId) return; 
 
     if (newStallId === "all-stalls" || newStallId === "") {
         console.log("SiteStallSelector: handleStallChange - setting active stall to null.");
@@ -194,8 +189,6 @@ export default function SiteStallSelector() {
     }
   };
 
-  // Only render the selector for admin or manager roles.
-  // Staff users have their context set by AuthContext based on their defaults.
   if (!user || (user.role !== 'admin' && user.role !== 'manager')) {
     console.log("SiteStallSelector: Not rendering, user role is not admin or manager. Role:", user?.role);
     return null;
@@ -211,7 +204,7 @@ export default function SiteStallSelector() {
   return (
     <div className="flex items-center gap-2">
       <Select
-        value={activeSiteId || "all-sites"} // Ensure value is never null for Select if "all-sites" represents null
+        value={activeSiteId || "all-sites"} 
         onValueChange={handleSiteChange}
         disabled={loadingSites || (user.role !== 'admin' && sitesForSelector.length === 0)}
       >
@@ -226,7 +219,6 @@ export default function SiteStallSelector() {
         </SelectContent>
       </Select>
 
-      {/* Stall selector is primarily for Admins. Managers have "All Stalls" context. Staff use their default. */}
       {user.role === 'admin' && (
         <Select
             value={activeStallId || "all-stalls"}
