@@ -34,8 +34,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Loader2, UserPlus, Eye, EyeOff } from "lucide-react";
 import type { AppUser, UserRole, Site, Stall } from "@/types";
-import { useAuth } from '@/contexts/AuthContext'; // To get current admin's token
+import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
+import { getAuth, type User as FirebaseUser } from 'firebase/auth'; // Import getAuth and FirebaseUser
+import { getApp } from 'firebase/app'; // Import getApp
 
 const createUserFormSchema = z.object({
   email: z.string().email({ message: "Invalid email address." }),
@@ -67,7 +69,8 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const { toast } = useToast();
-  const { user: adminUser, loading: adminAuthLoading } = useAuth(); // Get the currently logged-in admin user
+  const { user: adminAppUser, loading: adminAuthLoading } = useAuth(); // This is our AppUser type
+  const auth = getAuth(getApp()); // Get the Firebase Auth instance
 
   const form = useForm<CreateUserFormValues>({
     resolver: zodResolver(createUserFormSchema),
@@ -104,14 +107,16 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
   const handleSubmit = async (values: CreateUserFormValues) => {
     setIsSubmitting(true);
 
-    if (!adminUser || adminAuthLoading) {
-        toast({ title: "Error", description: "Admin user not loaded. Please try again.", variant: "destructive" });
+    const currentFirebaseUser: FirebaseUser | null = auth.currentUser; // Get current Firebase User
+
+    if (!adminAppUser || adminAuthLoading || !currentFirebaseUser) {
+        toast({ title: "Error", description: "Admin user not loaded or not authenticated. Please try again.", variant: "destructive" });
         setIsSubmitting(false);
         return;
     }
 
     try {
-      const idToken = await adminUser.getIdToken(); // Get admin's ID token
+      const idToken = await currentFirebaseUser.getIdToken(); // Get admin's ID token
 
       const response = await fetch('/api/admin/create-user', {
         method: 'POST',
@@ -129,7 +134,7 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
       const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.error || `Failed to create auth user. Status: ${response.status}`);
+        throw new Error(result.error || `Failed to create auth user via API. Status: ${response.status}`);
       }
       
       const authData = result as { uid: string; email: string; displayName: string };
@@ -160,14 +165,11 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
         form.reset();
         onClose();
       } else {
-        // onCreateUserFirestoreDoc should toast its own error.
-        // Consider if admin needs to delete the Auth user if Firestore doc fails (Advanced scenario)
-        // For now, this might leave an Auth user without a corresponding Firestore doc if firestoreSuccess is false.
          toast({ title: "Partial Success", description: `User ${authData.email} created in Auth, but Firestore document creation failed. Please check user list and try again.`, variant: "default" });
       }
 
     } catch (error: any) {
-      console.error("Error creating user via API route:", error);
+      console.error("Error creating user (callable or Firestore):", error);
       toast({
         title: "User Creation Failed",
         description: error.message || "An unexpected error occurred.",
@@ -394,3 +396,4 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
     </Dialog>
   );
 }
+
