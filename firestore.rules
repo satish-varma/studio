@@ -111,42 +111,32 @@ service cloud.firestore {
                        request.resource.data.name is string && request.resource.data.name.size() > 0 &&
                        request.resource.data.quantity is number && request.resource.data.quantity >= 0 &&
                        request.resource.data.price is number && request.resource.data.price >= 0 &&
-                       request.resource.data.lastUpdated is string; // Expecting ISO string from client
+                       request.resource.data.lastUpdated is string; 
 
-      allow update: if resource.data.siteId != null && 
-                       (isAdmin() || 
-                        (isManagerRole() && isManagerOfSite(resource.data.siteId)) || 
-                        (isStaffRole() && 
+      allow update: if resource.data.siteId != null &&
+                       (isAdmin() ||
+                        (isManagerRole() && isManagerOfSite(resource.data.siteId)) || // Managers can update items in their sites (all fields if needed, client controls specifics)
+                        (isStaffRole() &&
                           (
-                            // Case 1: Staff updating their assigned stall item
-                            (resource.data.stallId != null && 
+                            // Case 1: Staff updating their assigned STALL item - only quantity & lastUpdated
+                            (resource.data.stallId != null &&
                              isStaffAssignedTo(resource.data.siteId, resource.data.stallId) &&
-                             // Staff can only change quantity and lastUpdated for their stall items
                              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['quantity', 'lastUpdated'])
                             )
-                            || 
-                            // Case 2: Staff updating MASTER stock for THEIR ASSIGNED SITE (e.g., due to linked sale)
-                            (resource.data.stallId == null && 
+                            ||
+                            // Case 2: Staff updating MASTER stock item (stallId is null) FOR THEIR ASSIGNED SITE,
+                            // only if quantity and lastUpdated are being changed (e.g., due to a sale from their stall)
+                            (resource.data.stallId == null &&
                              isStaffAssignedToSiteOnly(resource.data.siteId) &&
-                             // Ensure only quantity and lastUpdated are being changed by staff for master stock
-                             request.resource.data.name == resource.data.name &&
-                             request.resource.data.category == resource.data.category &&
-                             request.resource.data.unit == resource.data.unit &&
-                             request.resource.data.price == resource.data.price &&
-                             request.resource.data.lowStockThreshold == resource.data.lowStockThreshold &&
-                             (request.resource.data.imageUrl == resource.data.imageUrl || (request.resource.data.imageUrl == null && resource.data.imageUrl == null)) && // Handle null imageUrl
-                             request.resource.data.siteId == resource.data.siteId && 
-                             request.resource.data.stallId == resource.data.stallId && 
-                             request.resource.data.originalMasterItemId == resource.data.originalMasterItemId
+                             request.resource.data.diff(resource.data).affectedKeys().hasOnly(['quantity', 'lastUpdated'])
                             )
                           )
                         )
                        ) &&
-                       // General conditions for any valid update by an authorized user
                        request.resource.data.lastUpdated is string &&
                        request.resource.data.quantity is number && request.resource.data.quantity >= 0 &&
-                       (request.resource.data.siteId == resource.data.siteId || isAdmin()) &&
-                       (request.resource.data.stallId == resource.data.stallId || isAdmin());
+                       (request.resource.data.siteId == resource.data.siteId || isAdmin()) && 
+                       (request.resource.data.stallId == resource.data.stallId || isAdmin()); 
 
       allow delete: if resource.data.siteId != null &&
                        (isAdmin() ||
@@ -163,12 +153,13 @@ service cloud.firestore {
     }
 
     match /salesTransactions/{transactionId} {
+      // Full secure rule for salesTransactions create
       allow create: if isSignedIn() && 
                        request.resource.data.staffId == request.auth.uid && 
-                       request.resource.data.siteId != null && 
-                       request.resource.data.stallId != null && 
+                       request.resource.data.siteId != null &&
+                       request.resource.data.stallId != null &&
                        (isAdmin() || 
-                        (isManagerRole() && isManagerOfSite(request.resource.data.siteId) && request.resource.data.stallId != null) || 
+                        (isManagerRole() && isManagerOfSite(request.resource.data.siteId) && request.resource.data.stallId != null) ||
                         (isStaffRole() && isStaffAssignedTo(request.resource.data.siteId, request.resource.data.stallId)) 
                        ) &&
                        request.resource.data.isDeleted == false &&
@@ -185,7 +176,7 @@ service cloud.firestore {
                        resource.data.isDeleted == false && 
                        request.resource.data.deletedBy == request.auth.uid &&
                        request.resource.data.deletionJustification is string && request.resource.data.deletionJustification.size() > 0 &&
-                       request.resource.data.deletedAt is string && // Expecting ISO string from client
+                       request.resource.data.deletedAt is string && 
                        !request.resource.data.keys().hasAny(['items', 'totalAmount', 'transactionDate', 'staffId', 'siteId', 'stallId', 'staffName']);
 
       allow delete: if false;
@@ -203,7 +194,7 @@ service cloud.firestore {
                        request.resource.data.quantityChange is number &&
                        request.resource.data.quantityBefore is number &&
                        request.resource.data.quantityAfter is number &&
-                       request.resource.data.timestamp is string; // Expecting ISO string from client
+                       request.resource.data.timestamp is string;
 
       allow read: if isAdmin() || 
                      (isManagerRole() && isManagerOfSite(resource.data.siteId));
@@ -223,3 +214,4 @@ service cloud.firestore {
   }
 }
 
+    
