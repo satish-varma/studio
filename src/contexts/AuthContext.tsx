@@ -91,8 +91,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
 
   const setActiveSite = (siteId: string | null) => {
+    console.log(`AuthContext: setActiveSite called with: ${siteId}`);
     setActiveSiteState(siteId);
     if (user?.role !== 'manager') {
+        console.log("AuthContext: Not a manager, clearing activeStallId.");
         setActiveStallState(null); 
     }
     if (typeof window !== 'undefined') {
@@ -108,6 +110,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const setActiveStall = (stallId: string | null) => {
+     console.log(`AuthContext: setActiveStall called with: ${stallId}`);
     setActiveStallState(stallId);
     if (typeof window !== 'undefined') {
       if (stallId) {
@@ -153,37 +156,48 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         userDocUnsubscribe();
         userDocUnsubscribe = null;
       }
-      // Keep loading true until user data is confirmed or user is confirmed null
       setLoading(true); 
 
       if (firebaseUser) {
+        console.log(`AuthContext: Auth state changed. User UID: ${firebaseUser.uid}. Fetching Firestore doc.`);
         const userDocRef = doc(db as Firestore, "users", firebaseUser.uid);
         
         userDocUnsubscribe = onSnapshot(userDocRef, (userDocSnap) => {
           let appUser: AppUser;
           if (userDocSnap.exists()) {
             const userData = userDocSnap.data();
+            console.log(`AuthContext: Firestore doc found for UID: ${firebaseUser.uid}. Data:`, userData);
             appUser = mapFirestoreDataToAppUser(firebaseUser, userData);
             
             const storedSiteId = typeof window !== 'undefined' ? localStorage.getItem('activeSiteId') : null;
             const storedStallId = typeof window !== 'undefined' ? localStorage.getItem('activeStallId') : null;
+            console.log(`AuthContext: User role: ${appUser.role}, defaultSiteId from DB: ${appUser.defaultSiteId}, defaultStallId from DB: ${appUser.defaultStallId}`);
+            console.log(`AuthContext: localStorage activeSiteId: ${storedSiteId}, localStorage activeStallId: ${storedStallId}`);
+
 
             if (appUser.role === 'admin') {
+                console.log(`AuthContext (Admin): Setting activeSite to localStorage value: ${storedSiteId}`);
                 setActiveSiteState(storedSiteId); 
                 setActiveStallState(storedSiteId ? storedStallId : null); 
             } else if (appUser.role === 'manager') {
                 if (appUser.managedSiteIds && appUser.managedSiteIds.length > 0) {
                     if (storedSiteId && appUser.managedSiteIds.includes(storedSiteId)) {
+                        console.log(`AuthContext (Manager): Setting activeSite to localStorage (valid managed): ${storedSiteId}`);
                         setActiveSiteState(storedSiteId);
                     } else {
+                        console.log(`AuthContext (Manager): Setting activeSite to first managed: ${appUser.managedSiteIds[0]}`);
                         setActiveSiteState(appUser.managedSiteIds[0]); 
                     }
                 } else {
+                    console.log(`AuthContext (Manager): No managed sites, setting activeSite to null.`);
                     setActiveSiteState(null); 
                 }
+                console.log(`AuthContext (Manager): Setting activeStall to null.`);
                 setActiveStallState(null); 
             } else { // Staff
+                console.log(`AuthContext (Staff): Setting activeSite to user's defaultSiteId: ${appUser.defaultSiteId}`);
                 setActiveSiteState(appUser.defaultSiteId); 
+                console.log(`AuthContext (Staff): Setting activeStall to user's defaultStallId (if defaultSiteId exists): ${appUser.defaultSiteId ? appUser.defaultStallId : null}`);
                 setActiveStallState(appUser.defaultSiteId ? appUser.defaultStallId : null); 
             }
             setUser(appUser);
@@ -194,26 +208,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User",
               createdAt: new Date().toISOString(), defaultSiteId: null, defaultStallId: null, managedSiteIds: null,
             };
-            // Set doc and expect this onSnapshot listener to fire again with the new data
             setDoc(userDocRef, defaultUserData).catch(error => {
                  console.error("AuthContext: Error creating user document in onSnapshot fallback:", error);
-                 // If doc creation fails, map with FirebaseUser data only and stop loading
                  setUser(mapFirestoreDataToAppUser(firebaseUser));
                  setLoading(false); 
             });
-            // Don't set loading false yet, wait for onSnapshot to re-fire with created doc or error out
             return; 
           }
-          setLoading(false); // Firestore data for user processed, set loading to false
+          console.log("AuthContext: User processed, setting loading to false.");
+          setLoading(false);
         }, (error) => {
           console.error("AuthContext: Error in user document onSnapshot listener:", error);
-          setUser(mapFirestoreDataToAppUser(firebaseUser)); // Fallback
+          setUser(mapFirestoreDataToAppUser(firebaseUser)); 
           setActiveSiteState(null);
           setActiveStallState(null);
-          setLoading(false); // Error occurred, stop loading
+          setLoading(false); 
         });
 
-      } else { // User logged out
+      } else { 
+        console.log("AuthContext: No Firebase user (logged out). Clearing state.");
         setUser(null);
         setActiveSiteState(null);
         setActiveStallState(null);
@@ -221,9 +234,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             localStorage.removeItem('activeSiteId');
             localStorage.removeItem('activeStallId');
         }
-        setLoading(false); // No user, stop loading
+        setLoading(false); 
       }
-      // setLoading(false) was here, moved inside or to else block
     });
 
     return () => {
@@ -240,9 +252,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, pass);
       const firebaseUser = userCredential.user;
-      
-      // The onSnapshot listener will handle setting user, activeSite/Stall, and setLoading(false)
-      // We can optimistically fetch the doc here for return, but context update relies on listener
       const userDocRef = doc(db as Firestore, "users", firebaseUser.uid);
       const userDocSnap = await getDoc(userDocRef);
       let appUserToReturn: AppUser;
@@ -256,16 +265,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User",
             createdAt: new Date().toISOString(), defaultSiteId: null, defaultStallId: null, managedSiteIds: null,
         };
-        await setDoc(userDocRef, defaultUserData); // This will trigger the onSnapshot
+        await setDoc(userDocRef, defaultUserData); 
         appUserToReturn = mapFirestoreDataToAppUser(firebaseUser, defaultUserData);
       }
       return appUserToReturn; 
     } catch (error) {
       console.error("Sign in error:", error);
-      setLoading(false); // Ensure loading is false on error
+      setLoading(false); 
       throw error; 
     }
-    // setLoading(false) will be handled by the onSnapshot listener
   }, []);
   
   const signUp = useCallback(async (email: string, pass: string, displayName: string): Promise<AppUser | null> => {
@@ -285,14 +293,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       };
       const userDocRef = doc(db as Firestore, "users", firebaseUser.uid);
       await setDoc(userDocRef, newUserDocData);
-      // The onSnapshot listener will pick up this new user and set context state, including setLoading(false).
       return mapFirestoreDataToAppUser(firebaseUser, newUserDocData);
     } catch (error) {
       console.error("Sign up error:", error);
-      setLoading(false); // Ensure loading is false on error
+      setLoading(false); 
       throw error;
     }
-    // setLoading(false) will be handled by the onSnapshot listener
   }, []);
 
   const signOutUser = useCallback(async () => {
@@ -300,14 +306,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.error("AuthContext: Firebase Auth not initialized for signOut.");
       return;
     }
-    // setLoading(true) not strictly needed here as onAuthStateChanged will handle it
     try {
       await firebaseSignOut(auth);
       console.log("AuthContext: User signed out successfully.");
     } catch (error) {
       console.error("Sign out error:", error);
     }
-    // setLoading(false) and state clearing will be handled by onAuthStateChanged listener
   }, []);
 
   return (
@@ -336,3 +340,4 @@ export const useAuth = (): AuthContextType => {
   return context;
 };
 
+    

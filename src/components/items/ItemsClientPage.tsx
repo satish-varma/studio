@@ -35,7 +35,7 @@ if (!getApps().length) {
 }
 
 export default function ItemsClientPage() {
-  const { user, activeSiteId, loading: authLoading } = useAuth(); // Use authLoading
+  const { user, activeSiteId, loading: authLoading } = useAuth(); 
 
   const [searchTerm, setSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
@@ -47,22 +47,24 @@ export default function ItemsClientPage() {
   const [sitesMap, setSitesMap] = useState<Record<string, string>>({});
   const [stallsMap, setStallsMap] = useState<Record<string, string>>({});
 
-  const [loadingPageData, setLoadingPageData] = useState(true); // Renamed for clarity
-  const [errorPageData, setErrorPageData] = useState<string | null>(null); // Renamed for clarity
+  const [loadingPageData, setLoadingPageData] = useState(true); 
+  const [errorPageData, setErrorPageData] = useState<string | null>(null); 
   
   useEffect(() => {
-    if (user && !authLoading) { // Only set from user defaults once auth is done and user is available
+    if (user && !authLoading) { 
       setSearchTerm(user.defaultItemSearchTerm || "");
       setCategoryFilter(user.defaultItemCategoryFilter || "all");
       setStockStatusFilter(user.defaultItemStockStatusFilter || "all");
       setStallFilterOption(user.defaultItemStallFilterOption || "all");
+      console.log("ItemsClientPage: User defaults applied to filters.", { defaultSearch: user.defaultItemSearchTerm, activeSiteIdFromAuth: activeSiteId });
     }
-  }, [user, authLoading]);
+  }, [user, authLoading, activeSiteId]); // Added activeSiteId to re-evaluate if it changes
 
 
   const fetchSupportingDataAndItems = useCallback(async () => {
-    if (authLoading) { // If auth is still loading, don't proceed
-        setLoadingPageData(true); // Ensure page shows loading
+    console.log(`ItemsClientPage: fetchSupportingDataAndItems called. AuthLoading: ${authLoading}, User: ${!!user}, ActiveSiteId: ${activeSiteId}`);
+    if (authLoading) { 
+        setLoadingPageData(true); 
         return;
     }
 
@@ -92,6 +94,7 @@ export default function ItemsClientPage() {
         newSitesMap[doc.id] = (doc.data() as Site).name;
       });
       setSitesMap(newSitesMap);
+      console.log("ItemsClientPage: Sites map fetched.", newSitesMap);
 
       const allStallsCollectionRef = collection(db, "stalls");
       const allStallsSnapshot = await getDocs(allStallsCollectionRef);
@@ -100,21 +103,27 @@ export default function ItemsClientPage() {
         newStallsMap[doc.id] = (doc.data() as Stall).name;
       });
       setStallsMap(newStallsMap);
+      console.log("ItemsClientPage: Stalls map fetched.", newStallsMap);
+
 
       if (activeSiteId) {
+        console.log(`ItemsClientPage: Active site ID is ${activeSiteId}. Fetching its stalls.`);
         const qStalls = query(collection(db, "stalls"), where("siteId", "==", activeSiteId));
         const querySnapshotStalls = await getDocs(qStalls);
         const fetchedStalls = querySnapshotStalls.docs.map(doc => ({ id: doc.id, ...doc.data() } as Stall));
         fetchedStalls.sort((a, b) => a.name.localeCompare(b.name));
         setStallsForFilterDropdown(fetchedStalls);
+        console.log("ItemsClientPage: Stalls for filter dropdown fetched for site.", activeSiteId, fetchedStalls);
         
-        // If current stallFilterOption is a specific stall ID that's no longer in the fetchedStalls for the new activeSiteId, reset it.
         if (stallFilterOption !== 'all' && stallFilterOption !== 'master' && !fetchedStalls.find(s => s.id === stallFilterOption)) {
+            console.log("ItemsClientPage: Current stallFilterOption not in new site's stalls, resetting to 'all'.");
             setStallFilterOption('all'); 
         }
       } else {
+        console.log("ItemsClientPage: No active site ID. Clearing stalls for filter dropdown.");
         setStallsForFilterDropdown([]);
         if (stallFilterOption !== 'all' && stallFilterOption !== 'master') {
+             console.log("ItemsClientPage: No active site, resetting stallFilterOption to 'all'.");
              setStallFilterOption('all'); 
         }
       }
@@ -129,8 +138,10 @@ export default function ItemsClientPage() {
         } else if (user.role === 'manager') {
           message = "Manager: Please select one of your managed sites from the header to view its stock.";
         }
+        console.log("ItemsClientPage: No active site, setting error message:", message);
         setErrorPageData(message);
       } else {
+        console.log(`ItemsClientPage: Fetching items for site: ${activeSiteId}, stallFilter: ${stallFilterOption}`);
         const itemsCollectionRef = collection(db, "stockItems");
         let qConstraints: QueryConstraint[] = [
           where("siteId", "==", activeSiteId)
@@ -141,6 +152,7 @@ export default function ItemsClientPage() {
         } else if (stallFilterOption !== "all" && stallFilterOption !== "master") {
           qConstraints.push(where("stallId", "==", stallFilterOption));
         }
+        console.log("ItemsClientPage: Query constraints for items:", qConstraints);
 
         const finalItemsQuery = query(itemsCollectionRef, ...qConstraints);
         const itemsSnapshot = await getDocs(finalItemsQuery);
@@ -150,6 +162,7 @@ export default function ItemsClientPage() {
         } as StockItem));
         fetchedItems.sort((a, b) => a.name.localeCompare(b.name));
         setItems(fetchedItems);
+        console.log("ItemsClientPage: Items fetched:", fetchedItems.length, fetchedItems);
       }
 
     } catch (error: any) {
@@ -162,14 +175,13 @@ export default function ItemsClientPage() {
       setStallsForFilterDropdown([]);
     } finally {
       setLoadingPageData(false);
+      console.log("ItemsClientPage: fetchSupportingDataAndItems finished. LoadingPageData: false.");
     }
-  }, [user, activeSiteId, stallFilterOption, db, authLoading]); // Added authLoading
+  }, [user, activeSiteId, stallFilterOption, db, authLoading]); 
 
   useEffect(() => {
-    // This effect now primarily triggers based on authLoading, user, activeSiteId changes,
-    // ensuring fetchSupportingDataAndItems runs when these critical context values are stable.
     fetchSupportingDataAndItems();
-  }, [fetchSupportingDataAndItems]); // fetchSupportingDataAndItems itself now depends on authLoading
+  }, [fetchSupportingDataAndItems]); // fetchSupportingDataAndItems is memoized and its dependencies include activeSiteId, user, authLoading etc.
 
 
   const uniqueCategories = useMemo(() => {
@@ -196,7 +208,7 @@ export default function ItemsClientPage() {
   }, [items, searchTerm, categoryFilter, stockStatusFilter]);
 
 
-  if (authLoading || loadingPageData) { // Check both authLoading and page-specific loading
+  if (authLoading || loadingPageData) { 
     return (
       <div className="flex justify-center items-center py-10">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -225,7 +237,7 @@ export default function ItemsClientPage() {
         isSiteActive={!!activeSiteId}
       />
 
-      {errorPageData && !loadingPageData && ( // Check page-specific loading and error
+      {errorPageData && !loadingPageData && ( 
         <Alert variant="default" className="border-primary/30">
             <Info className="h-4 w-4" />
             <AlertTitle>Information</AlertTitle>
@@ -262,4 +274,5 @@ export default function ItemsClientPage() {
     </div>
   );
 }
+    
     
