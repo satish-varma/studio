@@ -137,7 +137,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
 
   const handleSelectItem = (itemId: string, checked: boolean | 'indeterminate') => {
     const item = items.find(i => i.id === itemId);
-    if (item && !item.stallId) return; 
+    if (item && !item.stallId) return;
 
     if (checked === true) {
       setSelectedItems(prev => [...prev, itemId]);
@@ -148,7 +148,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
 
   const handleEdit = (itemId: string) => {
     router.push(`/items/${itemId}/edit`);
-    setSelectedItems([]); 
+    setSelectedItems([]);
   };
 
   const handleDelete = async (itemId: string, itemName: string) => {
@@ -244,7 +244,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         }
         const currentItemData = itemSnap.data() as StockItem;
         const oldQuantity = currentItemData.quantity;
-        
+
         let masterItemSnap: DocumentSnapshot | null = null;
         let masterItemRef: DocumentReference | null = null;
 
@@ -252,7 +252,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             masterItemRef = doc(db, "stockItems", currentItemData.originalMasterItemId);
             masterItemSnap = await transaction.get(masterItemRef);
         }
-        
+
         transaction.update(itemRef, {
           quantity: updatedQuantityNum,
           lastUpdated: new Date().toISOString(),
@@ -260,12 +260,12 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
 
         if (masterItemSnap && masterItemSnap.exists() && masterItemRef) {
           const masterItemData = masterItemSnap.data() as StockItem;
-          const quantityDelta = updatedQuantityNum - oldQuantity; 
-          
+          const quantityDelta = updatedQuantityNum - oldQuantity;
+
           const newMasterQuantity = masterItemData.quantity - quantityDelta;
-          
+
           transaction.update(masterItemRef, {
-            quantity: Math.max(0, newMasterQuantity), 
+            quantity: Math.max(0, newMasterQuantity),
             lastUpdated: new Date().toISOString(),
           });
         } else if (currentItemData.stallId && currentItemData.originalMasterItemId && !masterItemSnap?.exists()){
@@ -331,12 +331,12 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           where("originalMasterItemId", "==", itemToAllocate.id),
           where("stallId", "==", targetStallIdForAllocation)
         );
-        
+
         let targetStallItemRef: DocumentReference | null = null;
         let existingStallItemData: StockItem | null = null;
-        
-        const existingStallItemsQuerySnap = await getDocs(stallItemsQuery); 
-                                                                         
+
+        const existingStallItemsQuerySnap = await getDocs(stallItemsQuery);
+
         if (!existingStallItemsQuerySnap.empty) {
             targetStallItemRef = existingStallItemsQuerySnap.docs[0].ref;
             const targetStallItemSnap = await transaction.get(targetStallItemRef);
@@ -345,12 +345,12 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             }
         }
 
-        if (targetStallItemRef && existingStallItemData) { 
+        if (targetStallItemRef && existingStallItemData) {
             transaction.update(targetStallItemRef, {
                 quantity: existingStallItemData.quantity + numQuantityToAllocate,
                 lastUpdated: new Date().toISOString(),
             });
-        } else { 
+        } else {
             const newStallItemRef = doc(collection(db, "stockItems"));
             const newStallItemDataToSave: Omit<StockItem, 'id'> = {
                 name: currentMasterStock.name,
@@ -358,6 +358,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                 quantity: numQuantityToAllocate,
                 unit: currentMasterStock.unit,
                 price: currentMasterStock.price,
+                costPrice: currentMasterStock.costPrice,
                 lowStockThreshold: currentMasterStock.lowStockThreshold,
                 imageUrl: currentMasterStock.imageUrl,
                 siteId: currentMasterStock.siteId,
@@ -491,11 +492,10 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     try {
       await runTransaction(db, async (transaction) => {
         const sourceItemRef = doc(db, "stockItems", itemToTransfer.id);
-        
+
         let destinationItemRef: DocumentReference | null = null;
         let destinationItemSnap: DocumentSnapshot | null = null;
-        
-        // Perform reads first
+
         const sourceItemSnap = await transaction.get(sourceItemRef);
         if (!sourceItemSnap.exists()) throw new Error("Source item not found.");
         const sourceItemData = sourceItemSnap.data() as StockItem;
@@ -504,19 +504,15 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         const q = query(
             collection(db, "stockItems"),
             where("stallId", "==", destinationStallId),
-            where("originalMasterItemId", "==", sourceItemData.originalMasterItemId || null) 
+            where("originalMasterItemId", "==", sourceItemData.originalMasterItemId || null)
         );
-        
-        // This getDocs is outside the transaction reads-first requirement because it's a query, not a direct doc read.
-        // However, for strict atomicity with the destination check, this could be a point of refinement if high concurrency is an issue.
-        // For now, we'll fetch the query result and then get the specific doc inside the transaction.
-        const destQuerySnap = await getDocs(q); 
+
+        const destQuerySnap = await getDocs(q);
         if (!destQuerySnap.empty) {
             destinationItemRef = destQuerySnap.docs[0].ref;
-            destinationItemSnap = await transaction.get(destinationItemRef); // Read inside transaction
+            destinationItemSnap = await transaction.get(destinationItemRef);
         }
 
-        // Now perform writes
         transaction.update(sourceItemRef, {
           quantity: sourceItemData.quantity - numQuantityToTransfer,
           lastUpdated: new Date().toISOString()
@@ -536,6 +532,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             quantity: numQuantityToTransfer,
             unit: sourceItemData.unit,
             price: sourceItemData.price,
+            costPrice: sourceItemData.costPrice,
             lowStockThreshold: sourceItemData.lowStockThreshold,
             imageUrl: sourceItemData.imageUrl,
             siteId: sourceItemData.siteId,
@@ -592,7 +589,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             if (masterItemSnap.exists()) {
               const masterData = masterItemSnap.data() as StockItem;
               transaction.update(masterItemRef, {
-                quantity: masterData.quantity + stallItemData.quantity, 
+                quantity: masterData.quantity + stallItemData.quantity,
                 lastUpdated: new Date().toISOString(),
               });
             } else {
@@ -621,7 +618,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         variant: "destructive",
       });
     }
-    
+
     onDataNeedsRefresh();
     setSelectedItems([]);
     setIsBatchDeleting(false);
@@ -633,7 +630,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       toast({ title: "No Stall Items Selected", description: "Please select stall items to update.", variant: "default" });
       return;
     }
-    setBatchUpdateQuantity(""); 
+    setBatchUpdateQuantity("");
     setShowBatchUpdateStockDialog(true);
   };
 
@@ -661,7 +658,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           }
           const currentStallData = stallItemSnap.data() as StockItem;
           const oldStallQuantity = currentStallData.quantity;
-          
+
           let masterItemSnap: DocumentSnapshot | null = null;
           let masterItemRefToUpdate: DocumentReference | null = null;
 
@@ -669,7 +666,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             masterItemRefToUpdate = doc(db, "stockItems", currentStallData.originalMasterItemId);
             masterItemSnap = await transaction.get(masterItemRefToUpdate);
           }
-          
+
           transaction.update(stallItemRef, {
             quantity: newBatchQtyNum,
             lastUpdated: new Date().toISOString(),
@@ -693,7 +690,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         errorCount++;
       }
     }
-    
+
     if (successCount > 0) {
       toast({
         title: "Batch Stock Update Processed",
@@ -737,7 +734,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   };
 
 
-  if (items.length === 0 && selectedItems.length === 0) { 
+  if (items.length === 0 && selectedItems.length === 0) {
     return (
       <div className="text-center py-10 px-4 bg-card rounded-lg border shadow-sm">
         <PackageOpen className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
@@ -756,7 +753,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   const stallsForCurrentSite = itemToAllocate?.siteId
     ? availableStallsForAllocation.filter(s => s.siteId === itemToAllocate.siteId)
     : [];
-  
+
   const destinationStallsForTransfer = itemToTransfer?.siteId
     ? availableStallsForAllocation.filter(s => s.siteId === itemToTransfer.siteId && s.id !== itemToTransfer.stallId)
     : [];
@@ -776,14 +773,14 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem 
+              <DropdownMenuItem
                 onClick={handleOpenBatchUpdateStockDialog}
                 disabled={isBatchUpdatingStock}
               >
                 <Edit3 className="mr-2 h-4 w-4" /> Set Stock Quantity
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem 
+              <DropdownMenuItem
                 onClick={handleOpenBatchDeleteDialog}
                 className="text-destructive focus:text-destructive-foreground focus:bg-destructive"
                 disabled={isBatchDeleting}
@@ -815,7 +812,8 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
               <TableHead>Category</TableHead>
               <TableHead className="text-right">Quantity</TableHead>
               <TableHead>Unit</TableHead>
-              <TableHead className="text-right">Price</TableHead>
+              <TableHead className="text-right">Cost Price</TableHead>
+              <TableHead className="text-right">Sell Price</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Last Updated</TableHead>
               <TableHead className="text-right">Actions</TableHead>
@@ -861,8 +859,8 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
 
 
               return (
-                <TableRow 
-                    key={item.id} 
+                <TableRow
+                    key={item.id}
                     data-state={isSelected && !isMasterStock ? "selected" : ""}
                     className={cn(
                         isSelected && !isMasterStock && "bg-primary/5 hover:bg-primary/10",
@@ -877,7 +875,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                         checked={isSelected}
                         onCheckedChange={(checked) => handleSelectItem(item.id, checked)}
                         aria-label={`Select item ${item.name}`}
-                        disabled={isMasterStock} 
+                        disabled={isMasterStock}
                       />
                   </TableCell>
                   <TableCell>
@@ -902,6 +900,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                   <TableCell className="text-muted-foreground">{item.category}</TableCell>
                   <TableCell className="text-right text-foreground">{item.quantity}</TableCell>
                   <TableCell className="text-muted-foreground">{item.unit}</TableCell>
+                  <TableCell className="text-right text-muted-foreground">₹{(item.costPrice ?? 0).toFixed(2)}</TableCell>
                   <TableCell className="text-right text-foreground">₹{item.price.toFixed(2)}</TableCell>
                   <TableCell>
                     <Badge
@@ -1069,7 +1068,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       {itemForSingleDelete && (
         <AlertDialog open={showSingleDeleteDialog} onOpenChange={(open) => {
             setShowSingleDeleteDialog(open);
-            if (!open) setItemForSingleDelete(null); 
+            if (!open) setItemForSingleDelete(null);
         }}>
             <AlertDialogContent>
             <AlertDialogHeader>
@@ -1250,11 +1249,10 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         </AlertDialog>
       )}
       <style jsx global>{`
-        .indeterminate-checkbox:has(+ svg) { 
-          background-image: none; 
+        .indeterminate-checkbox:has(+ svg) {
+          background-image: none;
         }
       `}</style>
     </TooltipProvider>
   );
 }
-

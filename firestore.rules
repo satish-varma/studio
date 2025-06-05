@@ -111,21 +111,19 @@ service cloud.firestore {
                        request.resource.data.name is string && request.resource.data.name.size() > 0 &&
                        request.resource.data.quantity is number && request.resource.data.quantity >= 0 &&
                        request.resource.data.price is number && request.resource.data.price >= 0 &&
-                       request.resource.data.lastUpdated is string; 
+                       (request.resource.data.costPrice == null || (request.resource.data.costPrice is number && request.resource.data.costPrice >= 0)) &&
+                       request.resource.data.lastUpdated is string;
 
       allow update: if resource.data.siteId != null &&
                        (isAdmin() ||
-                        (isManagerRole() && isManagerOfSite(resource.data.siteId)) || // Managers can update items in their sites (all fields if needed, client controls specifics)
+                        (isManagerRole() && isManagerOfSite(resource.data.siteId)) || 
                         (isStaffRole() &&
                           (
-                            // Case 1: Staff updating their assigned STALL item - only quantity & lastUpdated
                             (resource.data.stallId != null &&
                              isStaffAssignedTo(resource.data.siteId, resource.data.stallId) &&
                              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['quantity', 'lastUpdated'])
                             )
                             ||
-                            // Case 2: Staff updating MASTER stock item (stallId is null) FOR THEIR ASSIGNED SITE,
-                            // only if quantity and lastUpdated are being changed (e.g., due to a sale from their stall)
                             (resource.data.stallId == null &&
                              isStaffAssignedToSiteOnly(resource.data.siteId) &&
                              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['quantity', 'lastUpdated'])
@@ -135,8 +133,9 @@ service cloud.firestore {
                        ) &&
                        request.resource.data.lastUpdated is string &&
                        request.resource.data.quantity is number && request.resource.data.quantity >= 0 &&
-                       (request.resource.data.siteId == resource.data.siteId || isAdmin()) && 
-                       (request.resource.data.stallId == resource.data.stallId || isAdmin()); 
+                       (request.resource.data.costPrice == null || (request.resource.data.costPrice is number && request.resource.data.costPrice >= 0)) && // Allow costPrice to be updated
+                       (request.resource.data.siteId == resource.data.siteId || isAdmin()) &&
+                       (request.resource.data.stallId == resource.data.stallId || isAdmin());
 
       allow delete: if resource.data.siteId != null &&
                        (isAdmin() ||
@@ -153,7 +152,6 @@ service cloud.firestore {
     }
 
     match /salesTransactions/{transactionId} {
-      // Full secure rule for salesTransactions create
       allow create: if isSignedIn() && 
                        request.resource.data.staffId == request.auth.uid && 
                        request.resource.data.siteId != null &&
@@ -213,5 +211,3 @@ service cloud.firestore {
     }
   }
 }
-
-    

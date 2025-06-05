@@ -23,7 +23,7 @@ import { getFirestore, doc, setDoc, addDoc, collection, getDoc } from "firebase/
 import { firebaseConfig } from "@/lib/firebaseConfig";
 import { getApps, initializeApp } from "firebase/app";
 import type { StockItem } from "@/types";
-import { useState, useEffect } from "react"; 
+import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { logStockMovement } from "@/lib/stockLogger";
 
@@ -37,8 +37,8 @@ if (!getApps().length) {
 const db = getFirestore();
 
 interface ItemFormProps {
-  initialData?: StockItem | null; 
-  itemId?: string | null; 
+  initialData?: StockItem | null;
+  itemId?: string | null;
   sitesMap?: Record<string, string>; // Optional, for displaying names
   stallsMap?: Record<string, string>; // Optional, for displaying names
 }
@@ -46,7 +46,7 @@ interface ItemFormProps {
 export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap = {} }: ItemFormProps) {
   const router = useRouter();
   const { toast } = useToast();
-  const { user, activeSiteId, activeStallId } = useAuth(); 
+  const { user, activeSiteId, activeStallId } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const isEditMode = !!initialData && !!itemId;
   const [itemStatusMessage, setItemStatusMessage] = useState<string | null>(null);
@@ -59,6 +59,7 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
       quantity: initialData.quantity,
       unit: initialData.unit,
       price: initialData.price,
+      costPrice: initialData.costPrice || 0.00,
       lowStockThreshold: initialData.lowStockThreshold,
       imageUrl: initialData.imageUrl || "",
     } : {
@@ -67,6 +68,7 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
       quantity: 0,
       unit: "pcs",
       price: 0.00,
+      costPrice: 0.00,
       lowStockThreshold: 10,
       imageUrl: "",
     },
@@ -108,17 +110,29 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
       const newQuantity = Number(values.quantity);
       const baseItemData = {
         ...values,
-        price: Number(values.price), 
-        quantity: newQuantity, 
-        lowStockThreshold: Number(values.lowStockThreshold), 
+        price: Number(values.price),
+        costPrice: Number(values.costPrice),
+        quantity: newQuantity,
+        lowStockThreshold: Number(values.lowStockThreshold),
         lastUpdated: new Date().toISOString(),
       };
 
       if (isEditMode && itemId && initialData) {
         const itemRef = doc(db, "stockItems", itemId);
+        // Exclude siteId and stallId from direct update if they are part of baseItemData
+        // These should not be changed through this form directly, but via allocation/transfer logic
         const { siteId: initialSiteId, stallId: initialStallId, ...editableValues } = baseItemData;
-        await setDoc(itemRef, editableValues, { merge: true });
-        
+
+        const dataToSet = {
+            ...editableValues,
+            // Retain original siteId and stallId for existing items
+            siteId: initialData.siteId,
+            stallId: initialData.stallId,
+            originalMasterItemId: initialData.originalMasterItemId,
+        };
+
+        await setDoc(itemRef, dataToSet, { merge: true });
+
         const oldQuantity = initialData.quantity;
         const quantityChange = newQuantity - oldQuantity;
 
@@ -140,7 +154,7 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
           title: "Item Updated",
           description: `${values.name} has been successfully updated.`,
         });
-      } else { 
+      } else {
         if (!activeSiteId) {
           toast({ title: "Site Context Missing", description: "Please select an active site from the header to add an item.", variant: "destructive" });
           setIsSubmitting(false);
@@ -149,11 +163,11 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
         const itemDataToSave = {
           ...baseItemData,
           siteId: activeSiteId,
-          stallId: activeStallId, 
+          stallId: activeStallId,
           originalMasterItemId: null, // New items don't have this until allocated from master
         };
         const newItemRef = await addDoc(collection(db, "stockItems"), itemDataToSave);
-        
+
         await logStockMovement(user, {
           stockItemId: newItemRef.id,
           siteId: activeSiteId,
@@ -171,7 +185,7 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
         });
       }
       router.push("/items");
-      router.refresh(); 
+      router.refresh();
     } catch (error: any) {
       console.error("Error saving item:", error);
       toast({
@@ -257,10 +271,10 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <FormField
                 control={form.control}
-                name="price"
+                name="costPrice"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Price per Unit (₹)</FormLabel>
+                    <FormLabel>Cost Price per Unit (₹)</FormLabel>
                     <FormControl>
                       <Input type="number" step="0.01" placeholder="0.00" {...field} onChange={e => field.onChange(parseFloat(e.target.value) || 0)} disabled={isSubmitting} className="bg-input"/>
                     </FormControl>
@@ -269,6 +283,20 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
                 )}
               />
               <FormField
+                control={form.control}
+                name="price"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Selling Price per Unit (₹)</FormLabel>
+                    <FormControl>
+                      <Input type="number" step="0.01" placeholder="0.00" {...field} onChange={e => field.onChange(parseFloat(e.target.value) || 0)} disabled={isSubmitting} className="bg-input"/>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+             <FormField
                 control={form.control}
                 name="lowStockThreshold"
                 render={({ field }) => (
@@ -281,7 +309,6 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
                   </FormItem>
                 )}
               />
-            </div>
             <FormField
               control={form.control}
               name="imageUrl"

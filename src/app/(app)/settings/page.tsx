@@ -43,7 +43,7 @@ export default function SettingsPage() {
   const { toast } = useToast();
   const [isExportingStockCsv, setIsExportingStockCsv] = useState(false);
   const [isExportingSalesCsv, setIsExportingSalesCsv] = useState(false);
-  
+
   const [isProcessingStockSheetsImport, setIsProcessingStockSheetsImport] = useState(false);
   const [isProcessingStockSheetsExport, setIsProcessingStockSheetsExport] = useState(false);
   const [isProcessingSalesSheetsImport, setIsProcessingSalesSheetsImport] = useState(false);
@@ -72,7 +72,7 @@ export default function SettingsPage() {
       const stockItemsCollectionRef = collection(db, "stockItems");
       const q = query(stockItemsCollectionRef, orderBy("name"));
       const querySnapshot = await getDocs(q);
-      
+
       const items: StockItem[] = [];
       querySnapshot.forEach((doc) => {
         items.push({ id: doc.id, ...doc.data() } as StockItem);
@@ -85,10 +85,10 @@ export default function SettingsPage() {
       }
 
       const headers = [
-        "ID", "Name", "Category", "Quantity", "Unit", 
-        "Price (₹)", "Low Stock Threshold", "Image URL", "Last Updated", "Site ID", "Stall ID"
+        "ID", "Name", "Category", "Quantity", "Unit",
+        "Cost Price (₹)", "Selling Price (₹)", "Low Stock Threshold", "Image URL", "Last Updated", "Site ID", "Stall ID", "Original Master Item ID"
       ];
-      
+
       const csvRows = [headers.join(",")];
 
       items.forEach(item => {
@@ -98,12 +98,14 @@ export default function SettingsPage() {
           escapeCsvCell(item.category),
           escapeCsvCell(item.quantity),
           escapeCsvCell(item.unit),
+          escapeCsvCell((item.costPrice ?? 0).toFixed(2)),
           escapeCsvCell(item.price.toFixed(2)),
           escapeCsvCell(item.lowStockThreshold),
           escapeCsvCell(item.imageUrl || ""),
           escapeCsvCell(item.lastUpdated ? new Date(item.lastUpdated).toLocaleString('en-IN') : ""),
           escapeCsvCell(item.siteId || ""),
-          escapeCsvCell(item.stallId || "")
+          escapeCsvCell(item.stallId || ""),
+          escapeCsvCell(item.originalMasterItemId || "")
         ];
         csvRows.push(row.join(","));
       });
@@ -264,17 +266,17 @@ export default function SettingsPage() {
         return;
       }
       const idToken = await auth.currentUser.getIdToken();
-      
+
       const response = await fetch('/api/google-sheets-proxy', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${idToken}`,
         },
-        body: JSON.stringify({ 
-          action: action, 
+        body: JSON.stringify({
+          action: action,
           dataType: dataType,
-          sheetId: sheetId, 
+          sheetId: sheetId,
         }),
       });
 
@@ -295,12 +297,12 @@ export default function SettingsPage() {
       if (!response.ok) {
         console.error(`API Error (${response.status}) for ${friendlyAction}:`, result);
         if (result.needsAuth && result.authUrl) {
-          toast({ 
-            title: "Authorization Required", 
+          toast({
+            title: "Authorization Required",
             description: "Please authorize StallSync to access your Google Sheets. Redirecting...",
-            duration: 5000 
+            duration: 5000
           });
-          window.location.href = result.authUrl; 
+          window.location.href = result.authUrl;
         } else {
           let errorMessage = result.error || `Failed to ${friendlyAction}. Status: ${response.status}.`;
           if (response.status === 401 && result.error?.toLowerCase().includes("invalid firebase id token")) {
@@ -329,10 +331,10 @@ export default function SettingsPage() {
 
     } catch (error: any) {
       console.error(`Error during Google Sheets ${friendlyAction}:`, error);
-      toast({ 
-        title: "Client-side Error", 
-        description: error.message || `Failed to ${friendlyAction}. Check console for details.`, 
-        variant: "destructive" 
+      toast({
+        title: "Client-side Error",
+        description: error.message || `Failed to ${friendlyAction}. Check console for details.`,
+        variant: "destructive"
       });
     } finally {
       setLoadingState(false);
@@ -360,7 +362,7 @@ export default function SettingsPage() {
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between p-4 bg-muted/30 rounded-md">
               <Label htmlFor="dark-mode-switch" className="text-sm font-medium">Dark Mode</Label>
-              <Switch id="dark-mode-switch" disabled /> 
+              <Switch id="dark-mode-switch" disabled />
             </div>
              <p className="text-xs text-center text-muted-foreground">(Theme switching coming soon)</p>
           </CardContent>
@@ -405,9 +407,9 @@ export default function SettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <Button 
-            variant="outline" 
-            className="w-full" 
+          <Button
+            variant="outline"
+            className="w-full"
             onClick={exportStockItemsToCsv}
             disabled={isExportingStockCsv}
           >
@@ -418,9 +420,9 @@ export default function SettingsPage() {
             )}
             Export Stock Data (CSV)
           </Button>
-          <Button 
-            variant="outline" 
-            className="w-full" 
+          <Button
+            variant="outline"
+            className="w-full"
             onClick={exportSalesDataToCsv}
             disabled={isExportingSalesCsv}
           >
@@ -447,18 +449,18 @@ export default function SettingsPage() {
         <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-3 p-4 border rounded-md bg-muted/20">
                 <h4 className="font-medium text-foreground">Stock Items</h4>
-                <Button 
-                    variant="outline" 
-                    className="w-full" 
+                <Button
+                    variant="outline"
+                    className="w-full"
                     onClick={() => openSheetIdPrompt("importStockItems", 'stock')}
                     disabled={isProcessingStockSheetsImport || isProcessingStockSheetsExport}
                 >
                     {isProcessingStockSheetsImport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4 text-green-700" />}
                     Import Stock from Sheets
                 </Button>
-                <Button 
-                    variant="outline" 
-                    className="w-full" 
+                <Button
+                    variant="outline"
+                    className="w-full"
                     onClick={() => openSheetIdPrompt("exportStockItems", 'stock')}
                     disabled={isProcessingStockSheetsImport || isProcessingStockSheetsExport}
                 >
@@ -468,18 +470,18 @@ export default function SettingsPage() {
             </div>
             <div className="space-y-3 p-4 border rounded-md bg-muted/20">
                 <h4 className="font-medium text-foreground">Sales History</h4>
-                <Button 
-                    variant="outline" 
-                    className="w-full" 
+                <Button
+                    variant="outline"
+                    className="w-full"
                     onClick={() => openSheetIdPrompt("importSalesHistory", 'sales')}
                     disabled={isProcessingSalesSheetsImport || isProcessingSalesSheetsExport}
                 >
                      {isProcessingSalesSheetsImport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4 text-green-700" />}
                     Import Sales from Sheets
                 </Button>
-                <Button 
-                    variant="outline" 
-                    className="w-full" 
+                <Button
+                    variant="outline"
+                    className="w-full"
                     onClick={() => openSheetIdPrompt("exportSalesHistory", 'sales')}
                     disabled={isProcessingSalesSheetsImport || isProcessingSalesSheetsExport}
                 >
@@ -490,7 +492,7 @@ export default function SettingsPage() {
         </CardContent>
          <CardFooter>
             <p className="text-xs text-muted-foreground">
-              Note: Full Google Sheets integration requires setting up OAuth 2.0 credentials, configuring a Redirect URI, 
+              Note: Full Google Sheets integration requires setting up OAuth 2.0 credentials, configuring a Redirect URI,
               and implementing the backend API route (`/api/google-sheets-proxy`) to handle Google API calls and token management.
             </p>
         </CardFooter>
@@ -503,7 +505,7 @@ export default function SettingsPage() {
                 {currentSheetAction?.toLowerCase().includes('import') ? 'Enter Google Sheet ID for Import' : 'Enter Google Sheet ID for Export (Optional)'}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {currentSheetAction?.toLowerCase().includes('import') 
+              {currentSheetAction?.toLowerCase().includes('import')
                 ? `Please provide the ID of the Google Sheet you want to import ${currentDataType} data from.`
                 : `If you provide a Sheet ID, ${currentDataType} data will be exported to that sheet. Otherwise, a new sheet will be created.`}
             </AlertDialogDescription>
@@ -537,5 +539,3 @@ export default function SettingsPage() {
     </div>
   );
 }
-
-    

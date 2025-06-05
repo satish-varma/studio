@@ -62,7 +62,7 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET && GOOGLE_REDIRECT_URI) {
     console.error("/api/google-sheets-proxy: CRITICAL - Google OAuth2 client credentials (ID, Secret, Redirect URI) are not configured. Sheets API integration will not work. Check .env.local or environment variables.");
 }
 
-const STOCK_ITEMS_HEADERS = ["ID", "Name", "Category", "Quantity", "Unit", "Price", "Low Stock Threshold", "Image URL", "Site ID", "Stall ID"];
+const STOCK_ITEMS_HEADERS = ["ID", "Name", "Category", "Quantity", "Unit", "Cost Price", "Selling Price", "Low Stock Threshold", "Image URL", "Site ID", "Stall ID", "Original Master Item ID"];
 const SALES_HISTORY_HEADERS = ["Transaction ID (Sheet)", "Date", "Staff Name", "Staff ID", "Total Amount", "Site ID", "Stall ID", "Items (JSON)"];
 
 
@@ -113,7 +113,7 @@ export async function POST(request: NextRequest) {
       const authUrl = oauth2Client.generateAuthUrl({
         access_type: 'offline',
         scope: ['https://www.googleapis.com/auth/spreadsheets'],
-        prompt: 'consent', 
+        prompt: 'consent',
         state: uid, // Pass Firebase UID to identify user in callback
       });
       return NextResponse.json({ error: 'Google Sheets authorization required.', needsAuth: true, authUrl: authUrl }, { status: 403 });
@@ -136,7 +136,7 @@ export async function POST(request: NextRequest) {
           console.log(`/api/google-sheets-proxy: Access token for user ${uid} potentially expired (expiry: ${storedTokens.expiry_date ? new Date(storedTokens.expiry_date).toISOString() : 'N/A'}), attempting refresh.`);
           const { credentials } = await oauth2Client.refreshAccessToken();
           console.log(`/api/google-sheets-proxy: Access token refreshed for user ${uid}. New expiry: ${credentials.expiry_date ? new Date(credentials.expiry_date).toISOString() : 'N/A'}`);
-          
+
           const updatedTokens: UserGoogleOAuthTokens = {
             access_token: credentials.access_token!,
             refresh_token: credentials.refresh_token || storedTokens.refresh_token, // Preserve old refresh token if new one isn't provided
@@ -146,8 +146,8 @@ export async function POST(request: NextRequest) {
             id_token: credentials.id_token,
           };
           await userGoogleTokensRef.set(updatedTokens, { merge: true }); // Use set with merge to update or create
-          oauth2Client.setCredentials(credentials); 
-          storedTokens = updatedTokens; 
+          oauth2Client.setCredentials(credentials);
+          storedTokens = updatedTokens;
           console.log(`/api/google-sheets-proxy: Updated tokens stored in Firestore for user ${uid}.`);
         } catch (refreshError: any) {
           console.error(`/api/google-sheets-proxy: Failed to refresh access token for user ${uid}:`, refreshError.response?.data || refreshError.message);
@@ -165,7 +165,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Google authorization expired (no refresh token). Please re-authorize.', needsAuth: true, authUrl: authUrl }, { status: 403 });
       }
     }
-    
+
     const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
     let spreadsheetIdToUse = sheetId;
 
@@ -175,7 +175,7 @@ export async function POST(request: NextRequest) {
         if (!sheetId) return NextResponse.json({ error: 'Sheet ID is required for import.' }, { status: 400 });
         try {
             console.log(`/api/google-sheets-proxy: Importing stock items from sheet ${sheetId} for user ${uid}.`);
-            const range = `${sheetName}!A:Z`; 
+            const range = `${sheetName}!A:Z`;
             const response = await sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range });
             const rows = response.data.values;
 
@@ -200,8 +200,12 @@ export async function POST(request: NextRequest) {
                 try {
                     const itemDataFromSheet: Record<string, any> = {};
                     STOCK_ITEMS_HEADERS.forEach((header, index) => {
-                        const key = header.toLowerCase().replace(/\s\(.*\)/g, '').replace(/\s+/g, '_').replace(/_([a-z])/g, (g) => g[1].toUpperCase());
-                        itemDataFromSheet[key] = row[index] !== undefined ? row[index] : null;
+                        // Simplified key generation
+                        const key = header.replace(/\s\(.*\)/g, '').replace(/\s+/g, '_').toLowerCase();
+                        let formattedKey = key.replace(/_([a-z])/g, (g) => g[1].toUpperCase());
+                        if (formattedKey === "id") formattedKey = "sheetProvidedId"; // Special handling for "ID" from sheet
+
+                        itemDataFromSheet[formattedKey] = row[index] !== undefined ? row[index] : null;
                     });
 
                     const parsedItem = {
@@ -209,28 +213,43 @@ export async function POST(request: NextRequest) {
                         category: String(itemDataFromSheet.category || ""),
                         quantity: itemDataFromSheet.quantity !== null ? parseInt(String(itemDataFromSheet.quantity), 10) : 0,
                         unit: String(itemDataFromSheet.unit || "pcs"),
-                        price: itemDataFromSheet.price !== null ? parseFloat(String(itemDataFromSheet.price)) : 0.0,
-                        lowStockThreshold: itemDataFromSheet.lowStockThreshold !== null ? parseInt(String(itemDataFromSheet.lowStockThreshold), 10) : 0,
-                        imageUrl: String(itemDataFromSheet.imageUrl || ""),
-                        siteId: itemDataFromSheet.siteId ? String(itemDataFromSheet.siteId) : null, 
-                        stallId: itemDataFromSheet.stallId ? String(itemDataFromSheet.stallId) : null,
-                        originalMasterItemId: null, // Assume new items from sheet are master or direct stall, not allocations
+                        costPrice: itemDataFromSheet.cost_price !== null ? parseFloat(String(itemDataFromSheet.cost_price)) : 0.0,
+                        price: itemDataFromSheet.selling_price !== null ? parseFloat(String(itemDataFromSheet.selling_price)) : 0.0, // selling_price from header
+                        lowStockThreshold: itemDataFromSheet.low_stock_threshold !== null ? parseInt(String(itemDataFromSheet.low_stock_threshold), 10) : 0,
+                        imageUrl: String(itemDataFromSheet.image_url || ""),
+                        siteId: itemDataFromSheet.site_id ? String(itemDataFromSheet.site_id) : null,
+                        stallId: itemDataFromSheet.stall_id ? String(itemDataFromSheet.stall_id) : null,
+                        originalMasterItemId: itemDataFromSheet.original_master_item_id ? String(itemDataFromSheet.original_master_item_id) : null,
                     };
-                    
-                    stockItemSchema.parse(parsedItem); // Zod will throw if invalid
+
+                    // Use Zod schema for validation, excluding sheetProvidedId
+                    const { sheetProvidedId, ...dataForZod } = itemDataFromSheet;
+                    stockItemSchema.omit({ siteId: true, stallId: true, originalMasterItemId: true }) // these can be null from sheet
+                                   .merge(z.object({ costPrice: z.number().optional(), price: z.number() })) // ensure price exists, costPrice is optional
+                                   .parse({
+                                      name: parsedItem.name,
+                                      category: parsedItem.category,
+                                      quantity: parsedItem.quantity,
+                                      unit: parsedItem.unit,
+                                      price: parsedItem.price,
+                                      costPrice: parsedItem.costPrice,
+                                      lowStockThreshold: parsedItem.lowStockThreshold,
+                                      imageUrl: parsedItem.imageUrl,
+                                    });
+
 
                     const dataToSave = {
                         ...parsedItem,
-                        lastUpdated: AdminTimestamp.now().toDate().toISOString(), 
+                        lastUpdated: AdminTimestamp.now().toDate().toISOString(),
                     };
-                    
-                    const sheetProvidedId = itemDataFromSheet.id ? String(itemDataFromSheet.id).trim() : null;
+
+                    const docId = itemDataFromSheet.sheetProvidedId ? String(itemDataFromSheet.sheetProvidedId).trim() : null;
                     let docRef;
-                    if (sheetProvidedId && sheetProvidedId !== "") {
-                        docRef = adminDb.collection('stockItems').doc(sheetProvidedId);
-                        batch.set(docRef, dataToSave, { merge: true }); 
+                    if (docId && docId !== "") {
+                        docRef = adminDb.collection('stockItems').doc(docId);
+                        batch.set(docRef, dataToSave, { merge: true });
                     } else {
-                        docRef = adminDb.collection('stockItems').doc(); 
+                        docRef = adminDb.collection('stockItems').doc();
                         batch.set(docRef, dataToSave);
                     }
                     importedCount++;
@@ -238,15 +257,15 @@ export async function POST(request: NextRequest) {
                     errors.push({ row: i + 1, message: e.message || 'Validation/Parsing failed.', data: row });
                 }
             }
-            
+
             if (importedCount > 0) {
                 await batch.commit();
             }
             console.log(`/api/google-sheets-proxy: Stock import complete for user ${uid}. Imported: ${importedCount}, Errors: ${errors.length}`);
-            return NextResponse.json({ 
+            return NextResponse.json({
                 message: `Stock items import processed. ${importedCount} items imported/updated. ${errors.length} rows had issues.`,
-                importedCount, 
-                errors 
+                importedCount,
+                errors
             });
 
         } catch (e: any) {
@@ -259,7 +278,7 @@ export async function POST(request: NextRequest) {
             console.log(`/api/google-sheets-proxy: Exporting stock items for user ${uid}. Sheet ID provided: ${spreadsheetIdToUse}`);
             const stockItemsSnapshot = await adminDb.collection('stockItems').orderBy('name').get();
             const stockItemsData: StockItem[] = stockItemsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as StockItem));
-            
+
             const values = [STOCK_ITEMS_HEADERS];
             stockItemsData.forEach(item => {
                 values.push([
@@ -268,12 +287,13 @@ export async function POST(request: NextRequest) {
                     item.category,
                     item.quantity.toString(),
                     item.unit,
+                    (item.costPrice ?? 0).toString(),
                     item.price.toString(),
                     item.lowStockThreshold.toString(),
                     item.imageUrl || "",
                     item.siteId || "",
-                    item.stallId || ""
-                    // item.originalMasterItemId is not in STOCK_ITEMS_HEADERS
+                    item.stallId || "",
+                    item.originalMasterItemId || ""
                 ]);
             });
 
@@ -300,7 +320,7 @@ export async function POST(request: NextRequest) {
             console.error(`Error exporting stock items for user ${uid}:`, e.message, e.stack);
             return NextResponse.json({ error: 'Failed to export stock items to Google Sheet.', details: e.message }, { status: 500 });
         }
-      
+
       case 'importSalesHistory':
         if (!sheetId) return NextResponse.json({ error: 'Sheet ID is required for sales import.' }, { status: 400 });
         try {
@@ -318,7 +338,7 @@ export async function POST(request: NextRequest) {
                  console.error("/api/google-sheets-proxy: " + errorMsg);
                  return NextResponse.json({ error: 'Sales sheet header mismatch.', details: errorMsg }, { status: 400 });
             }
-            
+
             const batch = adminDb.batch();
             const errors: { row: number; message: string; data: any[] }[] = [];
             let importedCount = 0;
@@ -337,7 +357,7 @@ export async function POST(request: NextRequest) {
                     if (!saleDataFromSheet.date || !saleDataFromSheet.staffId || !saleDataFromSheet.totalAmount || !saleDataFromSheet.itemsJson) {
                         throw new Error("Missing required fields (Date, Staff ID, Total Amount, Items JSON).");
                     }
-                    
+
                     let transactionDateTimestamp: AdminTimestamp;
                     try {
                         const parsedDate = new Date(String(saleDataFromSheet.date));
@@ -346,7 +366,7 @@ export async function POST(request: NextRequest) {
                     } catch (dateError: any) {
                         throw new Error(`Invalid Date: ${saleDataFromSheet.date}. ${dateError.message}`);
                     }
-                    
+
                     const totalAmount = parseFloat(String(saleDataFromSheet.totalAmount));
                     if (isNaN(totalAmount)) throw new Error(`Invalid Total Amount: ${saleDataFromSheet.totalAmount}.`);
 
@@ -354,8 +374,8 @@ export async function POST(request: NextRequest) {
                     try {
                         items = JSON.parse(String(saleDataFromSheet.itemsJson));
                         if (!Array.isArray(items)) throw new Error("Items JSON must be an array.");
-                        items.forEach((item, idx) => { 
-                            if (typeof item.itemId !== 'string' || typeof item.name !== 'string' || 
+                        items.forEach((item, idx) => {
+                            if (typeof item.itemId !== 'string' || typeof item.name !== 'string' ||
                                 typeof item.quantity !== 'number' || isNaN(item.quantity) ||
                                 typeof item.pricePerUnit !== 'number' || isNaN(item.pricePerUnit) ||
                                 typeof item.totalPrice !== 'number' || isNaN(item.totalPrice) ) {
@@ -376,15 +396,15 @@ export async function POST(request: NextRequest) {
                         siteId: saleDataFromSheet.siteId ? String(saleDataFromSheet.siteId) : undefined,
                         stallId: saleDataFromSheet.stallId ? String(saleDataFromSheet.stallId) : undefined,
                     };
-                    
-                    const saleDocRef = adminDb.collection('salesTransactions').doc(); 
+
+                    const saleDocRef = adminDb.collection('salesTransactions').doc();
                     batch.set(saleDocRef, dataToSave);
                     importedCount++;
                 } catch (e: any) {
                      errors.push({ row: i + 1, message: e.message || 'Validation/Parsing failed for sale.', data: row });
                 }
             }
-            
+
             if (importedCount > 0) {
                 await batch.commit();
             }
@@ -416,14 +436,14 @@ export async function POST(request: NextRequest) {
             const values = [SALES_HISTORY_HEADERS];
             salesData.forEach(sale => {
                 values.push([
-                    sale.id, 
-                    new Date(sale.transactionDate).toLocaleString('en-IN'), 
+                    sale.id,
+                    new Date(sale.transactionDate).toLocaleString('en-IN'),
                     sale.staffName || "N/A",
                     sale.staffId,
                     sale.totalAmount.toString(),
                     sale.siteId || "",
                     sale.stallId || "",
-                    JSON.stringify(sale.items) 
+                    JSON.stringify(sale.items)
                 ]);
             });
 
@@ -458,24 +478,24 @@ export async function POST(request: NextRequest) {
 
   } catch (error: any) {
     console.error(`/api/google-sheets-proxy: General error for user ${uid || 'unknown_user'}:`, error.message, error.stack);
-    const currentUid = typeof uid === 'string' ? uid : "unknown_user_needs_reauth"; 
+    const currentUid = typeof uid === 'string' ? uid : "unknown_user_needs_reauth";
 
-    if (error.code === 401 || 
+    if (error.code === 401 ||
         error.message?.toLowerCase().includes('unauthorized') ||
         error.message?.toLowerCase().includes('token') ||
-        (error.response?.data?.error === 'invalid_grant') || 
+        (error.response?.data?.error === 'invalid_grant') ||
         (error.response?.data?.error === 'unauthorized_client')) {
-        
+
         if (currentUid !== "unknown_user_needs_reauth" && adminDb && oauth2Client) {
             console.warn(`/api/google-sheets-proxy: OAuth error encountered for user ${currentUid}. Error details:`, error.response?.data || error.message);
             await adminDb.collection('userGoogleOAuthTokens').doc(currentUid).delete().catch(delErr => console.error("Failed to delete stale tokens:", delErr));
-            const authUrl = oauth2Client.generateAuthUrl({ 
-                access_type: 'offline', scope: ['https://www.googleapis.com/auth/spreadsheets'], prompt: 'consent', state: currentUid 
+            const authUrl = oauth2Client.generateAuthUrl({
+                access_type: 'offline', scope: ['https://www.googleapis.com/auth/spreadsheets'], prompt: 'consent', state: currentUid
             });
             return NextResponse.json({ error: 'Google authorization is invalid or expired. Please re-authorize.', needsAuth: true, authUrl: authUrl }, { status: 403 });
         } else if (oauth2Client) {
-             const authUrl = oauth2Client.generateAuthUrl({ 
-                access_type: 'offline', scope: ['https://www.googleapis.com/auth/spreadsheets'], prompt: 'consent', state: currentUid 
+             const authUrl = oauth2Client.generateAuthUrl({
+                access_type: 'offline', scope: ['https://www.googleapis.com/auth/spreadsheets'], prompt: 'consent', state: currentUid
             });
              return NextResponse.json({ error: 'Google authorization is invalid or expired. Please re-authorize.', needsAuth: true, authUrl: authUrl }, { status: 403 });
         }
@@ -483,5 +503,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error.message || 'An unexpected error occurred on the server.' }, { status: 500 });
   }
 }
-
-    
