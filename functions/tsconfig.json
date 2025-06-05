@@ -1,0 +1,23 @@
+
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "outDir": "lib",
+    "sourceMap": true,
+    "strict": true,
+    "target": "es2020", // Updated target, es2017 or higher is fine
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true, // Added to bypass @google-cloud/storage type errors for now
+    "lib": ["es2020"] // Explicitly add lib if needed, ensure it's compatible
+  },
+  "compileOnSave": true,
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}
