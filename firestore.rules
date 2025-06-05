@@ -1,9 +1,10 @@
+
 rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // --- Helper Functions (ensure these are as in your latest correct version) ---
+    // --- Helper Functions ---
     function isSignedIn() {
       return request.auth != null;
     }
@@ -46,7 +47,6 @@ service cloud.firestore {
              siteId in userData.managedSiteIds;
     }
 
-    // Checks if the current user is a staff member assigned to the given site AND stall
     function isStaffAssignedTo(siteId, stallId) {
       let userData = getAuthenticatedUserData();
       return isStaffRole() &&
@@ -55,7 +55,6 @@ service cloud.firestore {
              userData.defaultStallId == stallId;
     }
     
-    // Checks if the current user is staff assigned to the given site (for master stock operations)
     function isStaffAssignedToSiteOnly(siteId) {
       let userData = getAuthenticatedUserData();
       return isStaffRole() &&
@@ -65,7 +64,6 @@ service cloud.firestore {
 
     // --- Collections Rules ---
 
-    // Users Collection (/users/{userId})
     match /users/{userId} {
       allow read: if isUser(userId) || isAdmin() || isManagerRole();
       allow create: if isAdmin(); 
@@ -82,7 +80,6 @@ service cloud.firestore {
       allow list: if isAdmin() || isManagerRole();
     }
 
-    // Sites Collection (/sites/{siteId})
     match /sites/{siteId} {
       allow read: if isSignedIn();
       allow create, update, delete: if isAdmin();
@@ -91,7 +88,6 @@ service cloud.firestore {
       allow list: if isSignedIn();
     }
 
-    // Stalls Collection (/stalls/{stallId})
     match /stalls/{stallId} {
       allow read: if isSignedIn();
       allow create, update, delete: if isAdmin();
@@ -100,7 +96,6 @@ service cloud.firestore {
       allow list: if isSignedIn();
     }
 
-    // StockItems Collection (/stockItems/{itemId})
     match /stockItems/{itemId} {
       allow read: if isSignedIn();
 
@@ -116,28 +111,26 @@ service cloud.firestore {
                        request.resource.data.name is string && request.resource.data.name.size() > 0 &&
                        request.resource.data.quantity is number && request.resource.data.quantity >= 0 &&
                        request.resource.data.price is number && request.resource.data.price >= 0 &&
-                       request.resource.data.lastUpdated == request.time.toMillis().toString();
+                       // Client sends ISOString for lastUpdated
+                       request.resource.data.lastUpdated is string;
 
-      allow update: if resource.data.siteId != null && // Must have a siteId
-                       (isAdmin() || // Admins can update any
-                        (isManagerRole() && isManagerOfSite(resource.data.siteId)) || // Managers can update items in their sites
-                        (isStaffRole() && // Staff can update items if:
+      allow update: if resource.data.siteId != null && 
+                       (isAdmin() || 
+                        (isManagerRole() && isManagerOfSite(resource.data.siteId)) || 
+                        (isStaffRole() && 
                           (
-                            // Case 1: It's their assigned stall item
                             (resource.data.stallId != null && isStaffAssignedTo(resource.data.siteId, resource.data.stallId)) 
                             || 
-                            // Case 2: It's MASTER stock for THEIR ASSIGNED SITE (stallId is null)
-                            // AND they are only attempting to change 'quantity' and 'lastUpdated'
                             (resource.data.stallId == null && 
                              isStaffAssignedToSiteOnly(resource.data.siteId) &&
-                             // Check that no fields other than quantity and lastUpdated are being modified
                              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['quantity', 'lastUpdated'])
                             )
                           )
                         )
                        ) &&
-                       request.resource.data.lastUpdated == request.time.toMillis().toString() && // Enforce server timestamp for lastUpdated
-                       request.resource.data.quantity is number && request.resource.data.quantity >=0; // Ensure quantity is valid
+                       // Client sends ISOString for lastUpdated, ensure it's present and a string.
+                       request.resource.data.lastUpdated is string &&
+                       request.resource.data.quantity is number && request.resource.data.quantity >=0;
 
       allow delete: if resource.data.siteId != null &&
                        (isAdmin() ||
@@ -153,8 +146,6 @@ service cloud.firestore {
         allow list: if isSignedIn();
     }
 
-
-    // SalesTransactions Collection (/salesTransactions/{transactionId})
     match /salesTransactions/{transactionId} {
       allow create: if isSignedIn() && 
                        request.resource.data.staffId == request.auth.uid && 
@@ -167,7 +158,9 @@ service cloud.firestore {
                        request.resource.data.isDeleted == false &&
                        request.resource.data.items is list && request.resource.data.items.size() > 0 &&
                        request.resource.data.totalAmount is number && request.resource.data.totalAmount >= 0 &&
-                       request.resource.data.transactionDate == request.time;
+                       // Client sends Timestamp.now(), which arrives as a map in request.resource.data
+                       request.resource.data.transactionDate is map && 
+                       request.resource.data.transactionDate.keys().hasAll(['seconds', 'nanoseconds']);
 
       allow read: if (isStaffRole() && resource.data.staffId == request.auth.uid) || 
                      (isManagerRole() && isManagerOfSite(resource.data.siteId)) ||
@@ -178,7 +171,8 @@ service cloud.firestore {
                        resource.data.isDeleted == false && 
                        request.resource.data.deletedBy == request.auth.uid &&
                        request.resource.data.deletionJustification is string && request.resource.data.deletionJustification.size() > 0 &&
-                       request.resource.data.deletedAt == request.time.toMillis().toString() &&
+                       // Client sends ISOString for deletedAt
+                       request.resource.data.deletedAt is string &&
                        !request.resource.data.keys().hasAny(['items', 'totalAmount', 'transactionDate', 'staffId', 'siteId', 'stallId', 'staffName']);
 
       allow delete: if false;
@@ -187,7 +181,6 @@ service cloud.firestore {
         allow list: if isSignedIn();
     }
 
-    // StockMovementLogs Collection (/stockMovementLogs/{logId})
     match /stockMovementLogs/{logId} {
       allow create: if isSignedIn() &&
                        request.resource.data.userId == request.auth.uid &&
@@ -197,7 +190,8 @@ service cloud.firestore {
                        request.resource.data.quantityChange is number &&
                        request.resource.data.quantityBefore is number &&
                        request.resource.data.quantityAfter is number &&
-                       request.resource.data.timestamp == request.time.toMillis().toString(); 
+                       // Client sends ISOString for timestamp
+                       request.resource.data.timestamp is string; 
 
       allow read: if isAdmin() || 
                      (isManagerRole() && isManagerOfSite(resource.data.siteId));
@@ -208,7 +202,6 @@ service cloud.firestore {
         allow list: if isAdmin() || isManagerRole();
     }
 
-    // UserGoogleOAuthTokens Collection (/userGoogleOAuthTokens/{userId})
     match /userGoogleOAuthTokens/{userId} {
       allow read, write, delete: if isUser(userId);
       allow create: if isUser(userId) &&
