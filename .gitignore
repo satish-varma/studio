@@ -40,7 +40,6 @@ next-env.d.ts
 .genkit/*
 .env*
 service_account.json
-
 # firebase
 firebase-debug.log
 firestore-debug.log
