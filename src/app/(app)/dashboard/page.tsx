@@ -378,15 +378,22 @@ export default function DashboardPage() {
               variant="secondary"
               className="flex-1"
               onClick={() => router.push('/items/new')}
-              disabled={!activeSiteId || !activeStallId}
+              disabled={!activeSiteId}
             >
               Add New Item
             </Button>
           </CardContent>
-          {(!activeSiteId || !activeStallId) && (
+          {(!activeSiteId) && (
             <CardFooter className="pt-3 pb-4 justify-center">
                 <p className="text-xs text-muted-foreground text-center">
-                    Select a specific site and stall to enable quick actions.
+                    Select an active site to enable quick actions. Sales require a specific stall.
+                </p>
+            </CardFooter>
+          )}
+          {(activeSiteId && !activeStallId) && (
+             <CardFooter className="pt-3 pb-4 justify-center">
+                <p className="text-xs text-muted-foreground text-center">
+                    "Add New Item" is enabled for site master stock. Select a specific stall to record sales.
                 </p>
             </CardFooter>
           )}
@@ -396,3 +403,4 @@ export default function DashboardPage() {
   );
 }
 
+    
