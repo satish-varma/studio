@@ -155,13 +155,13 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     setIsDeleting(true);
     try {
       const itemRef = doc(db, "stockItems", itemId);
-      const itemDocSnap = await getDoc(itemRef); // Renamed for clarity
+      const itemDocSnap = await getDoc(itemRef); 
       if (!itemDocSnap.exists()) {
         throw new Error("Item not found for deletion.");
       }
       const itemData = itemDocSnap.data() as StockItem;
 
-      if (itemData.stallId === null && itemData.siteId) { // It's a master item
+      if (itemData.stallId === null && itemData.siteId) { 
           const linkedStallsQuery = query(
             collection(db, "stockItems"),
             where("originalMasterItemId", "==", itemId)
@@ -363,7 +363,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                 imageUrl: currentMasterStock.imageUrl,
                 siteId: currentMasterStock.siteId,
                 stallId: targetStallIdForAllocation,
-                originalMasterItemId: itemToAllocate.id,
+                originalMasterItemId: itemToAllocate.id, 
                 lastUpdated: new Date().toISOString(),
             };
             transaction.set(newStallItemRef, newStallItemDataToSave);
@@ -504,7 +504,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         const q = query(
             collection(db, "stockItems"),
             where("stallId", "==", destinationStallId),
-            where("originalMasterItemId", "==", sourceItemData.originalMasterItemId || null)
+            where("originalMasterItemId", "==", sourceItemData.originalMasterItemId ?? null)
         );
 
         const destQuerySnap = await getDocs(q);
@@ -537,7 +537,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             imageUrl: sourceItemData.imageUrl,
             siteId: sourceItemData.siteId,
             stallId: destinationStallId,
-            originalMasterItemId: sourceItemData.originalMasterItemId || null,
+            originalMasterItemId: sourceItemData.originalMasterItemId ?? null,
             lastUpdated: new Date().toISOString(),
           });
         }

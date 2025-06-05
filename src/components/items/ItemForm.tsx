@@ -59,7 +59,7 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
       quantity: initialData.quantity,
       unit: initialData.unit,
       price: initialData.price,
-      costPrice: initialData.costPrice || 0.00,
+      costPrice: initialData.costPrice ?? 0.00, // Ensure null/undefined becomes 0 for form
       lowStockThreshold: initialData.lowStockThreshold,
       imageUrl: initialData.imageUrl || "",
     } : {
@@ -111,7 +111,7 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
       const baseItemData = {
         ...values,
         price: Number(values.price),
-        costPrice: Number(values.costPrice),
+        costPrice: values.costPrice !== undefined ? Number(values.costPrice) : null, // Ensure costPrice is number or null
         quantity: newQuantity,
         lowStockThreshold: Number(values.lowStockThreshold),
         lastUpdated: new Date().toISOString(),
@@ -119,16 +119,13 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
 
       if (isEditMode && itemId && initialData) {
         const itemRef = doc(db, "stockItems", itemId);
-        // Exclude siteId and stallId from direct update if they are part of baseItemData
-        // These should not be changed through this form directly, but via allocation/transfer logic
-        const { siteId: initialSiteId, stallId: initialStallId, ...editableValues } = baseItemData;
+        const { siteId: formSiteId, stallId: formStallId, ...editableValues } = baseItemData;
 
         const dataToSet = {
             ...editableValues,
-            // Retain original siteId and stallId for existing items
-            siteId: initialData.siteId,
-            stallId: initialData.stallId,
-            originalMasterItemId: initialData.originalMasterItemId,
+            siteId: initialData.siteId, // Retain original siteId
+            stallId: initialData.stallId, // Retain original stallId
+            originalMasterItemId: initialData.originalMasterItemId ?? null, // Ensure null if undefined
         };
 
         await setDoc(itemRef, dataToSet, { merge: true });
@@ -139,8 +136,8 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
         if (quantityChange !== 0) {
           await logStockMovement(user, {
             stockItemId: itemId,
-            masterStockItemIdForContext: initialData.originalMasterItemId,
-            siteId: initialData.siteId!, // Assuming siteId is always present for existing items
+            masterStockItemIdForContext: initialData.originalMasterItemId ?? undefined,
+            siteId: initialData.siteId!, 
             stallId: initialData.stallId,
             type: initialData.stallId ? 'DIRECT_STALL_UPDATE' : 'DIRECT_MASTER_UPDATE',
             quantityChange: quantityChange,
@@ -160,11 +157,12 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
           setIsSubmitting(false);
           return;
         }
-        const itemDataToSave = {
+        const itemDataToSave: Omit<StockItem, 'id'> = {
           ...baseItemData,
           siteId: activeSiteId,
-          stallId: activeStallId,
-          originalMasterItemId: null, // New items don't have this until allocated from master
+          stallId: activeStallId, 
+          originalMasterItemId: null, 
+          lastUpdated: baseItemData.lastUpdated, 
         };
         const newItemRef = await addDoc(collection(db, "stockItems"), itemDataToSave);
 
@@ -278,6 +276,7 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
                     <FormControl>
                       <Input type="number" step="0.01" placeholder="0.00" {...field} onChange={e => field.onChange(parseFloat(e.target.value) || 0)} disabled={isSubmitting} className="bg-input"/>
                     </FormControl>
+                    <FormDescription>Optional. Used for profit calculation.</FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
