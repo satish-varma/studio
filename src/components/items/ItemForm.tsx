@@ -14,9 +14,10 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea"; // Import Textarea
 import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription as UiCardDescription } from "@/components/ui/card"; // Aliased CardDescription
 import { stockItemSchema, type StockItemFormValues } from "@/types/item";
-import { Loader2, Save, Info } from "lucide-react";
+import { Loader2, Save, Info, Sparkles } from "lucide-react"; // Added Sparkles
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
 import { getFirestore, doc, setDoc, addDoc, collection, getDoc } from "firebase/firestore";
@@ -26,6 +27,7 @@ import type { StockItem } from "@/types";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { logStockMovement } from "@/lib/stockLogger";
+import { generateItemDescription } from "@/ai/flows/generate-item-description-flow"; // Import the Genkit flow
 
 if (!getApps().length) {
   try {
@@ -48,6 +50,7 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
   const { toast } = useToast();
   const { user, activeSiteId, activeStallId } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGeneratingDesc, setIsGeneratingDesc] = useState(false);
   const isEditMode = !!initialData && !!itemId;
   const [itemStatusMessage, setItemStatusMessage] = useState<string | null>(null);
 
@@ -56,15 +59,17 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
     defaultValues: initialData ? {
       name: initialData.name,
       category: initialData.category,
+      description: initialData.description || "", // Initialize description
       quantity: initialData.quantity,
       unit: initialData.unit,
       price: initialData.price,
-      costPrice: initialData.costPrice ?? 0.00, // Ensure null/undefined becomes 0 for form
+      costPrice: initialData.costPrice ?? 0.00,
       lowStockThreshold: initialData.lowStockThreshold,
       imageUrl: initialData.imageUrl || "",
     } : {
       name: "",
       category: "",
+      description: "", // Initialize description
       quantity: 0,
       unit: "pcs",
       price: 0.00,
@@ -99,6 +104,37 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
     }
   }, [isEditMode, initialData, sitesMap, stallsMap, activeSiteId, activeStallId]);
 
+  const handleGenerateDescription = async () => {
+    const itemName = form.getValues("name");
+    const itemCategory = form.getValues("category");
+
+    if (!itemName || !itemCategory) {
+      toast({
+        title: "Missing Information",
+        description: "Please enter item name and category before generating a description.",
+        variant: "default",
+      });
+      return;
+    }
+    setIsGeneratingDesc(true);
+    try {
+      const result = await generateItemDescription({ itemName, itemCategory });
+      form.setValue("description", result.description);
+      toast({
+        title: "Description Generated!",
+        description: "The AI has suggested a description for your item.",
+      });
+    } catch (error: any) {
+      console.error("Error generating item description:", error);
+      toast({
+        title: "Generation Failed",
+        description: error.message || "Could not generate description. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGeneratingDesc(false);
+    }
+  };
 
   async function onSubmit(values: StockItemFormValues) {
     if (!user) {
@@ -109,9 +145,9 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
     try {
       const newQuantity = Number(values.quantity);
       const baseItemData = {
-        ...values,
+        ...values, // Includes description now
         price: Number(values.price),
-        costPrice: values.costPrice !== undefined ? Number(values.costPrice) : null, // Ensure costPrice is number or null
+        costPrice: values.costPrice !== undefined ? Number(values.costPrice) : null,
         quantity: newQuantity,
         lowStockThreshold: Number(values.lowStockThreshold),
         lastUpdated: new Date().toISOString(),
@@ -119,14 +155,14 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
 
       if (isEditMode && itemId && initialData) {
         const itemRef = doc(db, "stockItems", itemId);
-        const { siteId: formSiteId, stallId: formStallId, ...editableValues } = baseItemData;
-
+        // siteId, stallId, and originalMasterItemId are not directly editable by form but retained
         const dataToSet = {
-            ...editableValues,
-            siteId: initialData.siteId, // Retain original siteId
-            stallId: initialData.stallId, // Retain original stallId
-            originalMasterItemId: initialData.originalMasterItemId ?? null, // Ensure null if undefined
+            ...baseItemData, // Contains all form fields including description
+            siteId: initialData.siteId,
+            stallId: initialData.stallId,
+            originalMasterItemId: initialData.originalMasterItemId ?? null,
         };
+        // No need to destructure siteId/stallId from baseItemData as they are not in StockItemFormValues schema directly for form input
 
         await setDoc(itemRef, dataToSet, { merge: true });
 
@@ -219,7 +255,7 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
                 <FormItem>
                   <FormLabel>Item Name</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g., Fresh Apples" {...field} disabled={isSubmitting} className="bg-input"/>
+                    <Input placeholder="e.g., Fresh Apples" {...field} disabled={isSubmitting || isGeneratingDesc} className="bg-input"/>
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -232,8 +268,41 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
                 <FormItem>
                   <FormLabel>Category</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g., Fruits" {...field} disabled={isSubmitting} className="bg-input"/>
+                    <Input placeholder="e.g., Fruits" {...field} disabled={isSubmitting || isGeneratingDesc} className="bg-input"/>
                   </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="description"
+              render={({ field }) => (
+                <FormItem>
+                  <div className="flex items-center justify-between">
+                    <FormLabel>Description (Optional)</FormLabel>
+                    <Button 
+                      type="button" 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={handleGenerateDescription} 
+                      disabled={isGeneratingDesc || isSubmitting || !form.watch("name") || !form.watch("category")}
+                      className="text-xs text-accent hover:text-accent/80"
+                    >
+                      {isGeneratingDesc ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Sparkles className="h-4 w-4 mr-1.5" />}
+                      Generate with AI
+                    </Button>
+                  </div>
+                  <FormControl>
+                    <Textarea 
+                      placeholder="e.g., Crisp and juicy red apples, perfect for snacking." 
+                      {...field} 
+                      disabled={isSubmitting || isGeneratingDesc} 
+                      className="bg-input min-h-[80px]"
+                      value={field.value || ""}
+                    />
+                  </FormControl>
+                  <FormDescription>A short description of the item.</FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
@@ -324,10 +393,10 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
             />
           </CardContent>
           <CardFooter className="flex justify-end gap-2">
-             <Button type="button" variant="outline" onClick={() => router.back()} disabled={isSubmitting}>
+             <Button type="button" variant="outline" onClick={() => router.back()} disabled={isSubmitting || isGeneratingDesc}>
                 Cancel
             </Button>
-            <Button type="submit" disabled={isSubmitting || (!isEditMode && !activeSiteId) }>
+            <Button type="submit" disabled={isSubmitting || isGeneratingDesc || (!isEditMode && !activeSiteId) }>
               {isSubmitting ? (
                 <Loader2 className="animate-spin mr-2" />
               ) : (
