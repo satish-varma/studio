@@ -31,7 +31,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
   Dialog,
@@ -40,8 +39,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
-  DialogClose,
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
@@ -61,15 +58,16 @@ import {
   query,
   where,
   getDocs,
-  getDoc, // Added getDoc
+  getDoc,
   writeBatch,
-  serverTimestamp,
   Timestamp,
   DocumentReference,
   DocumentSnapshot
 } from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
+import { useAuth } from "@/contexts/AuthContext"; // Import useAuth
+import { logStockMovement } from "@/lib/stockLogger"; // Import logStockMovement
 
 if (!getApps().length) {
   try {
@@ -91,6 +89,8 @@ interface ItemTableProps {
 export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAllocation, onDataNeedsRefresh }: ItemTableProps) {
   const { toast } = useToast();
   const router = useRouter();
+  const { user } = useAuth(); // Get user from AuthContext for logging
+
   const [isDeleting, setIsDeleting] = useState(false);
   const [isUpdatingStock, setIsUpdatingStock] = useState(false);
   const [stockUpdateItem, setStockUpdateItem] = useState<StockItem | null>(null);
@@ -153,15 +153,16 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
 
   const handleDelete = async (itemId: string, itemName: string) => {
     setIsDeleting(true);
+    let itemDataForLog: StockItem | null = null;
     try {
       const itemRef = doc(db, "stockItems", itemId);
       const itemDocSnap = await getDoc(itemRef); 
       if (!itemDocSnap.exists()) {
         throw new Error("Item not found for deletion.");
       }
-      const itemData = itemDocSnap.data() as StockItem;
+      itemDataForLog = { id: itemDocSnap.id, ...itemDocSnap.data() } as StockItem;
 
-      if (itemData.stallId === null && itemData.siteId) { 
+      if (itemDataForLog.stallId === null && itemDataForLog.siteId) { 
           const linkedStallsQuery = query(
             collection(db, "stockItems"),
             where("originalMasterItemId", "==", itemId)
@@ -181,23 +182,53 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           }
       }
 
-
       await runTransaction(db, async (transaction) => {
-        if (itemData.stallId && itemData.originalMasterItemId) {
-          const masterItemRef = doc(db, "stockItems", itemData.originalMasterItemId);
+        if (itemDataForLog!.stallId && itemDataForLog!.originalMasterItemId) {
+          const masterItemRef = doc(db, "stockItems", itemDataForLog!.originalMasterItemId);
           const masterItemSnap = await transaction.get(masterItemRef);
           if (masterItemSnap.exists()) {
             const masterData = masterItemSnap.data() as StockItem;
             transaction.update(masterItemRef, {
-              quantity: masterData.quantity + itemData.quantity,
+              quantity: masterData.quantity + itemDataForLog!.quantity,
               lastUpdated: new Date().toISOString(),
             });
           } else {
-            console.warn(`Master item ${itemData.originalMasterItemId} not found during deletion of stall item ${itemData.id}. Master stock not adjusted.`);
+            console.warn(`Master item ${itemDataForLog!.originalMasterItemId} not found during deletion of stall item ${itemDataForLog!.id}. Master stock not adjusted.`);
           }
         }
         transaction.delete(itemRef);
       });
+
+      if (user && itemDataForLog) {
+        await logStockMovement(user, {
+            stockItemId: itemDataForLog.id,
+            masterStockItemIdForContext: itemDataForLog.originalMasterItemId,
+            siteId: itemDataForLog.siteId!,
+            stallId: itemDataForLog.stallId,
+            type: itemDataForLog.stallId ? 'DELETE_STALL_ITEM' : 'DELETE_MASTER_ITEM',
+            quantityChange: -itemDataForLog.quantity, 
+            quantityBefore: itemDataForLog.quantity,
+            quantityAfter: 0,
+            notes: `Item "${itemDataForLog.name}" deleted. ${itemDataForLog.stallId && itemDataForLog.originalMasterItemId ? 'Quantity returned to master implicitly.' : ''}`,
+        });
+         if (itemDataForLog.stallId && itemDataForLog.originalMasterItemId) {
+             const masterItemAfterDeletionSnap = await getDoc(doc(db, "stockItems", itemDataForLog.originalMasterItemId));
+             if (masterItemAfterDeletionSnap.exists()) {
+                const masterItemAfter = masterItemAfterDeletionSnap.data() as StockItem;
+                 await logStockMovement(user, {
+                    stockItemId: itemDataForLog.originalMasterItemId,
+                    siteId: masterItemAfter.siteId!,
+                    stallId: null,
+                    type: 'RECEIVE_RETURN_FROM_STALL', // Implicit return on delete
+                    quantityChange: itemDataForLog.quantity,
+                    quantityBefore: masterItemAfter.quantity - itemDataForLog.quantity,
+                    quantityAfter: masterItemAfter.quantity,
+                    notes: `Implicit return from deleted stall item "${itemDataForLog.name}" (ID: ${itemDataForLog.id}).`,
+                    linkedStockItemId: itemDataForLog.id,
+                 });
+             }
+         }
+      }
 
       toast({
         title: "Item Deleted",
@@ -233,6 +264,10 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     }
     setIsUpdatingStock(true);
     const updatedQuantityNum = Number(newQuantity);
+    let originalItemData: StockItem | null = null;
+    let originalMasterData: StockItem | null = null;
+    let newMasterQuantityAfterUpdate: number | null = null;
+
 
     try {
       await runTransaction(db, async (transaction) => {
@@ -242,15 +277,18 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         if (!itemSnap.exists()) {
           throw new Error("Item being updated not found.");
         }
-        const currentItemData = itemSnap.data() as StockItem;
-        const oldQuantity = currentItemData.quantity;
+        originalItemData = { id: itemSnap.id, ...itemSnap.data() } as StockItem;
+        const oldQuantity = originalItemData.quantity;
 
         let masterItemSnap: DocumentSnapshot | null = null;
         let masterItemRef: DocumentReference | null = null;
 
-        if (currentItemData.stallId && currentItemData.originalMasterItemId) {
-            masterItemRef = doc(db, "stockItems", currentItemData.originalMasterItemId);
+        if (originalItemData.stallId && originalItemData.originalMasterItemId) {
+            masterItemRef = doc(db, "stockItems", originalItemData.originalMasterItemId);
             masterItemSnap = await transaction.get(masterItemRef);
+            if (masterItemSnap.exists()) {
+                originalMasterData = { id: masterItemSnap.id, ...masterItemSnap.data() } as StockItem;
+            }
         }
 
         transaction.update(itemRef, {
@@ -258,20 +296,44 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           lastUpdated: new Date().toISOString(),
         });
 
-        if (masterItemSnap && masterItemSnap.exists() && masterItemRef) {
-          const masterItemData = masterItemSnap.data() as StockItem;
+        if (masterItemSnap && masterItemSnap.exists() && masterItemRef && originalMasterData) {
           const quantityDelta = updatedQuantityNum - oldQuantity;
-
-          const newMasterQuantity = masterItemData.quantity - quantityDelta;
-
+          newMasterQuantityAfterUpdate = Math.max(0, originalMasterData.quantity - quantityDelta);
           transaction.update(masterItemRef, {
-            quantity: Math.max(0, newMasterQuantity),
+            quantity: newMasterQuantityAfterUpdate,
             lastUpdated: new Date().toISOString(),
           });
-        } else if (currentItemData.stallId && currentItemData.originalMasterItemId && !masterItemSnap?.exists()){
-            console.warn(`Master stock item ${currentItemData.originalMasterItemId} not found. Stall stock updated, but master cannot be adjusted.`);
+        } else if (originalItemData.stallId && originalItemData.originalMasterItemId && !masterItemSnap?.exists()){
+            console.warn(`Master stock item ${originalItemData.originalMasterItemId} not found. Stall stock updated, but master cannot be adjusted.`);
         }
       });
+
+      if (user && originalItemData) {
+         await logStockMovement(user, {
+            stockItemId: originalItemData.id,
+            masterStockItemIdForContext: originalItemData.originalMasterItemId,
+            siteId: originalItemData.siteId!,
+            stallId: originalItemData.stallId,
+            type: originalItemData.stallId ? 'DIRECT_STALL_UPDATE' : 'DIRECT_MASTER_UPDATE',
+            quantityChange: updatedQuantityNum - originalItemData.quantity,
+            quantityBefore: originalItemData.quantity,
+            quantityAfter: updatedQuantityNum,
+            notes: "Direct stock quantity update via item table.",
+          });
+        if (originalMasterData && newMasterQuantityAfterUpdate !== null) {
+             await logStockMovement(user, {
+                stockItemId: originalMasterData.id,
+                siteId: originalMasterData.siteId!,
+                stallId: null,
+                type: 'DIRECT_STALL_UPDATE_AFFECTS_MASTER',
+                quantityChange: newMasterQuantityAfterUpdate - originalMasterData.quantity,
+                quantityBefore: originalMasterData.quantity,
+                quantityAfter: newMasterQuantityAfterUpdate,
+                notes: `Master stock adjusted due to direct update of linked stall item ${originalItemData.name} (ID: ${originalItemData.id}).`,
+                linkedStockItemId: originalItemData.id,
+            });
+        }
+      }
 
       toast({
         title: "Stock Updated",
@@ -313,6 +375,11 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     }
 
     setIsAllocating(true);
+    let masterStockDataBeforeTx: StockItem | null = null;
+    let stallItemDataBeforeTx: StockItem | null = null;
+    let newStallItemIdForLog: string | null = null; // To capture ID if new stall item is created
+    let existingStallItemIdForLog: string | null = null; // To capture ID if existing stall item is updated
+
     try {
       await runTransaction(db, async (transaction) => {
         const masterStockRef = doc(db, "stockItems", itemToAllocate.id);
@@ -321,9 +388,9 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         if (!masterStockSnap.exists()) {
           throw new Error("Master stock item not found.");
         }
-        const currentMasterStock = masterStockSnap.data() as StockItem;
-        if (currentMasterStock.quantity < numQuantityToAllocate) {
-          throw new Error(`Concurrent update: Not enough master stock. Available: ${currentMasterStock.quantity}`);
+        masterStockDataBeforeTx = { id: masterStockSnap.id, ...masterStockSnap.data() } as StockItem;
+        if (masterStockDataBeforeTx.quantity < numQuantityToAllocate) {
+          throw new Error(`Concurrent update: Not enough master stock. Available: ${masterStockDataBeforeTx.quantity}`);
         }
 
         const stallItemsQuery = query(
@@ -333,47 +400,80 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         );
 
         let targetStallItemRef: DocumentReference | null = null;
-        let existingStallItemData: StockItem | null = null;
-
-        const existingStallItemsQuerySnap = await getDocs(stallItemsQuery);
+        const existingStallItemsQuerySnap = await getDocs(stallItemsQuery); // GetDocs outside transaction for read
 
         if (!existingStallItemsQuerySnap.empty) {
             targetStallItemRef = existingStallItemsQuerySnap.docs[0].ref;
-            const targetStallItemSnap = await transaction.get(targetStallItemRef);
+            existingStallItemIdForLog = existingStallItemsQuerySnap.docs[0].id;
+            const targetStallItemSnap = await transaction.get(targetStallItemRef); // Get within transaction for consistency
             if (targetStallItemSnap.exists()) {
-                existingStallItemData = targetStallItemSnap.data() as StockItem;
+                stallItemDataBeforeTx = {id: targetStallItemSnap.id, ...targetStallItemSnap.data()} as StockItem;
             }
         }
 
-        if (targetStallItemRef && existingStallItemData) {
+        if (targetStallItemRef && stallItemDataBeforeTx) {
             transaction.update(targetStallItemRef, {
-                quantity: existingStallItemData.quantity + numQuantityToAllocate,
+                quantity: stallItemDataBeforeTx.quantity + numQuantityToAllocate,
                 lastUpdated: new Date().toISOString(),
             });
         } else {
-            const newStallItemRef = doc(collection(db, "stockItems"));
+            const newStallItemDocRef = doc(collection(db, "stockItems")); // Generate ID client-side for logging
+            newStallItemIdForLog = newStallItemDocRef.id;
             const newStallItemDataToSave: Omit<StockItem, 'id'> = {
-                name: currentMasterStock.name,
-                category: currentMasterStock.category,
+                name: masterStockDataBeforeTx.name,
+                category: masterStockDataBeforeTx.category,
+                description: masterStockDataBeforeTx.description || "",
                 quantity: numQuantityToAllocate,
-                unit: currentMasterStock.unit,
-                price: currentMasterStock.price,
-                costPrice: currentMasterStock.costPrice,
-                lowStockThreshold: currentMasterStock.lowStockThreshold,
-                imageUrl: currentMasterStock.imageUrl,
-                siteId: currentMasterStock.siteId,
+                unit: masterStockDataBeforeTx.unit,
+                price: masterStockDataBeforeTx.price,
+                costPrice: masterStockDataBeforeTx.costPrice,
+                lowStockThreshold: masterStockDataBeforeTx.lowStockThreshold,
+                imageUrl: masterStockDataBeforeTx.imageUrl,
+                siteId: masterStockDataBeforeTx.siteId,
                 stallId: targetStallIdForAllocation,
                 originalMasterItemId: itemToAllocate.id, 
                 lastUpdated: new Date().toISOString(),
             };
-            transaction.set(newStallItemRef, newStallItemDataToSave);
+            transaction.set(newStallItemDocRef, newStallItemDataToSave);
         }
 
         transaction.update(masterStockRef, {
-          quantity: currentMasterStock.quantity - numQuantityToAllocate,
+          quantity: masterStockDataBeforeTx.quantity - numQuantityToAllocate,
           lastUpdated: new Date().toISOString(),
         });
       });
+
+      if (user && masterStockDataBeforeTx) {
+        // Log master stock decrease
+        await logStockMovement(user, {
+          stockItemId: masterStockDataBeforeTx.id,
+          siteId: masterStockDataBeforeTx.siteId!,
+          stallId: null, 
+          type: 'ALLOCATE_TO_STALL',
+          quantityChange: -numQuantityToAllocate,
+          quantityBefore: masterStockDataBeforeTx.quantity,
+          quantityAfter: masterStockDataBeforeTx.quantity - numQuantityToAllocate,
+          notes: `Allocated ${numQuantityToAllocate} unit(s) of ${masterStockDataBeforeTx.name} to stall: ${stallsMap[targetStallIdForAllocation] || targetStallIdForAllocation}.`,
+          linkedStockItemId: newStallItemIdForLog || existingStallItemIdForLog,
+        });
+
+        // Log stall stock increase/creation
+        const stallItemLogId = newStallItemIdForLog || existingStallItemIdForLog;
+        if (stallItemLogId) {
+          await logStockMovement(user, {
+            stockItemId: stallItemLogId,
+            masterStockItemIdForContext: masterStockDataBeforeTx.id,
+            siteId: masterStockDataBeforeTx.siteId!,
+            stallId: targetStallIdForAllocation,
+            type: 'RECEIVE_ALLOCATION',
+            quantityChange: numQuantityToAllocate,
+            quantityBefore: stallItemDataBeforeTx ? stallItemDataBeforeTx.quantity : 0,
+            quantityAfter: (stallItemDataBeforeTx ? stallItemDataBeforeTx.quantity : 0) + numQuantityToAllocate,
+            notes: `Received ${numQuantityToAllocate} unit(s) of ${masterStockDataBeforeTx.name} from master stock.`,
+            linkedStockItemId: masterStockDataBeforeTx.id,
+          });
+        }
+      }
 
       toast({
         title: "Stock Allocated",
@@ -412,6 +512,9 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     }
 
     setIsReturning(true);
+    let stallItemDataBeforeTx: StockItem | null = null;
+    let masterItemDataBeforeTx: StockItem | null = null;
+
     try {
       await runTransaction(db, async (transaction) => {
         const stallItemRef = doc(db, "stockItems", itemToReturn.id);
@@ -423,27 +526,57 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         if (!stallItemSnap.exists()) {
           throw new Error("Stall item not found. Cannot proceed with return.");
         }
+        stallItemDataBeforeTx = {id: stallItemSnap.id, ...stallItemSnap.data()} as StockItem;
+
         if (!masterItemSnap.exists()) {
           throw new Error("Original master stock item not found. Cannot return to a non-existent master item.");
         }
+        masterItemDataBeforeTx = {id: masterItemSnap.id, ...masterItemSnap.data()} as StockItem;
 
-        const currentStallStock = stallItemSnap.data() as StockItem;
-        const currentMasterStock = masterItemSnap.data() as StockItem;
-
-        if (currentStallStock.quantity < numQuantityToReturn) {
-          throw new Error(`Concurrent update: Not enough stall stock to return. Available: ${currentStallStock.quantity}`);
+        if (stallItemDataBeforeTx.quantity < numQuantityToReturn) {
+          throw new Error(`Concurrent update: Not enough stall stock to return. Available: ${stallItemDataBeforeTx.quantity}`);
         }
 
         transaction.update(masterItemRef, {
-          quantity: currentMasterStock.quantity + numQuantityToReturn,
+          quantity: masterItemDataBeforeTx.quantity + numQuantityToReturn,
           lastUpdated: new Date().toISOString(),
         });
 
         transaction.update(stallItemRef, {
-          quantity: currentStallStock.quantity - numQuantityToReturn,
+          quantity: stallItemDataBeforeTx.quantity - numQuantityToReturn,
           lastUpdated: new Date().toISOString(),
         });
       });
+      
+      if (user && stallItemDataBeforeTx && masterItemDataBeforeTx) {
+         // Log stall stock decrease
+        await logStockMovement(user, {
+          stockItemId: stallItemDataBeforeTx.id,
+          masterStockItemIdForContext: stallItemDataBeforeTx.originalMasterItemId,
+          siteId: stallItemDataBeforeTx.siteId!,
+          stallId: stallItemDataBeforeTx.stallId,
+          type: 'RETURN_TO_MASTER',
+          quantityChange: -numQuantityToReturn,
+          quantityBefore: stallItemDataBeforeTx.quantity,
+          quantityAfter: stallItemDataBeforeTx.quantity - numQuantityToReturn,
+          notes: `Returned ${numQuantityToReturn} unit(s) of ${stallItemDataBeforeTx.name} to master stock.`,
+          linkedStockItemId: masterItemDataBeforeTx.id,
+        });
+
+        // Log master stock increase
+        await logStockMovement(user, {
+          stockItemId: masterItemDataBeforeTx.id,
+          siteId: masterItemDataBeforeTx.siteId!,
+          stallId: null,
+          type: 'RECEIVE_RETURN_FROM_STALL',
+          quantityChange: numQuantityToReturn,
+          quantityBefore: masterItemDataBeforeTx.quantity,
+          quantityAfter: masterItemDataBeforeTx.quantity + numQuantityToReturn,
+          notes: `Received ${numQuantityToReturn} unit(s) of ${stallItemDataBeforeTx.name} from stall: ${stallsMap[stallItemDataBeforeTx.stallId!] || stallItemDataBeforeTx.stallId}.`,
+          linkedStockItemId: stallItemDataBeforeTx.id,
+        });
+      }
+
 
       toast({
         title: "Stock Returned to Master",
@@ -489,59 +622,100 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     }
 
     setIsTransferring(true);
+    let sourceItemDataBeforeTx: StockItem | null = null;
+    let destItemDataBeforeTx: StockItem | null = null;
+    let newDestItemIdForLog: string | null = null;
+    let existingDestItemIdForLog: string | null = null;
+
+
     try {
       await runTransaction(db, async (transaction) => {
         const sourceItemRef = doc(db, "stockItems", itemToTransfer.id);
-
-        let destinationItemRef: DocumentReference | null = null;
-        let destinationItemSnap: DocumentSnapshot | null = null;
-
         const sourceItemSnap = await transaction.get(sourceItemRef);
         if (!sourceItemSnap.exists()) throw new Error("Source item not found.");
-        const sourceItemData = sourceItemSnap.data() as StockItem;
-        if (sourceItemData.quantity < numQuantityToTransfer) throw new Error(`Concurrent update: Not enough source stock. Available: ${sourceItemData.quantity}`);
+        sourceItemDataBeforeTx = { id: sourceItemSnap.id, ...sourceItemSnap.data() } as StockItem;
+        if (sourceItemDataBeforeTx.quantity < numQuantityToTransfer) throw new Error(`Concurrent update: Not enough source stock. Available: ${sourceItemDataBeforeTx.quantity}`);
 
+        let destinationItemRef: DocumentReference | null = null;
         const q = query(
             collection(db, "stockItems"),
             where("stallId", "==", destinationStallId),
-            where("originalMasterItemId", "==", sourceItemData.originalMasterItemId ?? null)
+            where("originalMasterItemId", "==", sourceItemDataBeforeTx.originalMasterItemId ?? null) // Important for consistency
         );
-
-        const destQuerySnap = await getDocs(q);
+        const destQuerySnap = await getDocs(q); // Read outside transaction
         if (!destQuerySnap.empty) {
             destinationItemRef = destQuerySnap.docs[0].ref;
-            destinationItemSnap = await transaction.get(destinationItemRef);
+            existingDestItemIdForLog = destQuerySnap.docs[0].id;
+            const destinationItemSnap = await transaction.get(destinationItemRef); // Read inside transaction for consistency
+            if(destinationItemSnap.exists()){
+                destItemDataBeforeTx = {id: destinationItemSnap.id, ...destinationItemSnap.data()} as StockItem;
+            }
         }
 
         transaction.update(sourceItemRef, {
-          quantity: sourceItemData.quantity - numQuantityToTransfer,
+          quantity: sourceItemDataBeforeTx.quantity - numQuantityToTransfer,
           lastUpdated: new Date().toISOString()
         });
 
-        if (destinationItemSnap && destinationItemSnap.exists() && destinationItemRef) {
-          const destItemData = destinationItemSnap.data() as StockItem;
+        if (destinationItemRef && destItemDataBeforeTx) {
           transaction.update(destinationItemRef, {
-            quantity: destItemData.quantity + numQuantityToTransfer,
+            quantity: destItemDataBeforeTx.quantity + numQuantityToTransfer,
             lastUpdated: new Date().toISOString()
           });
         } else {
-          const newDestItemRef = doc(collection(db, "stockItems"));
-          transaction.set(newDestItemRef, {
-            name: sourceItemData.name,
-            category: sourceItemData.category,
+          const newDestItemDocRef = doc(collection(db, "stockItems"));
+          newDestItemIdForLog = newDestItemDocRef.id;
+          transaction.set(newDestItemDocRef, {
+            name: sourceItemDataBeforeTx.name,
+            category: sourceItemDataBeforeTx.category,
+            description: sourceItemDataBeforeTx.description || "",
             quantity: numQuantityToTransfer,
-            unit: sourceItemData.unit,
-            price: sourceItemData.price,
-            costPrice: sourceItemData.costPrice,
-            lowStockThreshold: sourceItemData.lowStockThreshold,
-            imageUrl: sourceItemData.imageUrl,
-            siteId: sourceItemData.siteId,
+            unit: sourceItemDataBeforeTx.unit,
+            price: sourceItemDataBeforeTx.price,
+            costPrice: sourceItemDataBeforeTx.costPrice,
+            lowStockThreshold: sourceItemDataBeforeTx.lowStockThreshold,
+            imageUrl: sourceItemDataBeforeTx.imageUrl,
+            siteId: sourceItemDataBeforeTx.siteId,
             stallId: destinationStallId,
-            originalMasterItemId: sourceItemData.originalMasterItemId ?? null,
+            originalMasterItemId: sourceItemDataBeforeTx.originalMasterItemId ?? null,
             lastUpdated: new Date().toISOString(),
           });
         }
       });
+
+      if (user && sourceItemDataBeforeTx) {
+        // Log transfer out from source stall
+        await logStockMovement(user, {
+            stockItemId: sourceItemDataBeforeTx.id,
+            masterStockItemIdForContext: sourceItemDataBeforeTx.originalMasterItemId,
+            siteId: sourceItemDataBeforeTx.siteId!,
+            stallId: sourceItemDataBeforeTx.stallId,
+            type: 'TRANSFER_OUT_FROM_STALL',
+            quantityChange: -numQuantityToTransfer,
+            quantityBefore: sourceItemDataBeforeTx.quantity,
+            quantityAfter: sourceItemDataBeforeTx.quantity - numQuantityToTransfer,
+            notes: `Transferred ${numQuantityToTransfer} unit(s) of ${sourceItemDataBeforeTx.name} to stall: ${stallsMap[destinationStallId] || destinationStallId}.`,
+            linkedStockItemId: newDestItemIdForLog || existingDestItemIdForLog,
+        });
+
+        // Log transfer in to destination stall
+        const destItemLogId = newDestItemIdForLog || existingDestItemIdForLog;
+        if(destItemLogId) {
+             await logStockMovement(user, {
+                stockItemId: destItemLogId,
+                masterStockItemIdForContext: sourceItemDataBeforeTx.originalMasterItemId,
+                siteId: sourceItemDataBeforeTx.siteId!,
+                stallId: destinationStallId,
+                type: 'TRANSFER_IN_TO_STALL',
+                quantityChange: numQuantityToTransfer,
+                quantityBefore: destItemDataBeforeTx ? destItemDataBeforeTx.quantity : 0,
+                quantityAfter: (destItemDataBeforeTx ? destItemDataBeforeTx.quantity : 0) + numQuantityToTransfer,
+                notes: `Received ${numQuantityToTransfer} unit(s) of ${sourceItemDataBeforeTx.name} from stall: ${stallsMap[sourceItemDataBeforeTx.stallId!] || sourceItemDataBeforeTx.stallId}.`,
+                linkedStockItemId: sourceItemDataBeforeTx.id,
+            });
+        }
+      }
+
       toast({
         title: "Transfer Successful",
         description: `${numQuantityToTransfer} unit(s) of ${itemToTransfer.name} transferred.`,
@@ -573,6 +747,8 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
 
     for (const itemToDelete of itemsToDeleteInfo) {
       if (!itemToDelete) continue;
+      let originalItemData: StockItem | null = null;
+      let originalMasterData: StockItem | null = null;
       try {
         await runTransaction(db, async (transaction) => {
           const stallItemRef = doc(db, "stockItems", itemToDelete.id);
@@ -581,24 +757,51 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           if (!stallItemSnap.exists()) {
             throw new Error(`Stall item ${itemToDelete.name} not found during batch delete.`);
           }
-          const stallItemData = stallItemSnap.data() as StockItem;
+          originalItemData = { id: stallItemSnap.id, ...stallItemSnap.data() } as StockItem;
 
-          if (stallItemData.originalMasterItemId) {
-            const masterItemRef = doc(db, "stockItems", stallItemData.originalMasterItemId);
+          if (originalItemData.originalMasterItemId) {
+            const masterItemRef = doc(db, "stockItems", originalItemData.originalMasterItemId);
             const masterItemSnap = await transaction.get(masterItemRef);
             if (masterItemSnap.exists()) {
-              const masterData = masterItemSnap.data() as StockItem;
+              originalMasterData = { id: masterItemSnap.id, ...masterItemSnap.data() } as StockItem;
               transaction.update(masterItemRef, {
-                quantity: masterData.quantity + stallItemData.quantity,
+                quantity: originalMasterData.quantity + originalItemData.quantity,
                 lastUpdated: new Date().toISOString(),
               });
             } else {
-              console.warn(`Master item ${stallItemData.originalMasterItemId} for stall item ${stallItemData.id} not found. Master stock not adjusted during batch delete.`);
+              console.warn(`Master item ${originalItemData.originalMasterItemId} for stall item ${originalItemData.id} not found. Master stock not adjusted during batch delete.`);
             }
           }
           transaction.delete(stallItemRef);
         });
         successCount++;
+        if (user && originalItemData) {
+            await logStockMovement(user, {
+                stockItemId: originalItemData.id,
+                masterStockItemIdForContext: originalItemData.originalMasterItemId,
+                siteId: originalItemData.siteId!,
+                stallId: originalItemData.stallId,
+                type: 'BATCH_STALL_DELETE',
+                quantityChange: -originalItemData.quantity,
+                quantityBefore: originalItemData.quantity,
+                quantityAfter: 0,
+                notes: `Batch deleted item "${originalItemData.name}". ${originalItemData.originalMasterItemId ? 'Quantity returned to master.' : ''}`,
+            });
+            if (originalMasterData && originalItemData.originalMasterItemId) {
+                const masterQtyAfter = originalMasterData.quantity + originalItemData.quantity;
+                 await logStockMovement(user, {
+                    stockItemId: originalMasterData.id,
+                    siteId: originalMasterData.siteId!,
+                    stallId: null,
+                    type: 'RECEIVE_RETURN_FROM_STALL', // Implicit batch return
+                    quantityChange: originalItemData.quantity,
+                    quantityBefore: originalMasterData.quantity,
+                    quantityAfter: masterQtyAfter,
+                    notes: `Implicit return from batch deleted stall item "${originalItemData.name}" (ID: ${originalItemData.id}).`,
+                    linkedStockItemId: originalItemData.id,
+                 });
+            }
+        }
       } catch (error: any) {
         console.error(`Error deleting item ${itemToDelete.id} in batch:`, error);
         errorCount++;
@@ -648,6 +851,9 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
 
     for (const itemToUpdate of itemsToUpdateInfo) {
        if (!itemToUpdate) continue;
+       let originalStallData: StockItem | null = null;
+       let originalMasterData: StockItem | null = null;
+       let newMasterQtyAfterUpdate: number | null = null;
       try {
         await runTransaction(db, async (transaction) => {
           const stallItemRef = doc(db, "stockItems", itemToUpdate.id);
@@ -656,15 +862,18 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           if (!stallItemSnap.exists()) {
             throw new Error(`Stall item ${itemToUpdate.name} not found during batch update.`);
           }
-          const currentStallData = stallItemSnap.data() as StockItem;
-          const oldStallQuantity = currentStallData.quantity;
+          originalStallData = { id: stallItemSnap.id, ...stallItemSnap.data() } as StockItem;
+          const oldStallQuantity = originalStallData.quantity;
 
           let masterItemSnap: DocumentSnapshot | null = null;
           let masterItemRefToUpdate: DocumentReference | null = null;
 
-          if (currentStallData.originalMasterItemId) {
-            masterItemRefToUpdate = doc(db, "stockItems", currentStallData.originalMasterItemId);
+          if (originalStallData.originalMasterItemId) {
+            masterItemRefToUpdate = doc(db, "stockItems", originalStallData.originalMasterItemId);
             masterItemSnap = await transaction.get(masterItemRefToUpdate);
+            if (masterItemSnap.exists()) {
+                originalMasterData = { id: masterItemSnap.id, ...masterItemSnap.data() } as StockItem;
+            }
           }
 
           transaction.update(stallItemRef, {
@@ -672,19 +881,44 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             lastUpdated: new Date().toISOString(),
           });
 
-          if (masterItemSnap && masterItemSnap.exists() && masterItemRefToUpdate) {
-            const masterData = masterItemSnap.data() as StockItem;
+          if (masterItemSnap && masterItemSnap.exists() && masterItemRefToUpdate && originalMasterData) {
             const quantityDelta = newBatchQtyNum - oldStallQuantity;
-            const newMasterQuantity = masterData.quantity - quantityDelta;
+            newMasterQtyAfterUpdate = Math.max(0, originalMasterData.quantity - quantityDelta);
             transaction.update(masterItemRefToUpdate, {
-              quantity: Math.max(0, newMasterQuantity),
+              quantity: newMasterQtyAfterUpdate,
               lastUpdated: new Date().toISOString(),
             });
-          } else if (currentStallData.originalMasterItemId && !masterItemSnap?.exists()){
-             console.warn(`Master item ${currentStallData.originalMasterItemId} for stall item ${currentStallData.id} not found. Master stock not adjusted during batch update.`);
+          } else if (originalStallData.originalMasterItemId && !masterItemSnap?.exists()){
+             console.warn(`Master item ${originalStallData.originalMasterItemId} for stall item ${originalStallData.id} not found. Master stock not adjusted during batch update.`);
           }
         });
         successCount++;
+         if (user && originalStallData) {
+             await logStockMovement(user, {
+                stockItemId: originalStallData.id,
+                masterStockItemIdForContext: originalStallData.originalMasterItemId,
+                siteId: originalStallData.siteId!,
+                stallId: originalStallData.stallId,
+                type: 'BATCH_STALL_UPDATE_SET',
+                quantityChange: newBatchQtyNum - originalStallData.quantity,
+                quantityBefore: originalStallData.quantity,
+                quantityAfter: newBatchQtyNum,
+                notes: `Batch stock update set quantity to ${newBatchQtyNum}.`,
+            });
+            if (originalMasterData && newMasterQtyAfterUpdate !== null) {
+                 await logStockMovement(user, {
+                    stockItemId: originalMasterData.id,
+                    siteId: originalMasterData.siteId!,
+                    stallId: null,
+                    type: 'DIRECT_STALL_UPDATE_AFFECTS_MASTER',
+                    quantityChange: newMasterQtyAfterUpdate - originalMasterData.quantity,
+                    quantityBefore: originalMasterData.quantity,
+                    quantityAfter: newMasterQtyAfterUpdate,
+                    notes: `Master stock adjusted due to batch update of linked stall item ${originalStallData.name} (ID: ${originalStallData.id}).`,
+                    linkedStockItemId: originalStallData.id,
+                });
+            }
+         }
       } catch (error: any) {
         console.error(`Error batch updating stock for item ${itemToUpdate.id}:`, error);
         errorCount++;
@@ -1256,3 +1490,4 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     </TooltipProvider>
   );
 }
+
