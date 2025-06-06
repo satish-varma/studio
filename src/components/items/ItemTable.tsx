@@ -1027,7 +1027,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                   checked={isAllSelected || isIndeterminate}
                   onCheckedChange={handleSelectAll}
                   aria-label="Select all stall items"
-                  className={isIndeterminate ? '[&_svg]:hidden indeterminate-checkbox' : ''}
+                  className={cn(isIndeterminate ? '[&_svg]:hidden indeterminate-checkbox' : '')}
                   data-state={isIndeterminate ? 'indeterminate' : (isAllSelected ? 'checked' : 'unchecked')}
                   disabled={selectableItems.length === 0}
                 />
