@@ -25,7 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import PageHeader from "@/components/shared/PageHeader";
 import { useAuth } from "@/contexts/AuthContext";
-import { Loader2, Save, UserCircle, FilterIcon, HistoryIcon, PackageIcon, Building } from "lucide-react"; // Added Building
+import { Loader2, Save, UserCircle, FilterIcon, HistoryIcon, PackageIcon, Building } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { getFirestore, doc, updateDoc, collection, getDocs, query, where, getDoc } from "firebase/firestore";
@@ -38,7 +38,7 @@ import { CalendarIcon } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
 import { format, parseISO, isValid } from "date-fns";
 import type { DateRange } from "react-day-picker";
-import { Badge } from "@/components/ui/badge"; // Added Badge
+import { Badge } from "@/components/ui/badge";
 
 if (!getApps().length) {
   try {
@@ -53,10 +53,8 @@ const auth = getAuth(getApp());
 const profileFormSchema = z.object({
   displayName: z.string().min(2, { message: "Display name must be at least 2 characters." }),
   email: z.string().email().optional(),
-  // Site/Stall defaults are now role-dependent and handled differently for managers
-  defaultSiteId: z.string().nullable().optional(), // Kept for staff/admin convenience
-  defaultStallId: z.string().nullable().optional(), // Kept for staff/admin convenience
-  // managedSiteIds is not part of this form, it's managed by Admin
+  defaultSiteId: z.string().nullable().optional(),
+  defaultStallId: z.string().nullable().optional(),
   defaultItemSearchTerm: z.string().nullable().optional(),
   defaultItemCategoryFilter: z.string().nullable().optional(),
   defaultItemStockStatusFilter: z.string().nullable().optional(),
@@ -72,7 +70,7 @@ export default function ProfilePage() {
   const { user, loading: authLoading, setUser: setAuthUser, setActiveSite, setActiveStall } = useAuth();
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [allSites, setAllSites] = useState<Site[]>([]); // Renamed from sites to allSites for clarity
+  const [allSites, setAllSites] = useState<Site[]>([]);
   const [stallsForSelectedSite, setStallsForSelectedSite] = useState<Stall[]>([]);
   const [allUsersForStaffFilter, setAllUsersForStaffFilter] = useState<AppUser[]>([]);
   const [itemCategories, setItemCategories] = useState<string[]>([]);
@@ -85,8 +83,8 @@ export default function ProfilePage() {
     defaultValues: {
       displayName: "",
       email: "",
-      defaultSiteId: null, // For staff/admin
-      defaultStallId: null, // For staff/admin
+      defaultSiteId: null,
+      defaultStallId: null,
       defaultItemSearchTerm: null,
       defaultItemCategoryFilter: null, 
       defaultItemStockStatusFilter: null, 
@@ -97,7 +95,7 @@ export default function ProfilePage() {
     },
   });
 
-  const selectedDefaultSiteId = form.watch("defaultSiteId"); // Used by staff/admin for their default stall dropdown
+  const selectedDefaultSiteId = form.watch("defaultSiteId");
   const isStaffUser = user?.role === 'staff';
   const isManagerUser = user?.role === 'manager';
   const isAdminUser = user?.role === 'admin';
@@ -107,7 +105,6 @@ export default function ProfilePage() {
       if (!db || !user) return;
       setLoadingContextData(true);
       try {
-        // Fetch all sites for dropdowns (Admins & Managers to set their *own* current view preference)
         const sitesSnapshot = await getDocs(collection(db, "sites"));
         const fetchedSites: Site[] = sitesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Site));
         setAllSites(fetchedSites.sort((a, b) => a.name.localeCompare(b.name)));
@@ -141,8 +138,8 @@ export default function ProfilePage() {
       form.reset({
         displayName: user.displayName || "",
         email: user.email || "",
-        defaultSiteId: (isStaffUser || isAdminUser) ? (user.defaultSiteId ?? null) : null, // Site for staff/admin
-        defaultStallId: (isStaffUser || isAdminUser) ? (user.defaultStallId ?? null) : null, // Stall for staff/admin
+        defaultSiteId: (isStaffUser || isAdminUser) ? (user.defaultSiteId ?? null) : null,
+        defaultStallId: (isStaffUser || isAdminUser) ? (user.defaultStallId ?? null) : null,
         defaultItemSearchTerm: user.defaultItemSearchTerm ?? null,
         defaultItemCategoryFilter: user.defaultItemCategoryFilter ?? null,
         defaultItemStockStatusFilter: user.defaultItemStockStatusFilter ?? null,
@@ -152,20 +149,20 @@ export default function ProfilePage() {
         defaultSalesStaffFilter: user.defaultSalesStaffFilter ?? null,
       });
        setDateRange({
-          from: user.defaultSalesDateRangeFrom ? parseISO(user.defaultSalesDateRangeFrom) : undefined,
-          to: user.defaultSalesDateRangeTo ? parseISO(user.defaultSalesDateRangeTo) : undefined,
+          from: user.defaultSalesDateRangeFrom && isValid(parseISO(user.defaultSalesDateRangeFrom)) ? parseISO(user.defaultSalesDateRangeFrom) : undefined,
+          to: user.defaultSalesDateRangeTo && isValid(parseISO(user.defaultSalesDateRangeTo)) ? parseISO(user.defaultSalesDateRangeTo) : undefined,
       });
     }
   }, [user, form, allSites, isStaffUser, isAdminUser]);
 
   useEffect(() => {
     const fetchStalls = async () => {
-      if (!db || !selectedDefaultSiteId) { // Only relevant if defaultSiteId is being selected (staff/admin)
+      if (!db || !selectedDefaultSiteId) {
         setStallsForSelectedSite([]);
         form.setValue("defaultStallId", null); 
         return;
       }
-      setLoadingContextData(true); // Can reuse this loading state
+      setLoadingContextData(true);
       try {
         const q = query(collection(db, "stalls"), where("siteId", "==", selectedDefaultSiteId));
         const stallsSnapshot = await getDocs(q);
@@ -184,10 +181,10 @@ export default function ProfilePage() {
         setLoadingContextData(false);
       }
     };
-    if (isStaffUser || isAdminUser) { // Only fetch stalls if user is staff or admin
+    if (isStaffUser || isAdminUser) {
         fetchStalls();
     } else {
-        setStallsForSelectedSite([]); // Managers don't use defaultStallId field
+        setStallsForSelectedSite([]);
     }
   }, [selectedDefaultSiteId, toast, form, isStaffUser, isAdminUser]);
 
@@ -201,21 +198,19 @@ export default function ProfilePage() {
     try {
       const dataToUpdate: Partial<AppUser> = { 
         displayName: values.displayName,
-        // Site/Stall defaults are handled based on role
         defaultItemSearchTerm: values.defaultItemSearchTerm && values.defaultItemSearchTerm.trim() !== "" ? values.defaultItemSearchTerm.trim() : null,
-        defaultItemCategoryFilter: values.defaultItemCategoryFilter, 
-        defaultItemStockStatusFilter: values.defaultItemStockStatusFilter, 
-        defaultItemStallFilterOption: values.defaultItemStallFilterOption, 
-        defaultSalesDateRangeFrom: dateRange?.from ? dateRange.from.toISOString() : null,
-        defaultSalesDateRangeTo: dateRange?.to ? dateRange.to.toISOString() : null,
-        defaultSalesStaffFilter: values.defaultSalesStaffFilter, 
+        defaultItemCategoryFilter: values.defaultItemCategoryFilter === "all" ? null : values.defaultItemCategoryFilter, 
+        defaultItemStockStatusFilter: values.defaultItemStockStatusFilter === "all" ? null : values.defaultItemStockStatusFilter, 
+        defaultItemStallFilterOption: values.defaultItemStallFilterOption === "all" ? null : values.defaultItemStallFilterOption, 
+        defaultSalesDateRangeFrom: dateRange?.from && isValid(dateRange.from) ? dateRange.from.toISOString() : null,
+        defaultSalesDateRangeTo: dateRange?.to && isValid(dateRange.to) ? dateRange.to.toISOString() : null,
+        defaultSalesStaffFilter: values.defaultSalesStaffFilter === "all" ? null : values.defaultSalesStaffFilter, 
       };
 
-      if (isStaffUser || isAdminUser) { // Admins can set their own "viewing" default
+      if (isStaffUser || isAdminUser) {
         dataToUpdate.defaultSiteId = values.defaultSiteId ? values.defaultSiteId : null;
         dataToUpdate.defaultStallId = (values.defaultSiteId && values.defaultStallId) ? values.defaultStallId : null;
       }
-      // For managers, managedSiteIds is set by admin, not here. Their defaultSiteId/StallId in DB should remain null or be ignored.
 
       const userDocRef = doc(db, "users", user.uid);
       await updateDoc(userDocRef, dataToUpdate);
@@ -231,11 +226,10 @@ export default function ProfilePage() {
         } : null);
       }
       
-      if (isAdminUser || isStaffUser) { // For admins/staff, update active context from their *own* defaults
+      if (isAdminUser || isStaffUser) {
         setActiveSite(dataToUpdate.defaultSiteId || null);
         setActiveStall(dataToUpdate.defaultSiteId ? (dataToUpdate.defaultStallId || null) : null);
       }
-      // For managers, setActiveSite/Stall is handled by SiteStallSelector or login logic based on managedSiteIds
 
       toast({
         title: "Profile Updated",
@@ -324,7 +318,7 @@ export default function ProfilePage() {
                   </FormItem>
                 )}
 
-                {(isStaffUser || isAdminUser) && ( // Admin can set their own default view, Staff has assigned default
+                {(isStaffUser || isAdminUser) && (
                   <>
                     <FormField
                       control={form.control}
@@ -335,7 +329,7 @@ export default function ProfilePage() {
                           <Select 
                               onValueChange={(value) => field.onChange(value === "none" ? null : value)} 
                               value={field.value || "none"}
-                              disabled={isSubmitting || allSites.length === 0 || isStaffUser} // Staff cannot change, only view
+                              disabled={isSubmitting || allSites.length === 0 || isStaffUser}
                           >
                             <FormControl>
                               <SelectTrigger className="bg-input" disabled={isStaffUser}>
@@ -372,7 +366,7 @@ export default function ProfilePage() {
                           <Select 
                               onValueChange={(value) => field.onChange(value === "none" ? null : value)} 
                               value={field.value || "none"}
-                              disabled={isSubmitting || !selectedDefaultSiteId || stallsForSelectedSite.length === 0 || isStaffUser} // Staff cannot change
+                              disabled={isSubmitting || !selectedDefaultSiteId || stallsForSelectedSite.length === 0 || isStaffUser}
                           >
                             <FormControl>
                               <SelectTrigger className="bg-input" disabled={isStaffUser}>
@@ -412,13 +406,40 @@ export default function ProfilePage() {
                   <FormField control={form.control} name="defaultItemSearchTerm" render={({ field }) => ( <FormItem><FormLabel>Search Term</FormLabel><FormControl><Input placeholder="e.g., Apples" {...field} value={field.value || ""} disabled={isSubmitting} className="bg-input"/></FormControl></FormItem> )} />
                   <FormField control={form.control} name="defaultItemCategoryFilter" render={({ field }) => ( <FormItem><FormLabel>Category</FormLabel><Select onValueChange={(v) => field.onChange(v === "all" ? null : v)} value={field.value || "all"} disabled={isSubmitting}><FormControl><SelectTrigger className="bg-input"><SelectValue placeholder="All Categories" /></SelectTrigger></FormControl><SelectContent><SelectItem value="all">All Categories</SelectItem>{itemCategories.map(cat => <SelectItem key={cat} value={cat}>{cat}</SelectItem>)}</SelectContent></Select></FormItem> )} />
                   <FormField control={form.control} name="defaultItemStockStatusFilter" render={({ field }) => ( <FormItem><FormLabel>Stock Status</FormLabel><Select onValueChange={(v) => field.onChange(v === "all" ? null : v)} value={field.value || "all"} disabled={isSubmitting}><FormControl><SelectTrigger className="bg-input"><SelectValue placeholder="All Statuses" /></SelectTrigger></FormControl><SelectContent><SelectItem value="all">All Statuses</SelectItem><SelectItem value="in-stock">In Stock</SelectItem><SelectItem value="low-stock">Low Stock</SelectItem><SelectItem value="out-of-stock">Out of Stock</SelectItem></SelectContent></Select></FormItem> )} />
-                  <FormField control={form.control} name="defaultItemStallFilterOption" render={({ field }) => ( <FormItem><FormLabel>Stall/Location Filter</FormLabel><Select onValueChange={(v) => field.onChange(v === "all" ? null : v)} value={field.value || "all"} disabled={isSubmitting || !selectedDefaultSiteId && !(isManagerUser && user.managedSiteIds && user.managedSiteIds.length > 0) }><FormControl><SelectTrigger className="bg-input"><SelectValue placeholder={!selectedDefaultSiteId && !(isManagerUser && user.managedSiteIds && user.managedSiteIds.length > 0) ? "Select site context first" : "All Stock (Site-wide)"} /></SelectTrigger></FormControl><SelectContent>{itemStallFilterOptions.map(opt => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}</SelectContent></Select><FormDescription>Applies to the currently active site view.</FormDescription></FormItem> )} />
+                  <FormField 
+                    control={form.control} 
+                    name="defaultItemStallFilterOption" 
+                    render={({ field }) => ( 
+                      <FormItem>
+                        <FormLabel>Stall/Location Filter</FormLabel>
+                        <Select 
+                          onValueChange={(v) => field.onChange(v === "all" ? null : v)} 
+                          value={field.value || "all"} 
+                          disabled={isSubmitting || (!selectedDefaultSiteId && !(isManagerUser && user.managedSiteIds && user.managedSiteIds.length > 0)) }
+                        >
+                          <FormControl>
+                            <SelectTrigger className="bg-input">
+                              <SelectValue placeholder={
+                                (!selectedDefaultSiteId && !(isManagerUser && user.managedSiteIds && user.managedSiteIds.length > 0)) 
+                                ? "Select site context first" 
+                                : "All Stock (Site-wide)"
+                              } />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {itemStallFilterOptions.map(opt => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <FormDescription>Applies to the currently active site view for managers, or default site view for admins/staff.</FormDescription>
+                      </FormItem> 
+                    )} 
+                  />
                 </CardContent>
               </Card>
               <Card className="shadow-lg">
                 <CardHeader><CardTitle className="text-xl flex items-center"><HistoryIcon className="mr-2 h-5 w-5 text-primary"/> Default Sales History Filters</CardTitle></CardHeader>
                 <CardContent className="space-y-4">
-                   <FormItem><FormLabel>Date Range</FormLabel><Popover><PopoverTrigger asChild><Button variant={"outline"} className={`w-full justify-start text-left font-normal bg-input ${!dateRange?.from && "text-muted-foreground"}`} disabled={isSubmitting}><CalendarIcon className="mr-2 h-4 w-4" />{dateRange?.from ? (dateRange.to ? ( <> {format(dateRange.from, "LLL dd, y")} - {format(dateRange.to, "LLL dd, y")} </> ) : ( format(dateRange.from, "LLL dd, y") ) ) : ( <span>Pick a date range</span> )}</Button></PopoverTrigger><PopoverContent className="w-auto p-0" align="start"><Calendar initialFocus mode="range" defaultMonth={dateRange?.from} selected={dateRange} onSelect={setDateRange} numberOfMonths={2}/></PopoverContent></Popover></FormItem>
+                   <FormItem><FormLabel>Date Range</FormLabel><Popover><PopoverTrigger asChild><Button variant={"outline"} className={`w-full justify-start text-left font-normal bg-input ${!dateRange?.from && "text-muted-foreground"}`} disabled={isSubmitting}><CalendarIcon className="mr-2 h-4 w-4" />{dateRange?.from && isValid(dateRange.from) ? (dateRange.to && isValid(dateRange.to) ? ( <> {format(dateRange.from, "LLL dd, y")} - {format(dateRange.to, "LLL dd, y")} </> ) : ( format(dateRange.from, "LLL dd, y") ) ) : ( <span>Pick a date range</span> )}</Button></PopoverTrigger><PopoverContent className="w-auto p-0" align="start"><Calendar initialFocus mode="range" defaultMonth={dateRange?.from} selected={dateRange} onSelect={setDateRange} numberOfMonths={2}/></PopoverContent></Popover></FormItem>
                   {(user.role === 'admin' || user.role === 'manager') && (
                     <FormField control={form.control} name="defaultSalesStaffFilter" render={({ field }) => ( <FormItem><FormLabel>Staff Member</FormLabel><Select onValueChange={(v) => field.onChange(v === "all" ? null : v)} value={field.value || "all"} disabled={isSubmitting}><FormControl><SelectTrigger className="bg-input"><SelectValue placeholder="All Staff" /></SelectTrigger></FormControl><SelectContent><SelectItem value="all">All Staff</SelectItem>{allUsersForStaffFilter.filter(staff => staff.uid && staff.uid.trim() !== "").map(staff => <SelectItem key={staff.uid} value={staff.uid}>{staff.displayName || staff.email}</SelectItem>)}</SelectContent></Select></FormItem> )} />
                   )}
@@ -437,3 +458,5 @@ export default function ProfilePage() {
     </div>
   );
 }
+
+    

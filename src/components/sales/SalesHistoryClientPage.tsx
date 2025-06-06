@@ -23,7 +23,7 @@ import {
     updateDoc,
     QueryConstraint 
 } from "firebase/firestore";
-import { getApps, initializeApp } from 'firebase/app';
+import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
 import { Loader2, Info } from "lucide-react";
@@ -40,15 +40,11 @@ if (!getApps().length) {
 const db = getFirestore();
 
 export default function SalesHistoryClientPage() {
-  const { user, activeSiteId, activeStallId } = useAuth();
+  const { user, activeSiteId, activeStallId, loading: authLoading } = useAuth();
   const { toast } = useToast();
 
-  const [dateRange, setDateRange] = useState<DateRange | undefined>(() => {
-    const from = user?.defaultSalesDateRangeFrom ? parseISO(user.defaultSalesDateRangeFrom) : subDays(new Date(), 29);
-    const to = user?.defaultSalesDateRangeTo ? parseISO(user.defaultSalesDateRangeTo) : new Date();
-    return { from: isValid(from) ? from : undefined, to: isValid(to) ? to : undefined };
-  });
-  const [staffFilter, setStaffFilter] = useState(() => user?.defaultSalesStaffFilter || "all"); 
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
+  const [staffFilter, setStaffFilter] = useState("all"); 
   
   const [transactions, setTransactions] = useState<SaleTransaction[]>([]);
   const [loadingTransactions, setLoadingTransactions] = useState(true);
@@ -58,19 +54,23 @@ export default function SalesHistoryClientPage() {
 
   const isManagerOrAdmin = user?.role === 'manager' || user?.role === 'admin';
 
-  // Effect to update filters if user context changes
   useEffect(() => {
-    if (user) {
-      const fromDate = user.defaultSalesDateRangeFrom ? parseISO(user.defaultSalesDateRangeFrom) : subDays(new Date(), 29);
-      const toDate = user.defaultSalesDateRangeTo ? parseISO(user.defaultSalesDateRangeTo) : new Date();
-      setDateRange({ from: isValid(fromDate) ? fromDate : undefined, to: isValid(toDate) ? toDate : undefined });
+    if (user && !authLoading) {
+      const fromDate = user.defaultSalesDateRangeFrom && isValid(parseISO(user.defaultSalesDateRangeFrom)) 
+                       ? parseISO(user.defaultSalesDateRangeFrom) 
+                       : subDays(new Date(), 29);
+      const toDate = user.defaultSalesDateRangeTo && isValid(parseISO(user.defaultSalesDateRangeTo))
+                     ? parseISO(user.defaultSalesDateRangeTo) 
+                     : new Date();
+      setDateRange({ from: fromDate, to: toDate });
       setStaffFilter(user.defaultSalesStaffFilter || "all");
+      console.log("SalesHistoryClientPage: User defaults applied. DateRange:", {from: fromDate, to: toDate}, "StaffFilter:", user.defaultSalesStaffFilter || "all");
     }
-  }, [user]);
+  }, [user, authLoading]);
 
   useEffect(() => {
     async function fetchStaffMembers() {
-      if (isManagerOrAdmin) {
+      if (isManagerOrAdmin && db) {
         setLoadingStaff(true);
         try {
           const usersCollectionRef = collection(db, "users");
@@ -92,10 +92,14 @@ export default function SalesHistoryClientPage() {
     if (user) { 
         fetchStaffMembers();
     }
-  }, [user, isManagerOrAdmin, toast]);
+  }, [user, isManagerOrAdmin, toast, db]);
 
 
   useEffect(() => {
+    if (authLoading || !db) {
+        setLoadingTransactions(true);
+        return;
+    }
     if (!user) {
       setLoadingTransactions(false);
       setErrorTransactions("User not authenticated.");
@@ -176,7 +180,7 @@ export default function SalesHistoryClientPage() {
     );
 
     return () => unsubscribe();
-  }, [user, activeSiteId, activeStallId, dateRange, staffFilter, isManagerOrAdmin]);
+  }, [user, activeSiteId, activeStallId, dateRange, staffFilter, isManagerOrAdmin, authLoading, db]);
 
   const handleDeleteSaleWithJustification = async (saleId: string, justification: string) => {
     if (!user || user.role !== 'admin') {
@@ -187,10 +191,12 @@ export default function SalesHistoryClientPage() {
         toast({ title: "Justification Required", description: "Please provide a reason for deleting the sale.", variant: "destructive" });
         return;
     }
+    if (!db) {
+        toast({ title: "Database Error", description: "Firestore not initialized.", variant: "destructive"});
+        return;
+    }
 
     const saleDocRef = doc(db, "salesTransactions", saleId);
-    // Note: Reverting stock for deleted sales is complex and not implemented here.
-    // This delete is a "soft delete" for record-keeping.
     try {
       await updateDoc(saleDocRef, {
         isDeleted: true,
@@ -266,3 +272,5 @@ export default function SalesHistoryClientPage() {
     </div>
   );
 }
+
+    
