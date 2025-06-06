@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from "react";
 import type { StockMovementLog } from "@/types/log";
-import type { Site, Stall } from "@/types"; // Import Site and Stall types
+import type { Site, Stall, StockItem, AppUser } from "@/types"; // Import Site, Stall, StockItem, AppUser types
 import { 
   getFirestore, 
   collection, 
@@ -12,7 +12,7 @@ import {
   orderBy,
   QuerySnapshot,
   DocumentData,
-  getDocs // Import getDocs for one-time fetch of sites/stalls
+  getDocs // Import getDocs for one-time fetch of sites/stalls/items/users
 } from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
@@ -37,23 +37,22 @@ export default function ActivityLogClientPage() {
   const [logs, setLogs] = useState<StockMovementLog[]>([]);
   const [sitesMap, setSitesMap] = useState<Record<string, string>>({});
   const [stallsMap, setStallsMap] = useState<Record<string, string>>({});
-  const [loadingData, setLoadingData] = useState(true); // Combined loading state
+  const [itemsMap, setItemsMap] = useState<Record<string, string>>({});
+  const [usersMap, setUsersMap] = useState<Record<string, string>>({});
+  const [loadingData, setLoadingData] = useState(true);
   const [errorData, setErrorData] = useState<string | null>(null);
 
   useEffect(() => {
     if (authLoading) {
-      // Still waiting for auth to resolve, keep loadingData true or let it be.
-      // It's initialized to true, so this is fine.
       return;
     }
 
     if (!currentUser || currentUser.role !== 'admin') {
-      setLoadingData(false); // Not authorized, stop loading.
+      setLoadingData(false);
       setErrorData("Access Denied: You do not have permission to view this page.");
       return;
     }
 
-    // Set loading to true at the start of data fetching for this specific effect run.
     setLoadingData(true);
     setErrorData(null);
 
@@ -75,6 +74,23 @@ export default function ActivityLogClientPage() {
         stallsSnapshot.forEach(doc => newStallsMap[doc.id] = (doc.data() as Stall).name);
         setStallsMap(newStallsMap);
 
+        // Fetch Items Map
+        const itemsCollectionRef = collection(db, "stockItems");
+        const itemsSnapshot = await getDocs(itemsCollectionRef);
+        const newItemsMap: Record<string, string> = {};
+        itemsSnapshot.forEach(doc => newItemsMap[doc.id] = (doc.data() as StockItem).name);
+        setItemsMap(newItemsMap);
+
+        // Fetch Users Map
+        const usersCollectionRef = collection(db, "users");
+        const usersSnapshot = await getDocs(usersCollectionRef);
+        const newUsersMap: Record<string, string> = {};
+        usersSnapshot.forEach(doc => {
+          const userData = doc.data() as AppUser;
+          newUsersMap[doc.id] = userData.displayName || userData.email || doc.id;
+        });
+        setUsersMap(newUsersMap);
+
         // Subscribe to Logs
         const logsCollectionRef = collection(db, "stockMovementLogs");
         const q = query(logsCollectionRef, orderBy("timestamp", "desc")); 
@@ -86,19 +102,19 @@ export default function ActivityLogClientPage() {
               ...docSnapshot.data()
             } as StockMovementLog));
             setLogs(fetchedLogs);
-            setErrorData(null); // Clear previous error on success
-            setLoadingData(false); // Data (maps and first log snapshot) is loaded
+            setErrorData(null); 
+            setLoadingData(false); 
           },
           (error) => {
             console.error("Error fetching activity logs:", error);
             setErrorData("Failed to load activity logs. Please try again later.");
-            setLoadingData(false); // Stop loading on error
+            setLoadingData(false); 
           }
         );
       } catch (mapError) {
-        console.error("Error fetching site/stall maps:", mapError);
-        setErrorData("Failed to load site/stall context data.");
-        setLoadingData(false); // Stop loading on map error
+        console.error("Error fetching context maps:", mapError);
+        setErrorData("Failed to load context data for logs.");
+        setLoadingData(false); 
       }
     };
     
@@ -107,7 +123,7 @@ export default function ActivityLogClientPage() {
     return () => {
       if (unsubscribeLogs) unsubscribeLogs();
     };
-  }, [currentUser, authLoading]); // Removed loadingData from dependency array
+  }, [currentUser, authLoading]); 
 
   if (authLoading || loadingData) {
     return (
@@ -140,7 +156,13 @@ export default function ActivityLogClientPage() {
 
   return (
     <div className="space-y-6">
-      <ActivityLogTable logs={logs} sitesMap={sitesMap} stallsMap={stallsMap} />
+      <ActivityLogTable 
+        logs={logs} 
+        sitesMap={sitesMap} 
+        stallsMap={stallsMap}
+        itemsMap={itemsMap}
+        usersMap={usersMap}
+      />
     </div>
   );
 }

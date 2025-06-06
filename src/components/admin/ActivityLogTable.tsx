@@ -13,15 +13,17 @@ import type { StockMovementLog } from "@/types/log";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Info, ArrowUpCircle, ArrowDownCircle, Building, Store } from "lucide-react"; // Added Building, Store
+import { Info, ArrowUpCircle, ArrowDownCircle, Building, Store } from "lucide-react";
 
 interface ActivityLogTableProps {
   logs: StockMovementLog[];
   sitesMap: Record<string, string>;
   stallsMap: Record<string, string>;
+  itemsMap: Record<string, string>;
+  usersMap: Record<string, string>;
 }
 
-export function ActivityLogTable({ logs, sitesMap, stallsMap }: ActivityLogTableProps) {
+export function ActivityLogTable({ logs, sitesMap, stallsMap, itemsMap, usersMap }: ActivityLogTableProps) {
 
   const formatDate = (dateString?: string) => {
     if (!dateString) return "N/A";
@@ -39,7 +41,7 @@ export function ActivityLogTable({ logs, sitesMap, stallsMap }: ActivityLogTable
 
   const getMovementTypeBadgeVariant = (type: StockMovementLog['type']): "default" | "secondary" | "destructive" | "outline" => {
     if (type.includes('SALE') || type.includes('DELETE') || type.includes('TRANSFER_OUT')) return "destructive";
-    if (type.includes('CREATE') || type.includes('RECEIVE') || type.includes('ALLOCATE_TO_STALL') || type.includes('TRANSFER_IN')) return "default"; // Using primary for positive changes
+    if (type.includes('CREATE') || type.includes('RECEIVE') || type.includes('ALLOCATE_TO_STALL') || type.includes('TRANSFER_IN')) return "default";
     if (type.includes('UPDATE') || type.includes('RETURN')) return "secondary";
     return "outline";
   };
@@ -48,6 +50,21 @@ export function ActivityLogTable({ logs, sitesMap, stallsMap }: ActivityLogTable
     if (change > 0) return "text-green-600 font-medium";
     if (change < 0) return "text-destructive font-medium";
     return "text-muted-foreground";
+  };
+
+  const getItemDisplay = (itemId: string | null | undefined, map: Record<string, string>, label: string) => {
+    if (!itemId) return null;
+    const name = map[itemId];
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="block text-muted-foreground cursor-help">
+            {label}: {name || itemId.substring(0, 8) + "..."}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent><p>{label}: {name || "Unknown Name"} (ID: {itemId})</p></TooltipContent>
+      </Tooltip>
+    );
   };
 
   if (logs.length === 0) {
@@ -63,7 +80,7 @@ export function ActivityLogTable({ logs, sitesMap, stallsMap }: ActivityLogTable
               <TableHead className="w-[180px]">Timestamp</TableHead>
               <TableHead>User</TableHead>
               <TableHead>Type</TableHead>
-              <TableHead className="w-[200px]">Item ID / Context</TableHead>
+              <TableHead className="w-[250px]">Item / Context</TableHead>
               <TableHead className="text-center">Qty Change</TableHead>
               <TableHead className="text-center">Before</TableHead>
               <TableHead className="text-center">After</TableHead>
@@ -76,7 +93,7 @@ export function ActivityLogTable({ logs, sitesMap, stallsMap }: ActivityLogTable
               <TableRow key={log.id}>
                 <TableCell className="text-xs text-muted-foreground">{formatDate(log.timestamp)}</TableCell>
                 <TableCell className="text-sm">
-                    {log.userName || log.userId.substring(0,8) + "..."}
+                    {log.userName || usersMap[log.userId] || log.userId.substring(0,8) + "..."}
                 </TableCell>
                 <TableCell>
                   <Badge variant={getMovementTypeBadgeVariant(log.type)} className="text-xs whitespace-nowrap">
@@ -86,26 +103,14 @@ export function ActivityLogTable({ logs, sitesMap, stallsMap }: ActivityLogTable
                 <TableCell className="text-xs">
                     <Tooltip>
                         <TooltipTrigger asChild>
-                            <span className="cursor-help underline decoration-dotted">{log.stockItemId.substring(0,12)}...</span>
+                            <span className="cursor-help underline decoration-dotted font-medium text-foreground">
+                                {itemsMap[log.stockItemId] || log.stockItemId.substring(0,12) + "..."}
+                            </span>
                         </TooltipTrigger>
-                        <TooltipContent><p>Item ID: {log.stockItemId}</p></TooltipContent>
+                        <TooltipContent><p>Item: {itemsMap[log.stockItemId] || "Unknown Item"} (ID: {log.stockItemId})</p></TooltipContent>
                     </Tooltip>
-                    {log.linkedStockItemId && (
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <span className="block text-muted-foreground cursor-help">Linked: {log.linkedStockItemId.substring(0,8)}...</span>
-                            </TooltipTrigger>
-                            <TooltipContent><p>Linked Item ID: {log.linkedStockItemId}</p></TooltipContent>
-                        </Tooltip>
-                    )}
-                     {log.masterStockItemIdForContext && (
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <span className="block text-muted-foreground/70 cursor-help">Master Ref: {log.masterStockItemIdForContext.substring(0,8)}...</span>
-                            </TooltipTrigger>
-                            <TooltipContent><p>Master Stock Item ID: {log.masterStockItemIdForContext}</p></TooltipContent>
-                        </Tooltip>
-                    )}
+                    {getItemDisplay(log.linkedStockItemId, itemsMap, "Linked Item")}
+                    {getItemDisplay(log.masterStockItemIdForContext, itemsMap, "Master Ref")}
                 </TableCell>
                 <TableCell className={`text-center ${getQuantityChangeClass(log.quantityChange)}`}>
                   <div className="flex items-center justify-center">
@@ -123,7 +128,7 @@ export function ActivityLogTable({ logs, sitesMap, stallsMap }: ActivityLogTable
                         <TooltipTrigger asChild>
                             <span className="cursor-help truncate">{sitesMap[log.siteId] || log.siteId.substring(0,8) + "..."}</span>
                         </TooltipTrigger>
-                        <TooltipContent><p>Site: {sitesMap[log.siteId] || "Unknown"}<br/>ID: {log.siteId}</p></TooltipContent>
+                        <TooltipContent><p>Site: {sitesMap[log.siteId] || "Unknown Site"}<br/>ID: {log.siteId}</p></TooltipContent>
                     </Tooltip>
                   </div>
                   {log.stallId && (
@@ -133,7 +138,7 @@ export function ActivityLogTable({ logs, sitesMap, stallsMap }: ActivityLogTable
                             <TooltipTrigger asChild>
                                 <span className="cursor-help truncate">{stallsMap[log.stallId] || log.stallId.substring(0,8) + "..."}</span>
                             </TooltipTrigger>
-                            <TooltipContent><p>Stall: {stallsMap[log.stallId] || "Unknown"}<br/>ID: {log.stallId}</p></TooltipContent>
+                            <TooltipContent><p>Stall: {stallsMap[log.stallId] || "Unknown Stall"}<br/>ID: {log.stallId}</p></TooltipContent>
                         </Tooltip>
                     </div>
                   )}
