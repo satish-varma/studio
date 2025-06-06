@@ -39,6 +39,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogClose, // Ensured DialogClose is imported
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
@@ -66,8 +67,8 @@ import {
 } from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
-import { useAuth } from "@/contexts/AuthContext"; // Import useAuth
-import { logStockMovement } from "@/lib/stockLogger"; // Import logStockMovement
+import { useAuth } from "@/contexts/AuthContext"; 
+import { logStockMovement } from "@/lib/stockLogger"; 
 
 if (!getApps().length) {
   try {
@@ -89,7 +90,7 @@ interface ItemTableProps {
 export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAllocation, onDataNeedsRefresh }: ItemTableProps) {
   const { toast } = useToast();
   const router = useRouter();
-  const { user } = useAuth(); // Get user from AuthContext for logging
+  const { user } = useAuth(); 
 
   const [isDeleting, setIsDeleting] = useState(false);
   const [isUpdatingStock, setIsUpdatingStock] = useState(false);
@@ -219,7 +220,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                     stockItemId: itemDataForLog.originalMasterItemId,
                     siteId: masterItemAfter.siteId!,
                     stallId: null,
-                    type: 'RECEIVE_RETURN_FROM_STALL', // Implicit return on delete
+                    type: 'RECEIVE_RETURN_FROM_STALL', 
                     quantityChange: itemDataForLog.quantity,
                     quantityBefore: masterItemAfter.quantity - itemDataForLog.quantity,
                     quantityAfter: masterItemAfter.quantity,
@@ -377,8 +378,8 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     setIsAllocating(true);
     let masterStockDataBeforeTx: StockItem | null = null;
     let stallItemDataBeforeTx: StockItem | null = null;
-    let newStallItemIdForLog: string | null = null; // To capture ID if new stall item is created
-    let existingStallItemIdForLog: string | null = null; // To capture ID if existing stall item is updated
+    let newStallItemIdForLog: string | null = null; 
+    let existingStallItemIdForLog: string | null = null; 
 
     try {
       await runTransaction(db, async (transaction) => {
@@ -400,12 +401,12 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         );
 
         let targetStallItemRef: DocumentReference | null = null;
-        const existingStallItemsQuerySnap = await getDocs(stallItemsQuery); // GetDocs outside transaction for read
+        const existingStallItemsQuerySnap = await getDocs(stallItemsQuery); 
 
         if (!existingStallItemsQuerySnap.empty) {
             targetStallItemRef = existingStallItemsQuerySnap.docs[0].ref;
             existingStallItemIdForLog = existingStallItemsQuerySnap.docs[0].id;
-            const targetStallItemSnap = await transaction.get(targetStallItemRef); // Get within transaction for consistency
+            const targetStallItemSnap = await transaction.get(targetStallItemRef); 
             if (targetStallItemSnap.exists()) {
                 stallItemDataBeforeTx = {id: targetStallItemSnap.id, ...targetStallItemSnap.data()} as StockItem;
             }
@@ -417,7 +418,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                 lastUpdated: new Date().toISOString(),
             });
         } else {
-            const newStallItemDocRef = doc(collection(db, "stockItems")); // Generate ID client-side for logging
+            const newStallItemDocRef = doc(collection(db, "stockItems")); 
             newStallItemIdForLog = newStallItemDocRef.id;
             const newStallItemDataToSave: Omit<StockItem, 'id'> = {
                 name: masterStockDataBeforeTx.name,
@@ -444,7 +445,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       });
 
       if (user && masterStockDataBeforeTx) {
-        // Log master stock decrease
         await logStockMovement(user, {
           stockItemId: masterStockDataBeforeTx.id,
           siteId: masterStockDataBeforeTx.siteId!,
@@ -457,7 +457,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           linkedStockItemId: newStallItemIdForLog || existingStallItemIdForLog,
         });
 
-        // Log stall stock increase/creation
         const stallItemLogId = newStallItemIdForLog || existingStallItemIdForLog;
         if (stallItemLogId) {
           await logStockMovement(user, {
@@ -549,7 +548,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       });
       
       if (user && stallItemDataBeforeTx && masterItemDataBeforeTx) {
-         // Log stall stock decrease
         await logStockMovement(user, {
           stockItemId: stallItemDataBeforeTx.id,
           masterStockItemIdForContext: stallItemDataBeforeTx.originalMasterItemId,
@@ -563,7 +561,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           linkedStockItemId: masterItemDataBeforeTx.id,
         });
 
-        // Log master stock increase
         await logStockMovement(user, {
           stockItemId: masterItemDataBeforeTx.id,
           siteId: masterItemDataBeforeTx.siteId!,
@@ -576,7 +573,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           linkedStockItemId: stallItemDataBeforeTx.id,
         });
       }
-
 
       toast({
         title: "Stock Returned to Master",
@@ -627,7 +623,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     let newDestItemIdForLog: string | null = null;
     let existingDestItemIdForLog: string | null = null;
 
-
     try {
       await runTransaction(db, async (transaction) => {
         const sourceItemRef = doc(db, "stockItems", itemToTransfer.id);
@@ -640,13 +635,13 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         const q = query(
             collection(db, "stockItems"),
             where("stallId", "==", destinationStallId),
-            where("originalMasterItemId", "==", sourceItemDataBeforeTx.originalMasterItemId ?? null) // Important for consistency
+            where("originalMasterItemId", "==", sourceItemDataBeforeTx.originalMasterItemId ?? null) 
         );
-        const destQuerySnap = await getDocs(q); // Read outside transaction
+        const destQuerySnap = await getDocs(q); 
         if (!destQuerySnap.empty) {
             destinationItemRef = destQuerySnap.docs[0].ref;
             existingDestItemIdForLog = destQuerySnap.docs[0].id;
-            const destinationItemSnap = await transaction.get(destinationItemRef); // Read inside transaction for consistency
+            const destinationItemSnap = await transaction.get(destinationItemRef); 
             if(destinationItemSnap.exists()){
                 destItemDataBeforeTx = {id: destinationItemSnap.id, ...destinationItemSnap.data()} as StockItem;
             }
@@ -684,7 +679,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       });
 
       if (user && sourceItemDataBeforeTx) {
-        // Log transfer out from source stall
         await logStockMovement(user, {
             stockItemId: sourceItemDataBeforeTx.id,
             masterStockItemIdForContext: sourceItemDataBeforeTx.originalMasterItemId,
@@ -698,7 +692,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             linkedStockItemId: newDestItemIdForLog || existingDestItemIdForLog,
         });
 
-        // Log transfer in to destination stall
         const destItemLogId = newDestItemIdForLog || existingDestItemIdForLog;
         if(destItemLogId) {
              await logStockMovement(user, {
@@ -793,7 +786,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                     stockItemId: originalMasterData.id,
                     siteId: originalMasterData.siteId!,
                     stallId: null,
-                    type: 'RECEIVE_RETURN_FROM_STALL', // Implicit batch return
+                    type: 'RECEIVE_RETURN_FROM_STALL', 
                     quantityChange: originalItemData.quantity,
                     quantityBefore: originalMasterData.quantity,
                     quantityAfter: masterQtyAfter,
@@ -1239,7 +1232,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         </Table>
       </div>
 
-      {/* Batch Delete Dialog */}
       <AlertDialog open={showBatchDeleteDialog} onOpenChange={setShowBatchDeleteDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1260,7 +1252,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Batch Update Stock Dialog */}
       <AlertDialog open={showBatchUpdateStockDialog} onOpenChange={setShowBatchUpdateStockDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1298,7 +1289,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Single Item Delete Dialog */}
       {itemForSingleDelete && (
         <AlertDialog open={showSingleDeleteDialog} onOpenChange={(open) => {
             setShowSingleDeleteDialog(open);
@@ -1327,8 +1317,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         </AlertDialog>
         )}
 
-
-      {/* ALLOCATE DIALOG */}
       {itemToAllocate && (
         <AlertDialog open={showAllocateDialog} onOpenChange={setShowAllocateDialog}>
           <AlertDialogContent>
@@ -1383,7 +1371,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         </AlertDialog>
       )}
 
-      {/* RETURN TO MASTER DIALOG */}
       {itemToReturn && (
         <AlertDialog open={showReturnDialog} onOpenChange={setShowReturnDialog}>
           <AlertDialogContent>
@@ -1423,7 +1410,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         </AlertDialog>
       )}
 
-      {/* TRANSFER DIALOG */}
       {itemToTransfer && (
         <AlertDialog open={showTransferDialog} onOpenChange={setShowTransferDialog}>
             <AlertDialogContent>
