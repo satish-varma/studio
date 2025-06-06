@@ -41,16 +41,23 @@ export default function ActivityLogClientPage() {
   const [errorData, setErrorData] = useState<string | null>(null);
 
   useEffect(() => {
-    if (authLoading) return;
+    if (authLoading) {
+      // Still waiting for auth to resolve, keep loadingData true or let it be.
+      // It's initialized to true, so this is fine.
+      return;
+    }
 
     if (!currentUser || currentUser.role !== 'admin') {
-      setLoadingData(false);
+      setLoadingData(false); // Not authorized, stop loading.
       setErrorData("Access Denied: You do not have permission to view this page.");
       return;
     }
 
+    // Set loading to true at the start of data fetching for this specific effect run.
     setLoadingData(true);
     setErrorData(null);
+
+    let unsubscribeLogs: (() => void) | null = null;
 
     const fetchMapsAndLogs = async () => {
       try {
@@ -72,43 +79,35 @@ export default function ActivityLogClientPage() {
         const logsCollectionRef = collection(db, "stockMovementLogs");
         const q = query(logsCollectionRef, orderBy("timestamp", "desc")); 
 
-        const unsubscribeLogs = onSnapshot(q, 
+        unsubscribeLogs = onSnapshot(q, 
           (snapshot: QuerySnapshot<DocumentData>) => {
             const fetchedLogs: StockMovementLog[] = snapshot.docs.map(docSnapshot => ({
               id: docSnapshot.id,
               ...docSnapshot.data()
             } as StockMovementLog));
             setLogs(fetchedLogs);
-            // Only set loading to false after logs are also fetched for the first time
-            // Subsequent log updates won't change this overall page loading state
-            if (loadingData) setLoadingData(false); 
-            setErrorData(null);
+            setErrorData(null); // Clear previous error on success
+            setLoadingData(false); // Data (maps and first log snapshot) is loaded
           },
           (error) => {
             console.error("Error fetching activity logs:", error);
             setErrorData("Failed to load activity logs. Please try again later.");
-            setLoadingData(false);
+            setLoadingData(false); // Stop loading on error
           }
         );
-        return unsubscribeLogs; // Return the unsubscribe function for logs
-
       } catch (mapError) {
         console.error("Error fetching site/stall maps:", mapError);
         setErrorData("Failed to load site/stall context data.");
-        setLoadingData(false);
-        return null; // No unsubscribe function to return if maps fail
+        setLoadingData(false); // Stop loading on map error
       }
     };
     
-    let unsubscribeLogs: (() => void) | null = null;
-    fetchMapsAndLogs().then(unsub => {
-        if (unsub) unsubscribeLogs = unsub;
-    });
+    fetchMapsAndLogs();
 
     return () => {
       if (unsubscribeLogs) unsubscribeLogs();
     };
-  }, [currentUser, authLoading, loadingData]); // Rerun if loadingData was true and maps finished, to init log listener
+  }, [currentUser, authLoading]); // Removed loadingData from dependency array
 
   if (authLoading || loadingData) {
     return (
