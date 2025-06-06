@@ -39,7 +39,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogClose, // Ensured DialogClose is imported
+  DialogTrigger, // Added DialogTrigger import
+  DialogClose, 
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
