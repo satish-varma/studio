@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Package, IndianRupee, TrendingUp, AlertTriangle, Loader2, Info, BarChart2 } from "lucide-react";
+import { Package, IndianRupee, TrendingUp, AlertTriangle, Loader2, Info, BarChart2, PackageSearch } from "lucide-react"; // Added PackageSearch
 import PageHeader from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
@@ -14,6 +14,7 @@ import { getApps, initializeApp } from 'firebase/app';
 import type { StockItem, SaleTransaction } from '@/types';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { subDays, startOfDay, endOfDay, isWithinInterval, format, eachDayOfInterval } from 'date-fns';
+import { ScrollArea } from "@/components/ui/scroll-area"; // Added ScrollArea
 
 import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartConfig } from "@/components/ui/chart";
 import { BarChart, Bar, CartesianGrid, XAxis, YAxis } from "recharts";
@@ -60,6 +61,7 @@ export default function DashboardPage() {
   });
   const [recentSales, setRecentSales] = useState<SaleTransaction[]>([]);
   const [salesChartData, setSalesChartData] = useState<SalesChartDataPoint[]>([]);
+  const [lowStockItemsData, setLowStockItemsData] = useState<StockItem[]>([]); // New state for low stock items
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -79,6 +81,7 @@ export default function DashboardPage() {
       setStats({ totalItems: 0, totalSalesLast7Days: 0, itemsSoldToday: 0, lowStockAlerts: 0 });
       setRecentSales([]);
       setSalesChartData([]);
+      setLowStockItemsData([]); // Clear low stock items
       setError(null);
       return;
     }
@@ -89,6 +92,7 @@ export default function DashboardPage() {
         setStats({ totalItems: 0, totalSalesLast7Days: 0, itemsSoldToday: 0, lowStockAlerts: 0 });
         setRecentSales([]);
         setSalesChartData([]);
+        setLowStockItemsData([]); // Clear low stock items
         return;
     }
 
@@ -98,7 +102,7 @@ export default function DashboardPage() {
     const now = new Date();
     const todayStart = startOfDay(now);
     const todayEnd = endOfDay(now);
-    const sevenDaysAgo = startOfDay(subDays(now, 6)); // Inclusive of today, so 6 days back + today = 7 days
+    const sevenDaysAgo = startOfDay(subDays(now, 6)); 
 
     // --- Stock Items Listener ---
     let stockItemsQueryConstraints: QueryConstraint[] = [];
@@ -119,17 +123,19 @@ export default function DashboardPage() {
     const unsubscribeStock = onSnapshot(stockQuery, (snapshot) => {
       const items: StockItem[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as StockItem));
       const total = items.length;
-      const lowStock = items.filter(item => item.quantity <= item.lowStockThreshold).length;
-      setStats(prevStats => ({ ...prevStats, totalItems: total, lowStockAlerts: lowStock }));
+      const lowStockAlertItems = items.filter(item => item.quantity <= item.lowStockThreshold);
+      setStats(prevStats => ({ ...prevStats, totalItems: total, lowStockAlerts: lowStockAlertItems.length }));
+      setLowStockItemsData(lowStockAlertItems.sort((a,b) => a.quantity - b.quantity).slice(0, 5)); // Show top 5, sorted by lowest quantity first
     }, (err) => {
       console.error("Error fetching stock items for dashboard:", err);
       setError("Failed to load stock item data.");
+      setLowStockItemsData([]);
       setLoading(false);
     });
 
     // --- Sales Transactions Listener (Last 7 Days) ---
     let salesQueryConstraints: QueryConstraint[] = [
-        where("isDeleted", "==", false), // Query for non-deleted sales
+        where("isDeleted", "==", false), 
         where("transactionDate", ">=", Timestamp.fromDate(sevenDaysAgo)),
         orderBy("transactionDate", "desc")
     ];
@@ -144,7 +150,6 @@ export default function DashboardPage() {
         return;
     }
 
-    // If user is staff, only fetch their sales
     if (user.role === 'staff') {
         salesQueryConstraints.push(where("staffId", "==", user.uid));
     }
@@ -173,7 +178,6 @@ export default function DashboardPage() {
 
       transactions.forEach(sale => {
         const saleDate = new Date(sale.transactionDate);
-        // All transactions are already within the last 7 days due to query
         salesLast7Days += sale.totalAmount;
 
         const formattedSaleDate = format(saleDate, 'yyyy-MM-dd');
@@ -197,7 +201,7 @@ export default function DashboardPage() {
 
       const chartDataPoints: SalesChartDataPoint[] = Array.from(dailySalesMap.entries())
         .map(([date, totalSales]) => ({ date, totalSales }))
-        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()); // Sort by date
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()); 
       setSalesChartData(chartDataPoints);
 
       setLoading(false);
@@ -332,6 +336,39 @@ export default function DashboardPage() {
         </CardContent>
       </Card>
 
+      <Card className="shadow-lg">
+        <CardHeader>
+          <CardTitle className="flex items-center">
+            <PackageSearch className="h-5 w-5 mr-2 text-destructive"/>
+            Items Low on Stock
+          </CardTitle>
+          <CardDescription>Top items that have reached or fallen below their low stock threshold.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {lowStockItemsData.length > 0 ? (
+            <ScrollArea className="h-[200px] pr-3"> 
+              <div className="space-y-3">
+                {lowStockItemsData.map((item) => (
+                  <div key={item.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-md hover:bg-muted/75 transition-colors">
+                    <div>
+                      <p className="font-medium text-foreground">{item.name}</p>
+                      <p className="text-sm text-muted-foreground">
+                        Qty: <span className="font-semibold text-destructive">{item.quantity}</span> {item.unit} (Threshold: {item.lowStockThreshold})
+                      </p>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => router.push(`/items/${item.id}/edit`)}>
+                      View/Edit
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          ) : (
+            <p className="text-sm text-center text-muted-foreground py-10">No items are currently low on stock in this context.</p>
+          )}
+        </CardContent>
+      </Card>
+
 
       <div className="grid gap-6 md:grid-cols-2">
         <Card className="shadow-lg">
@@ -402,5 +439,7 @@ export default function DashboardPage() {
     </div>
   );
 }
+
+    
 
     
