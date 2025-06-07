@@ -1,4 +1,3 @@
-
 "use client";
 
 import {
@@ -11,7 +10,7 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import type { Site } from "@/types/site";
-import { MoreHorizontal, Edit, Trash2, Store, Loader2 } from "lucide-react"; // Added Store icon
+import { MoreHorizontal, Edit, Trash2, Store, Loader2, Building } from "lucide-react"; // Added Building icon
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -75,18 +74,11 @@ export function SitesTable({ sites }: SitesTableProps) {
     if (!siteToDelete) return;
     setIsDeleting(true);
     try {
-      // TODO: Before deleting a site, consider implications for stalls associated with it.
-      // Options:
-      // 1. Prevent deletion if site has stalls.
-      // 2. Delete associated stalls (requires a transaction or Firebase Function for atomicity).
-      // 3. Orphan stalls (they will still have the siteId but the site doc won't exist).
-      // For now, we'll just delete the site document.
       await deleteDoc(doc(db, "sites", siteToDelete.id));
       toast({
         title: "Site Deleted",
         description: `Site "${siteToDelete.name}" has been successfully deleted.`,
       });
-      // Data will refresh due to onSnapshot in parent component
     } catch (error: any) {
       console.error("Error deleting site:", error);
       toast({
@@ -110,7 +102,18 @@ export function SitesTable({ sites }: SitesTableProps) {
   };
 
   if (sites.length === 0) {
-    return <p className="text-center text-muted-foreground py-8">No sites found. Add your first site!</p>;
+    return (
+      <div className="text-center py-10 px-4 bg-card rounded-lg border shadow-sm">
+        <Building className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+        <p className="text-xl font-semibold text-foreground mb-2">No Sites Found</p>
+        <p className="text-muted-foreground">
+          You haven't added any sites yet.
+        </p>
+        <Button className="mt-4" onClick={() => router.push('/admin/sites/new')}>
+          Add Your First Site
+        </Button>
+      </div>
+    );
   }
 
   return (

@@ -1,4 +1,3 @@
-
 "use client";
 
 import {
@@ -18,7 +17,7 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import type { AppUser, UserRole, Site, Stall } from "@/types";
-import { Trash2, MoreHorizontal, Loader2, Info, Edit3 } from "lucide-react"; // Added Edit3
+import { Trash2, MoreHorizontal, Loader2, Info, Edit3, Users as UsersIcon } from "lucide-react"; // Added UsersIcon
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,9 +35,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
-  DialogClose,
-} from "@/components/ui/dialog";
+} from "@/components/ui/dialog"; // Removed DialogTrigger, DialogClose as they are not directly used here.
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Label } from "@/components/ui/label";
@@ -48,10 +45,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-  DropdownMenuLabel,
-  DropdownMenuSeparator
-} from "@/components/ui/dropdown-menu";
-import { useState, useEffect } from "react";
+} from "@/components/ui/dropdown-menu"; // Removed DropdownMenuLabel, DropdownMenuSeparator as not used
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 
 interface UserTableProps {
@@ -62,7 +57,7 @@ interface UserTableProps {
   onDeleteUser: (userId: string, userName: string) => Promise<void>;
   onDefaultSiteChange: (userId: string, newSiteId: string | null) => Promise<void>;
   onDefaultStallChange: (userId: string, newStallId: string | null) => Promise<void>;
-  onManagedSitesChange: (userId: string, managedSiteIds: string[]) => Promise<void>; // New prop
+  onManagedSitesChange: (userId: string, managedSiteIds: string[]) => Promise<void>;
   currentUserId?: string;
 }
 
@@ -74,7 +69,7 @@ export function UserTable({
   onDeleteUser,
   onDefaultSiteChange,
   onDefaultStallChange,
-  onManagedSitesChange, // New prop
+  onManagedSitesChange,
   currentUserId,
 }: UserTableProps) {
   const [isUpdatingRole, setIsUpdatingRole] = useState<string | null>(null);
@@ -108,7 +103,7 @@ export function UserTable({
     await onDefaultStallChange(userId, newStallId === "none" ? null : newStallId);
     setIsUpdatingAssignment(null);
   };
-  
+
   const handleDeleteInternal = async () => {
     if (!userToDelete) return;
     setIsDeleting(true);
@@ -131,7 +126,7 @@ export function UserTable({
     setShowManageSitesDialog(false);
     setCurrentUserForSiteManagement(null);
   };
-  
+
   const formatDate = (dateString?: string) => {
     if (!dateString) return "N/A";
     try {
@@ -146,7 +141,15 @@ export function UserTable({
   };
 
   if (users.length === 0) {
-    return <p className="text-center text-muted-foreground py-8">No users found.</p>;
+    return (
+      <div className="text-center py-10 px-4 bg-card rounded-lg border shadow-sm">
+        <UsersIcon className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+        <p className="text-xl font-semibold text-foreground mb-2">No Users Found</p>
+        <p className="text-muted-foreground">
+          There are no users in the system yet. Try creating one!
+        </p>
+      </div>
+    );
   }
 
   return (
@@ -207,9 +210,9 @@ export function UserTable({
                         <Badge variant="secondary" className="text-xs">
                           Manages {user.managedSiteIds?.length || 0} site(s)
                         </Badge>
-                        <Button 
-                          variant="outline" 
-                          size="icon" 
+                        <Button
+                          variant="outline"
+                          size="icon"
                           className="h-7 w-7"
                           onClick={() => openManageSitesDialog(user)}
                           disabled={isCurrentUserBeingManaged || isUpdatingAssignment === user.uid}
@@ -218,7 +221,7 @@ export function UserTable({
                           <span className="sr-only">Edit Managed Sites</span>
                         </Button>
                       </div>
-                    ) : isStaff ? ( 
+                    ) : isStaff ? (
                       <Select
                         value={user.defaultSiteId || "none"}
                         onValueChange={(newSiteId) => handleDefaultSiteChangeInternal(user.uid, newSiteId)}
@@ -234,7 +237,7 @@ export function UserTable({
                           ))}
                         </SelectContent>
                       </Select>
-                    ) : ( 
+                    ) : (
                       <Badge variant="secondary">All Access</Badge>
                     )}
                   </TableCell>
@@ -257,7 +260,7 @@ export function UserTable({
                           ))}
                         </SelectContent>
                       </Select>
-                    ) : ( 
+                    ) : (
                       <Badge variant="outline">N/A</Badge>
                     )}
                   </TableCell>
@@ -271,13 +274,13 @@ export function UserTable({
                         </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                        <DropdownMenuItem 
-                        onSelect={(e) => e.preventDefault()} 
+                        <DropdownMenuItem
+                        onSelect={(e) => e.preventDefault()}
                         className="text-destructive focus:text-destructive-foreground focus:bg-destructive"
                         disabled={isCurrentUserBeingManaged || isDeleting}
                         onClick={() => setUserToDelete(user)}
                         >
-                        <Trash2 className="mr-2 h-4 w-4" /> Delete User
+                        <Trash2 className="mr-2 h-4 w-4" /> Delete User Document
                         </DropdownMenuItem>
                     </DropdownMenuContent>
                     </DropdownMenu>
@@ -295,19 +298,19 @@ export function UserTable({
             <AlertDialogHeader>
                 <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
                 <AlertDialogDescription>
-                This action cannot be undone. This will permanently delete the user "{userToDelete.displayName || userToDelete.email}" 
-                from Firestore. Deleting their Authentication account requires a separate process.
+                This action cannot be undone. This will permanently delete the user document for "{userToDelete.displayName || userToDelete.email}"
+                from Firestore. Deleting their Authentication account requires a separate process in the Firebase Console.
                 </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
                 <AlertDialogCancel onClick={() => setUserToDelete(null)} disabled={isDeleting}>Cancel</AlertDialogCancel>
-                <AlertDialogAction 
-                onClick={handleDeleteInternal} 
+                <AlertDialogAction
+                onClick={handleDeleteInternal}
                 disabled={isDeleting}
                 className="bg-destructive hover:bg-destructive/90"
                 >
                 {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Delete User from Firestore
+                Delete User Document
                 </AlertDialogAction>
             </AlertDialogFooter>
             </AlertDialogContent>
@@ -326,7 +329,7 @@ export function UserTable({
                 <DialogHeader>
                     <DialogTitle>Manage Sites for {currentUserForSiteManagement.displayName || currentUserForSiteManagement.email}</DialogTitle>
                     <DialogDescription>
-                        Select the sites this manager is responsible for.
+                        Select the sites this manager is responsible for. Default site/stall preferences for this manager will be cleared.
                     </DialogDescription>
                 </DialogHeader>
                 <ScrollArea className="max-h-[300px] my-4 pr-3 border rounded-md">
@@ -337,9 +340,9 @@ export function UserTable({
                                     id={`site-${site.id}`}
                                     checked={selectedManagedSites.includes(site.id)}
                                     onCheckedChange={(checked) => {
-                                        setSelectedManagedSites(prev => 
-                                            checked === true 
-                                            ? [...prev, site.id] 
+                                        setSelectedManagedSites(prev =>
+                                            checked === true
+                                            ? [...prev, site.id]
                                             : prev.filter(id => id !== site.id)
                                         );
                                     }}
@@ -355,9 +358,7 @@ export function UserTable({
                     </div>
                 </ScrollArea>
                 <DialogFooter>
-                    <DialogClose asChild>
-                        <Button type="button" variant="outline" disabled={isSavingManagedSites}>Cancel</Button>
-                    </DialogClose>
+                  <Button type="button" variant="outline" onClick={() => setShowManageSitesDialog(false)} disabled={isSavingManagedSites}>Cancel</Button>
                     <Button type="button" onClick={handleSaveManagedSites} disabled={isSavingManagedSites}>
                         {isSavingManagedSites && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                         Save Changes

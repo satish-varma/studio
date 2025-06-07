@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import type { Stall } from "@/types/stall";
-import { MoreHorizontal, Edit, Trash2, Loader2 } from "lucide-react";
+import { MoreHorizontal, Edit, Trash2, Loader2, Store } from "lucide-react"; // Added Store icon
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -78,7 +78,6 @@ export function StallsTable({ stalls }: StallsTableProps) {
         title: "Stall Deleted",
         description: `Stall "${stallToDelete.name}" has been successfully deleted.`,
       });
-      // Data will refresh due to onSnapshot in parent component (StallsClientPage)
     } catch (error: any) {
       console.error("Error deleting stall:", error);
       toast({
@@ -102,7 +101,18 @@ export function StallsTable({ stalls }: StallsTableProps) {
   };
 
   if (stalls.length === 0) {
-    return <p className="text-center text-muted-foreground py-8">No stalls found for this site. Add your first stall!</p>;
+     return (
+      <div className="text-center py-10 px-4 bg-card rounded-lg border shadow-sm">
+        <Store className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+        <p className="text-xl font-semibold text-foreground mb-2">No Stalls Found for this Site</p>
+        <p className="text-muted-foreground">
+          You haven't added any stalls to this site yet.
+        </p>
+        <Button className="mt-4" onClick={() => router.push(`/admin/sites/${siteId}/stalls/new`)}>
+          Add Your First Stall
+        </Button>
+      </div>
+    );
   }
 
   return (

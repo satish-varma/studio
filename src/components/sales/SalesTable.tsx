@@ -1,4 +1,3 @@
-
 "use client";
 
 import {
@@ -11,7 +10,7 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import type { SaleTransaction, UserRole } from "@/types";
-import { MoreHorizontal, Eye, Printer, Trash2, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
+import { MoreHorizontal, Eye, Printer, Trash2, Loader2, ChevronLeft, ChevronRight, ShoppingCart } from "lucide-react"; // Added ShoppingCart
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,16 +46,16 @@ interface SalesTableProps {
   onPrevPage: () => void;
 }
 
-export function SalesTable({ 
-    transactions, 
-    currentUserRole, 
+export function SalesTable({
+    transactions,
+    currentUserRole,
     onDeleteSale,
     isLoadingNextPage,
     isLoadingPrevPage,
     isLastPage,
     isFirstPage,
     onNextPage,
-    onPrevPage 
+    onPrevPage
 }: SalesTableProps) {
   const { toast } = useToast();
   const router = useRouter();
@@ -67,7 +66,7 @@ export function SalesTable({
 
   const formatDate = (dateString: string) => {
     try {
-      return new Date(dateString).toLocaleString('en-IN', { 
+      return new Date(dateString).toLocaleString('en-IN', {
         year: 'numeric',
         month: 'short',
         day: 'numeric',
@@ -94,7 +93,7 @@ export function SalesTable({
 
   const openDeleteDialog = (sale: SaleTransaction) => {
     setSaleToDelete(sale);
-    setJustification(""); 
+    setJustification("");
   };
 
   const closeDeleteDialog = () => {
@@ -115,7 +114,18 @@ export function SalesTable({
   const showPagination = transactions.length > 0 || !isFirstPage || !isLastPage;
 
   if (transactions.length === 0 && isFirstPage && !isLoadingPrevPage && !isLoadingNextPage) {
-    return <p className="text-center text-muted-foreground py-8">No sales transactions found for the selected criteria.</p>;
+    return (
+      <div className="text-center py-10 px-4 bg-card rounded-lg border shadow-sm">
+        <ShoppingCart className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+        <p className="text-xl font-semibold text-foreground mb-2">No Sales Transactions Found</p>
+        <p className="text-muted-foreground">
+          No sales transactions match your current filters or date range.
+        </p>
+        <p className="text-muted-foreground mt-1 text-sm">
+          Try adjusting the date range or staff filter above.
+        </p>
+      </div>
+    );
   }
 
   return (
@@ -166,7 +176,7 @@ export function SalesTable({
                           {currentUserRole === 'admin' && (
                             <>
                               <DropdownMenuSeparator />
-                              <DropdownMenuItem 
+                              <DropdownMenuItem
                                 onClick={() => openDeleteDialog(sale)}
                                 className="text-destructive focus:text-destructive-foreground focus:bg-destructive"
                               >
@@ -183,7 +193,7 @@ export function SalesTable({
           </TableBody>
         </Table>
       </div>
-      
+
       {showPagination && (
         <div className="flex items-center justify-end space-x-2 py-4">
           <Button
@@ -231,8 +241,8 @@ export function SalesTable({
                 </div>
                 <AlertDialogFooter>
                 <AlertDialogCancel onClick={closeDeleteDialog} disabled={isDeleting}>Cancel</AlertDialogCancel>
-                <AlertDialogAction 
-                    onClick={handleDeleteConfirm} 
+                <AlertDialogAction
+                    onClick={handleDeleteConfirm}
                     disabled={isDeleting || !justification.trim()}
                     className="bg-destructive hover:bg-destructive/90"
                 >
@@ -246,6 +256,3 @@ export function SalesTable({
     </>
   );
 }
-
-
-    

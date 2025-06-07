@@ -1,4 +1,3 @@
-
 "use client";
 
 import Image from "next/image";
@@ -39,8 +38,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger, 
-  DialogClose, 
+  DialogTrigger,
+  DialogClose,
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
@@ -68,8 +67,8 @@ import {
 } from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
-import { useAuth } from "@/contexts/AuthContext"; 
-import { logStockMovement } from "@/lib/stockLogger"; 
+import { useAuth } from "@/contexts/AuthContext";
+import { logStockMovement } from "@/lib/stockLogger";
 
 if (!getApps().length) {
   try {
@@ -91,7 +90,7 @@ interface ItemTableProps {
 export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAllocation, onDataNeedsRefresh }: ItemTableProps) {
   const { toast } = useToast();
   const router = useRouter();
-  const { user } = useAuth(); 
+  const { user } = useAuth();
 
   const [isDeleting, setIsDeleting] = useState(false);
   const [isUpdatingStock, setIsUpdatingStock] = useState(false);
@@ -122,7 +121,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   const [showBatchUpdateStockDialog, setShowBatchUpdateStockDialog] = useState(false);
   const [batchUpdateQuantity, setBatchUpdateQuantity] = useState<number | string>("");
   const [isBatchUpdatingStock, setIsBatchUpdatingStock] = useState(false);
-  
+
   const [showBatchUpdateDetailsDialog, setShowBatchUpdateDetailsDialog] = useState(false);
   const [batchUpdateCategory, setBatchUpdateCategory] = useState<string>("");
   const [batchUpdateLowStockThreshold, setBatchUpdateLowStockThreshold] = useState<string | number>("");
@@ -163,13 +162,13 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     let itemDataForLog: StockItem | null = null;
     try {
       const itemRef = doc(db, "stockItems", itemId);
-      const itemDocSnap = await getDoc(itemRef); 
+      const itemDocSnap = await getDoc(itemRef);
       if (!itemDocSnap.exists()) {
         throw new Error("Item not found for deletion.");
       }
       itemDataForLog = { id: itemDocSnap.id, ...itemDocSnap.data() } as StockItem;
 
-      if (itemDataForLog.stallId === null && itemDataForLog.siteId) { 
+      if (itemDataForLog.stallId === null && itemDataForLog.siteId) {
           const linkedStallsQuery = query(
             collection(db, "stockItems"),
             where("originalMasterItemId", "==", itemId)
@@ -213,7 +212,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             siteId: itemDataForLog.siteId!,
             stallId: itemDataForLog.stallId,
             type: itemDataForLog.stallId ? 'DELETE_STALL_ITEM' : 'DELETE_MASTER_ITEM',
-            quantityChange: -itemDataForLog.quantity, 
+            quantityChange: -itemDataForLog.quantity,
             quantityBefore: itemDataForLog.quantity,
             quantityAfter: 0,
             notes: `Item "${itemDataForLog.name}" deleted. ${itemDataForLog.stallId && itemDataForLog.originalMasterItemId ? 'Quantity returned to master implicitly.' : ''}`,
@@ -226,7 +225,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                     stockItemId: itemDataForLog.originalMasterItemId,
                     siteId: masterItemAfter.siteId!,
                     stallId: null,
-                    type: 'RECEIVE_RETURN_FROM_STALL', 
+                    type: 'RECEIVE_RETURN_FROM_STALL',
                     quantityChange: itemDataForLog.quantity,
                     quantityBefore: masterItemAfter.quantity - itemDataForLog.quantity,
                     quantityAfter: masterItemAfter.quantity,
@@ -384,8 +383,8 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     setIsAllocating(true);
     let masterStockDataBeforeTx: StockItem | null = null;
     let stallItemDataBeforeTx: StockItem | null = null;
-    let newStallItemIdForLog: string | null = null; 
-    let existingStallItemIdForLog: string | null = null; 
+    let newStallItemIdForLog: string | null = null;
+    let existingStallItemIdForLog: string | null = null;
 
     try {
       await runTransaction(db, async (transaction) => {
@@ -407,12 +406,12 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         );
 
         let targetStallItemRef: DocumentReference | null = null;
-        const existingStallItemsQuerySnap = await getDocs(stallItemsQuery); 
+        const existingStallItemsQuerySnap = await getDocs(stallItemsQuery);
 
         if (!existingStallItemsQuerySnap.empty) {
             targetStallItemRef = existingStallItemsQuerySnap.docs[0].ref;
             existingStallItemIdForLog = existingStallItemsQuerySnap.docs[0].id;
-            const targetStallItemSnap = await transaction.get(targetStallItemRef); 
+            const targetStallItemSnap = await transaction.get(targetStallItemRef);
             if (targetStallItemSnap.exists()) {
                 stallItemDataBeforeTx = {id: targetStallItemSnap.id, ...targetStallItemSnap.data()} as StockItem;
             }
@@ -424,7 +423,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                 lastUpdated: new Date().toISOString(),
             });
         } else {
-            const newStallItemDocRef = doc(collection(db, "stockItems")); 
+            const newStallItemDocRef = doc(collection(db, "stockItems"));
             newStallItemIdForLog = newStallItemDocRef.id;
             const newStallItemDataToSave: Omit<StockItem, 'id'> = {
                 name: masterStockDataBeforeTx.name,
@@ -438,7 +437,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                 imageUrl: masterStockDataBeforeTx.imageUrl,
                 siteId: masterStockDataBeforeTx.siteId,
                 stallId: targetStallIdForAllocation,
-                originalMasterItemId: itemToAllocate.id, 
+                originalMasterItemId: itemToAllocate.id,
                 lastUpdated: new Date().toISOString(),
             };
             transaction.set(newStallItemDocRef, newStallItemDataToSave);
@@ -454,7 +453,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         await logStockMovement(user, {
           stockItemId: masterStockDataBeforeTx.id,
           siteId: masterStockDataBeforeTx.siteId!,
-          stallId: null, 
+          stallId: null,
           type: 'ALLOCATE_TO_STALL',
           quantityChange: -numQuantityToAllocate,
           quantityBefore: masterStockDataBeforeTx.quantity,
@@ -552,7 +551,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           lastUpdated: new Date().toISOString(),
         });
       });
-      
+
       if (user && stallItemDataBeforeTx && masterItemDataBeforeTx) {
         await logStockMovement(user, {
           stockItemId: stallItemDataBeforeTx.id,
@@ -641,13 +640,13 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         const q = query(
             collection(db, "stockItems"),
             where("stallId", "==", destinationStallId),
-            where("originalMasterItemId", "==", sourceItemDataBeforeTx.originalMasterItemId ?? null) 
+            where("originalMasterItemId", "==", sourceItemDataBeforeTx.originalMasterItemId ?? null)
         );
-        const destQuerySnap = await getDocs(q); 
+        const destQuerySnap = await getDocs(q);
         if (!destQuerySnap.empty) {
             destinationItemRef = destQuerySnap.docs[0].ref;
             existingDestItemIdForLog = destQuerySnap.docs[0].id;
-            const destinationItemSnap = await transaction.get(destinationItemRef); 
+            const destinationItemSnap = await transaction.get(destinationItemRef);
             if(destinationItemSnap.exists()){
                 destItemDataBeforeTx = {id: destinationItemSnap.id, ...destinationItemSnap.data()} as StockItem;
             }
@@ -774,7 +773,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           transaction.delete(stallItemRef);
         });
         successCount++;
-        if (user && originalItemData) {
+         if (user && originalItemData) {
             await logStockMovement(user, {
                 stockItemId: originalItemData.id,
                 masterStockItemIdForContext: originalItemData.originalMasterItemId,
@@ -792,7 +791,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                     stockItemId: originalMasterData.id,
                     siteId: originalMasterData.siteId!,
                     stallId: null,
-                    type: 'RECEIVE_RETURN_FROM_STALL', 
+                    type: 'RECEIVE_RETURN_FROM_STALL',
                     quantityChange: originalItemData.quantity,
                     quantityBefore: originalMasterData.quantity,
                     quantityAfter: masterQtyAfter,
@@ -800,7 +799,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                     linkedStockItemId: originalItemData.id,
                  });
             }
-        }
+         }
       } catch (error: any) {
         console.error(`Error deleting item ${itemToDelete.id} in batch:`, error);
         errorCount++;
@@ -984,7 +983,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     if (newThresholdNumber !== undefined) {
       updateData.lowStockThreshold = newThresholdNumber;
     }
-    
+
     const logNotesParts: string[] = [];
     if (updateData.category) logNotesParts.push(`Category to '${updateData.category}'`);
     if (updateData.lowStockThreshold !== undefined) logNotesParts.push(`Threshold to ${updateData.lowStockThreshold}`);
@@ -995,7 +994,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       batch.update(itemRef, updateData);
       successCount++;
       if (user) {
-        // Log this immediately as we loop, batch commit is for Firestore efficiency
         logStockMovement(user, {
             stockItemId: item.id,
             masterStockItemIdForContext: item.originalMasterItemId,
@@ -1056,9 +1054,9 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         <PackageOpen className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
         <p className="text-xl font-semibold text-foreground mb-2">No Stock Items Found</p>
         <p className="text-muted-foreground">
-          No items match your current filters for this site/stall.
+          No items match your current filters for this site/stall context.
         </p>
-        <p className="text-muted-foreground mt-1">
+        <p className="text-muted-foreground mt-1 text-sm">
           Try adjusting the search or filters above. You can also use the "Add New Item" button
           (if enabled) to add stock to the currently selected site context.
         </p>
@@ -1424,8 +1422,8 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           </div>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setShowBatchUpdateDetailsDialog(false)} disabled={isBatchUpdatingDetails}>Cancel</AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={handleConfirmBatchUpdateDetails} 
+            <AlertDialogAction
+              onClick={handleConfirmBatchUpdateDetails}
               disabled={isBatchUpdatingDetails || (batchUpdateCategory.trim() === "" && (batchUpdateLowStockThreshold === "" || isNaN(Number(batchUpdateLowStockThreshold))))}
             >
               {isBatchUpdatingDetails && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -1614,12 +1612,11 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             </AlertDialogContent>
         </AlertDialog>
       )}
-      <style jsx global>{`
+      <style jsx global>{\`
         .indeterminate-checkbox:has(+ svg) {
           background-image: none;
         }
-      `}</style>
+      \`}</style>
     </TooltipProvider>
   );
 }
-
