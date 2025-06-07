@@ -39,7 +39,7 @@ const navItems: NavItem[] = [
   { href: "/sales/record", label: "Record Sale", icon: ShoppingCart, roles: ['staff', 'manager', 'admin'] },
   { href: "/sales/history", label: "Sales History", icon: History, roles: ['staff', 'manager', 'admin'] },
   { href: "/reports", label: "Reports", icon: BarChart3, roles: ['manager', 'admin'] },
-  { href: "/admin/users", label: "User Management", icon: Users, roles: ['admin'] },
+  { href: "/users", label: "User Management", icon: Users, roles: ['admin'] }, // Ensured this is /users
   { href: "/admin/sites", label: "Manage Sites & Stalls", icon: Building, roles: ['admin'] },
   { href: "/admin/activity-log", label: "Activity Log", icon: FileText, roles: ['admin'] },
   { href: "/profile", label: "My Profile", icon: UserCircle, roles: ['staff', 'manager', 'admin'] },
