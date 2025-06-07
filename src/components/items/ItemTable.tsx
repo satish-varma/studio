@@ -1409,11 +1409,10 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DialogTrigger asChild>
-                            <DropdownMenuItem onClick={() => handleOpenUpdateStockDialog(item)}>
-                              <PackageOpen className="mr-2 h-4 w-4" /> Update Stock
-                            </DropdownMenuItem>
-                          </DialogTrigger>
+                          {/* Remove DialogTrigger from here */}
+                          <DropdownMenuItem onClick={() => handleOpenUpdateStockDialog(item)}>
+                            <PackageOpen className="mr-2 h-4 w-4" /> Update Stock
+                          </DropdownMenuItem>
                            {item.stallId === null && item.siteId && (
                             <DropdownMenuItem onClick={() => handleOpenAllocateDialog(item)} disabled={availableStallsForAllocation.filter(s => s.siteId === item.siteId).length === 0}>
                               <MoveRight className="mr-2 h-4 w-4" /> Allocate to Stall
