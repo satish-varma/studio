@@ -290,6 +290,7 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
                   <div className="flex items-center justify-between">
                     <FormLabel>Description (Optional)</FormLabel>
                     <Button
+                      data-testid="generate-ai-description-button"
                       type="button"
                       variant="ghost"
                       size="sm"
