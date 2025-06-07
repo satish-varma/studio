@@ -4,7 +4,7 @@ import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { Toaster } from "@/components/ui/toaster";
-import { ThemeProvider } from '@/contexts/ThemeContext'; // Import ThemeProvider
+import { ThemeProvider } from '@/contexts/ThemeContext';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -27,13 +27,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning> {/* Add suppressHydrationWarning for theme persistence */}
+    <html lang="en" suppressHydrationWarning>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <ThemeProvider
-          attribute="class" // This is not directly used by our custom provider, but good for interop if ShadCN/UI <ThemeToggle /> was used
+          attribute="class"
           defaultTheme="system"
           enableSystem
-          disableTransitionOnChange // Prevents flash on theme change
+          disableTransitionOnChange
         >
           <AuthProvider>
             {children}
