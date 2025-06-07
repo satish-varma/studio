@@ -35,6 +35,12 @@
     *   [Admin User](#admin-user)
     *   [Manager User](#manager-user)
     *   [Staff User](#staff-user)
+13. [Production Readiness Considerations](#production-readiness-considerations)
+    *   [Firestore Security Rules](#firestore-security-rules)
+    *   [Testing Strategy](#testing-strategy)
+    *   [Logging and Monitoring](#logging-and-monitoring)
+    *   [Backup and Restore](#backup-and-restore)
+    *   [Legal and Compliance](#legal-and-compliance)
 
 ---
 
@@ -126,7 +132,9 @@ NEXT_PUBLIC_FIREBASE_APP_ID=YOUR_FIREBASE_APP_ID
 # For deployed environments, it's often better to set this via the hosting provider's secret management.
 # For local Firebase Emulator Suite, GOOGLE_APPLICATION_CREDENTIALS might not be needed if emulators are auto-configured.
 # If deploying to Firebase Hosting/Functions or App Hosting, these can often be auto-detected or configured in the environment.
-# GOOGLE_APPLICATION_CREDENTIALS_JSON='{"type": "service_account", ...}'
+# GOOGLE_APPLICATION_CREDENTIALS_JSON='{"type": "service_account", ...}' # Option 1: Paste JSON content as string
+# GOOGLE_APPLICATION_CREDENTIALS=/path/to/your/serviceAccountKey.json # Option 2: Path to service account file (preferred for local dev if not using JSON string)
+
 
 # Google OAuth Credentials (for Google Sheets API integration)
 # These should NOT be prefixed with NEXT_PUBLIC_ as they are sensitive.
@@ -141,12 +149,12 @@ GOOGLE_REDIRECT_URI=YOUR_CONFIGURED_GOOGLE_OAUTH_REDIRECT_URI
 ```
 
 *   **Firebase Client Config:** Obtain these from your Firebase project settings > Your apps > Select your web app > Firebase SDK snippet (Config).
-*   **Firebase Admin SDK (`GOOGLE_APPLICATION_CREDENTIALS_JSON`):**
+*   **Firebase Admin SDK (`GOOGLE_APPLICATION_CREDENTIALS_JSON` or `GOOGLE_APPLICATION_CREDENTIALS` path):**
     *   Go to Firebase Console > Project Settings > Service accounts.
     *   Generate a new private key (JSON file).
-    *   **Option 1 (Recommended for local dev):** Set the `GOOGLE_APPLICATION_CREDENTIALS` environment variable to the *path* of this downloaded JSON file (e.g., `GOOGLE_APPLICATION_CREDENTIALS=/path/to/your/serviceAccountKey.json`).
-    *   **Option 2:** Copy the *contents* of the JSON file into the `GOOGLE_APPLICATION_CREDENTIALS_JSON` variable in `.env.local` as a single-line, properly escaped JSON string. This is less secure and more error-prone.
-    *   **For Deployment:** Consult your hosting provider's documentation for setting service account credentials (e.g., Firebase Functions, Google Cloud Run, Vercel Environment Variables).
+    *   **Option 1 (Path - Recommended for local dev if not using functions emulator directly):** Set the `GOOGLE_APPLICATION_CREDENTIALS` environment variable in your terminal or `.env.local` to the *path* of this downloaded JSON file (e.g., `GOOGLE_APPLICATION_CREDENTIALS=/path/to/your/serviceAccountKey.json`). Next.js and Firebase Admin SDK might pick this up automatically.
+    *   **Option 2 (JSON String):** Copy the *contents* of the JSON file into the `GOOGLE_APPLICATION_CREDENTIALS_JSON` variable in `.env.local` as a single-line, properly escaped JSON string. This is useful for environments where setting a file path is difficult.
+    *   **For Cloud Functions & Firebase Hosting/App Hosting:** These services often have their own mechanisms for service account authentication (e.g., using the runtime service account). The Admin SDK `initializeApp()` without arguments will try to use Application Default Credentials.
 *   **Google OAuth Credentials:**
     *   Go to Google Cloud Console > APIs & Services > Credentials.
     *   Create an OAuth 2.0 Client ID (for Web application).
@@ -164,61 +172,17 @@ GOOGLE_REDIRECT_URI=YOUR_CONFIGURED_GOOGLE_OAUTH_REDIRECT_URI
     *   Start in **production mode** (you'll configure security rules next).
     *   Choose a Firestore location.
 5.  **Security Rules (`firestore.rules`):**
-    *   Update `firestore.rules` with appropriate rules to control access to your collections.
-    *   Example basic rules ( **REVIEW AND REFINE THESE FOR PRODUCTION SECURITY** ):
-        ```rules
-        rules_version = '2';
-        service cloud.firestore {
-          match /databases/{database}/documents {
-            // Users can read their own document, admins can read any user
-            match /users/{userId} {
-              allow read: if request.auth != null && request.auth.uid == userId;
-              allow write: if request.auth != null && request.auth.uid == userId; // Allow user to update their own profile
-              // Admin access for reading all users and potentially updating roles
-              allow read, update: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
-            }
-            // Admins can manage sites and stalls
-            match /sites/{siteId} {
-              allow read: if request.auth != null; // Allow all authenticated users to read sites (for selectors)
-              allow write: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
-            }
-            match /stalls/{stallId} {
-              allow read: if request.auth != null; // Allow all authenticated users to read stalls (for selectors)
-              allow write: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
-            }
-            // Stock items can be read by authenticated users, write access is more complex (admin, or staff for their stall)
-            match /stockItems/{itemId} {
-              allow read: if request.auth != null;
-              // Write logic will be more complex, often handled by backend or transactions
-              // For now, allow authenticated write, refine later
-              allow write: if request.auth != null; // Needs refinement: check user role and item's site/stallId
-            }
-            // Sales transactions can be created by authenticated users, read access might be role-based
-            match /salesTransactions/{saleId} {
-              allow read: if request.auth != null; // Refine based on user role and staffId/siteId/stallId on the document
-              allow create: if request.auth != null;
-              allow update (delete): if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'; // For soft delete
-            }
-            // Logs
-            match /stockMovementLogs/{logId} {
-                allow read: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
-                allow create: if request.auth != null; // Log creation is typically done by backend logic or trusted client actions
-            }
-            // User Google OAuth Tokens - only user themselves can write, only server (admin SDK) should read ideally
-            match /userGoogleOAuthTokens/{userId} {
-              allow read, write: if request.auth != null && request.auth.uid == userId;
-              // Potentially disallow client read if tokens are only for backend use
-            }
-          }
-        }
+    *   Deploy the `firestore.rules` file located in the project root:
+        ```bash
+        firebase deploy --only firestore:rules
         ```
-    *   Deploy rules: `firebase deploy --only firestore:rules`
+    *   **It is CRITICAL to review and test these rules thoroughly.** The provided rules aim for a balance of security and functionality for the defined roles but may need further refinement based on specific production requirements.
 6.  **Firestore Indexes (`firestore.indexes.json`):**
     *   As you develop and encounter query errors in the Firebase console or Next.js logs that mention missing indexes, Firestore will often provide a link to create them. Add these index definitions to `firestore.indexes.json`.
     *   Deploy indexes: `firebase deploy --only firestore:indexes`
 7.  **Enable Cloud Functions:**
     *   Go to Functions in the Firebase console. Click "Get started" if it's your first time.
-    *   Note: The application uses a Firebase Function (`createAuthUser`) for admin-initiated user creation. This needs to be deployed.
+    *   The application uses a Firebase Function (`createAuthUser`) for admin-initiated user creation, which can be called from the client.
 
 ### Running the Application
 
@@ -228,11 +192,12 @@ GOOGLE_REDIRECT_URI=YOUR_CONFIGURED_GOOGLE_OAUTH_REDIRECT_URI
     # or
     yarn install
     ```
-2.  **Deploy Firebase Functions (if not done automatically with Hosting):**
+2.  **Deploy Firebase Functions (if you plan to use the callable `createAuthUser` function directly from client):**
     *   Navigate to the `functions` directory: `cd functions`
     *   Install dependencies: `npm install`
     *   Build functions: `npm run build`
     *   Deploy: `cd ..` (back to root) then `firebase deploy --only functions`
+    *   *Note: The app also has a Next.js API route `/api/admin/create-user` that uses the Admin SDK server-side, which might be preferred over direct client calls to the Firebase Function for some architectures.*
 3.  **Run Development Server:**
     ```bash
     npm run dev
@@ -429,7 +394,7 @@ GOOGLE_REDIRECT_URI=YOUR_CONFIGURED_GOOGLE_OAUTH_REDIRECT_URI
     *   **Input:** `email`, `password`, `displayName`.
     *   **Output:** `{ uid, email, displayName }` of the newly created auth user.
     *   The client-side `CreateUserDialog` then uses this UID to create the corresponding Firestore user document.
-    *   This function is *not* directly exposed via a Next.js API route but is called from the client using Firebase SDK's `https.onCall`. The project also has a Next.js API route (`/api/admin/create-user`) which *internally* uses the Admin SDK for user creation and is preferred as it doesn't require deploying the Firebase Function separately for this specific task if the Next.js backend is already running. *Developer Note: Consider consolidating to only one method for admin user creation.*
+    *   *Alternatively, the project has a Next.js API route (`/api/admin/create-user`) which uses the Admin SDK for user creation and is preferred if the Next.js backend is already running, as it doesn't require separate deployment of this Firebase Function.*
 
 ### Next.js API Routes
 
@@ -531,14 +496,14 @@ TypeScript interfaces and Zod schemas define the structure of data used througho
 
 ### Manager User
 
-1.  **Login:** Accesses the system. Their `AuthContext` might default to one of their managed sites, or they select one from the header.
+1.  **Login:** Accesses the system. Their `AuthContext` might default to one of their managed sites, or they select one from the header. Their context is always "All Stalls" for the selected site.
 2.  **Dashboard:** Views dashboard for their selected managed site (e.g., "Main Warehouse"), with data aggregated from "All Stalls".
 3.  **Stock Review:** Navigates to "Stock Items".
     *   Views "All Stock (Site-wide)" for "Main Warehouse".
-    *   Filters to see only "Retail Counter A" stock. Notices "Product X" is low.
+    *   Filters to see only "Retail Counter A" stock (using the stall filter). Notices "Product X" is low.
     *   Filters to see "Back Storage" stock.
-4.  **Stock Transfer:** Transfers a quantity of "Product X" from "Back Storage" to "Retail Counter A".
-5.  **Record Sale (Optional):** If covering a stall, selects "Retail Counter A" in header (if admin UI allows such a switch for managers, or if their role allows direct sales), then records a sale. (Note: Current UI implies managers may not directly select a specific stall for *operational context* like sales, their view is "All Stalls" for their managed site. Sales would typically be by staff at a stall). *Clarification: Managers can select a site via the header, and their context is always "All Stalls" for that site. Quick Actions for 'Record Sale' might be disabled if a specific stall isn't selected by the overall system context, which might depend on how an admin sets up the manager's ability to "act as" a stall.*
+4.  **Stock Transfer:** From the "Stock Items" page, finds an item in "Back Storage", uses the item's action menu to "Transfer to Stall", and moves a quantity of "Product X" to "Retail Counter A".
+5.  **Record Sale (Context Dependent):** If the manager needs to record a sale, they would typically use the system in a context that implies a specific stall (e.g., if covering a stall, they might select that stall if the UI/permissions allow, or sales are recorded at the site level if that's the operational model). For this app, sale recording is tied to a specific stall context in the header. Managers do not have a specific stall context set by default for sales (their view is "All Stalls"). If an admin has given a manager a *default* stall in their user profile (not standard manager setup), or if UI allows temporary stall selection for action, they could. Otherwise, staff at specific stalls primarily record sales.
 6.  **Sales History:** Views sales history for "Main Warehouse", can filter by staff working there.
 7.  **Reports:** Generates sales reports for "Main Warehouse". Uses AI summary.
 8.  **Settings:** Exports sales data for "Main Warehouse" to CSV.
@@ -549,15 +514,60 @@ TypeScript interfaces and Zod schemas define the structure of data used througho
 1.  **Login:** Accesses the system. Their context is automatically set to their assigned default site and stall (e.g., "Main Warehouse", "Retail Counter A"). If no stall is assigned, context is their site's master stock.
 2.  **Dashboard:** Views dashboard specific to "Retail Counter A". Sees items low on stock *at their stall*.
 3.  **Stock Check:** Navigates to "Stock Items". View is automatically filtered to "Retail Counter A".
-    *   Updates quantity for "Product X" after a manual count.
+    *   Updates quantity for "Product X" after a manual count (using "Update Stock" action).
 4.  **Record Sale:** Navigates to "Record Sale".
-    *   Adds "Product X" and "Product Y" to a customer's order.
+    *   Adds "Product X" and "Product Y" to a customer's order from available stall stock.
     *   Completes the sale. Stock for "Product X" and "Product Y" at "Retail Counter A" (and linked master stock) is automatically decremented.
 5.  **Sales History:** Views their own sales for "Retail Counter A".
 6.  **Profile:** Updates their display name.
 7.  **Request Stock (Implicit):** If "Product Y" runs out, they might verbally request more from a manager or from "Back Storage" (system doesn't have a formal request feature, this would be an operational flow leading to a manager/admin performing an allocation or transfer).
 
+---
+
+## 13. Production Readiness Considerations
+
+Making StallSync fully production-ready involves several key areas beyond core feature development.
+
+### Firestore Security Rules
+
+*   **Current Status:** The `firestore.rules` file in the project root provides a more detailed set of rules than simple placeholders. It includes helper functions for role checks and ownership.
+*   **Action Required:** **CRITICAL REVIEW AND TESTING.** Before deploying to production, these rules must be thoroughly audited, tested (using Firebase Emulator Suite or unit tests for rules), and refined to ensure they precisely match the application's access control requirements. Deny by default and only allow specific operations needed by each role for each collection/document. Pay close attention to write rules for `stockItems` to prevent unauthorized quantity or price changes.
+
+### Testing Strategy
+
+*   **Current Status:** No automated tests (unit, integration, E2E) are currently part of the codebase.
+*   **Action Required:** Develop a comprehensive testing strategy:
+    *   **Unit Tests:** For utility functions, complex component logic, form validation logic, and potentially Genkit flows.
+    *   **Integration Tests:** Test interactions between components, API calls (e.g., to `/api/admin/create-user`), and Firebase services.
+    *   **End-to-End (E2E) Tests:** Use frameworks like Playwright or Cypress to simulate user journeys across different roles.
+    *   **Security Rule Tests:** Use Firebase testing tools to verify Firestore security rules.
+
+### Logging and Monitoring
+
+*   **Current Status:** The application uses `console.log/warn/error` extensively for client-side and server-side (API routes, Firebase Functions) debugging.
+*   **Action Required:**
+    *   **Structured Logging:** For production, integrate a structured logging solution (e.g., send logs to Google Cloud Logging if deploying on Firebase/GCP, or services like Sentry, Datadog).
+    *   **Error Monitoring:** Implement real-time error tracking (e.g., Sentry) to capture and alert on unhandled exceptions in production.
+    *   **Performance Monitoring:** Utilize Firebase Performance Monitoring or similar tools to track app performance.
+
+### Backup and Restore
+
+*   **Current Status:** Firebase provides automatic backups of Firestore data. The application includes CSV export features in "Settings".
+*   **Action Required:**
+    *   **Understand Firebase Backups:** Familiarize yourself with Firebase's point-in-time recovery (PITR) capabilities and limitations.
+    *   **Define RPO/RTO:** Determine your Recovery Point Objective (how much data can you afford to lose) and Recovery Time Objective (how quickly do you need to restore).
+    *   **Regular Exports:** Consider scheduling regular automated exports of critical data (e.g., using a Cloud Function) to a separate storage location as an additional backup measure, beyond Firebase's built-in capabilities. The CSV export is a manual option.
+    *   **Test Restore Process:** Regularly test your data restoration process.
+
+### Legal and Compliance
+
+*   **Current Status:** No specific legal documents (Privacy Policy, Terms of Service) are included.
+*   **Action Required:**
+    *   **Privacy Policy:** Create and display a privacy policy detailing how user data is collected, used, and stored.
+    *   **Terms of Service:** Define the terms of use for the application.
+    *   **Cookie Consent:** If using cookies for tracking or non-essential purposes, implement a cookie consent mechanism (relevant for users in regions like the EU/UK).
+    *   **Data Protection Regulations:** Ensure compliance with relevant data protection laws (e.g., GDPR, CCPA) based on your target users.
+
 This document should give you a solid foundation. Remember that documentation is a living thing and should be updated as the application evolves!
 
-```
-I've created the `DOCUMENTATION.md` file with a comprehensive structure, including setup, features, technical details, and user journeys. This should serve as a strong starting point for understanding and maintaining the application.
+    
