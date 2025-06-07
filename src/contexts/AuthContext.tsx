@@ -44,10 +44,10 @@ if (_app) {
     db = getFirestore(_app);
     console.log(`${LOG_PREFIX_CONTEXT} Firebase Auth and Firestore services obtained.`);
   } catch (error: any) {
-    console.warn(`${LOG_PREFIX_CONTEXT} Error obtaining Auth/Firestore services: ${error.message}. Firebase App object (_app) is undefined if initialization failed.`);
+    console.warn(`${LOG_PREFIX_CONTEXT} Error obtaining Auth/Firestore services: ${error.message}. This might happen if Firebase app object (_app) is undefined due to an earlier initialization failure.`);
   }
 } else {
-  console.warn(`${LOG_PREFIX_CONTEXT} Firebase App object (_app) is undefined after initialization attempt. This indicates a problem with firebaseConfig or initializeApp itself.`);
+  console.warn(`${LOG_PREFIX_CONTEXT} Firebase App object (_app) is undefined after initialization attempt. This indicates a problem with firebaseConfig or initializeApp itself. Firebase features will not work.`);
 }
 
 
@@ -89,6 +89,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [activeStall, setActiveStallObject] = useState<Stall | null>(null);
 
   const setUser: React.Dispatch<React.SetStateAction<AppUser | null>> = (newUser) => {
+    console.log(`${LOG_PREFIX_CONTEXT} setUser manually called. New user UID:`, newUser?.uid);
     setUserState(newUser);
   };
 
@@ -96,8 +97,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     console.log(`${LOG_PREFIX_CONTEXT} setActiveSite called. New siteId: ${siteId}, User role: ${user?.role}`);
     setActiveSiteState(siteId);
     if (user?.role !== 'manager') {
-      // For non-managers, changing site also clears the stall, as stall selection is dependent on site.
-      // Managers always have stall as null (representing all stalls for their active site).
       console.log(`${LOG_PREFIX_CONTEXT} User is not manager OR site is cleared, clearing activeStallId.`);
       setActiveStallState(null); 
     }
@@ -107,7 +106,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       } else {
         localStorage.removeItem('activeSiteId');
       }
-      // Clear stallId from localStorage if site is cleared or if user is not a manager (manager context handles stallId differently)
       if (!siteId || user?.role !== 'manager') {
         localStorage.removeItem('activeStallId');
       }
@@ -115,22 +113,28 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [user?.role]);
 
   const setActiveStall = useCallback((stallId: string | null) => {
-    console.log(`${LOG_PREFIX_CONTEXT} setActiveStall called. New stallId: ${stallId}`);
-    setActiveStallState(stallId);
-    if (typeof window !== 'undefined') {
-      if (stallId) {
-        localStorage.setItem('activeStallId', stallId);
-      } else {
-        localStorage.removeItem('activeStallId');
+    console.log(`${LOG_PREFIX_CONTEXT} setActiveStall called. New stallId: ${stallId}, User role: ${user?.role}`);
+    if (user?.role === 'manager') {
+      console.log(`${LOG_PREFIX_CONTEXT} Manager role detected. Setting activeStallId to null (All Stalls). Original request was for: ${stallId}`);
+      setActiveStallState(null); // Managers always operate on "All Stalls"
+      if (typeof window !== 'undefined') localStorage.removeItem('activeStallId');
+    } else {
+      setActiveStallState(stallId);
+      if (typeof window !== 'undefined') {
+        if (stallId) {
+          localStorage.setItem('activeStallId', stallId);
+        } else {
+          localStorage.removeItem('activeStallId');
+        }
       }
     }
-  }, []);
+  }, [user?.role]);
 
   useEffect(() => {
     console.log(`${LOG_PREFIX_CONTEXT} useEffect: Initializing auth state listener.`);
     if (!firebaseConfig || firebaseConfig.projectId === "YOUR_PROJECT_ID" || !firebaseConfig.projectId ||
         firebaseConfig.apiKey === "YOUR_API_KEY_HERE" || !firebaseConfig.apiKey) {
-      const configErrorMsg = `${LOG_PREFIX_CONTEXT} CRITICAL CONFIG FAILURE: Firebase projectId or apiKey is a placeholder or missing. Review '.env.local' and restart the server.`;
+      const configErrorMsg = `${LOG_PREFIX_CONTEXT} CRITICAL CONFIG FAILURE: Firebase projectId or apiKey is a placeholder or missing. Review '.env.local' and restart the server. This is likely due to an incomplete Firebase setup.`;
       console.error(configErrorMsg, { configUsed: firebaseConfig });
       setInitializationError(configErrorMsg);
       setLoading(false);
@@ -138,7 +142,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
 
     if (!auth || !db) {
-      const serviceErrorMsg = `${LOG_PREFIX_CONTEXT} CRITICAL SERVICE FAILURE: Firebase Auth or Firestore service not initialized. Check Firebase config and app initialization.`;
+      const serviceErrorMsg = `${LOG_PREFIX_CONTEXT} CRITICAL SERVICE FAILURE: Firebase Auth or Firestore service not initialized. This usually means the Firebase app object (_app) failed to initialize, possibly due to incorrect 'firebaseConfig' values or network issues preventing SDK load.`;
       console.error(serviceErrorMsg);
       setInitializationError(serviceErrorMsg);
       setLoading(false);
@@ -170,7 +174,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             const defaultUserData: AppUser = {
               uid: firebaseUser.uid, email: firebaseUser.email, role: 'staff',
               displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User",
-              createdAt: new Date().toISOString(), defaultSiteId: null, defaultStallId: null, managedSiteIds: null,
+              createdAt: new Date().toISOString(), defaultSiteId: null, defaultStallId: null, managedSiteIds: [],
               defaultItemSearchTerm: null, defaultItemCategoryFilter: null, defaultItemStockStatusFilter: null,
               defaultItemStallFilterOption: null, defaultSalesDateRangeFrom: null, defaultSalesDateRangeTo: null,
               defaultSalesStaffFilter: null,
@@ -183,43 +187,50 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           setUserState(appUserToSet);
           console.log(`${LOG_PREFIX_CONTEXT} AppUser state set for ${appUserToSet.uid}. Role: ${appUserToSet.role}`);
           
-          // Initialize active context based on Firestore defaults, then localStorage override if exists and valid for role
-          let initialSiteId = null;
-          let initialStallId = null;
+          let initialSiteId = appUserToSet.defaultSiteId;
+          let initialStallId = appUserToSet.defaultStallId;
           const storedSiteId = typeof window !== 'undefined' ? localStorage.getItem('activeSiteId') : null;
           const storedStallId = typeof window !== 'undefined' ? localStorage.getItem('activeStallId') : null;
 
           if (appUserToSet.role === 'admin') {
-              initialSiteId = appUserToSet.defaultSiteId || storedSiteId; // Prefer default, fallback to stored
-              initialStallId = (initialSiteId === appUserToSet.defaultSiteId) ? (appUserToSet.defaultStallId || (initialSiteId ? storedStallId : null)) : (initialSiteId ? storedStallId : null);
-              console.log(`${LOG_PREFIX_CONTEXT} Admin context init. DefaultSite: ${appUserToSet.defaultSiteId}, StoredSite: ${storedSiteId} -> FinalSite: ${initialSiteId}`);
+              initialSiteId = appUserToSet.defaultSiteId || storedSiteId || null;
+              initialStallId = (initialSiteId === appUserToSet.defaultSiteId) 
+                                ? (appUserToSet.defaultStallId || (initialSiteId ? storedStallId : null)) 
+                                : (initialSiteId ? storedStallId : null);
+              console.log(`${LOG_PREFIX_CONTEXT} Admin context init. FirestoreDefaultSite: ${appUserToSet.defaultSiteId}, StoredSite: ${storedSiteId} -> FinalSite: ${initialSiteId}. FirestoreDefaultStall: ${appUserToSet.defaultStallId}, StoredStall: ${storedStallId} -> FinalStall: ${initialStallId}`);
           } else if (appUserToSet.role === 'manager') {
               if (appUserToSet.managedSiteIds && appUserToSet.managedSiteIds.length > 0) {
-                  const preferredSite = appUserToSet.defaultSiteId && appUserToSet.managedSiteIds.includes(appUserToSet.defaultSiteId) 
-                                      ? appUserToSet.defaultSiteId 
+                  const preferredSite = (appUserToSet.defaultSiteId && appUserToSet.managedSiteIds.includes(appUserToSet.defaultSiteId))
+                                      ? appUserToSet.defaultSiteId
                                       : (storedSiteId && appUserToSet.managedSiteIds.includes(storedSiteId) ? storedSiteId : appUserToSet.managedSiteIds[0]);
                   initialSiteId = preferredSite;
+              } else {
+                  initialSiteId = null; // No managed sites, so no active site
               }
               initialStallId = null; // Managers always see all stalls for their selected site
-              console.log(`${LOG_PREFIX_CONTEXT} Manager context init. Managed: ${appUserToSet.managedSiteIds?.join(',')}, DefaultSite: ${appUserToSet.defaultSiteId}, StoredSite: ${storedSiteId} -> FinalSite: ${initialSiteId}`);
+              console.log(`${LOG_PREFIX_CONTEXT} Manager context init. Managed: ${appUserToSet.managedSiteIds?.join(',')}, FirestoreDefaultSite: ${appUserToSet.defaultSiteId}, StoredSite: ${storedSiteId} -> FinalSite: ${initialSiteId}. Stall is always null.`);
           } else { // staff
-              initialSiteId = appUserToSet.defaultSiteId;
-              initialStallId = appUserToSet.defaultSiteId ? appUserToSet.defaultStallId : null;
-              console.log(`${LOG_PREFIX_CONTEXT} Staff context init from defaults. Site: ${initialSiteId}, Stall: ${initialStallId}`);
+              initialSiteId = appUserToSet.defaultSiteId; // Staff defaults are source of truth
+              initialStallId = appUserToSet.defaultSiteId ? appUserToSet.defaultStallId : null; // Stall only if site is set
+              console.log(`${LOG_PREFIX_CONTEXT} Staff context init from Firestore defaults. Site: ${initialSiteId}, Stall: ${initialStallId}`);
           }
           
           setActiveSiteState(initialSiteId);
-          if (initialSiteId && typeof window !== 'undefined') localStorage.setItem('activeSiteId', initialSiteId);
-          else if (typeof window !== 'undefined') localStorage.removeItem('activeSiteId');
+          if (typeof window !== 'undefined') {
+            if (initialSiteId) localStorage.setItem('activeSiteId', initialSiteId);
+            else localStorage.removeItem('activeSiteId');
+          }
 
           setActiveStallState(initialStallId);
-          if (initialStallId && typeof window !== 'undefined') localStorage.setItem('activeStallId', initialStallId);
-          else if (typeof window !== 'undefined') localStorage.removeItem('activeStallId');
+          if (typeof window !== 'undefined') {
+            if (initialStallId) localStorage.setItem('activeStallId', initialStallId);
+            else localStorage.removeItem('activeStallId');
+          }
 
           setLoading(false);
         }, (error) => {
           console.error(`${LOG_PREFIX_CONTEXT} Error in user document onSnapshot listener for UID ${firebaseUser.uid}:`, error);
-          setUserState(mapFirestoreDataToAppUser(firebaseUser)); // Fallback to basic AppUser
+          setUserState(mapFirestoreDataToAppUser(firebaseUser)); 
           setLoading(false);
         });
       } else {
@@ -257,8 +268,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         } else {
           console.warn(`${LOG_PREFIX_CONTEXT} Active site object NOT FOUND for ID: ${activeSiteId}. Setting to null. This might happen if the site was deleted.`);
           setActiveSiteObject(null);
-          // If active site becomes invalid, clear it from state and localStorage
-          if (activeSiteId) { // Check if activeSiteId was actually set before trying to clear
+          if (activeSiteId) { 
              setActiveSiteState(null);
              if (typeof window !== 'undefined') localStorage.removeItem('activeSiteId');
           }
@@ -282,7 +292,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const unsubStall = onSnapshot(stallDocRef, (docSnap) => {
         if (docSnap.exists()) {
           const stallData = docSnap.data();
-          if (stallData.siteId === activeSiteId) { // Ensure stall belongs to current active site
+          if (stallData.siteId === activeSiteId) {
             console.log(`${LOG_PREFIX_CONTEXT} Active stall object updated for ID: ${activeStallId}`);
             setActiveStallObject({ id: docSnap.id, ...stallData } as Stall);
           } else {
@@ -294,8 +304,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         } else {
           console.warn(`${LOG_PREFIX_CONTEXT} Active stall object NOT FOUND for ID: ${activeStallId}. Setting to null.`);
           setActiveStallObject(null);
-           // If active stall becomes invalid, clear it from state and localStorage
-          if (activeStallId) { // Check if activeStallId was actually set
+          if (activeStallId) { 
              setActiveStallState(null);
              if (typeof window !== 'undefined') localStorage.removeItem('activeStallId');
           }
@@ -321,7 +330,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       createdAt: userDataFromFirestore.createdAt || new Date().toISOString(),
       defaultSiteId: userDataFromFirestore.defaultSiteId ?? null,
       defaultStallId: userDataFromFirestore.defaultStallId ?? null,
-      managedSiteIds: userDataFromFirestore.managedSiteIds ?? null,
+      managedSiteIds: userDataFromFirestore.managedSiteIds ?? [], // Ensure it's an array
       defaultItemSearchTerm: userDataFromFirestore.defaultItemSearchTerm ?? null,
       defaultItemCategoryFilter: userDataFromFirestore.defaultItemCategoryFilter ?? null,
       defaultItemStockStatusFilter: userDataFromFirestore.defaultItemStockStatusFilter ?? null,
@@ -355,7 +364,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         const defaultUserData: AppUser = {
             uid: firebaseUser.uid, email: firebaseUser.email, role: 'staff',
             displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User",
-            createdAt: new Date().toISOString(), defaultSiteId: null, defaultStallId: null, managedSiteIds: null,
+            createdAt: new Date().toISOString(), defaultSiteId: null, defaultStallId: null, managedSiteIds: [],
             defaultItemSearchTerm: null, defaultItemCategoryFilter: null, defaultItemStockStatusFilter: null,
             defaultItemStallFilterOption: null, defaultSalesDateRangeFrom: null, defaultSalesDateRangeTo: null,
             defaultSalesStaffFilter: null,
@@ -363,7 +372,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         await setDoc(userDocRef, defaultUserData);
         appUserToReturn = mapFirestoreDataToAppUser(firebaseUser, defaultUserData);
       }
-      // setLoading(false) and setUserState will be handled by onAuthStateChanged
       return appUserToReturn;
     } catch (error: any) {
       console.error(`${LOG_PREFIX_CONTEXT}:signIn: Sign-in error for ${email}:`, error.code, error.message);
@@ -387,7 +395,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const newUserDocData: AppUser = {
         uid: firebaseUser.uid, email: firebaseUser.email, role: 'staff' as UserRole,
         displayName: displayName, createdAt: new Date().toISOString(), defaultSiteId: null,
-        defaultStallId: null, managedSiteIds: null, defaultItemSearchTerm: null,
+        defaultStallId: null, managedSiteIds: [], defaultItemSearchTerm: null,
         defaultItemCategoryFilter: null, defaultItemStockStatusFilter: null,
         defaultItemStallFilterOption: null, defaultSalesDateRangeFrom: null,
         defaultSalesDateRangeTo: null, defaultSalesStaffFilter: null,
@@ -395,7 +403,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const userDocRef = doc(db as Firestore, "users", firebaseUser.uid);
       await setDoc(userDocRef, newUserDocData);
       console.log(`${LOG_PREFIX_CONTEXT}:signUp: Firestore document created for ${firebaseUser.uid}.`);
-      // setLoading(false) and setUserState will be handled by onAuthStateChanged
       return mapFirestoreDataToAppUser(firebaseUser, newUserDocData);
     } catch (error: any) {
       console.error(`${LOG_PREFIX_CONTEXT}:signUp: Sign-up error for ${email}:`, error.code, error.message);
@@ -413,7 +420,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       await firebaseSignOut(auth);
       console.log(`${LOG_PREFIX_CONTEXT}:signOutUser: Firebase sign-out successful. State updates handled by onAuthStateChanged.`);
-      // No need to manually clear user state here; onAuthStateChanged will do it.
     } catch (error: any) {
       console.error(`${LOG_PREFIX_CONTEXT}:signOutUser: Sign-out error:`, error.code, error.message);
     }
@@ -421,27 +427,33 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   if (initializationError) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-red-50 text-red-700 p-4">
-        <div className="text-center max-w-2xl p-8 border-2 border-red-300 rounded-lg shadow-lg bg-white">
-          <h1 className="text-3xl font-bold text-red-600 mb-4">Critical Configuration Error</h1>
-          <p className="text-md mb-6 text-left whitespace-pre-wrap">{initializationError}</p>
-          <div className="text-left text-sm text-red-600 space-y-2 mb-6 p-4 bg-red-50 border border-red-200 rounded-md">
-            <p><strong>Please check the following:</strong></p>
-            <ol className="list-decimal list-inside space-y-1">
-              <li>Ensure a <code>.env.local</code> file exists in the root of your project.</li>
-              <li>Verify all <code>NEXT_PUBLIC_FIREBASE_API_KEY</code>, <code>NEXT_PUBLIC_FIREBASE_PROJECT_ID</code>, etc., are correctly set with your Firebase project's web app credentials.</li>
-              <li>There should be <strong>NO</strong> quotes around the values in <code>.env.local</code>. E.g., <code>NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSy...</code> NOT <code>NEXT_PUBLIC_FIREBASE_API_KEY="AIzaSy..."</code>.</li>
-              <li>You <strong>MUST</strong> restart your Next.js development server after any changes to <code>.env.local</code> (e.g., by stopping <code>npm run dev</code> and running it again).</li>
+      <div className="flex flex-col items-center justify-center min-h-screen bg-red-100 text-red-800 p-4">
+        <div className="text-center max-w-2xl p-8 border-2 border-red-400 rounded-lg shadow-2xl bg-white">
+          <Loader2 className="h-16 w-16 text-red-500 mx-auto mb-6 animate-spin" />
+          <h1 className="text-4xl font-extrabold text-red-700 mb-4">Critical Firebase Error</h1>
+          <p className="text-lg mb-2 text-red-600 font-semibold">The application cannot start due to a Firebase configuration or initialization issue.</p>
+          <pre className="text-xs text-left whitespace-pre-wrap p-4 bg-red-50 border border-red-200 rounded-md my-4 overflow-x-auto">
+            {initializationError}
+          </pre>
+          <div className="text-left text-sm text-red-700 space-y-2 mb-6 p-4 bg-red-50 border border-red-200 rounded-md">
+            <p><strong>Troubleshooting Steps:</strong></p>
+            <ol className="list-decimal list-inside space-y-1 pl-4">
+              <li><strong>Verify <code>.env.local</code>:</strong> Ensure this file exists at your project root.</li>
+              <li><strong>Check Environment Variables:</strong> Confirm all <code>NEXT_PUBLIC_FIREBASE_...</code> variables (<code>API_KEY</code>, <code>PROJECT_ID</code>, etc.) are present and correct. They should come directly from your Firebase project's web app settings.</li>
+              <li><strong>No Quotes in <code>.env.local</code>:</strong> Values should be like <code>NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSy...</code> (no surrounding quotes).</li>
+              <li><strong>Restart Server:</strong> After any changes to <code>.env.local</code>, you MUST stop and restart your Next.js development server (<code>npm run dev</code>).</li>
+              <li><strong>Network Connectivity:</strong> Ensure your machine can reach Firebase services.</li>
+              <li><strong>Firebase Console:</strong> Double-check that the web app is correctly registered in your Firebase project console and the config values match.</li>
             </ol>
           </div>
-          <details className="mb-6 text-left text-xs">
-            <summary className="cursor-pointer font-medium">Current Firebase Config (as seen by app)</summary>
-            <pre className="mt-2 p-2 bg-gray-100 text-gray-700 rounded overflow-x-auto">
+          <details className="mb-6 text-left text-xs text-red-600">
+            <summary className="cursor-pointer font-medium text-red-700 hover:underline">Click to see current Firebase config (as loaded by app)</summary>
+            <pre className="mt-2 p-3 bg-red-50 border border-red-200 rounded-md overflow-x-auto text-red-900">
               {JSON.stringify(firebaseConfig, null, 2)}
             </pre>
           </details>
-           <Button onClick={() => window.location.reload()} variant="destructive">
-            Reload Application
+           <Button onClick={() => window.location.reload()} variant="destructive" size="lg" className="bg-red-600 hover:bg-red-700 text-white">
+            Attempt to Reload Application
           </Button>
         </div>
       </div>
@@ -476,6 +488,3 @@ export const useAuth = (): AuthContextType => {
   }
   return context;
 };
-
-    
-

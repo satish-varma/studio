@@ -1,3 +1,4 @@
+
 "use client";
 
 import {
@@ -17,7 +18,7 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import type { AppUser, UserRole, Site, Stall } from "@/types";
-import { Trash2, MoreHorizontal, Loader2, Info, Edit3, Users as UsersIcon } from "lucide-react"; // Added UsersIcon
+import { Trash2, MoreHorizontal, Loader2, Info, Edit3, Users as UsersIcon, Building, Store } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -35,7 +36,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"; // Removed DialogTrigger, DialogClose as they are not directly used here.
+} from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Label } from "@/components/ui/label";
@@ -45,7 +46,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"; // Removed DropdownMenuLabel, DropdownMenuSeparator as not used
+} from "@/components/ui/dropdown-menu";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 
@@ -93,7 +94,7 @@ export function UserTable({
     setIsUpdatingAssignment(userId);
     await onDefaultSiteChange(userId, newSiteId === "none" ? null : newSiteId);
     if (newSiteId === "none") {
-      await onDefaultStallChange(userId, null);
+      await onDefaultStallChange(userId, null); // If site is cleared, stall must be cleared
     }
     setIsUpdatingAssignment(null);
   };
@@ -172,10 +173,58 @@ export function UserTable({
               const isCurrentUserBeingManaged = user.uid === currentUserId;
               const isManager = user.role === 'manager';
               const isStaff = user.role === 'staff';
+              const isAdmin = user.role === 'admin';
 
               const stallsForSelectedSite = (isStaff && user.defaultSiteId)
                 ? stalls.filter(s => s.siteId === user.defaultSiteId)
                 : [];
+              
+              let siteAssignmentDisplay: React.ReactNode;
+              if (isManager) {
+                const managedSiteNames = (user.managedSiteIds || [])
+                  .map(id => sites.find(s => s.id === id)?.name)
+                  .filter(Boolean)
+                  .join(", ");
+                siteAssignmentDisplay = (
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className="text-xs whitespace-nowrap">
+                       Manages: {managedSiteNames || (user.managedSiteIds?.length ? `${user.managedSiteIds.length} site(s)` : "None")}
+                    </Badge>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() => openManageSitesDialog(user)}
+                      disabled={isCurrentUserBeingManaged || isUpdatingAssignment === user.uid}
+                    >
+                      <Edit3 size={14}/>
+                      <span className="sr-only">Edit Managed Sites</span>
+                    </Button>
+                  </div>
+                );
+              } else if (isStaff) {
+                siteAssignmentDisplay = (
+                  <Select
+                    value={user.defaultSiteId || "none"}
+                    onValueChange={(newSiteId) => handleDefaultSiteChangeInternal(user.uid, newSiteId)}
+                    disabled={isCurrentUserBeingManaged || isUpdatingAssignment === user.uid || sites.length === 0}
+                  >
+                    <SelectTrigger className="w-[160px] bg-input text-xs h-8" disabled={isCurrentUserBeingManaged}>
+                       <Building size={12} className="mr-1.5 text-muted-foreground" />
+                      <SelectValue placeholder={sites.length === 0 ? "No sites" : "Default Site"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">(None)</SelectItem>
+                      {sites.map(site => (
+                        <SelectItem key={site.id} value={site.id}>{site.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                );
+              } else { // Admin
+                siteAssignmentDisplay = <Badge variant="outline" className="text-xs border-primary/70 text-primary/90">All Access</Badge>;
+              }
+
 
               return (
                 <TableRow key={user.uid}>
@@ -205,41 +254,7 @@ export function UserTable({
                   <TableCell>
                     {isUpdatingAssignment === user.uid && (isStaff || isManager) ? (
                       <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                    ) : isManager ? (
-                      <div className="flex items-center gap-2">
-                        <Badge variant="secondary" className="text-xs">
-                          Manages {user.managedSiteIds?.length || 0} site(s)
-                        </Badge>
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => openManageSitesDialog(user)}
-                          disabled={isCurrentUserBeingManaged || isUpdatingAssignment === user.uid}
-                        >
-                          <Edit3 size={14}/>
-                          <span className="sr-only">Edit Managed Sites</span>
-                        </Button>
-                      </div>
-                    ) : isStaff ? (
-                      <Select
-                        value={user.defaultSiteId || "none"}
-                        onValueChange={(newSiteId) => handleDefaultSiteChangeInternal(user.uid, newSiteId)}
-                        disabled={isCurrentUserBeingManaged || isUpdatingAssignment === user.uid || sites.length === 0}
-                      >
-                        <SelectTrigger className="w-[160px] bg-input text-xs h-8" disabled={isCurrentUserBeingManaged}>
-                          <SelectValue placeholder={sites.length === 0 ? "No sites" : "Select default site"} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">(None)</SelectItem>
-                          {sites.map(site => (
-                            <SelectItem key={site.id} value={site.id}>{site.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <Badge variant="secondary">All Access</Badge>
-                    )}
+                    ) : siteAssignmentDisplay }
                   </TableCell>
                   <TableCell>
                     {isUpdatingAssignment === user.uid && isStaff && user.defaultSiteId ? (
@@ -251,7 +266,8 @@ export function UserTable({
                         disabled={isCurrentUserBeingManaged || isUpdatingAssignment === user.uid || !user.defaultSiteId || stallsForSelectedSite.length === 0}
                       >
                         <SelectTrigger className="w-[170px] bg-input text-xs h-8" disabled={isCurrentUserBeingManaged || !user.defaultSiteId}>
-                          <SelectValue placeholder={!user.defaultSiteId ? "Select site first" : (stallsForSelectedSite.length === 0 ? "No stalls in site" : "Select default stall")} />
+                           <Store size={12} className="mr-1.5 text-muted-foreground" />
+                          <SelectValue placeholder={!user.defaultSiteId ? "Select site first" : (stallsForSelectedSite.length === 0 ? "No stalls" : "Default Stall")} />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="none">(None)</SelectItem>
@@ -261,7 +277,7 @@ export function UserTable({
                         </SelectContent>
                       </Select>
                     ) : (
-                      <Badge variant="outline">N/A</Badge>
+                      <Badge variant="outline" className="text-xs">N/A</Badge>
                     )}
                   </TableCell>
                   <TableCell className="text-muted-foreground text-xs">{formatDate(user.createdAt as string | undefined)}</TableCell>
@@ -275,7 +291,7 @@ export function UserTable({
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                         <DropdownMenuItem
-                        onSelect={(e) => e.preventDefault()}
+                        onSelect={(e) => e.preventDefault()} // Prevent auto-close for dialog trigger
                         className="text-destructive focus:text-destructive-foreground focus:bg-destructive"
                         disabled={isCurrentUserBeingManaged || isDeleting}
                         onClick={() => setUserToDelete(user)}
@@ -329,7 +345,7 @@ export function UserTable({
                 <DialogHeader>
                     <DialogTitle>Manage Sites for {currentUserForSiteManagement.displayName || currentUserForSiteManagement.email}</DialogTitle>
                     <DialogDescription>
-                        Select the sites this manager is responsible for. Default site/stall preferences for this manager will be cleared.
+                        Select the sites this manager is responsible for. Default site/stall preferences for this manager will be cleared if assignments change.
                     </DialogDescription>
                 </DialogHeader>
                 <ScrollArea className="max-h-[300px] my-4 pr-3 border rounded-md">

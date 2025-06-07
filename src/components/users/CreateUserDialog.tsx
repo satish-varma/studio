@@ -49,10 +49,18 @@ const createUserFormSchema = z.object({
   role: z.enum(['staff', 'manager', 'admin'], { required_error: "Role is required." }),
   defaultSiteId: z.string().nullable().optional(),
   defaultStallId: z.string().nullable().optional(),
-  managedSiteIds: z.array(z.string()).nullable().optional(),
+  managedSiteIds: z.array(z.string()).optional().default([]), // Default to empty array
 }).refine(data => data.password === data.confirmPassword, {
   message: "Passwords don't match",
   path: ["confirmPassword"],
+}).refine(data => { // Conditional validation for manager
+  if (data.role === 'manager' && (!data.managedSiteIds || data.managedSiteIds.length === 0)) {
+    return false;
+  }
+  return true;
+}, {
+  message: "Managers must be assigned to at least one site.",
+  path: ["managedSiteIds"],
 });
 
 type CreateUserFormValues = z.infer<typeof createUserFormSchema>;
@@ -92,34 +100,35 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
   const selectedDefaultSiteId = form.watch("defaultSiteId");
 
   useEffect(() => {
-    console.log(`${LOG_PREFIX} useEffect for site/stall dependency. Role: ${selectedRole}, SiteID: ${selectedDefaultSiteId}`);
-    let newStallsForSite: Stall[] = [];
-    if (selectedRole === 'staff' && selectedDefaultSiteId) {
-      newStallsForSite = stalls.filter(s => s.siteId === selectedDefaultSiteId);
-      setStallsForSelectedSite(newStallsForSite);
-      console.log(`${LOG_PREFIX} Staff role, site ${selectedDefaultSiteId} selected. Stalls for site: ${newStallsForSite.length}`);
-
-      const currentDefaultStallId = form.getValues("defaultStallId");
-      if (currentDefaultStallId && !newStallsForSite.find(s => s.id === currentDefaultStallId)) {
+    console.log(`${LOG_PREFIX} Role or Site changed. Role: ${selectedRole}, SiteID: ${selectedDefaultSiteId}`);
+    if (selectedRole === 'staff') {
+      if (selectedDefaultSiteId) {
+        const filteredStalls = stalls.filter(s => s.siteId === selectedDefaultSiteId);
+        setStallsForSelectedSite(filteredStalls);
+        console.log(`${LOG_PREFIX} Staff role, site ${selectedDefaultSiteId} selected. Stalls for site: ${filteredStalls.length}`);
+        const currentDefaultStallId = form.getValues("defaultStallId");
+        if (currentDefaultStallId && !filteredStalls.find(s => s.id === currentDefaultStallId)) {
           console.log(`${LOG_PREFIX} Current stall ${currentDefaultStallId} not valid for new site. Clearing stall.`);
           form.setValue('defaultStallId', null);
+        }
+      } else {
+        setStallsForSelectedSite([]);
+        form.setValue('defaultStallId', null);
+        console.log(`${LOG_PREFIX} Staff role, no site selected. Clearing stall selection.`);
       }
-    } else {
+      form.setValue('managedSiteIds', []); // Staff don't manage sites
+    } else if (selectedRole === 'manager') {
       setStallsForSelectedSite([]);
-      if (selectedRole === 'staff') {
-        console.log(`${LOG_PREFIX} Staff role, no site selected or role changed. Clearing stall selection.`);
-        form.setValue('defaultStallId', null);
-      }
-    }
-
-    if (selectedRole !== 'staff') {
-        console.log(`${LOG_PREFIX} Role is not staff. Clearing default site/stall.`);
-        form.setValue('defaultSiteId', null);
-        form.setValue('defaultStallId', null);
-    }
-     if (selectedRole !== 'manager') {
-        console.log(`${LOG_PREFIX} Role is not manager. Clearing managed sites.`);
-        form.setValue('managedSiteIds', []);
+      form.setValue('defaultSiteId', null);
+      form.setValue('defaultStallId', null);
+      // managedSiteIds will be handled by its own field
+      console.log(`${LOG_PREFIX} Manager role. Clearing default site/stall.`);
+    } else if (selectedRole === 'admin') {
+      setStallsForSelectedSite([]);
+      form.setValue('defaultSiteId', null);
+      form.setValue('defaultStallId', null);
+      form.setValue('managedSiteIds', []);
+      console.log(`${LOG_PREFIX} Admin role. Clearing site/stall/managed sites assignments.`);
     }
   }, [selectedRole, selectedDefaultSiteId, stalls, form]);
 
@@ -138,7 +147,7 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
 
     try {
       console.log(`${LOG_PREFIX} Attempting to get ID token for admin user: ${currentFirebaseUser.uid}`);
-      const idToken = await currentFirebaseUser.getIdToken(true); // Force refresh token
+      const idToken = await currentFirebaseUser.getIdToken(true);
       console.log(`${LOG_PREFIX} ID token obtained. Calling /api/admin/create-user...`);
 
       const response = await fetch('/api/admin/create-user', {
@@ -176,9 +185,9 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
         email: authData.email,
         displayName: authData.displayName,
         role: values.role as UserRole,
-        defaultSiteId: values.role === 'staff' ? (values.defaultSiteId ?? null) : null,
-        defaultStallId: values.role === 'staff' && values.defaultSiteId ? (values.defaultStallId ?? null) : null,
-        managedSiteIds: values.role === 'manager' ? (values.managedSiteIds ?? []) : null, // Ensure it's an array or null
+        defaultSiteId: values.role === 'staff' ? (values.defaultSiteId || null) : null,
+        defaultStallId: values.role === 'staff' && values.defaultSiteId ? (values.defaultStallId || null) : null,
+        managedSiteIds: values.role === 'manager' ? (values.managedSiteIds || []) : [],
         defaultItemSearchTerm: null,
         defaultItemCategoryFilter: null,
         defaultItemStockStatusFilter: null,
@@ -221,7 +230,7 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
         <DialogHeader>
           <DialogTitle>Create New User</DialogTitle>
           <DialogDescription>
-            Creates a Firebase Authentication user and their Firestore document.
+            Creates a Firebase Authentication user and their Firestore document with specified role and assignments.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -376,7 +385,7 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
                 name="managedSiteIds"
                 render={() => (
                   <FormItem>
-                    <FormLabel>Managed Sites (for Manager)</FormLabel>
+                    <FormLabel>Managed Sites (for Manager) <span className="text-destructive">*</span></FormLabel>
                     <ScrollArea className="h-32 rounded-md border p-2 bg-input">
                       {sites.length === 0 && <p className="text-sm text-muted-foreground p-2">No sites available to assign.</p>}
                       {sites.map((site) => (
@@ -429,5 +438,3 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
     </Dialog>
   );
 }
-
-    
