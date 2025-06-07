@@ -174,7 +174,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     const item = items.find(i => i.id === itemId);
     if (item && !item.stallId) {
       console.log(`${LOG_PREFIX} Item ${itemId} is master stock. Selection ignored.`);
-      return; 
+      return;
     }
 
     console.log(`${LOG_PREFIX} handleSelectItem called. ItemID: ${itemId}, Checked: ${checked}`);
@@ -188,7 +188,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   const handleEdit = (itemId: string) => {
     console.log(`${LOG_PREFIX} Navigating to edit item: ${itemId}`);
     router.push(`/items/${itemId}/edit`);
-    setSelectedItems([]); 
+    setSelectedItems([]);
   };
 
   const handleDelete = async (itemId: string, itemName: string) => {
@@ -238,7 +238,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
              console.warn(`${LOG_PREFIX} Master item ${itemDataForLog!.originalMasterItemId} not found during deletion of stall item ${itemDataForLog!.id}. Master stock not adjusted.`);
           }
         }
-        
+
         if (itemDataForLog!.stallId && masterItemRef && masterData) {
           transaction.update(masterItemRef, {
             quantity: masterData.quantity + itemDataForLog!.quantity,
@@ -309,33 +309,30 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   const parseAndCapInput = (value: string, max?: number, min: number = 0): number | string => {
     if (value === "") return "";
     let num = parseInt(value, 10);
-    if (isNaN(num)) { // If parsing results in NaN (e.g., user types non-numeric chars)
-        const currentValStr = String(max === 0 ? min : (max || min)); // Use min or max as string if input is bad
-        if (currentValStr === String(max)) return max; // If max is the current field value (string form)
-        return min; // Default to min if still bad
+    if (isNaN(num)) {
+        const currentValStr = String(max === 0 ? min : (max || min));
+        if (currentValStr === String(max)) return max;
+        return min;
     }
     if (max !== undefined && num > max) num = max;
     if (num < min) num = min;
     return num;
   };
-  
+
   const parseAndCapFloatInput = (value: string, min: number = 0): number | string => {
     if (value === "") return "";
-    // Regex allows numbers, a single decimal point, and digits after decimal.
-    // It prevents multiple decimal points or non-numeric characters (except the first decimal).
     if (!/^\d*\.?\d*$/.test(value) || (value.split('.').length -1 > 1)) {
-        // If input is invalid (e.g. "1.2.3" or "abc"), try to parse what's valid or return current/min
         const floatVal = parseFloat(value);
-        if (!isNaN(floatVal) && floatVal >= min) return floatVal.toString(); // if initial part is valid
-        return min.toString(); // fallback to min
+        if (!isNaN(floatVal) && floatVal >= min) return floatVal.toString();
+        return min.toString();
     }
-    
+
     const num = parseFloat(value);
-    if (isNaN(num) && value !== "." && value !== "") { // Allow typing decimal point or clearing field
-        return min.toString(); // Or handle as you see fit, e.g. return current field value if parsing fails mid-type
+    if (isNaN(num) && value !== "." && value !== "") {
+        return min.toString();
     }
-    if (!isNaN(num) && num < min) return min.toString(); // Enforce minimum
-    return value; // Return original valid string (allows "1." or "1.23")
+    if (!isNaN(num) && num < min) return min.toString();
+    return value;
   };
 
 
@@ -501,7 +498,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         );
 
         let targetStallItemRef: DocumentReference | null = null;
-        const existingStallItemsQuerySnap = await getDocs(stallItemsQuery); 
+        const existingStallItemsQuerySnap = await getDocs(stallItemsQuery);
 
         if (!existingStallItemsQuerySnap.empty) {
             targetStallItemRef = existingStallItemsQuerySnap.docs[0].ref;
@@ -761,13 +758,13 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         const q = query(
             collection(db, "stockItems"),
             where("stallId", "==", destinationStallId),
-            where("originalMasterItemId", "==", sourceItemDataBeforeTx.originalMasterItemId ?? null) 
+            where("originalMasterItemId", "==", sourceItemDataBeforeTx.originalMasterItemId ?? null)
         );
-        const destQuerySnap = await getDocs(q); 
+        const destQuerySnap = await getDocs(q);
         if (!destQuerySnap.empty) {
             destinationItemRef = destQuerySnap.docs[0].ref;
             existingDestItemIdForLog = destQuerySnap.docs[0].id;
-            const destinationItemSnap = await transaction.get(destinationItemRef); 
+            const destinationItemSnap = await transaction.get(destinationItemRef);
             if(destinationItemSnap.exists()){
                 destItemDataBeforeTx = {id: destinationItemSnap.id, ...destinationItemSnap.data()} as StockItem;
             }
@@ -1284,7 +1281,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       <ArrowUpDown className="ml-2 h-3 w-3 text-primary" style={{ transform: 'rotate(180deg)' }}/> :
       <ArrowUpDown className="ml-2 h-3 w-3 text-primary" />;
   };
-  
+
 
 
   if (loading && items.length === 0) {
@@ -1362,18 +1359,21 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
                <DropdownMenuItem
+                data-testid="batch-edit-details-action"
                 onClick={handleOpenBatchUpdateDetailsDialog}
                 disabled={isBatchUpdatingDetails || selectedItems.length === 0}
               >
                 <Edit3 className="mr-2 h-4 w-4" /> Edit Category/Threshold
               </DropdownMenuItem>
               <DropdownMenuItem
+                data-testid="batch-edit-prices-action"
                 onClick={handleOpenBatchUpdatePriceDialog}
                 disabled={isBatchUpdatingPrice || selectedItems.length === 0}
               >
                 <IndianRupee className="mr-2 h-4 w-4" /> Edit Prices
               </DropdownMenuItem>
               <DropdownMenuItem
+                data-testid="batch-set-stock-action"
                 onClick={handleOpenBatchUpdateStockDialog}
                 disabled={isBatchUpdatingStock || selectedItems.length === 0}
               >
@@ -1381,6 +1381,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
+                data-testid="batch-delete-action"
                 onClick={handleOpenBatchDeleteDialog}
                 className="text-destructive focus:text-destructive-foreground focus:bg-destructive"
                 disabled={isBatchDeleting || selectedItems.length === 0}
@@ -1397,6 +1398,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             <TableRow>
               <TableHead className="w-[50px]">
                 <Checkbox
+                  data-testid="select-all-checkbox"
                   checked={isAllSelected || isIndeterminate}
                   onCheckedChange={handleSelectAll}
                   aria-label="Select all stall items"
@@ -1492,6 +1494,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                 >
                   <TableCell>
                      <Checkbox
+                        data-testid={`checkbox-${item.id}`}
                         checked={isSelected}
                         onCheckedChange={(checked) => handleSelectItem(item.id, checked)}
                         aria-label={`Select item ${item.name}`}
@@ -1535,7 +1538,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                     <Dialog open={stockUpdateItem?.id === item.id} onOpenChange={(open) => !open && setStockUpdateItem(null)}>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                          <Button variant="ghost" size="icon" className="h-8 w-8" data-testid={`actions-button-${item.id}`}>
                             <MoreHorizontal className="h-4 w-4" />
                             <span className="sr-only">Actions</span>
                           </Button>
@@ -1545,21 +1548,23 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                               <PackageOpen className="mr-2 h-4 w-4" /> Update Stock
                             </DropdownMenuItem>
                            {isMasterStock && (
-                            <DropdownMenuItem 
-                                onClick={() => handleOpenAllocateDialog(item)} 
+                            <DropdownMenuItem
+                                data-testid={`allocate-action-${item.id}`}
+                                onClick={() => handleOpenAllocateDialog(item)}
                                 disabled={availableStallsForAllocation.filter(s => s.siteId === item.siteId).length === 0}>
                               <MoveRight className="mr-2 h-4 w-4" /> Allocate to Stall
                             </DropdownMenuItem>
                           )}
                           {!isMasterStock && (
-                            <DropdownMenuItem 
-                                onClick={() => handleOpenTransferDialog(item)} 
+                            <DropdownMenuItem
+                                data-testid={`transfer-action-${item.id}`}
+                                onClick={() => handleOpenTransferDialog(item)}
                                 disabled={!item.siteId || availableStallsForAllocation.filter(s => s.siteId === item.siteId && s.id !== item.stallId).length === 0}>
                                 <Shuffle className="mr-2 h-4 w-4" /> Transfer to Stall
                             </DropdownMenuItem>
                           )}
                           {!isMasterStock && item.originalMasterItemId && (
-                             <DropdownMenuItem onClick={() => handleOpenReturnDialog(item)}>
+                             <DropdownMenuItem data-testid={`return-action-${item.id}`} onClick={() => handleOpenReturnDialog(item)}>
                               <Undo2 className="mr-2 h-4 w-4" /> Return to Master
                             </DropdownMenuItem>
                           )}
@@ -1570,6 +1575,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                           <DropdownMenuItem
                             onClick={() => handleOpenSingleDeleteDialog(item)}
                             className="text-destructive focus:text-destructive-foreground focus:bg-destructive"
+                            data-testid={`delete-action-${item.id}`}
                           >
                             <Trash2 className="mr-2 h-4 w-4" /> Delete Item
                           </DropdownMenuItem>
@@ -1595,6 +1601,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                             </Label>
                             <Input
                               id="quantity"
+                              data-testid="update-stock-quantity-input"
                               type="number"
                               value={newQuantity}
                               onChange={(e) => setNewQuantity(parseAndCapInput(e.target.value))}
@@ -1605,7 +1612,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                         </div>
                         <DialogFooter>
                           <Button type="button" variant="outline" onClick={() => setStockUpdateItem(null)} disabled={isUpdatingStock}>Cancel</Button>
-                          <Button type="button" onClick={handleStockQuantityChange} disabled={isUpdatingStock || newQuantity === "" || Number(newQuantity) < 0}>
+                          <Button type="button" data-testid="update-stock-confirm-button" onClick={handleStockQuantityChange} disabled={isUpdatingStock || newQuantity === "" || Number(newQuantity) < 0}>
                             {isUpdatingStock && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Save changes
                           </Button>
@@ -1632,7 +1639,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setShowBatchDeleteDialog(false)} disabled={isBatchDeleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmBatchDelete} disabled={isBatchDeleting} className="bg-destructive hover:bg-destructive/90">
+            <AlertDialogAction data-testid="batch-delete-confirm-button" onClick={handleConfirmBatchDelete} disabled={isBatchDeleting} className="bg-destructive hover:bg-destructive/90">
               {isBatchDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Delete Selected Items
             </AlertDialogAction>
@@ -1658,6 +1665,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
               </Label>
               <Input
                 id="batchQuantity"
+                data-testid="batch-update-stock-quantity-input"
                 type="number"
                 value={batchUpdateQuantity}
                 onChange={(e) => setBatchUpdateQuantity(parseAndCapInput(e.target.value))}
@@ -1669,7 +1677,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           </div>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setShowBatchUpdateStockDialog(false)} disabled={isBatchUpdatingStock}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmBatchUpdateStock} disabled={isBatchUpdatingStock || batchUpdateQuantity === "" || Number(batchUpdateQuantity) < 0}>
+            <AlertDialogAction data-testid="batch-update-stock-confirm-button" onClick={handleConfirmBatchUpdateStock} disabled={isBatchUpdatingStock || batchUpdateQuantity === "" || Number(batchUpdateQuantity) < 0}>
               {isBatchUpdatingStock && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Confirm Update
             </AlertDialogAction>
@@ -1691,6 +1699,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
               <Label htmlFor="batchUpdateCategory">New Category (Optional)</Label>
               <Input
                 id="batchUpdateCategory"
+                data-testid="batch-update-details-category-input"
                 value={batchUpdateCategory}
                 onChange={(e) => setBatchUpdateCategory(e.target.value)}
                 placeholder="Enter new category"
@@ -1702,6 +1711,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
               <Label htmlFor="batchUpdateLowStockThreshold">New Low Stock Threshold (Optional)</Label>
               <Input
                 id="batchUpdateLowStockThreshold"
+                data-testid="batch-update-details-threshold-input"
                 type="number"
                 value={batchUpdateLowStockThreshold}
                 onChange={(e) => setBatchUpdateLowStockThreshold(parseAndCapInput(e.target.value))}
@@ -1715,6 +1725,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setShowBatchUpdateDetailsDialog(false)} disabled={isBatchUpdatingDetails}>Cancel</AlertDialogCancel>
             <AlertDialogAction
+              data-testid="batch-update-details-confirm-button"
               onClick={handleConfirmBatchUpdateDetails}
               disabled={isBatchUpdatingDetails || (batchUpdateCategory.trim() === "" && (batchUpdateLowStockThreshold === "" || isNaN(Number(batchUpdateLowStockThreshold))))}
             >
@@ -1739,6 +1750,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
               <Label htmlFor="batchUpdatePrice">New Selling Price (₹) (Optional)</Label>
               <Input
                 id="batchUpdatePrice"
+                data-testid="batch-update-price-selling-input"
                 type="text"
                 value={batchUpdatePrice}
                 onChange={(e) => setBatchUpdatePrice(parseAndCapFloatInput(e.target.value))}
@@ -1751,7 +1763,8 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
               <Label htmlFor="batchUpdateCostPrice">New Cost Price (₹) (Optional)</Label>
               <Input
                 id="batchUpdateCostPrice"
-                type="text" 
+                data-testid="batch-update-price-cost-input"
+                type="text"
                 value={batchUpdateCostPrice}
                 onChange={(e) => setBatchUpdateCostPrice(parseAndCapFloatInput(e.target.value))}
                 placeholder="e.g., 99.50"
@@ -1763,6 +1776,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setShowBatchUpdatePriceDialog(false)} disabled={isBatchUpdatingPrice}>Cancel</AlertDialogCancel>
             <AlertDialogAction
+              data-testid="batch-update-price-confirm-button"
               onClick={handleConfirmBatchUpdatePrice}
               disabled={isBatchUpdatingPrice || (batchUpdatePrice === "" && batchUpdateCostPrice === "") || (batchUpdatePrice !== "" && (isNaN(Number(batchUpdatePrice)) || Number(batchUpdatePrice) < 0)) || (batchUpdateCostPrice !== "" && (isNaN(Number(batchUpdateCostPrice)) || Number(batchUpdateCostPrice) < 0)) }
             >
@@ -1792,7 +1806,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                     setShowSingleDeleteDialog(false);
                     setItemForSingleDelete(null);
                 }} disabled={isDeleting}>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={() => handleDelete(itemForSingleDelete.id, itemForSingleDelete.name)} disabled={isDeleting} className="bg-destructive hover:bg-destructive/90">
+                <AlertDialogAction data-testid="single-delete-confirm-button" onClick={() => handleDelete(itemForSingleDelete.id, itemForSingleDelete.name)} disabled={isDeleting} className="bg-destructive hover:bg-destructive/90">
                 {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Delete
                 </AlertDialogAction>
@@ -1818,7 +1832,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                   onValueChange={setTargetStallIdForAllocation}
                   disabled={isAllocating || stallsForCurrentSite.length === 0}
                 >
-                  <SelectTrigger id="targetStallForAllocation" className="bg-input">
+                  <SelectTrigger id="targetStallForAllocation" data-testid="allocate-stall-select-trigger" className="bg-input">
                     <SelectValue placeholder={stallsForCurrentSite.length === 0 ? "No stalls in this site" : "Select target stall"} />
                   </SelectTrigger>
                   <SelectContent>
@@ -1834,6 +1848,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                 <Label htmlFor="quantityToAllocate">Quantity to Allocate</Label>
                 <Input
                   id="quantityToAllocate"
+                  data-testid="allocate-quantity-input"
                   type="number"
                   value={quantityToAllocate}
                   onChange={(e) => setQuantityToAllocate(parseAndCapInput(e.target.value, itemToAllocate.quantity, 1))}
@@ -1846,7 +1861,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             </div>
             <AlertDialogFooter>
               <AlertDialogCancel onClick={() => setShowAllocateDialog(false)} disabled={isAllocating}>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={handleConfirmAllocation} disabled={isAllocating || !targetStallIdForAllocation || Number(quantityToAllocate) <= 0 || stallsForCurrentSite.length === 0}>
+              <AlertDialogAction data-testid="allocate-confirm-button" onClick={handleConfirmAllocation} disabled={isAllocating || !targetStallIdForAllocation || Number(quantityToAllocate) <= 0 || stallsForCurrentSite.length === 0}>
                 {isAllocating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Confirm Allocation
               </AlertDialogAction>
@@ -1870,6 +1885,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                 <Label htmlFor="quantityToReturn">Quantity to Return</Label>
                 <Input
                   id="quantityToReturn"
+                  data-testid="return-quantity-input"
                   type="number"
                   value={quantityToReturn}
                   onChange={(e) => setQuantityToReturn(parseAndCapInput(e.target.value, itemToReturn.quantity, 1))}
@@ -1883,6 +1899,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             <AlertDialogFooter>
               <AlertDialogCancel onClick={() => setShowReturnDialog(false)} disabled={isReturning}>Cancel</AlertDialogCancel>
               <AlertDialogAction
+                data-testid="return-confirm-button"
                 onClick={handleConfirmReturnToMaster}
                 disabled={isReturning || Number(quantityToReturn) <= 0 || Number(quantityToReturn) > itemToReturn.quantity}
               >
@@ -1913,7 +1930,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                             onValueChange={setDestinationStallId}
                             disabled={isTransferring || destinationStallsForTransfer.length === 0}
                         >
-                            <SelectTrigger id="destinationStall" className="bg-input">
+                            <SelectTrigger id="destinationStall" data-testid="transfer-stall-select-trigger" className="bg-input">
                                 <SelectValue placeholder={destinationStallsForTransfer.length === 0 ? "No other stalls in this site" : "Select destination stall"} />
                             </SelectTrigger>
                             <SelectContent>
@@ -1929,6 +1946,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                         <Label htmlFor="quantityToTransfer">Quantity to Transfer</Label>
                         <Input
                             id="quantityToTransfer"
+                            data-testid="transfer-quantity-input"
                             type="number"
                             value={quantityToTransfer}
                             onChange={(e) => setQuantityToTransfer(parseAndCapInput(e.target.value, itemToTransfer.quantity, 1))}
@@ -1942,6 +1960,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                 <AlertDialogFooter>
                     <AlertDialogCancel onClick={() => setShowTransferDialog(false)} disabled={isTransferring}>Cancel</AlertDialogCancel>
                     <AlertDialogAction
+                        data-testid="transfer-confirm-button"
                         onClick={handleConfirmTransfer}
                         disabled={isTransferring || !destinationStallId || Number(quantityToTransfer) <= 0 || Number(quantityToTransfer) > itemToTransfer.quantity || destinationStallsForTransfer.length === 0}
                     >
