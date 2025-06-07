@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { SalesHistoryControls } from "@/components/sales/SalesHistoryControls";
 import { SalesTable } from "@/components/sales/SalesTable";
 import PageHeader from "@/components/shared/PageHeader";
@@ -21,7 +21,11 @@ import {
     getDocs,
     doc,
     updateDoc,
-    QueryConstraint 
+    QueryConstraint,
+    limit,
+    startAfter,
+    endBefore,
+    DocumentSnapshot as FirestoreDocumentSnapshot // Explicit import
 } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
@@ -38,19 +42,28 @@ if (!getApps().length) {
   }
 }
 const db = getFirestore();
+const TRANSACTIONS_PER_PAGE = 20;
 
 export default function SalesHistoryClientPage() {
-  const { user, activeSiteId, activeStallId, loading: authLoading, activeSite, activeStall } = useAuth(); // Added activeSite, activeStall
+  const { user, activeSiteId, activeStallId, loading: authLoading, activeSite, activeStall } = useAuth();
   const { toast } = useToast();
 
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
   const [staffFilter, setStaffFilter] = useState("all"); 
   
-  const [transactions, setTransactions] = useState<SaleTransaction[]>([]);
+  const [currentPageTransactions, setCurrentPageTransactions] = useState<SaleTransaction[]>([]);
   const [loadingTransactions, setLoadingTransactions] = useState(true);
   const [errorTransactions, setErrorTransactions] = useState<string | null>(null);
   const [staffList, setStaffList] = useState<AppUser[]>([]);
   const [loadingStaff, setLoadingStaff] = useState(false);
+
+  const [firstTransactionDoc, setFirstTransactionDoc] = useState<FirestoreDocumentSnapshot<DocumentData> | null>(null);
+  const [lastTransactionDoc, setLastTransactionDoc] = useState<FirestoreDocumentSnapshot<DocumentData> | null>(null);
+  const [isLoadingNextPage, setIsLoadingNextPage] = useState(false);
+  const [isLoadingPrevPage, setIsLoadingPrevPage] = useState(false);
+  const [isLastPage, setIsLastPage] = useState(false);
+  const [isFirstPageReached, setIsFirstPageReached] = useState(true);
+
 
   const isManagerOrAdmin = user?.role === 'manager' || user?.role === 'admin';
 
@@ -62,9 +75,8 @@ export default function SalesHistoryClientPage() {
       const toDate = user.defaultSalesDateRangeTo && isValid(parseISO(user.defaultSalesDateRangeTo))
                      ? parseISO(user.defaultSalesDateRangeTo) 
                      : new Date();
-      setDateRange({ from: fromDate, to: toDate });
+      setDateRange({ from: startOfDay(fromDate), to: endOfDay(toDate) }); // Ensure full day range
       setStaffFilter(user.defaultSalesStaffFilter || "all");
-      console.log("SalesHistoryClientPage: User defaults applied. DateRange:", {from: fromDate, to: toDate}, "StaffFilter:", user.defaultSalesStaffFilter || "all");
     }
   }, [user, authLoading]);
 
@@ -80,7 +92,7 @@ export default function SalesHistoryClientPage() {
           querySnapshot.forEach((doc) => {
             fetchedStaff.push({ uid: doc.id, ...doc.data() } as AppUser);
           });
-          setStaffList(fetchedStaff);
+          setStaffList(fetchedStaff.sort((a,b) => (a.displayName || "").localeCompare(b.displayName || "")));
         } catch (error) {
           console.error("Error fetching staff members:", error);
           toast({ title: "Error", description: "Could not load staff list for filtering.", variant: "destructive" });
@@ -94,50 +106,61 @@ export default function SalesHistoryClientPage() {
     }
   }, [user, isManagerOrAdmin, toast, db]);
 
-
-  useEffect(() => {
-    if (authLoading || !db) {
-        setLoadingTransactions(true);
-        return;
-    }
+  const fetchTransactions = useCallback(async (direction: 'initial' | 'next' | 'prev' = 'initial') => {
+    if (authLoading || !db) return;
     if (!user) {
-      setLoadingTransactions(false);
       setErrorTransactions("User not authenticated.");
+      setLoadingTransactions(false);
+      setCurrentPageTransactions([]);
       return;
     }
-
     if (user.role === 'admin' && !activeSiteId) {
+      setErrorTransactions(null);
+      setCurrentPageTransactions([]);
       setLoadingTransactions(false);
-      setErrorTransactions(null); 
-      setTransactions([]); 
+      setFirstTransactionDoc(null);
+      setLastTransactionDoc(null);
+      setIsLastPage(true);
+      setIsFirstPageReached(true);
       return;
     }
     if (!activeSiteId && (user.role === 'staff' || user.role === 'manager')) {
-        setLoadingTransactions(false);
-        setErrorTransactions("No active site context. Please check your profile settings or contact an admin.");
-        setTransactions([]);
-        return;
+      setErrorTransactions("No active site context.");
+      setCurrentPageTransactions([]);
+      setLoadingTransactions(false);
+      setFirstTransactionDoc(null);
+      setLastTransactionDoc(null);
+      setIsLastPage(true);
+      setIsFirstPageReached(true);
+      return;
+    }
+     if (!dateRange?.from || !dateRange?.to || !isValid(dateRange.from) || !isValid(dateRange.to)) {
+      setErrorTransactions("Please select a valid date range.");
+      setCurrentPageTransactions([]);
+      setLoadingTransactions(false);
+      setFirstTransactionDoc(null);
+      setLastTransactionDoc(null);
+      setIsLastPage(true);
+      setIsFirstPageReached(true);
+      return;
     }
 
-    setLoadingTransactions(true);
+    if (direction === 'initial') setLoadingTransactions(true);
+    if (direction === 'next') setIsLoadingNextPage(true);
+    if (direction === 'prev') setIsLoadingPrevPage(true);
     setErrorTransactions(null);
-    
+
     const salesCollectionRef = collection(db, "salesTransactions");
     let salesQueryConstraints: QueryConstraint[] = [
-        orderBy("transactionDate", "desc"),
-        where("isDeleted", "==", false) 
+      orderBy("transactionDate", "desc"),
+      where("isDeleted", "==", false),
     ];
 
     if (activeSiteId) {
-        salesQueryConstraints.push(where("siteId", "==", activeSiteId));
-        if (activeStallId) {
-            salesQueryConstraints.push(where("stallId", "==", activeStallId));
-        }
-    } else if (user.role !== 'admin') { 
-        setLoadingTransactions(false);
-        setErrorTransactions("Site context is missing for your role.");
-        setTransactions([]);
-        return;
+      salesQueryConstraints.push(where("siteId", "==", activeSiteId));
+      if (activeStallId) {
+        salesQueryConstraints.push(where("stallId", "==", activeStallId));
+      }
     }
 
     if (user.role === 'staff') {
@@ -146,41 +169,113 @@ export default function SalesHistoryClientPage() {
       salesQueryConstraints.push(where("staffId", "==", staffFilter));
     }
     
-    if (dateRange?.from && isValid(dateRange.from)) {
-      salesQueryConstraints.push(where("transactionDate", ">=", Timestamp.fromDate(startOfDay(dateRange.from))));
+    salesQueryConstraints.push(where("transactionDate", ">=", Timestamp.fromDate(startOfDay(dateRange.from))));
+    salesQueryConstraints.push(where("transactionDate", "<=", Timestamp.fromDate(endOfDay(dateRange.to))));
+    
+    if (direction === 'next' && lastTransactionDoc) {
+      salesQueryConstraints.push(startAfter(lastTransactionDoc));
+    } else if (direction === 'prev' && firstTransactionDoc) {
+      // For previous, we need to reverse order, limit, then reverse results
+      // This part is tricky with onSnapshot. Let's do a getDocs for prev for simplicity.
+      // Or, manage an array of firstDocs for each page. For now, getDocs for 'prev'.
+       salesQueryConstraints = salesQueryConstraints.filter(c => c.type !== 'orderBy'); // remove existing orderBy
+       salesQueryConstraints.push(orderBy("transactionDate", "asc")); // reverse order for prev
+       salesQueryConstraints.push(startAfter(firstTransactionDoc)); // this is actually endBefore in reversed logic
+       salesQueryConstraints.push(limit(TRANSACTIONS_PER_PAGE));
+    } else { // initial or reset
+      salesQueryConstraints.push(limit(TRANSACTIONS_PER_PAGE + 1)); // +1 to check if last page
     }
-    if (dateRange?.to && isValid(dateRange.to)) {
-      salesQueryConstraints.push(where("transactionDate", "<=", Timestamp.fromDate(endOfDay(dateRange.to))));
+
+    let q: any; // query type from firebase
+    if (direction === 'prev') {
+      q = query(salesCollectionRef, ...salesQueryConstraints);
+    } else {
+      q = query(salesCollectionRef, ...salesQueryConstraints.filter(c => !(c.type === 'limit' && direction !== 'initial')), limit(TRANSACTIONS_PER_PAGE + (direction === 'initial' || direction === 'next' ? 1 : 0) ));
     }
     
-    const finalSalesQuery = query(salesCollectionRef, ...salesQueryConstraints);
+    // For 'prev', use getDocs. For 'initial'/'next', use onSnapshot.
+    if (direction === 'prev') {
+        try {
+            const querySnapshot = await getDocs(q);
+            const fetched: SaleTransaction[] = querySnapshot.docs.map(d => ({
+                id: d.id, ...d.data(), transactionDate: (d.data().transactionDate as Timestamp).toDate().toISOString()
+            } as SaleTransaction)).reverse(); // Reverse back to desc order for display
 
-    const unsubscribe = onSnapshot(finalSalesQuery,
+            setCurrentPageTransactions(fetched);
+            if (querySnapshot.docs.length > 0) {
+                setFirstTransactionDoc(querySnapshot.docs[querySnapshot.docs.length - 1]); // Last doc of reversed is first in original order
+                setLastTransactionDoc(querySnapshot.docs[0]); // First doc of reversed is last in original order
+            }
+            setIsFirstPageReached(querySnapshot.empty); // Or check against a known "very first" doc if we go further
+            setIsLastPage(false); // If we went prev, we are not on the last page
+        } catch (e: any) {
+            console.error("Error fetching previous page:", e);
+            setErrorTransactions("Failed to load previous page.");
+        } finally {
+            setIsLoadingPrevPage(false);
+            setLoadingTransactions(false);
+        }
+        return; // Exit for 'prev' as onSnapshot is not used
+    }
+
+
+    // For 'initial' and 'next', use onSnapshot
+    const unsubscribe = onSnapshot(q,
       (snapshot: QuerySnapshot<DocumentData>) => {
-        const fetchedTransactions: SaleTransaction[] = snapshot.docs.map(doc => {
-          const data = doc.data();
-          return {
-            id: doc.id,
-            ...data,
-            transactionDate: (data.transactionDate as Timestamp).toDate().toISOString(),
-          } as SaleTransaction;
-        });
-        setTransactions(fetchedTransactions);
+        let fetchedTransactions: SaleTransaction[] = snapshot.docs.map(d => ({
+          id: d.id, ...d.data(), transactionDate: (d.data().transactionDate as Timestamp).toDate().toISOString()
+        } as SaleTransaction));
+
+        const hasMore = fetchedTransactions.length > TRANSACTIONS_PER_PAGE;
+        setIsLastPage(!hasMore);
+        if (hasMore) {
+          fetchedTransactions.pop(); // Remove the extra item
+        }
+
+        setCurrentPageTransactions(fetchedTransactions);
+        
+        if (snapshot.docs.length > 0) {
+          if (direction === 'initial') {
+             setIsFirstPageReached(true); // Initial load is always the "first" page of current view
+          } else if (direction === 'next') {
+             setIsFirstPageReached(false);
+          }
+          setFirstTransactionDoc(snapshot.docs[0]);
+          setLastTransactionDoc(snapshot.docs[snapshot.docs.length - (hasMore ? 2 : 1)]);
+        } else {
+          if (direction === 'initial') setIsFirstPageReached(true);
+          if (direction === 'next') setIsLastPage(true); // No more items when fetching next
+          setFirstTransactionDoc(null);
+          setLastTransactionDoc(null);
+        }
         setLoadingTransactions(false);
+        setIsLoadingNextPage(false);
+        setIsLoadingPrevPage(false);
       },
       (error: any) => {
         console.error("Error fetching sales transactions:", error);
-        if (error.code === 'failed-precondition' && error.message.includes("requires an index")) {
-          setErrorTransactions(`Query requires a Firestore index. Please create it using the link in the Firebase error details, or directly in the Firebase console. Full error: ${error.message}`);
-        } else {
-          setErrorTransactions("Failed to load sales history. Please try again later.");
-        }
+        setErrorTransactions(error.message.includes("requires an index")
+          ? `Query requires Firestore index. Details: ${error.message.substring(error.message.indexOf('https://'))}`
+          : "Failed to load sales history.");
         setLoadingTransactions(false);
+        setIsLoadingNextPage(false);
+        setIsLoadingPrevPage(false);
       }
     );
+    return unsubscribe;
+  }, [user, activeSiteId, activeStallId, dateRange, staffFilter, isManagerOrAdmin, authLoading, db, lastTransactionDoc, firstTransactionDoc]);
 
-    return () => unsubscribe();
-  }, [user, activeSiteId, activeStallId, dateRange, staffFilter, isManagerOrAdmin, authLoading, db]);
+  useEffect(() => {
+    const unsubscribePromise = fetchTransactions('initial');
+    return () => {
+      unsubscribePromise.then(unsub => {
+        if (unsub && typeof unsub === 'function') {
+          unsub();
+        }
+      });
+    };
+  }, [fetchTransactions]);
+
 
   const handleDeleteSaleWithJustification = async (saleId: string, justification: string) => {
     if (!user || user.role !== 'admin') {
@@ -205,34 +300,20 @@ export default function SalesHistoryClientPage() {
         deletionJustification: justification.trim(),
       });
       toast({ title: "Sale Deleted", description: "The sale transaction has been marked as deleted." });
+      // Data will refresh via onSnapshot if the item was on the current page and isDeleted filter is applied
     } catch (error: any) {
       console.error("Error deleting sale:", error);
       toast({ title: "Deletion Failed", description: error.message || "Could not delete the sale transaction.", variant: "destructive" });
     }
   };
   
-  const filteredTransactions = useMemo(() => {
-    return transactions; 
-  }, [transactions]);
-
   const pageHeaderDescription = useMemo(() => {
-    if (!user) return "View and filter all past sales transactions."; // Default or loading state
-
+    if (!user) return "View and filter all past sales transactions.";
     if (!activeSite) {
-      if (user.role === 'staff') {
-        return "Your account needs a default site assigned to view sales. Please contact an administrator.";
-      }
-      return "Select a site to view its sales history.";
+      return user.role === 'staff' ? "Default site needed." : "Select site.";
     }
-
-    let desc = "View and filter all past sales transactions for ";
-    desc += `Site: "${activeSite.name}"`;
-
-    if (activeStall) {
-      desc += ` (Stall: "${activeStall.name}")`;
-    } else {
-      desc += " (All Stalls)";
-    }
+    let desc = `Viewing for Site: "${activeSite.name}"`;
+    desc += activeStall ? ` (Stall: "${activeStall.name}")` : " (All Stalls)";
     desc += ".";
     return desc;
   }, [user, activeSite, activeStall]);
@@ -240,16 +321,12 @@ export default function SalesHistoryClientPage() {
   if (user?.role === 'admin' && !activeSiteId && !authLoading && !loadingTransactions) {
     return (
       <div className="space-y-6">
-        <PageHeader
-          title="Sales History"
-          description={pageHeaderDescription}
-        />
+        <PageHeader title="Sales History" description="Sales records across your business." />
         <Alert variant="default" className="border-primary/50">
           <Info className="h-4 w-4" />
           <AlertTitle>Select a Site</AlertTitle>
           <AlertDescription>
-            Please select an active Site from the dropdown in the header bar to view sales history.
-            You can select "All Stalls" within a site or a specific stall.
+            Please select an active Site from the header dropdown to view sales history.
           </AlertDescription>
         </Alert>
       </div>
@@ -264,14 +341,14 @@ export default function SalesHistoryClientPage() {
       />
       <SalesHistoryControls
         dateRange={dateRange}
-        onDateRangeChange={setDateRange}
+        onDateRangeChange={(newRange) => { setDateRange(newRange); fetchTransactions('initial'); }}
         staffFilter={staffFilter}
-        onStaffFilterChange={setStaffFilter}
+        onStaffFilterChange={(newFilter) => { setStaffFilter(newFilter); fetchTransactions('initial'); }}
         staffMembers={staffList} 
         isLoadingStaff={loadingStaff}
         showStaffFilter={isManagerOrAdmin}
       />
-      {loadingTransactions && (
+      {loadingTransactions && !isLoadingNextPage && !isLoadingPrevPage && (
          <div className="flex justify-center items-center py-10">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
           <p className="ml-2">Loading sales history...</p>
@@ -286,13 +363,20 @@ export default function SalesHistoryClientPage() {
       )}
       {!loadingTransactions && !errorTransactions && 
         <SalesTable 
-            transactions={filteredTransactions} 
+            transactions={currentPageTransactions} 
             currentUserRole={user?.role}
             onDeleteSale={handleDeleteSaleWithJustification}
+            isLoadingNextPage={isLoadingNextPage}
+            isLoadingPrevPage={isLoadingPrevPage}
+            isLastPage={isLastPage}
+            isFirstPage={isFirstPageReached}
+            onNextPage={() => fetchTransactions('next')}
+            onPrevPage={() => fetchTransactions('prev')}
         />
       }
     </div>
   );
 }
+    
 
     
