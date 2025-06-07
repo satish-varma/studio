@@ -32,6 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import PageHeader from "@/components/shared/PageHeader"; // Import PageHeader
 
 
 if (!getApps().length) {
@@ -211,6 +212,26 @@ export default function SalesSummaryReportClientPage() {
     fetchReportData();
   }, [fetchReportData]);
 
+  const pageHeaderDescription = useMemo(() => {
+    if (!user) return "Analyze your sales data, profit margins, and inventory performance.";
+
+    if (!activeSite) {
+      return "Select a site to view its reports.";
+    }
+
+    let desc = "Analyze your sales data, profit margins, and inventory performance for ";
+    desc += `Site: "${activeSite.name}"`;
+
+    if (activeStall) {
+      desc += ` (Stall: "${activeStall.name}")`;
+    } else {
+      desc += " (All Stalls/Items for this site)";
+    }
+    desc += ".";
+    return desc;
+  }, [user, activeSite, activeStall]);
+
+
   const summaryCards = summaryData ? [
     { title: "Total Sales", value: `₹${summaryData.totalSalesAmount.toFixed(2)}`, icon: IndianRupee, color: "text-primary" },
     { title: "Total Items Sold", value: summaryData.totalItemsSold.toString(), icon: Package, color: "text-blue-500" },
@@ -233,33 +254,27 @@ export default function SalesSummaryReportClientPage() {
 
    if (!user || (user.role !== 'admin' && user.role !== 'manager')) {
     return (
-       <Alert variant="destructive">
-        <AlertTriangle className="h-4 w-4" />
-        <AlertTitle>Access Denied</AlertTitle>
-        <AlertDescription>You do not have permission to view reports.</AlertDescription>
-      </Alert>
-    );
-  }
-
-  if (!activeSiteId && !loadingReport) {
-     return (
-        <div className="space-y-4">
-            <ReportControls dateRange={dateRange} onDateRangeChange={setDateRange} />
-            <Alert variant="default" className="border-primary/50">
-                <Info className="h-4 w-4" />
-                <AlertTitle>Site Selection Required</AlertTitle>
-                <AlertDescription>
-                {user.role === 'admin' ? "Admin: Please select a site from the header to view its report." : "Manager: Please select one of your managed sites from the header to view its report."}
-                {activeStallId && " Sales will be shown for the specific stall selected."}
-                </AlertDescription>
-            </Alert>
-        </div>
+      <div className="space-y-6">
+        <PageHeader
+            title="Sales & Inventory Reports"
+            description="Access to reports is restricted."
+        />
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Access Denied</AlertTitle>
+          <AlertDescription>You do not have permission to view reports.</AlertDescription>
+        </Alert>
+      </div>
     );
   }
 
 
   return (
     <div className="space-y-6">
+      <PageHeader
+        title="Sales & Inventory Reports"
+        description={pageHeaderDescription}
+      />
       <ReportControls dateRange={dateRange} onDateRangeChange={setDateRange} />
 
       {loadingReport && (
@@ -268,6 +283,18 @@ export default function SalesSummaryReportClientPage() {
           <p className="ml-2">Loading report data...</p>
         </div>
       )}
+      
+      {!activeSiteId && !loadingReport && (
+        <Alert variant="default" className="border-primary/50">
+            <Info className="h-4 w-4" />
+            <AlertTitle>Site Selection Required</AlertTitle>
+            <AlertDescription>
+            {user.role === 'admin' ? "Admin: Please select a site from the header to view its report." : "Manager: Please select one of your managed sites from the header to view its report."}
+            {activeStallId && " Sales will be shown for the specific stall selected."}
+            </AlertDescription>
+        </Alert>
+      )}
+
 
       {errorReport && !loadingReport && (
         <Alert variant="destructive">
@@ -277,7 +304,7 @@ export default function SalesSummaryReportClientPage() {
         </Alert>
       )}
 
-      {!loadingReport && !errorReport && summaryData && (
+      {!loadingReport && !errorReport && activeSiteId && summaryData && (
         <>
           <Card className="shadow-lg">
               <CardHeader>
@@ -359,7 +386,7 @@ export default function SalesSummaryReportClientPage() {
            )}
         </>
       )}
-       {!loadingReport && !errorReport && !summaryData && activeSiteId && (
+       {!loadingReport && !errorReport && activeSiteId && !summaryData && (
          <Card className="shadow-lg">
              <CardHeader><CardTitle>Sales Summary</CardTitle></CardHeader>
              <CardContent>
