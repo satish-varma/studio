@@ -194,6 +194,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       const itemRef = doc(db, "stockItems", itemId);
       const itemDocSnap = await getDoc(itemRef);
       if (!itemDocSnap.exists()) {
+        console.warn(`${LOG_PREFIX} Item ${itemId} not found for deletion.`);
         throw new Error("Item not found for deletion.");
       }
       itemDataForLog = { id: itemDocSnap.id, ...itemDocSnap.data() } as StockItem;
@@ -205,6 +206,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           );
           const linkedStallsSnap = await getDocs(linkedStallsQuery);
           if (!linkedStallsSnap.empty) {
+            console.warn(`${LOG_PREFIX} Deletion prevented for master item ${itemId}. ${linkedStallsSnap.size} stall items linked.`);
             toast({
               title: "Deletion Prevented",
               description: `Master item "${itemName}" cannot be deleted because ${linkedStallsSnap.size} stall item(s) are still allocated from it. Please return or re-allocate stock from these stalls first.`,
@@ -228,6 +230,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
               quantity: masterData.quantity + itemDataForLog!.quantity,
               lastUpdated: new Date().toISOString(),
             });
+            console.log(`${LOG_PREFIX} Master stock ${masterItemData.id} updated in transaction. Adding ${itemDataForLog!.quantity} due to deletion of stall item ${itemDataForLog!.id}.`);
           } else {
             console.warn(`${LOG_PREFIX} Master item ${itemDataForLog!.originalMasterItemId} not found during deletion of stall item ${itemDataForLog!.id}. Master stock not adjusted.`);
           }
@@ -252,6 +255,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
              const masterItemAfterDeletionSnap = await getDoc(doc(db, "stockItems", itemDataForLog.originalMasterItemId));
              if (masterItemAfterDeletionSnap.exists()) {
                 const masterItemAfter = masterItemAfterDeletionSnap.data() as StockItem;
+                console.log(`${LOG_PREFIX} Logging implicit return to master ${masterItemAfter.id}. Quantity before this log entry was ${masterItemAfter.quantity - itemDataForLog.quantity}, new quantity is ${masterItemAfter.quantity}.`);
                  await logStockMovement(user, {
                     stockItemId: itemDataForLog.originalMasterItemId,
                     siteId: masterItemAfter.siteId!,
@@ -263,6 +267,8 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                     notes: `Implicit return from deleted stall item "${itemDataForLog.name}" (ID: ${itemDataForLog.id}).`,
                     linkedStockItemId: itemDataForLog.id,
                  });
+             } else {
+                 console.warn(`${LOG_PREFIX} Master item ${itemDataForLog.originalMasterItemId} no longer exists after deleting stall item ${itemDataForLog.id}. Cannot log return.`);
              }
          }
       }
@@ -313,6 +319,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         const itemSnap = await transaction.get(itemRef);
 
         if (!itemSnap.exists()) {
+          console.warn(`${LOG_PREFIX} Item ${stockUpdateItem.id} being updated not found during transaction.`);
           throw new Error("Item being updated not found.");
         }
         originalItemData = { id: itemSnap.id, ...itemSnap.data() } as StockItem;
@@ -347,6 +354,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             console.warn(`${LOG_PREFIX} Master stock item ${originalItemData.originalMasterItemId} not found. Stall stock updated, but master cannot be adjusted.`);
         }
       });
+      console.log(`${LOG_PREFIX} Stock update transaction successful for item ${stockUpdateItem.id}.`);
 
       if (user && originalItemData) {
          await logStockMovement(user, {
@@ -407,6 +415,13 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       toast({ title: "Invalid Input", description: "Please select a target stall and enter a valid quantity greater than 0.", variant: "destructive" });
       return;
     }
+    const stallsForCurrentSite = itemToAllocate?.siteId
+    ? availableStallsForAllocation.filter(s => s.siteId === itemToAllocate.siteId)
+    : [];
+    if(stallsForCurrentSite.length === 0){
+      toast({ title: "No Stalls Available", description: "There are no stalls in this site to allocate stock to.", variant: "destructive" });
+      return;
+    }
 
     const numQuantityToAllocate = Number(quantityToAllocate);
     if (numQuantityToAllocate > itemToAllocate.quantity) {
@@ -426,10 +441,12 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         const masterStockSnap = await transaction.get(masterStockRef);
 
         if (!masterStockSnap.exists()) {
+          console.warn(`${LOG_PREFIX} Master stock item ${itemToAllocate.id} not found during allocation transaction.`);
           throw new Error("Master stock item not found.");
         }
         masterStockDataBeforeTx = { id: masterStockSnap.id, ...masterStockSnap.data() } as StockItem;
         if (masterStockDataBeforeTx.quantity < numQuantityToAllocate) {
+          console.warn(`${LOG_PREFIX} Concurrent update for master item ${masterStockDataBeforeTx.id}. Available: ${masterStockDataBeforeTx.quantity}, Requested: ${numQuantityToAllocate}`);
           throw new Error(`Concurrent update: Not enough master stock. Available: ${masterStockDataBeforeTx.quantity}`);
         }
 
@@ -450,7 +467,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                 stallItemDataBeforeTx = {id: targetStallItemSnap.id, ...targetStallItemSnap.data()} as StockItem;
             }
         }
-        console.log(`${LOG_PREFIX} Allocation: Existing stall item? ${!!targetStallItemRef}. NewStallItemID (if new): ${newStallItemIdForLog}`);
+        console.log(`${LOG_PREFIX} Allocation: Existing stall item? ${!!targetStallItemRef}. StallItem ID (if existing): ${existingStallItemIdForLog}`);
 
         if (targetStallItemRef && stallItemDataBeforeTx) {
             console.log(`${LOG_PREFIX} Updating existing stall item ${existingStallItemIdForLog}. Old Qty: ${stallItemDataBeforeTx.quantity}, Allocating: ${numQuantityToAllocate}`);
@@ -486,6 +503,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         });
         console.log(`${LOG_PREFIX} Master stock ${masterStockDataBeforeTx.id} updated. Old Qty: ${masterStockDataBeforeTx.quantity}, New Qty: ${masterStockDataBeforeTx.quantity - numQuantityToAllocate}`);
       });
+      console.log(`${LOG_PREFIX} Allocation transaction successful for item ${itemToAllocate.id}.`);
 
       if (user && masterStockDataBeforeTx) {
         await logStockMovement(user, {
@@ -567,16 +585,19 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         const masterItemSnap = await transaction.get(masterItemRef);
 
         if (!stallItemSnap.exists()) {
+          console.warn(`${LOG_PREFIX} Stall item ${itemToReturn.id} not found during return transaction.`);
           throw new Error("Stall item not found. Cannot proceed with return.");
         }
         stallItemDataBeforeTx = {id: stallItemSnap.id, ...stallItemSnap.data()} as StockItem;
 
         if (!masterItemSnap.exists()) {
+          console.warn(`${LOG_PREFIX} Master item ${itemToReturn.originalMasterItemId} not found during return transaction.`);
           throw new Error("Original master stock item not found. Cannot return to a non-existent master item.");
         }
         masterItemDataBeforeTx = {id: masterItemSnap.id, ...masterItemSnap.data()} as StockItem;
 
         if (stallItemDataBeforeTx.quantity < numQuantityToReturn) {
+          console.warn(`${LOG_PREFIX} Concurrent update for stall item ${stallItemDataBeforeTx.id}. Available: ${stallItemDataBeforeTx.quantity}, Requested: ${numQuantityToReturn}`);
           throw new Error(`Concurrent update: Not enough stall stock to return. Available: ${stallItemDataBeforeTx.quantity}`);
         }
 
@@ -592,6 +613,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         });
         console.log(`${LOG_PREFIX} Stall stock ${stallItemDataBeforeTx.id} updated. Old Qty: ${stallItemDataBeforeTx.quantity}, New Qty: ${stallItemDataBeforeTx.quantity - numQuantityToReturn}`);
       });
+      console.log(`${LOG_PREFIX} Return to master transaction successful for item ${itemToReturn.id}.`);
 
       if (user && stallItemDataBeforeTx && masterItemDataBeforeTx) {
         await logStockMovement(user, {
@@ -654,6 +676,13 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       toast({ title: "Invalid Input", description: "Please select a destination stall and enter a valid quantity > 0.", variant: "destructive" });
       return;
     }
+    const destinationStallsForTransfer = itemToTransfer?.siteId
+    ? availableStallsForAllocation.filter(s => s.siteId === itemToTransfer.siteId && s.id !== itemToTransfer.stallId)
+    : [];
+    if(destinationStallsForTransfer.length === 0){
+        toast({ title: "No Other Stalls", description: "There are no other stalls in this site to transfer stock to.", variant: "destructive" });
+        return;
+    }
     if (itemToTransfer.stallId === destinationStallId) {
       toast({ title: "Invalid Destination", description: "Source and destination stalls cannot be the same.", variant: "destructive" });
       return;
@@ -674,9 +703,15 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       await runTransaction(db, async (transaction) => {
         const sourceItemRef = doc(db, "stockItems", itemToTransfer.id);
         const sourceItemSnap = await transaction.get(sourceItemRef);
-        if (!sourceItemSnap.exists()) throw new Error("Source item not found.");
+        if (!sourceItemSnap.exists()) {
+            console.warn(`${LOG_PREFIX} Source item ${itemToTransfer.id} not found during transfer transaction.`);
+            throw new Error("Source item not found.");
+        }
         sourceItemDataBeforeTx = { id: sourceItemSnap.id, ...sourceItemSnap.data() } as StockItem;
-        if (sourceItemDataBeforeTx.quantity < numQuantityToTransfer) throw new Error(`Concurrent update: Not enough source stock. Available: ${sourceItemDataBeforeTx.quantity}`);
+        if (sourceItemDataBeforeTx.quantity < numQuantityToTransfer) {
+            console.warn(`${LOG_PREFIX} Concurrent update for source item ${sourceItemDataBeforeTx.id}. Available: ${sourceItemDataBeforeTx.quantity}, Requested: ${numQuantityToTransfer}`);
+            throw new Error(`Concurrent update: Not enough source stock. Available: ${sourceItemDataBeforeTx.quantity}`);
+        }
 
         let destinationItemRef: DocumentReference | null = null;
         const q = query(
@@ -693,7 +728,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                 destItemDataBeforeTx = {id: destinationItemSnap.id, ...destinationItemSnap.data()} as StockItem;
             }
         }
-        console.log(`${LOG_PREFIX} Transfer: Source Qty: ${sourceItemDataBeforeTx.quantity}, Destination Exists? ${!!destinationItemRef}`);
+        console.log(`${LOG_PREFIX} Transfer: Source Qty: ${sourceItemDataBeforeTx.quantity}, Destination Exists? ${!!destinationItemRef}. Dest Item ID (if existing): ${existingDestItemIdForLog}`);
 
         transaction.update(sourceItemRef, {
           quantity: sourceItemDataBeforeTx.quantity - numQuantityToTransfer,
@@ -728,6 +763,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           });
         }
       });
+      console.log(`${LOG_PREFIX} Transfer transaction successful for item ${itemToTransfer.id}.`);
 
       if (user && sourceItemDataBeforeTx) {
         await logStockMovement(user, {
@@ -802,6 +838,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           const stallItemSnap = await transaction.get(stallItemRef);
 
           if (!stallItemSnap.exists()) {
+            console.warn(`${LOG_PREFIX} Stall item ${itemToDelete.name} (ID: ${itemToDelete.id}) not found during batch delete transaction.`);
             throw new Error(`Stall item ${itemToDelete.name} not found during batch delete.`);
           }
           originalItemData = { id: stallItemSnap.id, ...stallItemSnap.data() } as StockItem;
@@ -815,7 +852,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                 quantity: originalMasterData.quantity + originalItemData.quantity,
                 lastUpdated: new Date().toISOString(),
               });
-              console.log(`${LOG_PREFIX} Master stock ${originalMasterData.id} updated. Old Qty: ${originalMasterData.quantity}, Adding: ${originalItemData.quantity}`);
+              console.log(`${LOG_PREFIX} Master stock ${originalMasterData.id} updated in transaction. Adding ${originalItemData.quantity} due to batch deletion of stall item ${originalItemData.id}.`);
             } else {
               console.warn(`${LOG_PREFIX} Master item ${originalItemData.originalMasterItemId} for stall item ${originalItemData.id} not found. Master stock not adjusted during batch delete.`);
             }
@@ -837,6 +874,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             });
             if (originalMasterData && originalItemData.originalMasterItemId) {
                 const masterQtyAfter = originalMasterData.quantity + originalItemData.quantity;
+                console.log(`${LOG_PREFIX} Logging implicit return to master ${originalMasterData.id} for batch delete. Qty before this log: ${originalMasterData.quantity}, Qty after: ${masterQtyAfter}.`);
                  await logStockMovement(user, {
                     stockItemId: originalMasterData.id,
                     siteId: originalMasterData.siteId!,
@@ -910,6 +948,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           const stallItemSnap = await transaction.get(stallItemRef);
 
           if (!stallItemSnap.exists()) {
+            console.warn(`${LOG_PREFIX} Stall item ${itemToUpdate.name} (ID: ${itemToUpdate.id}) not found during batch update stock transaction.`);
             throw new Error(`Stall item ${itemToUpdate.name} not found during batch update.`);
           }
           originalStallData = { id: stallItemSnap.id, ...stallItemSnap.data() } as StockItem;
@@ -958,6 +997,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                 notes: `Batch stock update set quantity to ${newBatchQtyNum}.`,
             });
             if (originalMasterData && newMasterQtyAfterUpdate !== null) {
+                console.log(`${LOG_PREFIX} Logging master stock adjustment for batch update. Master ID: ${originalMasterData.id}, Change: ${newMasterQtyAfterUpdate - originalMasterData.quantity}`);
                  await logStockMovement(user, {
                     stockItemId: originalMasterData.id,
                     siteId: originalMasterData.siteId!,
@@ -1770,7 +1810,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             </div>
             <AlertDialogFooter>
               <AlertDialogCancel onClick={() => setShowAllocateDialog(false)} disabled={isAllocating}>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={handleConfirmAllocation} disabled={isAllocating || !targetStallIdForAllocation || Number(quantityToAllocate) <= 0}>
+              <AlertDialogAction onClick={handleConfirmAllocation} disabled={isAllocating || !targetStallIdForAllocation || Number(quantityToAllocate) <= 0 || stallsForCurrentSite.length === 0}>
                 {isAllocating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Confirm Allocation
               </AlertDialogAction>
@@ -1867,7 +1907,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                     <AlertDialogCancel onClick={() => setShowTransferDialog(false)} disabled={isTransferring}>Cancel</AlertDialogCancel>
                     <AlertDialogAction
                         onClick={handleConfirmTransfer}
-                        disabled={isTransferring || !destinationStallId || Number(quantityToTransfer) <= 0 || Number(quantityToTransfer) > itemToTransfer.quantity}
+                        disabled={isTransferring || !destinationStallId || Number(quantityToTransfer) <= 0 || Number(quantityToTransfer) > itemToTransfer.quantity || destinationStallsForTransfer.length === 0}
                     >
                         {isTransferring && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                         Confirm Transfer
@@ -1884,4 +1924,3 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     </TooltipProvider>
   );
 }
-

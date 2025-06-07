@@ -40,11 +40,14 @@ import { format, parseISO, isValid } from "date-fns";
 import type { DateRange } from "react-day-picker";
 import { Badge } from "@/components/ui/badge";
 
+const LOG_PREFIX = "[ProfilePage]";
+
 if (!getApps().length) {
   try {
     initializeApp(firebaseConfig);
+    console.log(`${LOG_PREFIX} Firebase initialized.`);
   } catch (error) {
-    console.error("Firebase initialization error in ProfilePage:", error);
+    console.error(`${LOG_PREFIX} Firebase initialization error:`, error);
   }
 }
 const db = getFirestore();
@@ -102,19 +105,29 @@ export default function ProfilePage() {
 
   useEffect(() => {
     const fetchInitialData = async () => {
-      if (!db || !user) return;
+      if (!db || !user) {
+        console.log(`${LOG_PREFIX} fetchInitialData: DB or user not available. User: ${!!user}, DB: ${!!db}`);
+        setLoadingContextData(false);
+        return;
+      }
+      console.log(`${LOG_PREFIX} fetchInitialData: Starting fetch for user ${user.uid}.`);
       setLoadingContextData(true);
       try {
+        console.log(`${LOG_PREFIX} Fetching sites...`);
         const sitesSnapshot = await getDocs(collection(db, "sites"));
         const fetchedSites: Site[] = sitesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Site));
         setAllSites(fetchedSites.sort((a, b) => a.name.localeCompare(b.name)));
+        console.log(`${LOG_PREFIX} Fetched ${fetchedSites.length} sites.`);
 
         if (user.role === 'admin' || user.role === 'manager') {
+          console.log(`${LOG_PREFIX} Fetching users for staff filter (role: ${user.role})...`);
           const usersSnapshot = await getDocs(query(collection(db, "users"), where("role", "in", ["staff", "manager", "admin"])));
           const fetchedUsers: AppUser[] = usersSnapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser));
           setAllUsersForStaffFilter(fetchedUsers.sort((a,b) => (a.displayName || "").localeCompare(b.displayName || "")));
+          console.log(`${LOG_PREFIX} Fetched ${fetchedUsers.length} users for staff filter.`);
         }
 
+        console.log(`${LOG_PREFIX} Fetching item categories...`);
         const itemsSnapshot = await getDocs(collection(db, "stockItems"));
         const categoriesSet = new Set<string>();
         itemsSnapshot.forEach(doc => {
@@ -122,12 +135,14 @@ export default function ProfilePage() {
             if (item.category && item.category.trim() !== "") categoriesSet.add(item.category.trim());
         });
         setItemCategories(Array.from(categoriesSet).sort());
+        console.log(`${LOG_PREFIX} Fetched ${categoriesSet.size} unique item categories.`);
 
       } catch (error: any) {
-        console.error("Error fetching context data for profile:", error);
+        console.error(`${LOG_PREFIX} Error fetching context data for profile:`, error.message, error.stack);
         toast({ title: "Error", description: "Could not load supporting data for profile settings. " + error.message, variant: "destructive" });
       } finally {
         setLoadingContextData(false);
+        console.log(`${LOG_PREFIX} fetchInitialData: Finished.`);
       }
     };
     if (user) fetchInitialData();
@@ -135,6 +150,7 @@ export default function ProfilePage() {
 
   useEffect(() => {
     if (user) {
+      console.log(`${LOG_PREFIX} useEffect (user form reset): Resetting form with user data.`, user);
       form.reset({
         displayName: user.displayName || "",
         email: user.email || "",
@@ -153,47 +169,56 @@ export default function ProfilePage() {
           to: user.defaultSalesDateRangeTo && isValid(parseISO(user.defaultSalesDateRangeTo)) ? parseISO(user.defaultSalesDateRangeTo) : undefined,
       });
     }
-  }, [user, form, allSites, isStaffUser, isAdminUser]);
+  }, [user, form, allSites, isStaffUser, isAdminUser]); // Added allSites as it was in original
 
   useEffect(() => {
     const fetchStalls = async () => {
       if (!db || !selectedDefaultSiteId) {
+        console.log(`${LOG_PREFIX} fetchStalls: No DB or selectedDefaultSiteId. Clearing stalls. SiteID: ${selectedDefaultSiteId}`);
         setStallsForSelectedSite([]);
         form.setValue("defaultStallId", null); 
+        setLoadingContextData(false); // Ensure loading stops if we bail early
         return;
       }
+      console.log(`${LOG_PREFIX} fetchStalls: Fetching stalls for site ID: ${selectedDefaultSiteId}`);
       setLoadingContextData(true);
       try {
         const q = query(collection(db, "stalls"), where("siteId", "==", selectedDefaultSiteId));
         const stallsSnapshot = await getDocs(q);
         const fetchedStalls: Stall[] = stallsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Stall));
         setStallsForSelectedSite(fetchedStalls.sort((a,b) => a.name.localeCompare(b.name)));
+        console.log(`${LOG_PREFIX} Fetched ${fetchedStalls.length} stalls for site ${selectedDefaultSiteId}.`);
         
         const currentDefaultStall = form.getValues("defaultStallId");
         if (currentDefaultStall && !fetchedStalls.find(s => s.id === currentDefaultStall)) {
+            console.log(`${LOG_PREFIX} Current default stall ${currentDefaultStall} not in fetched list. Clearing.`);
             form.setValue("defaultStallId", null);
         }
-      } catch (error) {
-        console.error("Error fetching stalls for profile:", error);
+      } catch (error: any) {
+        console.error(`${LOG_PREFIX} Error fetching stalls for profile (site ID: ${selectedDefaultSiteId}):`, error.message, error.stack);
         toast({ title: "Error", description: "Could not load stalls for the selected site.", variant: "destructive" });
         setStallsForSelectedSite([]);
       } finally {
         setLoadingContextData(false);
+        console.log(`${LOG_PREFIX} fetchStalls: Finished for site ID: ${selectedDefaultSiteId}.`);
       }
     };
     if (isStaffUser || isAdminUser) {
         fetchStalls();
     } else {
         setStallsForSelectedSite([]);
+        setLoadingContextData(false); // Ensure loading stops if not applicable
     }
   }, [selectedDefaultSiteId, toast, form, isStaffUser, isAdminUser]);
 
 
   async function onSubmit(values: ProfileFormValues) {
     if (!user || !auth.currentUser) {
+      console.warn(`${LOG_PREFIX} onSubmit: User not found or auth.currentUser null. Aborting.`);
       toast({ title: "Error", description: "User not found. Please re-login.", variant: "destructive" });
       return;
     }
+    console.log(`${LOG_PREFIX} onSubmit: Starting profile update for user ${user.uid}. Values:`, values);
     setIsSubmitting(true);
     try {
       const dataToUpdate: Partial<AppUser> = { 
@@ -211,22 +236,29 @@ export default function ProfilePage() {
         dataToUpdate.defaultSiteId = values.defaultSiteId ? values.defaultSiteId : null;
         dataToUpdate.defaultStallId = (values.defaultSiteId && values.defaultStallId) ? values.defaultStallId : null;
       }
+      console.log(`${LOG_PREFIX} onSubmit: Data to update in Firestore:`, dataToUpdate);
 
       const userDocRef = doc(db, "users", user.uid);
       await updateDoc(userDocRef, dataToUpdate);
+      console.log(`${LOG_PREFIX} onSubmit: Firestore document updated for UID: ${user.uid}.`);
 
       if (auth.currentUser.displayName !== values.displayName) {
+        console.log(`${LOG_PREFIX} onSubmit: Updating Firebase Auth profile display name for UID: ${user.uid}.`);
         await updateFirebaseProfile(auth.currentUser, { displayName: values.displayName });
+        console.log(`${LOG_PREFIX} onSubmit: Firebase Auth profile display name updated.`);
       }
       
       if (setAuthUser) {
-         setAuthUser(prevUser => prevUser ? {
+        console.log(`${LOG_PREFIX} onSubmit: Calling setAuthUser to update AuthContext state.`);
+        setAuthUser(prevUser => prevUser ? {
             ...prevUser, 
-            ...dataToUpdate,
+            ...dataToUpdate, // Spread the locally prepared update object
         } : null);
       }
       
+      // Explicitly set active site/stall in AuthContext for immediate UI update, especially for admins changing their own context
       if (isAdminUser || isStaffUser) {
+        console.log(`${LOG_PREFIX} onSubmit: User is admin or staff. Calling setActiveSite and setActiveStall.`);
         setActiveSite(dataToUpdate.defaultSiteId || null);
         setActiveStall(dataToUpdate.defaultSiteId ? (dataToUpdate.defaultStallId || null) : null);
       }
@@ -235,8 +267,9 @@ export default function ProfilePage() {
         title: "Profile Updated",
         description: "Your profile and default preferences have been successfully updated.",
       });
+      console.log(`${LOG_PREFIX} onSubmit: Profile update successful for UID: ${user.uid}.`);
     } catch (error: any) {
-      console.error("Error updating profile:", error);
+      console.error(`${LOG_PREFIX} Error updating profile for UID ${user.uid}:`, error.message, error.stack);
       toast({
         title: "Update Failed",
         description: error.message || "An unexpected error occurred. Please try again.",
@@ -244,6 +277,7 @@ export default function ProfilePage() {
       });
     } finally {
       setIsSubmitting(false);
+      console.log(`${LOG_PREFIX} onSubmit: Submission process ended for UID: ${user.uid}.`);
     }
   }
 
@@ -257,6 +291,7 @@ export default function ProfilePage() {
   }
 
   if (!user) {
+     console.warn(`${LOG_PREFIX} Render: User not loaded. Cannot display profile page.`);
      return (
       <div className="space-y-6">
         <PageHeader title="My Profile" />
@@ -458,5 +493,3 @@ export default function ProfilePage() {
     </div>
   );
 }
-
-    
