@@ -59,6 +59,7 @@ StallSync is a comprehensive stock and sales management application designed for
 *   **Charts:** Recharts (via ShadCN UI Charts)
 *   **Backend:** Firebase (Authentication, Firestore, Cloud Functions for Firebase)
 *   **AI Integration:** Genkit (with Google AI/Gemini models)
+*   **Testing:** Jest, React Testing Library
 *   **Deployment:** Configured for Firebase App Hosting (see `apphosting.yaml`) and Firebase Hosting (for static parts, though primarily server-rendered with Next.js).
 
 ---
@@ -96,11 +97,13 @@ A brief overview of important directories:
     *   `firebaseConfig.ts`: Firebase client SDK configuration.
     *   `stockLogger.ts`: Utility for logging stock movements.
     *   `utils.ts`: General utility functions (e.g., `cn` for Tailwind class merging).
+    *   `__tests__/`: Directory for unit tests for library functions.
 *   **`/src/types`**: TypeScript type definitions for data models.
 *   **Root Files:**
     *   `next.config.ts`, `tailwind.config.ts`, `tsconfig.json`, `package.json`, etc.
     *   `firebase.json`, `firestore.rules`, `firestore.indexes.json`, `storage.rules`: Firebase project configuration and rules.
     *   `apphosting.yaml`: Configuration for Firebase App Hosting.
+    *   `jest.config.js`, `jest.setup.js`: Jest testing configuration.
 
 ---
 
@@ -203,11 +206,17 @@ GOOGLE_REDIRECT_URI=YOUR_CONFIGURED_GOOGLE_OAUTH_REDIRECT_URI
     npm run dev
     ```
     The application will typically be available at `http://localhost:9002`.
-4.  **Build for Production:**
+4.  **Run Tests:**
+    ```bash
+    npm test
+    # or for watch mode:
+    npm run test:watch
+    ```
+5.  **Build for Production:**
     ```bash
     npm run build
     ```
-5.  **Start Production Server:**
+6.  **Start Production Server:**
     ```bash
     npm run start
     ```
@@ -530,44 +539,61 @@ Making StallSync fully production-ready involves several key areas beyond core f
 
 ### Firestore Security Rules
 
-*   **Current Status:** The `firestore.rules` file in the project root provides a more detailed set of rules than simple placeholders. It includes helper functions for role checks and ownership.
+*   **Current Status:** The `firestore.rules` file in the project root provides a detailed set of rules with helper functions for role checks and ownership.
 *   **Action Required:** **CRITICAL REVIEW AND TESTING.** Before deploying to production, these rules must be thoroughly audited, tested (using Firebase Emulator Suite or unit tests for rules), and refined to ensure they precisely match the application's access control requirements. Deny by default and only allow specific operations needed by each role for each collection/document. Pay close attention to write rules for `stockItems` to prevent unauthorized quantity or price changes.
 
 ### Testing Strategy
 
-*   **Current Status:** No automated tests (unit, integration, E2E) are currently part of the codebase.
+*   **Current Status:** A basic Jest testing environment has been configured (`jest.config.js`, `jest.setup.js`). An example unit test for the `cn` utility function exists in `src/lib/__tests__/utils.test.ts`. Core testing dependencies (`jest`, `@testing-library/react`, `@testing-library/jest-dom`, `@types/jest`, `jest-environment-jsdom`) are included in `package.json`.
 *   **Action Required:** Develop a comprehensive testing strategy:
-    *   **Unit Tests:** For utility functions, complex component logic, form validation logic, and potentially Genkit flows.
-    *   **Integration Tests:** Test interactions between components, API calls (e.g., to `/api/admin/create-user`), and Firebase services.
-    *   **End-to-End (E2E) Tests:** Use frameworks like Playwright or Cypress to simulate user journeys across different roles.
-    *   **Security Rule Tests:** Use Firebase testing tools to verify Firestore security rules.
+    *   **Unit Tests:**
+        *   **Focus:** Individual functions, small React components (especially presentational ones), custom hooks, utility functions (like validation schemas, formatters).
+        *   **Tools:** Jest, React Testing Library (for components).
+        *   **Goal:** Verify that individual pieces of code work correctly in isolation. Test edge cases and different inputs.
+        *   **Example:** The existing test for `cn` in `src/lib/__tests__/utils.test.ts` is a good starting point. Expand this to cover other utilities and critical functions.
+    *   **Integration Tests:**
+        *   **Focus:** Interactions between several components, API calls (e.g., to `/api/admin/create-user`, `/api/google-sheets-proxy`), interactions with Firebase services (mocked or using emulators), and context providers.
+        *   **Tools:** Jest with React Testing Library, potentially MSW (Mock Service Worker) for API mocking, Firebase Emulator Suite.
+        *   **Goal:** Ensure that different parts of the application work together as expected. For example, test that submitting a form correctly updates state and calls an API.
+    *   **End-to-End (E2E) Tests:**
+        *   **Focus:** Simulate full user journeys through the application from a user's perspective, interacting with the UI as a user would.
+        *   **Tools:** Frameworks like Playwright or Cypress.
+        *   **Goal:** Verify complete workflows across different roles (Admin, Manager, Staff). For example, an Admin creating a user, that user logging in, and performing their role-specific tasks.
+        *   E2E tests are generally slower and more resource-intensive but provide the highest confidence that the application works from start to finish.
+    *   **Security Rule Tests:**
+        *   **Focus:** Specifically verify Firestore security rules.
+        *   **Tools:** Firebase Emulator Suite provides tools for testing security rules. You can write test scripts (e.g., using JavaScript with the Firebase Testing SDK) to simulate different authenticated users attempting various Firestore operations and assert whether they are allowed or denied as per the rules.
+        *   **Goal:** Ensure data access controls are correctly implemented and prevent unauthorized access or modification. This is critical for production.
+    *   **Test Coverage:** Aim for reasonable test coverage, particularly for critical business logic and user flows. Tools like Jest can generate coverage reports.
+    *   **Continuous Integration (CI):** Integrate your tests into a CI/CD pipeline (e.g., using GitHub Actions, GitLab CI) to automatically run tests on every code change, preventing regressions from being deployed.
 
 ### Logging and Monitoring
 
-*   **Current Status:** The application uses `console.log/warn/error` extensively for client-side and server-side (API routes, Firebase Functions) debugging.
+*   **Current Status:** The application uses `console.log/warn/error` extensively for client-side and server-side (API routes, Firebase Functions) debugging. Firebase Functions have improved logging.
 *   **Action Required:**
-    *   **Structured Logging:** For production, integrate a structured logging solution (e.g., send logs to Google Cloud Logging if deploying on Firebase/GCP, or services like Sentry, Datadog).
-    *   **Error Monitoring:** Implement real-time error tracking (e.g., Sentry) to capture and alert on unhandled exceptions in production.
-    *   **Performance Monitoring:** Utilize Firebase Performance Monitoring or similar tools to track app performance.
+    *   **Structured Logging:** For production, integrate a structured logging solution (e.g., send logs to Google Cloud Logging if deploying on Firebase/GCP, or services like Sentry, Datadog). This allows for easier searching, filtering, and analysis of logs.
+    *   **Error Monitoring:** Implement real-time error tracking (e.g., Sentry) to capture and alert on unhandled exceptions in production (both frontend and backend).
+    *   **Performance Monitoring:** Utilize Firebase Performance Monitoring or similar tools to track app load times, API response times, and other performance metrics.
+    *   **Alerting:** Set up alerts for critical errors, high error rates, or performance degradation.
 
 ### Backup and Restore
 
-*   **Current Status:** Firebase provides automatic backups of Firestore data. The application includes CSV export features in "Settings".
+*   **Current Status:** Firebase provides automatic backups of Firestore data (Point-in-Time Recovery - PITR, typically for 7 or 30 days depending on your plan). The application includes manual CSV export features in "Settings".
 *   **Action Required:**
-    *   **Understand Firebase Backups:** Familiarize yourself with Firebase's point-in-time recovery (PITR) capabilities and limitations.
-    *   **Define RPO/RTO:** Determine your Recovery Point Objective (how much data can you afford to lose) and Recovery Time Objective (how quickly do you need to restore).
-    *   **Regular Exports:** Consider scheduling regular automated exports of critical data (e.g., using a Cloud Function) to a separate storage location as an additional backup measure, beyond Firebase's built-in capabilities. The CSV export is a manual option.
-    *   **Test Restore Process:** Regularly test your data restoration process.
+    *   **Understand Firebase Backups:** Familiarize yourself with Firebase's PITR capabilities, limitations, and restore procedures.
+    *   **Define RPO/RTO:** Determine your Recovery Point Objective (how much data can you afford to lose) and Recovery Time Objective (how quickly do you need to restore service).
+    *   **Scheduled Exports (Consider):** For enhanced protection or longer retention, consider implementing scheduled automated exports of critical Firestore collections (e.g., using a Cloud Function triggered by Cloud Scheduler) to a separate storage location (e.g., Google Cloud Storage bucket).
+    *   **Test Restore Process:** Regularly test your data restoration process from Firebase backups and any custom exports to ensure you can meet your RTO.
+    *   **Data Integrity Checks:** Implement checks or processes to verify data integrity after a restore.
 
 ### Legal and Compliance
 
 *   **Current Status:** No specific legal documents (Privacy Policy, Terms of Service) are included.
 *   **Action Required:**
-    *   **Privacy Policy:** Create and display a privacy policy detailing how user data is collected, used, and stored.
-    *   **Terms of Service:** Define the terms of use for the application.
-    *   **Cookie Consent:** If using cookies for tracking or non-essential purposes, implement a cookie consent mechanism (relevant for users in regions like the EU/UK).
-    *   **Data Protection Regulations:** Ensure compliance with relevant data protection laws (e.g., GDPR, CCPA) based on your target users.
+    *   **Privacy Policy:** Create and display a comprehensive privacy policy detailing how user data (personal information, usage data, etc.) is collected, used, stored, shared, and protected.
+    *   **Terms of Service (ToS):** Define the terms and conditions for using the StallSync application. Include acceptable use, limitations of liability, and intellectual property rights.
+    *   **Cookie Consent:** If using cookies for tracking, analytics (beyond essential operational cookies), or non-essential purposes, implement a cookie consent mechanism (e.g., a banner) that complies with regulations like GDPR (for EU users) or CCPA (for California users).
+    *   **Data Protection Regulations:** Ensure compliance with relevant data protection laws (e.g., GDPR, CCPA, PIPEDA) based on your target user base and the data you process. This may involve data minimization, user rights (access, rectification, erasure), and data security measures.
+    *   **Consult Legal Advice:** For production applications handling sensitive user data or operating in regulated industries, consult with a legal professional to ensure compliance with all applicable laws and regulations.
 
 This document should give you a solid foundation. Remember that documentation is a living thing and should be updated as the application evolves!
-
-    
