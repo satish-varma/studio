@@ -111,7 +111,7 @@ export function LoginForm() {
         />
         <Button type="submit" className="w-full" disabled={isLoading}>
           {isLoading ? (
-            <Loader2 className="animate-spin" />
+            <Loader2 className="animate-spin" data-testid="loader-icon" aria-label="Loading" role="status" />
           ) : (
             <>
               <LogIn className="mr-2" /> Sign In
@@ -125,3 +125,5 @@ export function LoginForm() {
     </Form>
   );
 }
+
+    
