@@ -32,7 +32,7 @@ const mockSites: Site[] = [
   { id: 'site-C', name: 'Site Charlie', createdAt: '', updatedAt: '' },
 ];
 const mockStalls: Stall[] = [
-  { id: 'stall-A1', name: 'Stall Alpha-1 (Retail)', siteId: 'site-A', stallType: 'Retail Counter', createdAt: '', updatedAt: '' },
+  { id: 'stall-A1', name: 'Stall Alpha-1 (Retail Counter)', siteId: 'site-A', stallType: 'Retail Counter', createdAt: '', updatedAt: '' },
   { id: 'stall-A2', name: 'Stall Alpha-2 (Storage)', siteId: 'site-A', stallType: 'Storage Room', createdAt: '', updatedAt: '' },
   { id: 'stall-B1', name: 'Stall Beta-1 (Pop-up)', siteId: 'site-B', stallType: 'Pop-up Booth', createdAt: '', updatedAt: '' },
 ];
@@ -213,4 +213,3 @@ describe('UserTable Component', () => {
     expect(within(staffUserRow!).getByText('Stall Alpha-1 (Retail Counter)')).toBeInTheDocument(); // From stall select
   });
 });
-
