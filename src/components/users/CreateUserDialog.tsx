@@ -49,11 +49,11 @@ const createUserFormSchema = z.object({
   role: z.enum(['staff', 'manager', 'admin'], { required_error: "Role is required." }),
   defaultSiteId: z.string().nullable().optional(),
   defaultStallId: z.string().nullable().optional(),
-  managedSiteIds: z.array(z.string()).optional().default([]), // Default to empty array
+  managedSiteIds: z.array(z.string()).optional().default([]),
 }).refine(data => data.password === data.confirmPassword, {
   message: "Passwords don't match",
   path: ["confirmPassword"],
-}).refine(data => { // Conditional validation for manager
+}).refine(data => {
   if (data.role === 'manager' && (!data.managedSiteIds || data.managedSiteIds.length === 0)) {
     return false;
   }
@@ -116,12 +116,11 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
         form.setValue('defaultStallId', null);
         console.log(`${LOG_PREFIX} Staff role, no site selected. Clearing stall selection.`);
       }
-      form.setValue('managedSiteIds', []); // Staff don't manage sites
+      form.setValue('managedSiteIds', []);
     } else if (selectedRole === 'manager') {
       setStallsForSelectedSite([]);
       form.setValue('defaultSiteId', null);
       form.setValue('defaultStallId', null);
-      // managedSiteIds will be handled by its own field
       console.log(`${LOG_PREFIX} Manager role. Clearing default site/stall.`);
     } else if (selectedRole === 'admin') {
       setStallsForSelectedSite([]);
@@ -169,7 +168,13 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
       if (!response.ok) {
         let apiErrorMsg = `API Error: ${result.error || `Failed to create auth user (Status: ${response.status})`}.`;
         if (result.details) apiErrorMsg += ` Details: ${result.details}.`;
-        if (result.code) apiErrorMsg += ` Code: ${result.code}.`;
+        if (result.code) {
+            apiErrorMsg += ` Code: ${result.code}.`;
+            if (result.code === 'auth/email-already-exists') {
+                apiErrorMsg = `The email address ${values.email} is already in use.`;
+                form.setError("email", { type: "manual", message: apiErrorMsg });
+            }
+        }
         console.error(`${LOG_PREFIX} API call failed:`, apiErrorMsg);
         throw new Error(apiErrorMsg);
       }

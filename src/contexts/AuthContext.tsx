@@ -96,9 +96,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const setActiveSite = useCallback((siteId: string | null) => {
     console.log(`${LOG_PREFIX_CONTEXT} setActiveSite called. New siteId: ${siteId}, User role: ${user?.role}`);
     setActiveSiteState(siteId);
-    if (user?.role !== 'manager') {
-      console.log(`${LOG_PREFIX_CONTEXT} User is not manager OR site is cleared, clearing activeStallId.`);
-      setActiveStallState(null); 
+    if (user?.role !== 'manager') { // Managers handle their stall view ("All Stalls") differently
+      console.log(`${LOG_PREFIX_CONTEXT} Site changed for non-manager or site cleared, clearing activeStallId.`);
+      setActiveStallState(null);
     }
     if (typeof window !== 'undefined') {
       if (siteId) {
@@ -106,7 +106,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       } else {
         localStorage.removeItem('activeSiteId');
       }
-      if (!siteId || user?.role !== 'manager') {
+       if (!siteId || user?.role !== 'manager') {
         localStorage.removeItem('activeStallId');
       }
     }
@@ -115,8 +115,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const setActiveStall = useCallback((stallId: string | null) => {
     console.log(`${LOG_PREFIX_CONTEXT} setActiveStall called. New stallId: ${stallId}, User role: ${user?.role}`);
     if (user?.role === 'manager') {
-      console.log(`${LOG_PREFIX_CONTEXT} Manager role detected. Setting activeStallId to null (All Stalls). Original request was for: ${stallId}`);
-      setActiveStallState(null); // Managers always operate on "All Stalls"
+      console.log(`${LOG_PREFIX_CONTEXT} Manager role detected. Forcing activeStallId to null (All Stalls). Original request was for: ${stallId}`);
+      setActiveStallState(null);
       if (typeof window !== 'undefined') localStorage.removeItem('activeStallId');
     } else {
       setActiveStallState(stallId);
@@ -133,8 +133,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     console.log(`${LOG_PREFIX_CONTEXT} useEffect: Initializing auth state listener.`);
     if (!firebaseConfig || firebaseConfig.projectId === "YOUR_PROJECT_ID" || !firebaseConfig.projectId ||
-        firebaseConfig.apiKey === "YOUR_API_KEY_HERE" || !firebaseConfig.apiKey) {
-      const configErrorMsg = `${LOG_PREFIX_CONTEXT} CRITICAL CONFIG FAILURE: Firebase projectId or apiKey is a placeholder or missing. Review '.env.local' and restart the server. This is likely due to an incomplete Firebase setup.`;
+        firebaseConfig.apiKey === "YOUR_API_KEY_HERE" || !firebaseConfig.apiKey || firebaseConfig.apiKey === "") {
+      const configErrorMsg = `${LOG_PREFIX_CONTEXT} CRITICAL CONFIG FAILURE: Firebase 'projectId' or 'apiKey' is a placeholder or missing in firebaseConfig. Please review your '.env.local' file and ensure NEXT_PUBLIC_FIREBASE_PROJECT_ID and NEXT_PUBLIC_FIREBASE_API_KEY are correctly set. Then, restart your development server. This is likely due to an incomplete Firebase project setup or missing environment variables.`;
       console.error(configErrorMsg, { configUsed: firebaseConfig });
       setInitializationError(configErrorMsg);
       setLoading(false);
@@ -142,7 +142,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
 
     if (!auth || !db) {
-      const serviceErrorMsg = `${LOG_PREFIX_CONTEXT} CRITICAL SERVICE FAILURE: Firebase Auth or Firestore service not initialized. This usually means the Firebase app object (_app) failed to initialize, possibly due to incorrect 'firebaseConfig' values or network issues preventing SDK load.`;
+      const serviceErrorMsg = `${LOG_PREFIX_CONTEXT} CRITICAL SERVICE FAILURE: Firebase Auth or Firestore service not initialized. This usually means the Firebase app object (_app) failed to initialize, possibly due to incorrect 'firebaseConfig' values or network issues preventing SDK load. Check previous logs for 'Firebase app initialization error'.`;
       console.error(serviceErrorMsg);
       setInitializationError(serviceErrorMsg);
       setLoading(false);
@@ -187,32 +187,36 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           setUserState(appUserToSet);
           console.log(`${LOG_PREFIX_CONTEXT} AppUser state set for ${appUserToSet.uid}. Role: ${appUserToSet.role}`);
           
-          let initialSiteId = appUserToSet.defaultSiteId;
-          let initialStallId = appUserToSet.defaultStallId;
+          let initialSiteId: string | null = null;
+          let initialStallId: string | null = null;
           const storedSiteId = typeof window !== 'undefined' ? localStorage.getItem('activeSiteId') : null;
           const storedStallId = typeof window !== 'undefined' ? localStorage.getItem('activeStallId') : null;
+          console.log(`${LOG_PREFIX_CONTEXT} Initializing context. FirestoreUser: defaultSite='${appUserToSet.defaultSiteId}', defaultStall='${appUserToSet.defaultStallId}'. LocalStorage: site='${storedSiteId}', stall='${storedStallId}'. Role: '${appUserToSet.role}'.`);
 
           if (appUserToSet.role === 'admin') {
               initialSiteId = appUserToSet.defaultSiteId || storedSiteId || null;
-              initialStallId = (initialSiteId === appUserToSet.defaultSiteId) 
+              // For admin, stall follows site preference. If site is user's default, use user's default stall. If site is from localStorage, use localStorage stall (if it belongs to that site).
+              initialStallId = initialSiteId === appUserToSet.defaultSiteId 
                                 ? (appUserToSet.defaultStallId || (initialSiteId ? storedStallId : null)) 
                                 : (initialSiteId ? storedStallId : null);
-              console.log(`${LOG_PREFIX_CONTEXT} Admin context init. FirestoreDefaultSite: ${appUserToSet.defaultSiteId}, StoredSite: ${storedSiteId} -> FinalSite: ${initialSiteId}. FirestoreDefaultStall: ${appUserToSet.defaultStallId}, StoredStall: ${storedStallId} -> FinalStall: ${initialStallId}`);
+              console.log(`${LOG_PREFIX_CONTEXT} Admin context determined. Site: ${initialSiteId}, Stall: ${initialStallId}.`);
           } else if (appUserToSet.role === 'manager') {
               if (appUserToSet.managedSiteIds && appUserToSet.managedSiteIds.length > 0) {
                   const preferredSite = (appUserToSet.defaultSiteId && appUserToSet.managedSiteIds.includes(appUserToSet.defaultSiteId))
                                       ? appUserToSet.defaultSiteId
                                       : (storedSiteId && appUserToSet.managedSiteIds.includes(storedSiteId) ? storedSiteId : appUserToSet.managedSiteIds[0]);
                   initialSiteId = preferredSite;
+                  console.log(`${LOG_PREFIX_CONTEXT} Manager context determined. Site chosen: ${initialSiteId} (from defaults/stored/first managed).`);
               } else {
-                  initialSiteId = null; // No managed sites, so no active site
+                  initialSiteId = null; 
+                  console.log(`${LOG_PREFIX_CONTEXT} Manager has no managed sites. Site set to null.`);
               }
-              initialStallId = null; // Managers always see all stalls for their selected site
-              console.log(`${LOG_PREFIX_CONTEXT} Manager context init. Managed: ${appUserToSet.managedSiteIds?.join(',')}, FirestoreDefaultSite: ${appUserToSet.defaultSiteId}, StoredSite: ${storedSiteId} -> FinalSite: ${initialSiteId}. Stall is always null.`);
+              initialStallId = null; // Managers always see "All Stalls"
+              console.log(`${LOG_PREFIX_CONTEXT} Manager stall context set to null (All Stalls).`);
           } else { // staff
-              initialSiteId = appUserToSet.defaultSiteId; // Staff defaults are source of truth
-              initialStallId = appUserToSet.defaultSiteId ? appUserToSet.defaultStallId : null; // Stall only if site is set
-              console.log(`${LOG_PREFIX_CONTEXT} Staff context init from Firestore defaults. Site: ${initialSiteId}, Stall: ${initialStallId}`);
+              initialSiteId = appUserToSet.defaultSiteId;
+              initialStallId = appUserToSet.defaultSiteId ? appUserToSet.defaultStallId : null;
+              console.log(`${LOG_PREFIX_CONTEXT} Staff context determined from user document. Site: ${initialSiteId}, Stall: ${initialStallId}.`);
           }
           
           setActiveSiteState(initialSiteId);
@@ -330,7 +334,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       createdAt: userDataFromFirestore.createdAt || new Date().toISOString(),
       defaultSiteId: userDataFromFirestore.defaultSiteId ?? null,
       defaultStallId: userDataFromFirestore.defaultStallId ?? null,
-      managedSiteIds: userDataFromFirestore.managedSiteIds ?? [], // Ensure it's an array
+      managedSiteIds: Array.isArray(userDataFromFirestore.managedSiteIds) ? userDataFromFirestore.managedSiteIds : [],
       defaultItemSearchTerm: userDataFromFirestore.defaultItemSearchTerm ?? null,
       defaultItemCategoryFilter: userDataFromFirestore.defaultItemCategoryFilter ?? null,
       defaultItemStockStatusFilter: userDataFromFirestore.defaultItemStockStatusFilter ?? null,
@@ -427,32 +431,32 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   if (initializationError) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-red-100 text-red-800 p-4">
-        <div className="text-center max-w-2xl p-8 border-2 border-red-400 rounded-lg shadow-2xl bg-white">
-          <Loader2 className="h-16 w-16 text-red-500 mx-auto mb-6 animate-spin" />
-          <h1 className="text-4xl font-extrabold text-red-700 mb-4">Critical Firebase Error</h1>
-          <p className="text-lg mb-2 text-red-600 font-semibold">The application cannot start due to a Firebase configuration or initialization issue.</p>
-          <pre className="text-xs text-left whitespace-pre-wrap p-4 bg-red-50 border border-red-200 rounded-md my-4 overflow-x-auto">
+      <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-destructive/90 text-destructive-foreground p-4 backdrop-blur-sm">
+        <div className="text-center max-w-2xl p-8 border-2 border-destructive-foreground/50 rounded-lg shadow-2xl bg-destructive">
+          <Loader2 className="h-16 w-16 text-destructive-foreground mx-auto mb-6 animate-spin" />
+          <h1 className="text-4xl font-extrabold text-destructive-foreground mb-4">Critical Firebase Error</h1>
+          <p className="text-lg mb-2 text-destructive-foreground/90 font-semibold">The application cannot start due to a Firebase configuration or initialization issue.</p>
+          <pre className="text-xs text-left whitespace-pre-wrap p-4 bg-destructive-foreground/10 border border-destructive-foreground/30 rounded-md my-4 overflow-x-auto text-destructive-foreground">
             {initializationError}
           </pre>
-          <div className="text-left text-sm text-red-700 space-y-2 mb-6 p-4 bg-red-50 border border-red-200 rounded-md">
+          <div className="text-left text-sm text-destructive-foreground/90 space-y-2 mb-6 p-4 bg-destructive-foreground/10 border border-destructive-foreground/30 rounded-md">
             <p><strong>Troubleshooting Steps:</strong></p>
             <ol className="list-decimal list-inside space-y-1 pl-4">
               <li><strong>Verify <code>.env.local</code>:</strong> Ensure this file exists at your project root.</li>
-              <li><strong>Check Environment Variables:</strong> Confirm all <code>NEXT_PUBLIC_FIREBASE_...</code> variables (<code>API_KEY</code>, <code>PROJECT_ID</code>, etc.) are present and correct. They should come directly from your Firebase project's web app settings.</li>
-              <li><strong>No Quotes in <code>.env.local</code>:</strong> Values should be like <code>NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSy...</code> (no surrounding quotes).</li>
+              <li><strong>Check Environment Variables:</strong> Confirm all <code>NEXT_PUBLIC_FIREBASE_...</code> variables (e.g., <code>API_KEY</code>, <code>PROJECT_ID</code>) are present and correct. They must come from your Firebase project's web app settings.</li>
+              <li><strong>No Quotes in <code>.env.local</code>:</strong> Values should be like <code>NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSy...</code> (without surrounding quotes).</li>
               <li><strong>Restart Server:</strong> After any changes to <code>.env.local</code>, you MUST stop and restart your Next.js development server (<code>npm run dev</code>).</li>
               <li><strong>Network Connectivity:</strong> Ensure your machine can reach Firebase services.</li>
-              <li><strong>Firebase Console:</strong> Double-check that the web app is correctly registered in your Firebase project console and the config values match.</li>
+              <li><strong>Firebase Console:</strong> Double-check that the web app is correctly registered in your Firebase project console and the config values match precisely.</li>
             </ol>
           </div>
-          <details className="mb-6 text-left text-xs text-red-600">
-            <summary className="cursor-pointer font-medium text-red-700 hover:underline">Click to see current Firebase config (as loaded by app)</summary>
-            <pre className="mt-2 p-3 bg-red-50 border border-red-200 rounded-md overflow-x-auto text-red-900">
+          <details className="mb-6 text-left text-xs text-destructive-foreground/80">
+            <summary className="cursor-pointer font-medium text-destructive-foreground hover:underline">Click to see current Firebase config (as loaded by app)</summary>
+            <pre className="mt-2 p-3 bg-destructive-foreground/10 border border-destructive-foreground/30 rounded-md overflow-x-auto text-destructive-foreground">
               {JSON.stringify(firebaseConfig, null, 2)}
             </pre>
           </details>
-           <Button onClick={() => window.location.reload()} variant="destructive" size="lg" className="bg-red-600 hover:bg-red-700 text-white">
+           <Button onClick={() => window.location.reload()} variant="outline" size="lg" className="border-destructive-foreground text-destructive-foreground hover:bg-destructive-foreground/10">
             Attempt to Reload Application
           </Button>
         </div>
@@ -488,3 +492,4 @@ export const useAuth = (): AuthContextType => {
   }
   return context;
 };
+

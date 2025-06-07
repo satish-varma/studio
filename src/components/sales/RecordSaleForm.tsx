@@ -193,7 +193,7 @@ export default function RecordSaleForm() {
             throw new Error(`Not enough stock for ${formItem.name}. Available: ${currentStockData.quantity}, Requested: ${formItem.quantity}.`);
           }
 
-          const pricePerUnit = currentStockData.price;
+          const pricePerUnit = currentStockData.price; // Use current price from DB for transaction
           soldItemsForTransaction.push({
             itemId: formItem.itemId,
             name: formItem.name,
@@ -228,7 +228,7 @@ export default function RecordSaleForm() {
         }
 
         if (Math.abs(calculatedTotalAmount - totalSaleAmount) > 0.001) {
-             console.warn(`${LOG_PREFIX} Frontend total ${totalSaleAmount} differs from backend calculated total ${calculatedTotalAmount}. Using backend total.`);
+             console.warn(`${LOG_PREFIX} Frontend total (₹${totalSaleAmount.toFixed(2)}) differs from backend calculated total (₹${calculatedTotalAmount.toFixed(2)}). Using backend total for transaction.`);
         }
 
         const salesDocRef = doc(db, "salesTransactions", saleTransactionId);
@@ -298,9 +298,15 @@ export default function RecordSaleForm() {
 
     } catch (error: any) {
       console.error(`${LOG_PREFIX} Error recording sale transaction (ID: ${saleTransactionId}):`, error.message, error.stack);
+      let userMessage = "An unexpected error occurred. The sale was not recorded, and stock levels were not changed. Please check item availability and try again.";
+      if (error.message.includes("Not enough stock for") || error.message.includes("not found in stock")) {
+          userMessage = `Error: ${error.message} Please refresh available items or adjust quantity.`;
+      } else if (error.message.includes("does not belong to the currently active stall")) {
+          userMessage = `Error: ${error.message} One of the items selected is no longer valid for this stall. Please remove it or refresh your item list.`;
+      }
       toast({
         title: "Sale Recording Failed",
-        description: error.message || "An unexpected error occurred. The sale was not recorded, and stock levels were not changed. Please check item availability and try again.",
+        description: userMessage,
         variant: "destructive",
         duration: 7000,
       });
@@ -319,7 +325,7 @@ export default function RecordSaleForm() {
         itemId: selectedItem.id,
         name: selectedItem.name,
         pricePerUnit: price,
-        quantity: 1 // Reset quantity to 1 when item changes
+        quantity: 1 
       });
     } else {
         update(index, {
@@ -331,6 +337,16 @@ export default function RecordSaleForm() {
         });
     }
   };
+  
+  const parseAndCapQuantity = (rawValue: string, maxQuantity: number | undefined): number | "" => {
+      if (rawValue === "") return "";
+      let val = parseInt(rawValue, 10);
+      if (isNaN(val)) return 1; // Or some other default if non-numeric typed
+      if (maxQuantity !== undefined && val > maxQuantity) val = maxQuantity;
+      if (val < 1) val = 1;
+      return val;
+  };
+
 
   if (!user) {
     return (
@@ -441,19 +457,8 @@ export default function RecordSaleForm() {
                             max={maxQuantity?.toString()}
                             disabled={isSubmitting || !watchedItems[index]?.itemId || availableItems.length === 0}
                             onChange={(e) => {
-                                const rawValue = e.target.value;
-                                if (rawValue === "") {
-                                    formField.onChange(""); // Allow empty string for clearing
-                                    return;
-                                }
-                                let val = parseInt(rawValue, 10);
-                                if (isNaN(val)) {
-                                    formField.onChange(formField.value); // Keep old value if NaN
-                                    return;
-                                }
-                                if (maxQuantity !== undefined && val > maxQuantity) val = maxQuantity;
-                                if (val < 1) val = 1;
-                                formField.onChange(val);
+                                const parsedVal = parseAndCapQuantity(e.target.value, maxQuantity);
+                                formField.onChange(parsedVal);
                             }}
                           />
                         </FormControl>
