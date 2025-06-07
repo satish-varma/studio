@@ -43,8 +43,8 @@ if (_app) {
     auth = getAuth(_app);
     db = getFirestore(_app);
     console.log(`${LOG_PREFIX_CONTEXT} Firebase Auth and Firestore services obtained.`);
-  } catch (error: any) { // Added curly braces for the catch block here
-    console.warn(`${LOG_PREFIX_CONTEXT} Error obtaining Auth/Firestore services: ${error.message}. Firebase App object (_app) might be undefined if initialization failed.`);
+  } catch (error: any) {
+    console.warn(`${LOG_PREFIX_CONTEXT} Error obtaining Auth/Firestore services: ${error.message}. Firebase App object (_app) is undefined if initialization failed.`);
   }
 } else {
   console.warn(`${LOG_PREFIX_CONTEXT} Firebase App object (_app) is undefined after initialization attempt. This indicates a problem with firebaseConfig or initializeApp itself.`);
@@ -96,8 +96,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     console.log(`${LOG_PREFIX_CONTEXT} setActiveSite called. New siteId: ${siteId}, User role: ${user?.role}`);
     setActiveSiteState(siteId);
     if (user?.role !== 'manager') {
-      console.log(`${LOG_PREFIX_CONTEXT} User is not manager, clearing activeStallId.`);
-      setActiveStallState(null);
+      // For non-managers, changing site also clears the stall, as stall selection is dependent on site.
+      // Managers always have stall as null (representing all stalls for their active site).
+      console.log(`${LOG_PREFIX_CONTEXT} User is not manager OR site is cleared, clearing activeStallId.`);
+      setActiveStallState(null); 
     }
     if (typeof window !== 'undefined') {
       if (siteId) {
@@ -105,7 +107,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       } else {
         localStorage.removeItem('activeSiteId');
       }
-      if (user?.role !== 'manager') {
+      // Clear stallId from localStorage if site is cleared or if user is not a manager (manager context handles stallId differently)
+      if (!siteId || user?.role !== 'manager') {
         localStorage.removeItem('activeStallId');
       }
     }
@@ -179,34 +182,40 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           }
           setUserState(appUserToSet);
           console.log(`${LOG_PREFIX_CONTEXT} AppUser state set for ${appUserToSet.uid}. Role: ${appUserToSet.role}`);
-
+          
+          // Initialize active context based on Firestore defaults, then localStorage override if exists and valid for role
+          let initialSiteId = null;
+          let initialStallId = null;
           const storedSiteId = typeof window !== 'undefined' ? localStorage.getItem('activeSiteId') : null;
           const storedStallId = typeof window !== 'undefined' ? localStorage.getItem('activeStallId') : null;
-          console.log(`${LOG_PREFIX_CONTEXT} Stored context - SiteId: ${storedSiteId}, StallId: ${storedStallId}`);
 
           if (appUserToSet.role === 'admin') {
-              setActiveSiteState(storedSiteId);
-              setActiveStallState(storedSiteId ? storedStallId : null);
-              console.log(`${LOG_PREFIX_CONTEXT} Admin user. Active context set to Site: ${storedSiteId}, Stall: ${storedSiteId ? storedStallId : null}`);
+              initialSiteId = appUserToSet.defaultSiteId || storedSiteId; // Prefer default, fallback to stored
+              initialStallId = (initialSiteId === appUserToSet.defaultSiteId) ? (appUserToSet.defaultStallId || (initialSiteId ? storedStallId : null)) : (initialSiteId ? storedStallId : null);
+              console.log(`${LOG_PREFIX_CONTEXT} Admin context init. DefaultSite: ${appUserToSet.defaultSiteId}, StoredSite: ${storedSiteId} -> FinalSite: ${initialSiteId}`);
           } else if (appUserToSet.role === 'manager') {
               if (appUserToSet.managedSiteIds && appUserToSet.managedSiteIds.length > 0) {
-                  if (storedSiteId && appUserToSet.managedSiteIds.includes(storedSiteId)) {
-                      setActiveSiteState(storedSiteId);
-                      console.log(`${LOG_PREFIX_CONTEXT} Manager user. Active site set to stored: ${storedSiteId}`);
-                  } else {
-                      setActiveSiteState(appUserToSet.managedSiteIds[0]);
-                      console.log(`${LOG_PREFIX_CONTEXT} Manager user. Active site set to first managed: ${appUserToSet.managedSiteIds[0]}`);
-                  }
-              } else {
-                  setActiveSiteState(null);
-                  console.log(`${LOG_PREFIX_CONTEXT} Manager user has no managed sites. Active site set to null.`);
+                  const preferredSite = appUserToSet.defaultSiteId && appUserToSet.managedSiteIds.includes(appUserToSet.defaultSiteId) 
+                                      ? appUserToSet.defaultSiteId 
+                                      : (storedSiteId && appUserToSet.managedSiteIds.includes(storedSiteId) ? storedSiteId : appUserToSet.managedSiteIds[0]);
+                  initialSiteId = preferredSite;
               }
-              setActiveStallState(null); // Managers always have stall set to null (all stalls for site)
-          } else { // Staff
-              setActiveSiteState(appUserToSet.defaultSiteId);
-              setActiveStallState(appUserToSet.defaultSiteId ? appUserToSet.defaultStallId : null);
-              console.log(`${LOG_PREFIX_CONTEXT} Staff user. Active context set from defaults. Site: ${appUserToSet.defaultSiteId}, Stall: ${appUserToSet.defaultSiteId ? appUserToSet.defaultStallId : null}`);
+              initialStallId = null; // Managers always see all stalls for their selected site
+              console.log(`${LOG_PREFIX_CONTEXT} Manager context init. Managed: ${appUserToSet.managedSiteIds?.join(',')}, DefaultSite: ${appUserToSet.defaultSiteId}, StoredSite: ${storedSiteId} -> FinalSite: ${initialSiteId}`);
+          } else { // staff
+              initialSiteId = appUserToSet.defaultSiteId;
+              initialStallId = appUserToSet.defaultSiteId ? appUserToSet.defaultStallId : null;
+              console.log(`${LOG_PREFIX_CONTEXT} Staff context init from defaults. Site: ${initialSiteId}, Stall: ${initialStallId}`);
           }
+          
+          setActiveSiteState(initialSiteId);
+          if (initialSiteId && typeof window !== 'undefined') localStorage.setItem('activeSiteId', initialSiteId);
+          else if (typeof window !== 'undefined') localStorage.removeItem('activeSiteId');
+
+          setActiveStallState(initialStallId);
+          if (initialStallId && typeof window !== 'undefined') localStorage.setItem('activeStallId', initialStallId);
+          else if (typeof window !== 'undefined') localStorage.removeItem('activeStallId');
+
           setLoading(false);
         }, (error) => {
           console.error(`${LOG_PREFIX_CONTEXT} Error in user document onSnapshot listener for UID ${firebaseUser.uid}:`, error);
@@ -234,7 +243,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         userDocUnsubscribe();
       }
     };
-  }, []); // Empty dependency array ensures this runs only once on mount
+  }, []); 
 
   useEffect(() => {
     if (!db) return;
@@ -246,8 +255,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           console.log(`${LOG_PREFIX_CONTEXT} Active site object updated for ID: ${activeSiteId}`);
           setActiveSiteObject({ id: docSnap.id, ...docSnap.data() } as Site);
         } else {
-          console.warn(`${LOG_PREFIX_CONTEXT} Active site object NOT FOUND for ID: ${activeSiteId}. Setting to null.`);
+          console.warn(`${LOG_PREFIX_CONTEXT} Active site object NOT FOUND for ID: ${activeSiteId}. Setting to null. This might happen if the site was deleted.`);
           setActiveSiteObject(null);
+          // If active site becomes invalid, clear it from state and localStorage
+          if (activeSiteId) { // Check if activeSiteId was actually set before trying to clear
+             setActiveSiteState(null);
+             if (typeof window !== 'undefined') localStorage.removeItem('activeSiteId');
+          }
         }
       }, (error) => {
         console.error(`${LOG_PREFIX_CONTEXT} Error fetching active site object for ID ${activeSiteId}:`, error);
@@ -267,11 +281,24 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const stallDocRef = doc(db as Firestore, "stalls", activeStallId);
       const unsubStall = onSnapshot(stallDocRef, (docSnap) => {
         if (docSnap.exists()) {
-          console.log(`${LOG_PREFIX_CONTEXT} Active stall object updated for ID: ${activeStallId}`);
-          setActiveStallObject({ id: docSnap.id, ...docSnap.data() } as Stall);
+          const stallData = docSnap.data();
+          if (stallData.siteId === activeSiteId) { // Ensure stall belongs to current active site
+            console.log(`${LOG_PREFIX_CONTEXT} Active stall object updated for ID: ${activeStallId}`);
+            setActiveStallObject({ id: docSnap.id, ...stallData } as Stall);
+          } else {
+            console.warn(`${LOG_PREFIX_CONTEXT} Active stall ${activeStallId} does not belong to active site ${activeSiteId}. Clearing active stall.`);
+            setActiveStallObject(null);
+            setActiveStallState(null);
+            if (typeof window !== 'undefined') localStorage.removeItem('activeStallId');
+          }
         } else {
           console.warn(`${LOG_PREFIX_CONTEXT} Active stall object NOT FOUND for ID: ${activeStallId}. Setting to null.`);
           setActiveStallObject(null);
+           // If active stall becomes invalid, clear it from state and localStorage
+          if (activeStallId) { // Check if activeStallId was actually set
+             setActiveStallState(null);
+             if (typeof window !== 'undefined') localStorage.removeItem('activeStallId');
+          }
         }
       }, (error) => {
         console.error(`${LOG_PREFIX_CONTEXT} Error fetching active stall object for ID ${activeStallId}:`, error);
@@ -451,3 +478,4 @@ export const useAuth = (): AuthContextType => {
 };
 
     
+

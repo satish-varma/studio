@@ -23,11 +23,11 @@ interface ItemControlsProps {
   stockStatusFilter: string;
   onStockStatusFilterChange: (status: string) => void;
   
-  userRole?: UserRole; // To determine if user is staff
-  stallFilterOption: string; // "all", "master", or specific stallId
+  userRole?: UserRole; 
+  stallFilterOption: string; 
   onStallFilterOptionChange: (option: string) => void;
-  staffsEffectiveStallId?: string | null; // If staff, their actual stallId (or null for master)
-  staffsAssignedStallName?: string; // Name of the staff's assigned stall (if specific)
+  staffsEffectiveStallId?: string | null; 
+  staffsAssignedStallName?: string; 
 
   categories: string[]; 
   availableStalls: Stall[]; 
@@ -63,7 +63,7 @@ export function ItemControls({
   if (isStaff) {
     if (staffsEffectiveStallId) {
       staffStallContextDisplay = staffsAssignedStallName ? `Stall: ${staffsAssignedStallName}` : `Stall ID: ${staffsEffectiveStallId.substring(0,6)}...`;
-    } else if (isSiteActive) { // Staff assigned to master stock (stallId is null but siteId active)
+    } else if (isSiteActive) { 
       staffStallContextDisplay = "Location: Site Master Stock";
     } else {
       staffStallContextDisplay = "No specific stall assigned";
@@ -121,9 +121,9 @@ export function ItemControls({
           <Select 
             value={stallFilterOption} 
             onValueChange={onStallFilterOptionChange}
-            disabled={!isSiteActive || isStaff} // Disable if not site active OR if staff
+            disabled={!isSiteActive} 
           >
-            <SelectTrigger className="w-full sm:w-[220px] bg-input">
+            <SelectTrigger className="w-full sm:w-[220px] bg-input" disabled={!isSiteActive}>
               <Store className="h-4 w-4 mr-2 text-muted-foreground" />
               <SelectValue placeholder={!isSiteActive ? "Select site for stall filter" : "Filter by stall/location"} />
             </SelectTrigger>
@@ -150,3 +150,4 @@ export function ItemControls({
     </div>
   );
 }
+

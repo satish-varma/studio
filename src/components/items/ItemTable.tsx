@@ -162,6 +162,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   const selectableItems = useMemo(() => items.filter(item => !!item.stallId), [items]);
 
   const handleSelectAll = (checked: boolean | 'indeterminate') => {
+    console.log(`${LOG_PREFIX} handleSelectAll called. Checked: ${checked}`);
     if (checked === true) {
       setSelectedItems(selectableItems.map(item => item.id));
     } else {
@@ -171,8 +172,12 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
 
   const handleSelectItem = (itemId: string, checked: boolean | 'indeterminate') => {
     const item = items.find(i => i.id === itemId);
-    if (item && !item.stallId) return; // Only allow selection of stall items
+    if (item && !item.stallId) {
+      console.log(`${LOG_PREFIX} Item ${itemId} is master stock. Selection ignored.`);
+      return; 
+    }
 
+    console.log(`${LOG_PREFIX} handleSelectItem called. ItemID: ${itemId}, Checked: ${checked}`);
     if (checked === true) {
       setSelectedItems(prev => [...prev, itemId]);
     } else {
@@ -221,19 +226,25 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       }
 
       await runTransaction(db, async (transaction) => {
-        if (itemDataForLog!.stallId && itemDataForLog!.originalMasterItemId) {
-          const masterItemRef = doc(db, "stockItems", itemDataForLog!.originalMasterItemId);
-          const masterItemSnap = await transaction.get(masterItemRef);
+        const masterItemRef = itemDataForLog!.originalMasterItemId ? doc(db, "stockItems", itemDataForLog!.originalMasterItemId) : null;
+        let masterItemSnap: DocumentSnapshot | null = null;
+        let masterData: StockItem | null = null;
+
+        if (masterItemRef) {
+          masterItemSnap = await transaction.get(masterItemRef);
           if (masterItemSnap.exists()) {
-            const masterData = masterItemSnap.data() as StockItem;
-            transaction.update(masterItemRef, {
-              quantity: masterData.quantity + itemDataForLog!.quantity,
-              lastUpdated: new Date().toISOString(),
-            });
-            console.log(`${LOG_PREFIX} Master stock ${masterItemData.id} updated in transaction. Adding ${itemDataForLog!.quantity} due to deletion of stall item ${itemDataForLog!.id}.`);
+             masterData = masterItemSnap.data() as StockItem;
           } else {
-            console.warn(`${LOG_PREFIX} Master item ${itemDataForLog!.originalMasterItemId} not found during deletion of stall item ${itemDataForLog!.id}. Master stock not adjusted.`);
+             console.warn(`${LOG_PREFIX} Master item ${itemDataForLog!.originalMasterItemId} not found during deletion of stall item ${itemDataForLog!.id}. Master stock not adjusted.`);
           }
+        }
+        
+        if (itemDataForLog!.stallId && masterItemRef && masterData) {
+          transaction.update(masterItemRef, {
+            quantity: masterData.quantity + itemDataForLog!.quantity,
+            lastUpdated: new Date().toISOString(),
+          });
+          console.log(`${LOG_PREFIX} Master stock ${masterData.id} updated in transaction. Adding ${itemDataForLog!.quantity} due to deletion of stall item ${itemDataForLog!.id}.`);
         }
         transaction.delete(itemRef);
       });
@@ -1252,14 +1263,13 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   
   const parseAndCapFloatInput = (value: string, min: number = 0): number | string => {
     if (value === "") return "";
-    // Allow for decimal input
     if (/^\d*\.?\d*$/.test(value)) {
         const num = parseFloat(value);
-        if (isNaN(num)) return value; // Keep partial input like "1."
-        if (num < min) return min.toString(); // or handle as error / keep value
-        return value; // Return string to allow ongoing decimal input
+        if (isNaN(num) && value !== "" && value !== ".") return value; // Keep partial input like "1." or if it becomes NaN mid-type
+        if (!isNaN(num) && num < min) return min.toString();
+        return value; 
     }
-    return ""; // Or return previous valid value
+    return ""; 
   };
 
 
@@ -1299,7 +1309,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     );
   }
 
-  if (items.length === 0 && selectedItems.length === 0) {
+  if (items.length === 0 && selectedItems.length === 0 && !loading) {
     return (
       <div className="text-center py-10 px-4 bg-card rounded-lg border shadow-sm">
         <PackageOpen className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
@@ -1407,39 +1417,52 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             {items.map((item) => {
               const isLowStock = item.quantity <= item.lowStockThreshold;
               const isOutOfStock = item.quantity === 0;
-              const isMasterStock = !item.stallId;
+              const isMasterStock = !item.stallId && !!item.siteId;
               const isSelected = selectedItems.includes(item.id);
 
               const siteNameDisplay = item.siteId ? (sitesMap[item.siteId] || `Site ID: ${item.siteId.substring(0,6)}...`) : "N/A";
 
-              let stallDisplayElement: React.ReactNode;
-              if (item.stallId) {
+              let locationDisplayElement: React.ReactNode;
+              if (isMasterStock) {
+                 locationDisplayElement = (
+                    <div>
+                        <div className="flex items-center text-foreground font-medium">
+                            <Building size={14} className="mr-1 text-primary/70" /> Master Stock
+                        </div>
+                        <div className="text-xs text-muted-foreground/80 ml-5">
+                             ({siteNameDisplay})
+                        </div>
+                    </div>
+                );
+              } else if (item.stallId) {
                   const stallName = stallsMap[item.stallId] || `Stall ID: ${item.stallId.substring(0,6)}...`;
-                  if (item.originalMasterItemId) {
-                      stallDisplayElement = (
-                          <div className="flex items-center">
-                              <span>{stallName}</span>
-                              <Tooltip>
-                                  <TooltipTrigger asChild>
-                                      <Button variant="ghost" size="icon" className="h-5 w-5 ml-1 p-0 hover:bg-transparent">
-                                        <Link2Icon className="h-3 w-3 text-muted-foreground hover:text-primary" />
-                                      </Button>
-                                  </TooltipTrigger>
-                                  <TooltipContent side="top">
-                                      <p>Allocated from master stock</p>
-                                      <p className="text-xs text-muted-foreground">Master ID: {item.originalMasterItemId.substring(0,8)}...</p>
-                                  </TooltipContent>
-                              </Tooltip>
+                   locationDisplayElement = (
+                      <div>
+                          <div className="flex items-center text-foreground">
+                              <Store size={14} className="mr-1 text-accent/70" /> {stallName}
+                              {item.originalMasterItemId && (
+                                  <Tooltip>
+                                      <TooltipTrigger asChild>
+                                          <Button variant="ghost" size="icon" className="h-5 w-5 ml-1 p-0 hover:bg-transparent">
+                                            <Link2Icon className="h-3 w-3 text-muted-foreground hover:text-primary" />
+                                          </Button>
+                                      </TooltipTrigger>
+                                      <TooltipContent side="top">
+                                          <p>Allocated from master</p>
+                                          <p className="text-xs text-muted-foreground">Master ID: {item.originalMasterItemId.substring(0,8)}...</p>
+                                      </TooltipContent>
+                                  </Tooltip>
+                              )}
                           </div>
-                      );
-                  } else {
-                      stallDisplayElement = <span>{stallName}</span>;
-                  }
-              } else if (item.siteId) {
-                  stallDisplayElement = <span className="italic">Master Stock</span>;
+                          <div className="text-xs text-muted-foreground/80 ml-5">
+                               ({siteNameDisplay})
+                          </div>
+                      </div>
+                  );
               } else {
-                  stallDisplayElement = <span className="italic">Unassigned</span>;
+                  locationDisplayElement = <span className="italic text-muted-foreground">Unassigned</span>;
               }
+
 
               return (
                 <TableRow
@@ -1473,12 +1496,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                   </TableCell>
                   <TableCell className="font-medium text-foreground">{item.name}</TableCell>
                   <TableCell className="text-sm">
-                    <div className="flex items-center text-muted-foreground">
-                      <Building size={14} className="mr-1 text-primary/70" /> {siteNameDisplay}
-                    </div>
-                    <div className="flex items-center text-xs text-muted-foreground/80">
-                      <Store size={12} className="mr-1 text-accent/70" /> {stallDisplayElement}
-                    </div>
+                    {locationDisplayElement}
                   </TableCell>
                   <TableCell className="text-muted-foreground">{item.category}</TableCell>
                   <TableCell className="text-right text-foreground">{item.quantity}</TableCell>
@@ -1512,17 +1530,21 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                             <DropdownMenuItem onClick={() => handleOpenUpdateStockDialog(item)}>
                               <PackageOpen className="mr-2 h-4 w-4" /> Update Stock
                             </DropdownMenuItem>
-                           {item.stallId === null && item.siteId && (
-                            <DropdownMenuItem onClick={() => handleOpenAllocateDialog(item)} disabled={availableStallsForAllocation.filter(s => s.siteId === item.siteId).length === 0}>
+                           {isMasterStock && (
+                            <DropdownMenuItem 
+                                onClick={() => handleOpenAllocateDialog(item)} 
+                                disabled={availableStallsForAllocation.filter(s => s.siteId === item.siteId).length === 0}>
                               <MoveRight className="mr-2 h-4 w-4" /> Allocate to Stall
                             </DropdownMenuItem>
                           )}
-                          {item.stallId !== null && (
-                            <DropdownMenuItem onClick={() => handleOpenTransferDialog(item)} disabled={availableStallsForAllocation.filter(s => s.siteId === item.siteId && s.id !== item.stallId).length === 0}>
+                          {!isMasterStock && (
+                            <DropdownMenuItem 
+                                onClick={() => handleOpenTransferDialog(item)} 
+                                disabled={!item.siteId || availableStallsForAllocation.filter(s => s.siteId === item.siteId && s.id !== item.stallId).length === 0}>
                                 <Shuffle className="mr-2 h-4 w-4" /> Transfer to Stall
                             </DropdownMenuItem>
                           )}
-                          {item.stallId !== null && item.originalMasterItemId && (
+                          {!isMasterStock && item.originalMasterItemId && (
                              <DropdownMenuItem onClick={() => handleOpenReturnDialog(item)}>
                               <Undo2 className="mr-2 h-4 w-4" /> Return to Master
                             </DropdownMenuItem>
@@ -1924,3 +1946,4 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     </TooltipProvider>
   );
 }
+
