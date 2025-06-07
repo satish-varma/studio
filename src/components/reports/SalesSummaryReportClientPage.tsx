@@ -5,7 +5,7 @@ import { useState, useMemo, useEffect, useCallback } from "react";
 import { ReportControls } from "@/components/reports/ReportControls";
 import type { SaleTransaction, StockItem, AppUser, SoldItem } from "@/types";
 import type { DateRange } from "react-day-picker";
-import { subDays, startOfDay, endOfDay, parseISO, isValid } from "date-fns";
+import { subDays, startOfDay, endOfDay, parseISO, isValid, format } from "date-fns";
 import {
     getFirestore,
     collection,
@@ -21,7 +21,7 @@ import {
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
-import { Loader2, Info, IndianRupee, Package, TrendingUp, AlertTriangle, Percent, ShoppingCart, ListOrdered } from "lucide-react";
+import { Loader2, Info, IndianRupee, Package, TrendingUp, AlertTriangle, Percent, ShoppingCart, ListOrdered, Sparkles } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -32,7 +32,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import PageHeader from "@/components/shared/PageHeader"; // Import PageHeader
+import PageHeader from "@/components/shared/PageHeader";
+import { summarizeSalesTrends } from "@/ai/flows/summarize-sales-trends-flow"; // Import AI flow
+import { Skeleton } from "@/components/ui/skeleton"; // Import Skeleton
 
 
 if (!getApps().length) {
@@ -62,7 +64,7 @@ interface TopSellingItemData {
   totalRevenueGenerated: number;
 }
 
-const MAX_TOP_ITEMS = 10; // Max number of top items to display
+const MAX_TOP_ITEMS = 10;
 
 export default function SalesSummaryReportClientPage() {
   const { user, activeSiteId, activeStallId, loading: authLoading, activeSite, activeStall } = useAuth();
@@ -75,6 +77,8 @@ export default function SalesSummaryReportClientPage() {
   const [topSellingItems, setTopSellingItems] = useState<TopSellingItemData[]>([]);
   const [loadingReport, setLoadingReport] = useState(true);
   const [errorReport, setErrorReport] = useState<string | null>(null);
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [loadingAiSummary, setLoadingAiSummary] = useState(false);
 
   const fetchReportData = useCallback(async () => {
     if (authLoading) return;
@@ -90,6 +94,7 @@ export default function SalesSummaryReportClientPage() {
       setLoadingReport(false);
       setSummaryData(null);
       setTopSellingItems([]);
+      setAiSummary(null);
       return;
     }
 
@@ -98,13 +103,16 @@ export default function SalesSummaryReportClientPage() {
         setLoadingReport(false);
         setSummaryData(null);
         setTopSellingItems([]);
+        setAiSummary(null);
         return;
     }
 
     setLoadingReport(true);
+    setLoadingAiSummary(true);
     setErrorReport(null);
     setSummaryData(null);
     setTopSellingItems([]);
+    setAiSummary(null);
 
     try {
       const salesCollectionRef = collection(db, "salesTransactions");
@@ -136,7 +144,9 @@ export default function SalesSummaryReportClientPage() {
           totalProfit: 0, averageSaleValue: 0, profitMargin: 0, numberOfSales: 0,
         });
         setTopSellingItems([]);
+        setAiSummary("No sales data available for the selected period to generate a summary.");
         setLoadingReport(false);
+        setLoadingAiSummary(false);
         return;
       }
 
@@ -157,7 +167,7 @@ export default function SalesSummaryReportClientPage() {
         sale.items.forEach(soldItem => {
           const quantity = Number(soldItem.quantity) || 0;
           totalItems += quantity;
-          
+
           const stockItemDetails = stockItemsMap.get(soldItem.itemId);
           const costPrice = stockItemDetails?.costPrice ?? 0;
           totalCOGS += quantity * costPrice;
@@ -168,7 +178,7 @@ export default function SalesSummaryReportClientPage() {
             existingAggregatedItem.totalRevenueGenerated += soldItem.totalPrice;
           } else {
             itemSalesAggregation.set(soldItem.itemId, {
-              name: soldItem.name, // Prefer name from sale record, fallback to stock map if needed
+              name: soldItem.name,
               category: stockItemDetails?.category || "N/A",
               totalQuantitySold: quantity,
               totalRevenueGenerated: soldItem.totalPrice,
@@ -179,34 +189,55 @@ export default function SalesSummaryReportClientPage() {
 
       const aggregatedItemsArray: TopSellingItemData[] = Array.from(itemSalesAggregation.entries())
         .map(([itemId, data]) => ({ itemId, ...data }));
-      
+
       const sortedTopItems = aggregatedItemsArray
         .sort((a, b) => b.totalQuantitySold - a.totalQuantitySold)
         .slice(0, MAX_TOP_ITEMS);
-      
+
       setTopSellingItems(sortedTopItems);
 
-      const totalProfit = totalSales - totalCOGS;
-      const averageSale = transactions.length > 0 ? totalSales / transactions.length : 0;
-      const margin = totalSales > 0 ? (totalProfit / totalSales) * 100 : 0;
+      const totalProfitCalc = totalSales - totalCOGS;
+      const averageSaleCalc = transactions.length > 0 ? totalSales / transactions.length : 0;
+      const marginCalc = totalSales > 0 ? (totalProfitCalc / totalSales) * 100 : 0;
 
-      setSummaryData({
+      const currentSummaryData: ReportSummaryData = {
         totalSalesAmount: totalSales,
         totalItemsSold: totalItems,
         totalCostOfGoodsSold: totalCOGS,
-        totalProfit: totalProfit,
-        averageSaleValue: averageSale,
-        profitMargin: margin,
+        totalProfit: totalProfitCalc,
+        averageSaleValue: averageSaleCalc,
+        profitMargin: marginCalc,
         numberOfSales: transactions.length,
-      });
+      };
+      setSummaryData(currentSummaryData);
+      setLoadingReport(false); // Report data is ready
+
+      // Call AI summary flow
+      try {
+        const aiInput = {
+          summaryStats: currentSummaryData,
+          topSellingItems: sortedTopItems,
+          dateRangeFrom: format(dateRange.from, "yyyy-MM-dd"),
+          dateRangeTo: format(dateRange.to, "yyyy-MM-dd"),
+          siteName: activeSite?.name,
+          stallName: activeStall?.name,
+        };
+        const aiResult = await summarizeSalesTrends(aiInput);
+        setAiSummary(aiResult.summary);
+      } catch (aiError: any) {
+        console.error("Error generating AI sales summary:", aiError);
+        setAiSummary("Could not generate AI summary for this period.");
+      } finally {
+        setLoadingAiSummary(false);
+      }
 
     } catch (error: any) {
       console.error("Error fetching report data:", error);
       setErrorReport("Failed to load report data. " + error.message);
-    } finally {
       setLoadingReport(false);
+      setLoadingAiSummary(false);
     }
-  }, [user, activeSiteId, activeStallId, dateRange, authLoading]);
+  }, [user, activeSiteId, activeStallId, dateRange, authLoading, activeSite, activeStall]);
 
   useEffect(() => {
     fetchReportData();
@@ -214,19 +245,10 @@ export default function SalesSummaryReportClientPage() {
 
   const pageHeaderDescription = useMemo(() => {
     if (!user) return "Analyze your sales data, profit margins, and inventory performance.";
-
-    if (!activeSite) {
-      return "Select a site to view its reports.";
-    }
-
-    let desc = "Analyze your sales data, profit margins, and inventory performance for ";
+    if (!activeSite) return "Select a site to view its reports.";
+    let desc = "Analyze sales data, profit margins, and inventory performance for ";
     desc += `Site: "${activeSite.name}"`;
-
-    if (activeStall) {
-      desc += ` (Stall: "${activeStall.name}")`;
-    } else {
-      desc += " (All Stalls/Items for this site)";
-    }
+    desc += activeStall ? ` (Stall: "${activeStall.name}")` : " (All Stalls/Items for this site)";
     desc += ".";
     return desc;
   }, [user, activeSite, activeStall]);
@@ -283,7 +305,7 @@ export default function SalesSummaryReportClientPage() {
           <p className="ml-2">Loading report data...</p>
         </div>
       )}
-      
+
       {!activeSiteId && !loadingReport && (
         <Alert variant="default" className="border-primary/50">
             <Info className="h-4 w-4" />
@@ -307,8 +329,33 @@ export default function SalesSummaryReportClientPage() {
       {!loadingReport && !errorReport && activeSiteId && summaryData && (
         <>
           <Card className="shadow-lg">
+            <CardHeader>
+                <CardTitle className="flex items-center">
+                    <Sparkles className="mr-2 h-5 w-5 text-accent" />
+                    AI-Powered Sales Summary
+                </CardTitle>
+                <CardDescription>
+                    An automated analysis of sales trends for the selected period and context.
+                </CardDescription>
+            </CardHeader>
+            <CardContent>
+                {loadingAiSummary ? (
+                    <div className="space-y-2">
+                        <Skeleton className="h-4 w-[80%]" />
+                        <Skeleton className="h-4 w-[70%]" />
+                        <Skeleton className="h-4 w-[75%]" />
+                    </div>
+                ) : aiSummary ? (
+                    <p className="text-sm text-foreground leading-relaxed">{aiSummary}</p>
+                ) : (
+                    <p className="text-sm text-muted-foreground">AI summary could not be generated for this period.</p>
+                )}
+            </CardContent>
+          </Card>
+
+          <Card className="shadow-lg">
               <CardHeader>
-                  <CardTitle>Sales Summary</CardTitle>
+                  <CardTitle>Sales Performance Metrics</CardTitle>
                   <CardDescription>
                       Overview of sales performance for the selected period
                       {activeSiteId ? ` at site: ${activeSite?.name || activeSiteId.substring(0,6)}...` : '.'}

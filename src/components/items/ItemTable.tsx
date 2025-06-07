@@ -1,3 +1,4 @@
+
 "use client";
 
 import Image from "next/image";
@@ -12,7 +13,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { StockItem, Stall } from "@/types";
-import { MoreHorizontal, Edit, Trash2, PackageOpen, Loader2, Building, Store, MoveRight, Undo2, Link2Icon, Shuffle, CheckSquare, Square, Edit3 } from "lucide-react";
+import { MoreHorizontal, Edit, Trash2, PackageOpen, Loader2, Building, Store, MoveRight, Undo2, Link2Icon, Shuffle, CheckSquare, Square, Edit3, IndianRupee, ArrowUpDown } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
@@ -38,8 +39,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
-  DialogClose,
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
@@ -69,6 +68,9 @@ import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
 import { logStockMovement } from "@/lib/stockLogger";
+import { Skeleton } from "@/components/ui/skeleton";
+import type { SortConfig } from "./ItemsClientPage";
+
 
 if (!getApps().length) {
   try {
@@ -85,9 +87,30 @@ interface ItemTableProps {
   stallsMap: Record<string, string>;
   availableStallsForAllocation: Stall[];
   onDataNeedsRefresh: () => void;
+  loading: boolean;
+  sortConfig: SortConfig;
+  requestSort: (key: keyof StockItem) => void;
 }
 
-export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAllocation, onDataNeedsRefresh }: ItemTableProps) {
+const TableRowSkeleton = () => (
+  <TableRow>
+    <TableCell><Skeleton className="h-5 w-5" /></TableCell>
+    <TableCell><Skeleton className="h-10 w-10 rounded-md" /></TableCell>
+    <TableCell><Skeleton className="h-4 w-32" /></TableCell>
+    <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+    <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+    <TableCell className="text-right"><Skeleton className="h-4 w-10 inline-block" /></TableCell>
+    <TableCell><Skeleton className="h-4 w-12" /></TableCell>
+    <TableCell className="text-right"><Skeleton className="h-4 w-16 inline-block" /></TableCell>
+    <TableCell className="text-right"><Skeleton className="h-4 w-16 inline-block" /></TableCell>
+    <TableCell><Skeleton className="h-6 w-20 rounded-full" /></TableCell>
+    <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+    <TableCell className="text-right"><Skeleton className="h-8 w-8 rounded-full" /></TableCell>
+  </TableRow>
+);
+
+
+export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAllocation, onDataNeedsRefresh, loading, sortConfig, requestSort }: ItemTableProps) {
   const { toast } = useToast();
   const router = useRouter();
   const { user } = useAuth();
@@ -127,9 +150,13 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   const [batchUpdateLowStockThreshold, setBatchUpdateLowStockThreshold] = useState<string | number>("");
   const [isBatchUpdatingDetails, setIsBatchUpdatingDetails] = useState(false);
 
+  const [showBatchUpdatePriceDialog, setShowBatchUpdatePriceDialog] = useState(false);
+  const [batchUpdatePrice, setBatchUpdatePrice] = useState<string | number>("");
+  const [batchUpdateCostPrice, setBatchUpdateCostPrice] = useState<string | number>("");
+  const [isBatchUpdatingPrice, setIsBatchUpdatingPrice] = useState(false);
+
   const [itemForSingleDelete, setItemForSingleDelete] = useState<StockItem | null>(null);
   const [showSingleDeleteDialog, setShowSingleDeleteDialog] = useState(false);
-
 
   const selectableItems = useMemo(() => items.filter(item => !!item.stallId), [items]);
 
@@ -274,7 +301,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     let originalMasterData: StockItem | null = null;
     let newMasterQuantityAfterUpdate: number | null = null;
 
-
     try {
       await runTransaction(db, async (transaction) => {
         const itemRef = doc(db, "stockItems", stockUpdateItem.id);
@@ -359,7 +385,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       setIsUpdatingStock(false);
     }
   };
-
 
   const handleOpenAllocateDialog = (item: StockItem) => {
     setItemToAllocate(item);
@@ -846,7 +871,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     let errorCount = 0;
     const itemsToUpdateInfo = selectedItems.map(id => items.find(item => item.id === id)).filter(item => item && !!item.stallId);
 
-
     for (const itemToUpdate of itemsToUpdateInfo) {
        if (!itemToUpdate) continue;
        let originalStallData: StockItem | null = null;
@@ -1025,6 +1049,89 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     }
   };
 
+  const handleOpenBatchUpdatePriceDialog = () => {
+    if (selectedItems.length === 0) {
+      toast({ title: "No Stall Items Selected", description: "Please select stall items to update prices.", variant: "default" });
+      return;
+    }
+    const actualStallItemsSelected = items.filter(item => selectedItems.includes(item.id) && !!item.stallId);
+    if (actualStallItemsSelected.length === 0) {
+        toast({ title: "No Stall Items Selected", description: "This action only applies to items within specific stalls.", variant: "default" });
+        return;
+    }
+    setBatchUpdatePrice("");
+    setBatchUpdateCostPrice("");
+    setShowBatchUpdatePriceDialog(true);
+  };
+
+  const handleConfirmBatchUpdatePrice = async () => {
+    const newPrice = batchUpdatePrice !== "" ? Number(batchUpdatePrice) : undefined;
+    const newCostPrice = batchUpdateCostPrice !== "" ? Number(batchUpdateCostPrice) : undefined;
+
+    if (newPrice === undefined && newCostPrice === undefined) {
+      toast({ title: "No Prices Specified", description: "Please enter a new selling price and/or cost price.", variant: "default" });
+      return;
+    }
+    if (newPrice !== undefined && (isNaN(newPrice) || newPrice < 0)) {
+      toast({ title: "Invalid Selling Price", description: "Selling price must be a non-negative number.", variant: "destructive" });
+      return;
+    }
+    if (newCostPrice !== undefined && (isNaN(newCostPrice) || newCostPrice < 0)) {
+      toast({ title: "Invalid Cost Price", description: "Cost price must be a non-negative number.", variant: "destructive" });
+      return;
+    }
+
+    setIsBatchUpdatingPrice(true);
+    const batch = writeBatch(db);
+    let successCount = 0;
+    const itemsToUpdatePrices = items.filter(item => selectedItems.includes(item.id) && !!item.stallId);
+
+    const updateData: Partial<Pick<StockItem, 'price' | 'costPrice' | 'lastUpdated'>> = {
+      lastUpdated: new Date().toISOString(),
+    };
+    if (newPrice !== undefined) updateData.price = newPrice;
+    if (newCostPrice !== undefined) updateData.costPrice = newCostPrice;
+
+    const logNotesParts: string[] = [];
+    if (updateData.price !== undefined) logNotesParts.push(`Selling Price to ₹${updateData.price.toFixed(2)}`);
+    if (updateData.costPrice !== undefined) logNotesParts.push(`Cost Price to ₹${updateData.costPrice.toFixed(2)}`);
+    const logNotes = `Batch price update: ${logNotesParts.join(', ')}.`;
+
+    for (const item of itemsToUpdatePrices) {
+      const itemRef = doc(db, "stockItems", item.id);
+      batch.update(itemRef, updateData);
+      successCount++;
+      if (user) {
+        logStockMovement(user, {
+            stockItemId: item.id,
+            masterStockItemIdForContext: item.originalMasterItemId,
+            siteId: item.siteId!,
+            stallId: item.stallId,
+            type: 'DIRECT_STALL_UPDATE',
+            quantityChange: 0,
+            quantityBefore: item.quantity,
+            quantityAfter: item.quantity,
+            notes: logNotes,
+        }).catch(logError => console.error("Error logging batch price update:", logError));
+      }
+    }
+
+    try {
+      await batch.commit();
+      toast({
+        title: "Batch Price Update Successful",
+        description: `${successCount} stall item(s) prices updated. ${logNotes}`,
+      });
+      onDataNeedsRefresh();
+    } catch (error: any) {
+      console.error("Error batch updating item prices:", error);
+      toast({ title: "Batch Price Update Failed", description: error.message, variant: "destructive" });
+    } finally {
+      setIsBatchUpdatingPrice(false);
+      setShowBatchUpdatePriceDialog(false);
+      setSelectedItems([]);
+    }
+  };
 
   const formatDate = (dateString?: string) => {
     if (!dateString) return "N/A";
@@ -1047,6 +1154,50 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     setShowSingleDeleteDialog(true);
   };
 
+  const getSortIcon = (key: keyof StockItem) => {
+    if (sortConfig.key !== key) {
+      return <ArrowUpDown className="ml-2 h-3 w-3 text-muted-foreground/70" />;
+    }
+    return sortConfig.direction === 'ascending' ?
+      <ArrowUpDown className="ml-2 h-3 w-3 text-primary" style={{ transform: 'rotate(180deg)' }}/> :
+      <ArrowUpDown className="ml-2 h-3 w-3 text-primary" />;
+  };
+
+  if (loading && items.length === 0) {
+    return (
+      <div className="rounded-lg border shadow-sm overflow-hidden bg-card">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-[50px]"><Skeleton className="h-5 w-5" /></TableHead>
+              <TableHead className="w-[64px]"><Skeleton className="h-4 w-12" /></TableHead>
+              <TableHead>
+                <Button variant="ghost" size="sm" className="p-1 h-auto -ml-2 opacity-50 cursor-default">
+                  Name <ArrowUpDown className="ml-2 h-3 w-3 text-muted-foreground/70" />
+                </Button>
+              </TableHead>
+              <TableHead><Skeleton className="h-4 w-20" /></TableHead>
+              <TableHead><Skeleton className="h-4 w-20" /></TableHead>
+              <TableHead className="text-right">
+                <Button variant="ghost" size="sm" className="p-1 h-auto opacity-50 cursor-default">
+                  Quantity <ArrowUpDown className="ml-2 h-3 w-3 text-muted-foreground/70" />
+                </Button>
+              </TableHead>
+              <TableHead><Skeleton className="h-4 w-10" /></TableHead>
+              <TableHead className="text-right"><Skeleton className="h-4 w-16 inline-block" /></TableHead>
+              <TableHead className="text-right"><Skeleton className="h-4 w-16 inline-block" /></TableHead>
+              <TableHead><Skeleton className="h-4 w-16" /></TableHead>
+              <TableHead><Skeleton className="h-4 w-20" /></TableHead>
+              <TableHead className="text-right"><Skeleton className="h-4 w-10 inline-block" /></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {[...Array(5)].map((_, i) => <TableRowSkeleton key={i} />)}
+          </TableBody>
+        </Table>
+      </div>
+    );
+  }
 
   if (items.length === 0 && selectedItems.length === 0) {
     return (
@@ -1072,7 +1223,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     ? availableStallsForAllocation.filter(s => s.siteId === itemToTransfer.siteId && s.id !== itemToTransfer.stallId)
     : [];
 
-
   return (
     <TooltipProvider>
       {selectedItems.length > 0 && (
@@ -1087,11 +1237,17 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem
+               <DropdownMenuItem
                 onClick={handleOpenBatchUpdateDetailsDialog}
                 disabled={isBatchUpdatingDetails || selectedItems.length === 0}
               >
                 <Edit3 className="mr-2 h-4 w-4" /> Edit Category/Threshold
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={handleOpenBatchUpdatePriceDialog}
+                disabled={isBatchUpdatingPrice || selectedItems.length === 0}
+              >
+                <IndianRupee className="mr-2 h-4 w-4" /> Edit Prices
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={handleOpenBatchUpdateStockDialog}
@@ -1127,10 +1283,18 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                  {isIndeterminate && <Square className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-2.5 w-2.5 text-primary fill-current pointer-events-none" />}
               </TableHead>
               <TableHead className="w-[64px]">Image</TableHead>
-              <TableHead>Name</TableHead>
+              <TableHead>
+                <Button variant="ghost" size="sm" className="p-1 h-auto -ml-2" onClick={() => requestSort('name')}>
+                  Name {getSortIcon('name')}
+                </Button>
+              </TableHead>
               <TableHead>Location</TableHead>
               <TableHead>Category</TableHead>
-              <TableHead className="text-right">Quantity</TableHead>
+              <TableHead className="text-right">
+                <Button variant="ghost" size="sm" className="p-1 h-auto" onClick={() => requestSort('quantity')}>
+                  Quantity {getSortIcon('quantity')}
+                </Button>
+              </TableHead>
               <TableHead>Unit</TableHead>
               <TableHead className="text-right">Cost Price</TableHead>
               <TableHead className="text-right">Sell Price</TableHead>
@@ -1176,7 +1340,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
               } else {
                   stallDisplayElement = <span className="italic">Unassigned</span>;
               }
-
 
               return (
                 <TableRow
@@ -1307,9 +1470,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                           </div>
                         </div>
                         <DialogFooter>
-                          <DialogClose asChild>
-                             <Button type="button" variant="outline" disabled={isUpdatingStock}>Cancel</Button>
-                          </DialogClose>
+                          <Button type="button" variant="outline" onClick={() => setStockUpdateItem(null)} disabled={isUpdatingStock}>Cancel</Button>
                           <Button type="button" onClick={handleStockQuantityChange} disabled={isUpdatingStock}>
                             {isUpdatingStock && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Save changes
@@ -1325,7 +1486,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         </Table>
       </div>
 
-      {/* Batch Delete Dialog */}
       <AlertDialog open={showBatchDeleteDialog} onOpenChange={setShowBatchDeleteDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1346,7 +1506,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Batch Update Stock Quantity Dialog */}
       <AlertDialog open={showBatchUpdateStockDialog} onOpenChange={setShowBatchUpdateStockDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1384,7 +1543,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Batch Update Category/Threshold Dialog */}
       <AlertDialog open={showBatchUpdateDetailsDialog} onOpenChange={setShowBatchUpdateDetailsDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1428,6 +1586,58 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             >
               {isBatchUpdatingDetails && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Apply Changes
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showBatchUpdatePriceDialog} onOpenChange={setShowBatchUpdatePriceDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Batch Update Prices for Stall Items</AlertDialogTitle>
+            <AlertDialogDescription>
+              Update selling price and/or cost price for {selectedItems.filter(id => items.find(item => item.id === id && !!item.stallId)).length} selected stall item(s).
+              Leave a field blank to keep its current value. This action only applies to items within specific stalls. Master stock prices are not affected by this batch action.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label htmlFor="batchUpdatePrice">New Selling Price (₹) (Optional)</Label>
+              <Input
+                id="batchUpdatePrice"
+                type="number"
+                step="0.01"
+                value={batchUpdatePrice}
+                onChange={(e) => setBatchUpdatePrice(e.target.value)}
+                placeholder="e.g., 199.99"
+                className="bg-input"
+                min="0"
+                disabled={isBatchUpdatingPrice}
+              />
+            </div>
+            <div>
+              <Label htmlFor="batchUpdateCostPrice">New Cost Price (₹) (Optional)</Label>
+              <Input
+                id="batchUpdateCostPrice"
+                type="number"
+                step="0.01"
+                value={batchUpdateCostPrice}
+                onChange={(e) => setBatchUpdateCostPrice(e.target.value)}
+                placeholder="e.g., 99.50"
+                className="bg-input"
+                min="0"
+                disabled={isBatchUpdatingPrice}
+              />
+            </div>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setShowBatchUpdatePriceDialog(false)} disabled={isBatchUpdatingPrice}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmBatchUpdatePrice}
+              disabled={isBatchUpdatingPrice || (batchUpdatePrice === "" && batchUpdateCostPrice === "") || (batchUpdatePrice !== "" && Number(batchUpdatePrice) < 0) || (batchUpdateCostPrice !== "" && Number(batchUpdateCostPrice) < 0) }
+            >
+              {isBatchUpdatingPrice && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Apply Price Changes
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1612,11 +1822,11 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             </AlertDialogContent>
         </AlertDialog>
       )}
-      <style jsx global>{\`
+      <style jsx global>{`
         .indeterminate-checkbox:has(+ svg) {
           background-image: none;
         }
-      \`}</style>
+      `}</style>
     </TooltipProvider>
   );
 }
