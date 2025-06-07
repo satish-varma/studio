@@ -77,8 +77,11 @@ export default function ItemsClientPage() {
 
   const fetchSupportingDataAndItems = useCallback(async () => {
     console.log(`${LOG_PREFIX} fetchSupportingDataAndItems called. AuthLoading: ${authLoading}, User: ${!!user}, DB: ${!!db}`);
+    setLoadingPageData(true);
+    setErrorPageData(null); // Reset error before new fetch
+
     if (authLoading) {
-        setLoadingPageData(true);
+        // Still waiting for auth context to resolve
         return;
     }
 
@@ -99,8 +102,6 @@ export default function ItemsClientPage() {
       return;
     }
 
-    setLoadingPageData(true);
-    setErrorPageData(null);
     console.log(`${LOG_PREFIX} Starting data fetch. User: ${user.uid}, ActiveSite: ${activeSiteId}, ActiveStall: ${activeStallId}, StallFilter: ${stallFilterOption}`);
 
     try {
@@ -142,7 +143,7 @@ export default function ItemsClientPage() {
         console.log(`${LOG_PREFIX} No active site or user is staff. Clearing stallsForFilterDropdown.`);
         setStallsForFilterDropdown([]);
          // If not staff and filter was specific, reset it if activeSiteId is now null
-         if (user.role !== 'staff' && stallFilterOption !== 'all' && stallFilterOption !== 'master') {
+         if (user.role !== 'staff' && stallFilterOption !== 'all' && stallFilterOption !== 'master' && !activeSiteId) {
              console.log(`${LOG_PREFIX} No active site, resetting stallFilterOption to 'all'.`);
              setStallFilterOption('all');
         }
@@ -297,7 +298,7 @@ export default function ItemsClientPage() {
   }, [user, activeSite, activeStall, activeStallId, stallFilterOption, stallsMap]);
 
 
-  if (authLoading) {
+  if (authLoading || loadingPageData) { // Show loader if auth is loading OR page data is loading
     return (
       <div className="flex justify-center items-center py-10">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />

@@ -1,7 +1,7 @@
 
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { initializeApp, getApps, getApp, App as AdminApp, cert } from 'firebase-admin/app';
+import admin, { initializeApp, getApps, getApp, App as AdminApp, cert } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { getFirestore as getAdminFirestore, Timestamp as AdminTimestamp } from 'firebase-admin/firestore';
 import { google, Auth, sheets_v4 } from 'googleapis';
@@ -12,32 +12,31 @@ import { z } from 'zod'; // Import Zod for detailed validation error messages
 const LOG_PREFIX = "[API:GoogleSheetsProxy]";
 
 // Firebase Admin SDK Initialization
-let adminApp: AdminApp;
-let adminDb: ReturnType<typeof getAdminFirestore>;
+let adminApp: AdminApp | undefined;
+let adminDb: ReturnType<typeof getAdminFirestore> | undefined;
 
-console.log(`${LOG_PREFIX} Attempting Firebase Admin SDK initialization...`);
+console.log(`${LOG_PREFIX} Checking Firebase Admin SDK initialization status...`);
 if (!getApps().length) {
   try {
-    // Try to initialize using Application Default Credentials (recommended for deployed environments)
+    console.log(`${LOG_PREFIX} No existing Firebase Admin app found. Attempting to initialize...`);
+    // Attempt to initialize using Application Default Credentials (recommended for deployed environments)
     adminApp = initializeApp();
-    console.log(`${LOG_PREFIX} Firebase Admin SDK initialized successfully (using GOOGLE_APPLICATION_CREDENTIALS or default discovery). Project: ${adminApp.options.projectId}`);
+    console.log(`${LOG_PREFIX} Firebase Admin SDK initialized successfully using Application Default Credentials. Project ID: ${adminApp.options.projectId}`);
   } catch (e: any) {
-    console.error(`${LOG_PREFIX} Firebase Admin SDK default initialization failed:`, e.message);
-    // Fallback or specific handling if needed, for now, adminApp will be undefined if this fails.
-    if (!adminApp!) { // Check if adminApp is still undefined
-         console.error(`${LOG_PREFIX} CRITICAL - Firebase Admin SDK could not be initialized. Verify GOOGLE_APPLICATION_CREDENTIALS environment variable or local service account key setup.`);
-    }
+    console.error(`${LOG_PREFIX} Firebase Admin SDK default initialization failed:`, e.message, e.stack);
+    // Further error handling or alternative initialization methods could be placed here if needed.
+    // For now, adminApp will remain undefined if this critical step fails.
   }
 } else {
   adminApp = getApp();
-  console.log(`${LOG_PREFIX} Firebase Admin SDK already initialized, got existing instance. Project: ${adminApp.options.projectId}`);
+  console.log(`${LOG_PREFIX} Firebase Admin SDK already initialized. Using existing app. Project ID: ${adminApp.options.projectId}`);
 }
 
-if (adminApp!) { // Check if adminApp was successfully initialized
+if (adminApp && adminApp.options.projectId) { // Ensure app is initialized and has a project ID
     adminDb = getAdminFirestore(adminApp);
-    console.log(`${LOG_PREFIX} Firestore Admin DB obtained for project:`, adminApp.options.projectId || "Project ID not available in options");
+    console.log(`${LOG_PREFIX} Firestore Admin DB obtained for project: ${adminApp.options.projectId}.`);
 } else {
-    console.error(`${LOG_PREFIX} CRITICAL - Firebase Admin App is not initialized. Firestore Admin DB cannot be obtained. Further operations will likely fail.`);
+    console.error(`${LOG_PREFIX} CRITICAL - Firebase Admin App is not properly initialized or project ID is missing. Firestore Admin DB cannot be obtained. Further operations will likely fail.`);
 }
 
 // Google OAuth2 Client Setup
@@ -71,7 +70,7 @@ const importStockItemSchemaInternal = z.object({
   cost_price: z.preprocess(val => (val === "" || val === null || val === undefined) ? 0.0 : parseFloat(String(val)), z.number().min(0, "Cost price must be non-negative").optional().nullable()),
   selling_price: z.preprocess(val => (val === "" || val === null || val === undefined) ? 0.0 : parseFloat(String(val)), z.number().min(0, "Selling price must be non-negative")),
   low_stock_threshold: z.preprocess(val => (val === "" || val === null || val === undefined) ? 0 : parseInt(String(val), 10), z.number().int().min(0, "Threshold must be non-negative")),
-  image_url: z.string().url().optional().nullable().or(z.literal("")),
+  image_url: z.string().url({message: "Image URL must be a valid URL or empty."}).optional().nullable().or(z.literal("")),
   site_id: z.string().optional().nullable(),
   stall_id: z.string().optional().nullable(),
   original_master_item_id: z.string().optional().nullable(),
@@ -533,5 +532,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error.message || 'An unexpected error occurred on the server.', code: error.code, details: error.response?.data?.error_description }, { status: 500 });
   }
 }
-
-    

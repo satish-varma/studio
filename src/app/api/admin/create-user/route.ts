@@ -10,41 +10,46 @@ const LOG_PREFIX = "[API:CreateUser]";
 let adminApp: AdminApp | undefined;
 
 if (!admin.apps.length) {
-  console.log(`${LOG_PREFIX} Attempting Firebase Admin SDK initialization...`);
-  try {
-    const serviceAccountJsonEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
-    const serviceAccountPathEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  console.log(`${LOG_PREFIX} Firebase Admin SDK not initialized. Attempting initialization...`);
+  const serviceAccountJsonEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+  const serviceAccountPathEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS;
 
+  try {
     if (serviceAccountJsonEnv) {
-      console.log(`${LOG_PREFIX} Initializing with GOOGLE_APPLICATION_CREDENTIALS_JSON env var...`);
+      console.log(`${LOG_PREFIX} Initializing with GOOGLE_APPLICATION_CREDENTIALS_JSON env var.`);
       const serviceAccount = JSON.parse(serviceAccountJsonEnv);
       adminApp = admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
       });
       console.log(`${LOG_PREFIX} Firebase Admin SDK initialized successfully using JSON env var. Project: ${adminApp.options.projectId}`);
     } else if (serviceAccountPathEnv) {
-      console.log(`${LOG_PREFIX} Initializing with GOOGLE_APPLICATION_CREDENTIALS path: ${serviceAccountPathEnv}`);
-      adminApp = admin.initializeApp({
-         credential: admin.credential.applicationDefault(),
-      });
-      console.log(`${LOG_PREFIX} Firebase Admin SDK initialized successfully using path env var. Project: ${adminApp.options.projectId}`);
+      console.log(`${LOG_PREFIX} Initializing with GOOGLE_APPLICATION_CREDENTIALS path: ${serviceAccountPathEnv}.`);
+      // Note: For path, Firebase Admin SDK might expect the env var to be set globally for applicationDefault to pick it up.
+      // Explicitly using admin.credential.applicationDefault() is often for ADC in managed environments.
+      // If GOOGLE_APPLICATION_CREDENTIALS points to a file, initializeApp() without args or with ADC might be preferred.
+      // For now, keeping structure but noting that just having path in env might not be enough for admin.initializeApp({})
+      // unless the environment itself makes the SDK use it. Let's try with initializeApp() which uses ADC.
+      adminApp = admin.initializeApp(); // This will use ADC, which should pick up GOOGLE_APPLICATION_CREDENTIALS if set in env.
+      console.log(`${LOG_PREFIX} Firebase Admin SDK initialized via initializeApp() (likely ADC). Project: ${adminApp.options.projectId}`);
     } else {
-      console.warn(`${LOG_PREFIX} GOOGLE_APPLICATION_CREDENTIALS_JSON and GOOGLE_APPLICATION_CREDENTIALS env vars not set. This route will likely fail in deployed environments.`);
-      adminApp = undefined;
+      console.log(`${LOG_PREFIX} No service account JSON or path found in env. Attempting Application Default Credentials.`);
+      adminApp = admin.initializeApp(); // Relies on Application Default Credentials
+      console.log(`${LOG_PREFIX} Firebase Admin SDK initialized successfully using Application Default Credentials. Project: ${adminApp.options.projectId}`);
     }
   } catch (error: any) {
-    console.error(`${LOG_PREFIX} Firebase Admin SDK initialization CRITICAL error:`, error.stack);
-    adminApp = undefined;
+    console.error(`${LOG_PREFIX} Firebase Admin SDK initialization CRITICAL error:`, error.message, error.stack);
+    adminApp = undefined; // Explicitly set to undefined on failure
   }
 } else {
-  adminApp = admin.app();
+  adminApp = admin.app(); // Get existing app
   console.log(`${LOG_PREFIX} Firebase Admin SDK already initialized. Project ID: ${adminApp.options.projectId}`);
 }
 
+
 export async function POST(request: NextRequest) {
   console.log(`${LOG_PREFIX} POST request received.`);
-  if (!adminApp) {
-    console.error(`${LOG_PREFIX} Firebase Admin SDK is not initialized. Service account credentials might be missing or incorrect.`);
+  if (!adminApp || !adminApp.options.projectId) { // Check for projectId as a sign of successful init
+    console.error(`${LOG_PREFIX} Firebase Admin SDK is not properly initialized. Service account credentials might be missing, incorrect, or ADC failed.`);
     return NextResponse.json({ error: 'Server configuration error: Firebase Admin SDK not initialized. Check server logs for details.' }, { status: 500 });
   }
 
@@ -59,7 +64,7 @@ export async function POST(request: NextRequest) {
     console.log(`${LOG_PREFIX} Verifying ID Token (first 10 chars): ${idToken.substring(0, 10)}...`);
 
     try {
-      callingUser = await admin.auth().verifyIdToken(idToken);
+      callingUser = await admin.auth(adminApp).verifyIdToken(idToken);
       console.log(`${LOG_PREFIX} ID Token verified successfully for UID: ${callingUser.uid}`);
     } catch (tokenError: any) {
       console.error(`${LOG_PREFIX} ID Token verification failed. Code: ${tokenError.code}, Message: ${tokenError.message}`);
@@ -67,7 +72,7 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(`${LOG_PREFIX} Checking admin privileges for UID: ${callingUser.uid}`);
-    const adminUserDoc = await admin.firestore().collection('users').doc(callingUser.uid).get();
+    const adminUserDoc = await admin.firestore(adminApp).collection('users').doc(callingUser.uid).get();
     if (!adminUserDoc.exists || adminUserDoc.data()?.role !== 'admin') {
       console.warn(`${LOG_PREFIX} Forbidden. Caller UID ${callingUser.uid} is not an admin. Role: ${adminUserDoc.data()?.role ?? 'not found'}`);
       return NextResponse.json({ error: 'Forbidden: Caller is not an admin.' }, { status: 403 });
@@ -91,7 +96,7 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(`${LOG_PREFIX} Attempting to create Firebase Auth user for email: ${email}`);
-    const newUserRecord = await admin.auth().createUser({
+    const newUserRecord = await admin.auth(adminApp).createUser({
       email,
       password,
       displayName,
@@ -124,5 +129,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: errorMessage, details: error.code || 'UNKNOWN_SERVER_ERROR' }, { status: 500 });
   }
 }
-
-    
