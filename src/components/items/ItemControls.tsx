@@ -140,7 +140,11 @@ export function ItemControls({
         )}
       </div>
 
-      <Button onClick={handleAddNewItem} className="w-full sm:w-auto" disabled={!isSiteActive}>
+      <Button 
+        onClick={handleAddNewItem} 
+        className="w-full sm:w-auto" 
+        disabled={!isSiteActive}
+      >
         <PlusCircle className="mr-2 h-5 w-5" /> Add New Item
       </Button>
     </div>
