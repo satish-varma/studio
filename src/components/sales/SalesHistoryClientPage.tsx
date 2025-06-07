@@ -40,7 +40,7 @@ if (!getApps().length) {
 const db = getFirestore();
 
 export default function SalesHistoryClientPage() {
-  const { user, activeSiteId, activeStallId, loading: authLoading } = useAuth();
+  const { user, activeSiteId, activeStallId, loading: authLoading, activeSite, activeStall } = useAuth(); // Added activeSite, activeStall
   const { toast } = useToast();
 
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
@@ -215,12 +215,34 @@ export default function SalesHistoryClientPage() {
     return transactions; 
   }, [transactions]);
 
-  if (user?.role === 'admin' && !activeSiteId) {
+  const pageHeaderDescription = useMemo(() => {
+    if (!user) return "View and filter all past sales transactions."; // Default or loading state
+
+    if (!activeSite) {
+      if (user.role === 'staff') {
+        return "Your account needs a default site assigned to view sales. Please contact an administrator.";
+      }
+      return "Select a site to view its sales history.";
+    }
+
+    let desc = "View and filter all past sales transactions for ";
+    desc += `Site: "${activeSite.name}"`;
+
+    if (activeStall) {
+      desc += ` (Stall: "${activeStall.name}")`;
+    } else {
+      desc += " (All Stalls)";
+    }
+    desc += ".";
+    return desc;
+  }, [user, activeSite, activeStall]);
+
+  if (user?.role === 'admin' && !activeSiteId && !authLoading && !loadingTransactions) {
     return (
       <div className="space-y-6">
         <PageHeader
           title="Sales History"
-          description="View and filter all past sales transactions."
+          description={pageHeaderDescription}
         />
         <Alert variant="default" className="border-primary/50">
           <Info className="h-4 w-4" />
@@ -238,7 +260,7 @@ export default function SalesHistoryClientPage() {
     <div className="space-y-6">
       <PageHeader
         title="Sales History"
-        description="View and filter all past sales transactions for the selected site/stall."
+        description={pageHeaderDescription}
       />
       <SalesHistoryControls
         dateRange={dateRange}
