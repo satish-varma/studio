@@ -271,6 +271,7 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
                     <FormControl>
                         <div className="relative">
                         <Input
+                            data-testid="password-input"
                             type={showPassword ? "text" : "password"}
                             placeholder="Min. 6 characters"
                             {...field}
@@ -284,9 +285,9 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
                             className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 text-muted-foreground"
                             onClick={() => setShowPassword(!showPassword)}
                             tabIndex={-1}
+                            aria-label={showPassword ? "Hide password" : "Show password"}
                         >
                             {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                            <span className="sr-only">{showPassword ? "Hide password" : "Show password"}</span>
                         </Button>
                         </div>
                     </FormControl>
@@ -303,6 +304,7 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
                     <FormControl>
                         <div className="relative">
                         <Input
+                            data-testid="confirm-password-input"
                             type={showConfirmPassword ? "text" : "password"}
                             placeholder="Confirm password"
                             {...field}
@@ -316,9 +318,9 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
                             className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 text-muted-foreground"
                             onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                             tabIndex={-1}
+                            aria-label={showConfirmPassword ? "Hide confirm password" : "Show confirm password"}
                         >
                             {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                            <span className="sr-only">{showConfirmPassword ? "Hide password" : "Show password"}</span>
                         </Button>
                         </div>
                     </FormControl>
