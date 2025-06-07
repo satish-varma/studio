@@ -51,7 +51,7 @@ const chartConfig = {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { user, activeSiteId, activeStallId } = useAuth();
+  const { user, activeSiteId, activeStallId, activeSite, activeStall } = useAuth();
 
   const [stats, setStats] = useState<DashboardStats>({
     totalItems: 0,
@@ -218,6 +218,24 @@ export default function DashboardPage() {
 
   }, [user, activeSiteId, activeStallId]);
 
+  const pageHeaderDescription = useMemo(() => {
+    if (user?.role === 'admin' && !activeSite) {
+        return "Admin: Select a site to view its dashboard.";
+    }
+    if (!activeSite) {
+        return "Overview of your activity and stock levels. Select a site to view details.";
+    }
+    let desc = "Overview of your activity and stock levels for ";
+    desc += `Site: "${activeSite.name}"`;
+
+    if (activeStall) {
+        desc += ` (Stall: "${activeStall.name}")`;
+    } else {
+        desc += " (All Stalls)";
+    }
+    desc += ".";
+    return desc;
+  }, [user, activeSite, activeStall]);
 
   if (loading) {
     return (
@@ -231,7 +249,7 @@ export default function DashboardPage() {
   if (user?.role === 'admin' && !activeSiteId) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Dashboard" description="Overview of your activity and stock levels." />
+        <PageHeader title="Dashboard" description={pageHeaderDescription} />
         <Alert variant="default" className="border-primary/50">
           <Info className="h-4 w-4" />
           <AlertTitle>Select a Site</AlertTitle>
@@ -247,7 +265,7 @@ export default function DashboardPage() {
   if (error) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Dashboard" description="Overview of your activity and stock levels." />
+        <PageHeader title="Dashboard" description={pageHeaderDescription} />
         <Alert variant="destructive">
             <AlertTriangle className="h-4 w-4" />
             <AlertTitle>Error Loading Dashboard</AlertTitle>
@@ -266,7 +284,7 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Dashboard" description="Overview of your activity and stock levels for the selected site/stall." />
+      <PageHeader title="Dashboard" description={pageHeaderDescription} />
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {dashboardStatCards.map((stat) => (
@@ -439,7 +457,5 @@ export default function DashboardPage() {
     </div>
   );
 }
-
     
-
     
