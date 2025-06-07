@@ -61,7 +61,7 @@ export function UserNav() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="relative h-10 w-10 rounded-full">
+        <Button variant="ghost" className="relative h-10 w-10 rounded-full" data-testid="user-nav-trigger">
           <Avatar className="h-10 w-10 border-2 border-primary">
             <AvatarImage 
               src={user.photoURL || `https://placehold.co/40x40/E3F2FD/4285F4?text=${userInitials}`} 
@@ -72,40 +72,40 @@ export function UserNav() {
           </Avatar>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="w-56" align="end" forceMount>
+      <DropdownMenuContent className="w-56" align="end" forceMount data-testid="user-nav-dropdown">
         <DropdownMenuLabel className="font-normal">
           <div className="flex flex-col space-y-1">
-            <p className="text-sm font-medium leading-none text-foreground">
+            <p className="text-sm font-medium leading-none text-foreground" data-testid="user-nav-displayname">
               {user.displayName || "User"}
             </p>
-            <p className="text-xs leading-none text-muted-foreground">
+            <p className="text-xs leading-none text-muted-foreground" data-testid="user-nav-email">
               {user.email}
             </p>
-            <p className="text-xs leading-none text-muted-foreground capitalize pt-1">
+            <p className="text-xs leading-none text-muted-foreground capitalize pt-1" data-testid="user-nav-role">
               Role: {user.role}
             </p>
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
-          <DropdownMenuItem onClick={() => router.push('/profile')}>
+          <DropdownMenuItem onClick={() => router.push('/profile')} data-testid="user-nav-profile">
             <UserCircle className="mr-2 h-4 w-4" />
             <span>Profile</span>
           </DropdownMenuItem>
           {(user.role === 'admin' || user.role === 'manager') && (
-            <DropdownMenuItem onClick={() => router.push('/settings')}>
+            <DropdownMenuItem onClick={() => router.push('/settings')} data-testid="user-nav-settings">
               <Settings className="mr-2 h-4 w-4" />
               <span>Settings</span>
             </DropdownMenuItem>
           )}
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => router.push('/support')}>
+        <DropdownMenuItem onClick={() => router.push('/support')} data-testid="user-nav-support">
           <LifeBuoy className="mr-2 h-4 w-4" />
           <span>Support</span>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={handleSignOut}>
+        <DropdownMenuItem onClick={handleSignOut} data-testid="user-nav-logout">
           <LogOut className="mr-2 h-4 w-4" />
           <span>Log out</span>
         </DropdownMenuItem>
