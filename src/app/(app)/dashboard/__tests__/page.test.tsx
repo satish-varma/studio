@@ -297,10 +297,13 @@ describe('DashboardPage Component Detailed Tests', () => {
 
   test('record sale button is disabled if no activeStallId, add item button enabled if activeSiteId', async () => {
     mockUseAuth.mockReturnValueOnce({
-      ...mockUseAuth(),
+      ...mockUseAuth(), // This will spread the default mock function, not its return value
       user: { ...mockAdminUser, role: 'staff' }, // Simulate staff to easily control stall context
+      activeSiteId: 'site1', // Has active site
       activeStallId: null,   // No specific stall (viewing master stock)
+      activeSite: { id: 'site1', name: 'Test Site One' },
       activeStall: null,
+      loading: false,
     });
     render(<DashboardPage />);
     simulateStockItemsLoad();
@@ -315,10 +318,12 @@ describe('DashboardPage Component Detailed Tests', () => {
   test('quick action buttons are disabled if no activeSiteId', async () => {
     mockUseAuth.mockReturnValueOnce({
       ...mockUseAuth(),
+      user: mockAdminUser,
       activeSiteId: null, 
       activeSite: null,
       activeStallId: null,
       activeStall: null,
+      loading: false,
     });
     render(<DashboardPage />);
     // This will show the 'admin-no-site-alert' instead of the main dashboard
