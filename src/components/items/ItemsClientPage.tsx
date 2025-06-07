@@ -35,7 +35,7 @@ if (!getApps().length) {
 }
 
 export default function ItemsClientPage() {
-  const { user, activeSiteId, activeStallId, loading: authLoading } = useAuth(); 
+  const { user, activeSiteId, activeStallId, loading: authLoading, activeSite, activeStall } = useAuth(); 
 
   const [searchTerm, setSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
@@ -219,6 +219,39 @@ export default function ItemsClientPage() {
     });
   }, [items, searchTerm, categoryFilter, stockStatusFilter]);
 
+  const pageHeaderDescription = useMemo(() => {
+    if (!user) return "Manage your inventory."; // Default or loading state
+
+    if (!activeSite) {
+      if (user.role === 'staff') {
+        return "Your account needs a default site assigned. Please contact an administrator.";
+      }
+      return "Select a site to view and manage its inventory.";
+    }
+
+    let desc = "Manage your inventory. Currently viewing: ";
+    desc += `Site: "${activeSite.name}"`;
+
+    if (activeStall) {
+      desc += ` (Stall: "${activeStall.name}")`;
+    } else if (user.role !== 'staff') { // If admin/manager and no specific stall, but site is active
+        // Check the stallFilterOption to be more specific
+        if (stallFilterOption === 'master') {
+            desc += " (Master Stock).";
+        } else if (stallFilterOption === 'all' || !stallFilterOption) {
+            desc += " (All items in site).";
+        } else if (stallsMap[stallFilterOption]) { // A specific stall IS selected via filter
+            desc += ` (Stall: "${stallsMap[stallFilterOption]}").`;
+        } else {
+             desc += " (All items in site).";
+        }
+    } else if (user.role === 'staff' && !activeStallId) { // Staff with active site but no specific stall (i.e., master stock)
+        desc += " (Master Stock).";
+    }
+     desc += ".";
+    return desc;
+  }, [user, activeSite, activeStall, activeStallId, stallFilterOption, stallsMap]);
+
 
   if (authLoading || loadingPageData) { 
     return (
@@ -233,7 +266,7 @@ export default function ItemsClientPage() {
     <div className="space-y-6">
       <PageHeader
         title="Stock Items"
-        description="Manage your inventory. Add items to site master stock or a specific stall."
+        description={pageHeaderDescription}
       />
       <ItemControls
         searchTerm={searchTerm}
