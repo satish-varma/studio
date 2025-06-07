@@ -14,11 +14,13 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
+const LOG_PREFIX = "[SitesClientPage]";
+
 if (!getApps().length) {
   try {
     initializeApp(firebaseConfig);
   } catch (error) {
-    console.error("Firebase initialization error in SitesClientPage:", error);
+    console.error(`${LOG_PREFIX} Firebase initialization error:`, error);
   }
 }
 const db = getFirestore();
@@ -32,33 +34,48 @@ export default function SitesClientPage() {
   const [errorSites, setErrorSites] = useState<string | null>(null);
 
   useEffect(() => {
+    console.log(`${LOG_PREFIX} Mounted. AuthLoading: ${authLoading}`);
     if (authLoading) return;
 
-    if (!currentUser || currentUser.role !== 'admin') {
+    if (!currentUser) {
+        console.warn(`${LOG_PREFIX} No current user. Auth may still be loading or user not logged in.`);
+        setLoadingSites(false);
+        setErrorSites("Authentication is required to view sites.");
+        return;
+    }
+    
+    if (currentUser.role !== 'admin') {
+      console.warn(`${LOG_PREFIX} Access denied. User role: ${currentUser.role}`);
       setLoadingSites(false);
       setErrorSites("Access Denied: You do not have permission to manage sites.");
       return;
     }
 
+    console.log(`${LOG_PREFIX} Subscribing to sites collection.`);
+    setLoadingSites(true);
     const sitesCollectionRef = collection(db, "sites");
     const unsubscribe = onSnapshot(sitesCollectionRef, 
       (snapshot: QuerySnapshot<DocumentData>) => {
         const fetchedSites: Site[] = snapshot.docs.map(docSnapshot => ({
           id: docSnapshot.id,
           ...docSnapshot.data()
-        } as Site)).sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()); // Sort by creation date desc
+        } as Site)).sort((a,b) => (b.createdAt && a.createdAt) ? new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime() : 0);
+        console.log(`${LOG_PREFIX} Sites snapshot received. ${fetchedSites.length} sites fetched.`);
         setSites(fetchedSites);
         setLoadingSites(false);
         setErrorSites(null);
       },
       (error) => {
-        console.error("Error fetching sites:", error);
-        setErrorSites("Failed to load sites. Please try again later.");
+        console.error(`${LOG_PREFIX} Error fetching sites:`, error.message, error.stack);
+        setErrorSites(`Failed to load sites: ${error.message}. Please try again later.`);
         setLoadingSites(false);
       }
     );
 
-    return () => unsubscribe();
+    return () => {
+      console.log(`${LOG_PREFIX} Unmounted. Unsubscribing from sites collection.`);
+      unsubscribe();
+    };
   }, [currentUser, authLoading]);
 
   if (authLoading || loadingSites) {
@@ -76,7 +93,7 @@ export default function SitesClientPage() {
         <CardHeader>
           <CardTitle className="flex items-center text-destructive">
             <ShieldAlert className="mr-2 h-5 w-5" />
-            Access Restricted or Error
+            {currentUser?.role !== 'admin' ? "Access Restricted" : "Error Loading Sites"}
           </CardTitle>
         </CardHeader>
         <CardContent>

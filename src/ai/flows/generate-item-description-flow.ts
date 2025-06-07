@@ -11,6 +11,8 @@
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
 
+const LOG_PREFIX = "[GenerateItemDescriptionFlow]";
+
 const GenerateItemDescriptionInputSchema = z.object({
   itemName: z.string().describe('The name of the stock item.'),
   itemCategory: z.string().describe('The category of the stock item.'),
@@ -23,7 +25,15 @@ const GenerateItemDescriptionOutputSchema = z.object({
 export type GenerateItemDescriptionOutput = z.infer<typeof GenerateItemDescriptionOutputSchema>;
 
 export async function generateItemDescription(input: GenerateItemDescriptionInput): Promise<GenerateItemDescriptionOutput> {
-  return generateItemDescriptionFlow(input);
+  console.log(`${LOG_PREFIX} Called with input:`, input);
+  try {
+    const result = await generateItemDescriptionFlow(input);
+    console.log(`${LOG_PREFIX} Successfully generated description for item: ${input.itemName}`);
+    return result;
+  } catch (error: any) {
+    console.error(`${LOG_PREFIX} Error generating description for item ${input.itemName}:`, error.message, error.stack);
+    throw new Error(`Failed to generate description: ${error.message}`);
+  }
 }
 
 const prompt = ai.definePrompt({
@@ -48,10 +58,17 @@ const generateItemDescriptionFlow = ai.defineFlow(
     outputSchema: GenerateItemDescriptionOutputSchema,
   },
   async (input) => {
-    const {output} = await prompt(input);
-    if (!output) {
-        throw new Error("Failed to generate description from the AI model.");
+    console.log(`${LOG_PREFIX} Flow execution started with input:`, input);
+    const {output, error} = await prompt(input); // Destructure to get potential error
+    if (error) {
+        console.error(`${LOG_PREFIX} Error from AI prompt for item ${input.itemName}:`, error);
+        throw new Error(`AI model failed to generate description. Details: ${error.message || error}`);
     }
+    if (!output || !output.description) {
+        console.warn(`${LOG_PREFIX} AI model returned no output or empty description for item: ${input.itemName}`);
+        throw new Error("AI model returned no output or an empty description.");
+    }
+    console.log(`${LOG_PREFIX} Flow successfully generated output for item: ${input.itemName}`);
     return output;
   }
 );

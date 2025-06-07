@@ -26,11 +26,13 @@ import { useRouter, useParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Link from "next/link";
 
+const LOG_PREFIX = "[StallsClientPage]";
+
 if (!getApps().length) {
   try {
     initializeApp(firebaseConfig);
   } catch (error) {
-    console.error("Firebase initialization error in StallsClientPage:", error);
+    console.error(`${LOG_PREFIX} Firebase initialization error:`, error);
   }
 }
 const db = getFirestore();
@@ -47,18 +49,27 @@ export default function StallsClientPage() {
   const [errorData, setErrorData] = useState<string | null>(null);
 
   useEffect(() => {
+    console.log(`${LOG_PREFIX} Mounted. AuthLoading: ${authLoading}, SiteID: ${siteId}`);
     if (authLoading) return;
 
-    if (!currentUser || currentUser.role !== 'admin') {
+    if (!currentUser) {
+        console.warn(`${LOG_PREFIX} No current user. Auth may still be loading or user not logged in.`);
+        setLoadingData(false);
+        setErrorData("Authentication is required to manage stalls.");
+        return;
+    }
+    if (currentUser.role !== 'admin') {
+      console.warn(`${LOG_PREFIX} Access denied. User role: ${currentUser.role}`);
       setLoadingData(false);
       setErrorData("Access Denied: You do not have permission to manage stalls.");
       return;
     }
 
     if (!siteId) {
+      console.warn(`${LOG_PREFIX} Site ID is missing. Redirecting to sites page.`);
       setLoadingData(false);
-      setErrorData("Site ID is missing.");
-      router.replace("/admin/sites"); // Redirect if no siteId
+      setErrorData("Site ID is missing. Cannot load stalls.");
+      router.replace("/admin/sites");
       return;
     }
     
@@ -66,55 +77,58 @@ export default function StallsClientPage() {
     let unsubscribeStalls: (() => void) | null = null;
 
     const fetchData = async () => {
+      console.log(`${LOG_PREFIX} Starting fetchData for site ${siteId}.`);
       setLoadingData(true);
       setErrorData(null);
       try {
-        // Fetch Site Details
         const siteDocRef = doc(db, "sites", siteId);
         unsubscribeSite = onSnapshot(siteDocRef, (docSnapshot) => {
           if (docSnapshot.exists()) {
+            console.log(`${LOG_PREFIX} Site document for ${siteId} received:`, docSnapshot.data());
             setSite({ id: docSnapshot.id, ...docSnapshot.data() } as Site);
           } else {
-            setErrorData("Parent site not found.");
+            console.warn(`${LOG_PREFIX} Parent site ${siteId} not found.`);
+            setErrorData("Parent site not found. Cannot load stalls.");
             setSite(null);
-            setStalls([]); // Clear stalls if site not found
+            setStalls([]);
           }
         }, (error) => {
-          console.error("Error fetching site details:", error);
-          setErrorData("Failed to load site details.");
+          console.error(`${LOG_PREFIX} Error fetching site details for ${siteId}:`, error.message, error.stack);
+          setErrorData(`Failed to load site details: ${error.message}.`);
+          setSite(null);
         });
 
-        // Fetch Stalls for this Site
         const stallsCollectionRef = collection(db, "stalls");
         const q = query(stallsCollectionRef, where("siteId", "==", siteId));
-        
+        console.log(`${LOG_PREFIX} Subscribing to stalls for site ${siteId}.`);
         unsubscribeStalls = onSnapshot(q, 
           (snapshot: QuerySnapshot<DocumentData>) => {
             const fetchedStalls: Stall[] = snapshot.docs.map(docSnapshot => ({
               id: docSnapshot.id,
               ...docSnapshot.data()
-            } as Stall)).sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            } as Stall)).sort((a,b) => (b.createdAt && a.createdAt) ? new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime() : 0);
+            console.log(`${LOG_PREFIX} Stalls snapshot received for site ${siteId}. ${fetchedStalls.length} stalls fetched.`);
             setStalls(fetchedStalls);
           },
           (error) => {
-            console.error("Error fetching stalls:", error);
-            setErrorData("Failed to load stalls. Please try again later.");
+            console.error(`${LOG_PREFIX} Error fetching stalls for site ${siteId}:`, error.message, error.stack);
+            setErrorData(`Failed to load stalls: ${error.message}. Please try again later.`);
           }
         );
 
-      } catch (err) {
-         console.error("Error in fetchData setup:", err);
-         setErrorData("An unexpected error occurred.");
+      } catch (err: any) {
+         console.error(`${LOG_PREFIX} Error in fetchData setup for site ${siteId}:`, err.message, err.stack);
+         setErrorData(`An unexpected error occurred: ${err.message}.`);
       } finally {
-        // Initial loading is done after subscriptions are set up
-        // The onSnapshot callbacks will handle subsequent loading state if needed.
         setLoadingData(false); 
+        console.log(`${LOG_PREFIX} Initial data fetch attempt for site ${siteId} finished.`);
       }
     };
 
     fetchData();
 
     return () => {
+      console.log(`${LOG_PREFIX} Unmounted for site ${siteId}. Unsubscribing...`);
       if (unsubscribeSite) unsubscribeSite();
       if (unsubscribeStalls) unsubscribeStalls();
     };
@@ -135,7 +149,7 @@ export default function StallsClientPage() {
         <CardHeader>
           <CardTitle className="flex items-center text-destructive">
             <ShieldAlert className="mr-2 h-5 w-5" />
-            Access Restricted or Error
+             {currentUser?.role !== 'admin' ? "Access Restricted" : "Error Loading Stalls"}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -157,7 +171,7 @@ export default function StallsClientPage() {
           <CardTitle>Site Not Found</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-center py-10 text-muted-foreground">The requested site could not be found.</p>
+          <p className="text-center py-10 text-muted-foreground">The requested site (ID: {siteId}) could not be found.</p>
            <div className="text-center mt-4">
             <Button onClick={() => router.push("/admin/sites")} variant="outline">
                 <ArrowLeft className="mr-2 h-4 w-4" /> Back to Sites

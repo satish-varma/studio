@@ -31,11 +31,13 @@ import { firebaseConfig } from "@/lib/firebaseConfig";
 import { getApps, initializeApp } from "firebase/app";
 import { useState } from "react";
 
+const LOG_PREFIX = "[StallForm]";
+
 if (!getApps().length) {
   try {
     initializeApp(firebaseConfig);
   } catch (error) {
-    console.error("Firebase initialization error in StallForm:", error);
+    console.error(`${LOG_PREFIX} Firebase initialization error:`, error);
   }
 }
 const db = getFirestore();
@@ -49,7 +51,7 @@ interface StallFormProps {
 export default function StallForm({ initialData, stallId }: StallFormProps) {
   const router = useRouter();
   const params = useParams();
-  const siteId = params.siteId as string; // Get siteId from URL
+  const siteIdFromUrl = params.siteId as string; // Get siteId from URL
 
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -59,31 +61,32 @@ export default function StallForm({ initialData, stallId }: StallFormProps) {
     resolver: zodResolver(stallFormSchema),
     defaultValues: initialData ? {
       name: initialData.name,
-      siteId: initialData.siteId, // Should match the current siteId from params
+      siteId: initialData.siteId, 
       stallType: initialData.stallType,
     } : {
       name: "",
-      siteId: siteId, // Pre-fill siteId for new stalls
-      stallType: STALL_TYPES[0], // Default to the first type
+      siteId: siteIdFromUrl, 
+      stallType: STALL_TYPES[0], 
     },
   });
   
-  // Ensure siteId in form matches current siteId from params, especially for new stalls
-  if (!isEditMode && form.getValues("siteId") !== siteId) {
-      form.setValue("siteId", siteId);
+  if (!isEditMode && form.getValues("siteId") !== siteIdFromUrl) {
+      console.log(`${LOG_PREFIX} Aligning form siteId (${form.getValues("siteId")}) with URL siteId (${siteIdFromUrl}) for new stall.`);
+      form.setValue("siteId", siteIdFromUrl);
   }
 
 
   async function onSubmit(values: StallFormValues) {
-    if (!siteId) {
-      toast({ title: "Error", description: "Site ID is missing.", variant: "destructive" });
+    console.log(`${LOG_PREFIX} Form submission started. Mode: ${isEditMode ? 'Edit' : 'Add'}. Values:`, values);
+    if (!siteIdFromUrl) {
+      console.error(`${LOG_PREFIX} Site ID from URL is missing. Cannot submit.`);
+      toast({ title: "Error", description: "Site ID is missing from the URL. Cannot save stall.", variant: "destructive" });
       return;
     }
     
-    // Ensure the siteId from the form submission matches the one from the URL
-    if (values.siteId !== siteId) {
-        toast({ title: "Error", description: "Site ID mismatch. Please try again.", variant: "destructive" });
-        console.error("Form siteId:", values.siteId, "URL siteId:", siteId);
+    if (values.siteId !== siteIdFromUrl) {
+        console.error(`${LOG_PREFIX} Form siteId (${values.siteId}) mismatch with URL siteId (${siteIdFromUrl}).`);
+        toast({ title: "Error", description: "Site ID mismatch. Please refresh and try again.", variant: "destructive" });
         return;
     }
 
@@ -98,28 +101,31 @@ export default function StallForm({ initialData, stallId }: StallFormProps) {
       if (isEditMode && stallId) {
         const stallRef = doc(db, "stalls", stallId);
         await setDoc(stallRef, stallDataToSave, { merge: true });
+        console.log(`${LOG_PREFIX} Stall ${stallId} updated successfully for site ${siteIdFromUrl}.`);
         toast({
           title: "Stall Updated",
           description: `Stall "${values.name}" has been successfully updated.`,
         });
       } else {
-        await addDoc(collection(db, "stalls"), stallDataToSave);
+        const newDocRef = await addDoc(collection(db, "stalls"), stallDataToSave);
+        console.log(`${LOG_PREFIX} New stall added successfully with ID: ${newDocRef.id} for site ${siteIdFromUrl}.`);
         toast({
           title: "Stall Added",
           description: `Stall "${values.name}" has been successfully added.`,
         });
       }
-      router.push(`/admin/sites/${siteId}/stalls`); // Navigate back to the stalls list for the current site
+      router.push(`/admin/sites/${siteIdFromUrl}/stalls`); 
       router.refresh();
     } catch (error: any) {
-      console.error("Error saving stall:", error);
+      console.error(`${LOG_PREFIX} Error saving stall (Mode: ${isEditMode ? 'Edit' : 'Add'}, StallID: ${stallId}, SiteID: ${siteIdFromUrl}):`, error.message, error.stack);
       toast({
         title: isEditMode ? "Update Failed" : "Add Failed",
-        description: error.message || "An unexpected error occurred. Please try again.",
+        description: `An error occurred: ${error.message || "Please try again."}`,
         variant: "destructive",
       });
     } finally {
       setIsSubmitting(false);
+      console.log(`${LOG_PREFIX} Form submission ended. Mode: ${isEditMode ? 'Edit' : 'Add'}.`);
     }
   }
 
@@ -170,13 +176,12 @@ export default function StallForm({ initialData, stallId }: StallFormProps) {
                 </FormItem>
               )}
             />
-            {/* Hidden siteId field - its value is derived and validated */}
              <FormField
               control={form.control}
               name="siteId"
               render={({ field }) => (
                 <FormItem className="hidden">
-                  <FormLabel>Site ID</FormLabel>
+                  <FormLabel>Site ID (Hidden)</FormLabel>
                   <FormControl>
                     <Input {...field} readOnly />
                   </FormControl>

@@ -11,6 +11,8 @@
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
 
+const LOG_PREFIX = "[SummarizeSalesTrendsFlow]";
+
 const SoldItemSummarySchema = z.object({
   itemId: z.string(),
   name: z.string(),
@@ -45,7 +47,15 @@ const SummarizeSalesTrendsOutputSchema = z.object({
 export type SummarizeSalesTrendsOutput = z.infer<typeof SummarizeSalesTrendsOutputSchema>;
 
 export async function summarizeSalesTrends(input: SummarizeSalesTrendsInput): Promise<SummarizeSalesTrendsOutput> {
-  return summarizeSalesTrendsFlow(input);
+  console.log(`${LOG_PREFIX} Called with input:`, input);
+  try {
+    const result = await summarizeSalesTrendsFlow(input);
+    console.log(`${LOG_PREFIX} Successfully generated sales trend summary.`);
+    return result;
+  } catch (error: any) {
+    console.error(`${LOG_PREFIX} Error generating sales trend summary:`, error.message, error.stack);
+    throw new Error(`Failed to generate sales trend summary: ${error.message}`);
+  }
 }
 
 const prompt = ai.definePrompt({
@@ -85,10 +95,17 @@ const summarizeSalesTrendsFlow = ai.defineFlow(
     outputSchema: SummarizeSalesTrendsOutputSchema,
   },
   async (input) => {
-    const {output} = await prompt(input);
-    if (!output) {
-        throw new Error("Failed to generate sales trend summary from the AI model.");
+    console.log(`${LOG_PREFIX} Flow execution started with input:`, input);
+    const {output, error} = await prompt(input); // Destructure to get potential error
+    if (error) {
+        console.error(`${LOG_PREFIX} Error from AI prompt for sales summary:`, error);
+        throw new Error(`AI model failed to generate sales summary. Details: ${error.message || error}`);
     }
+    if (!output || !output.summary) {
+        console.warn(`${LOG_PREFIX} AI model returned no output or empty summary for sales trends.`);
+        throw new Error("AI model returned no output or an empty sales summary.");
+    }
+    console.log(`${LOG_PREFIX} Flow successfully generated sales summary output.`);
     return output;
   }
 );

@@ -14,11 +14,13 @@ import { Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 
+const LOG_PREFIX = "[EditStallPage]";
+
 if (!getApps().length) {
   try {
     initializeApp(firebaseConfig);
   } catch (error) {
-    console.error("Firebase initialization error in EditStallPage:", error);
+    console.error(`${LOG_PREFIX} Firebase initialization error:`, error);
   }
 }
 const db = getFirestore();
@@ -36,48 +38,55 @@ export default function EditStallPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    console.log(`${LOG_PREFIX} Mounted. SiteID: ${siteId}, StallID: ${stallId}`);
     if (siteId && stallId) {
       const fetchStallAndSite = async () => {
+        console.log(`${LOG_PREFIX} Fetching stall and site data. SiteID: ${siteId}, StallID: ${stallId}`);
         setLoading(true);
         setError(null);
         try {
-          // Fetch Site
           const siteDocRef = doc(db, "sites", siteId);
           const siteDocSnap = await getDoc(siteDocRef);
           if (siteDocSnap.exists()) {
+            console.log(`${LOG_PREFIX} Parent site document found for ID: ${siteId}`, siteDocSnap.data());
             setSite({ id: siteDocSnap.id, ...siteDocSnap.data() } as Site);
           } else {
+             console.warn(`${LOG_PREFIX} Parent site not found for ID: ${siteId}.`);
              throw new Error("Parent site not found.");
           }
 
-          // Fetch Stall
           const stallDocRef = doc(db, "stalls", stallId);
           const stallDocSnap = await getDoc(stallDocRef);
 
           if (stallDocSnap.exists()) {
+            console.log(`${LOG_PREFIX} Stall document found for ID: ${stallId}`, stallDocSnap.data());
             const stallData = stallDocSnap.data() as Omit<Stall, 'id'>;
             if (stallData.siteId !== siteId) {
+                console.error(`${LOG_PREFIX} Stall-Site mismatch. Stall's siteId (${stallData.siteId}) != URL siteId (${siteId}). Redirecting.`);
                 setError("Stall does not belong to the specified site.");
-                toast({ title: "Error", description: "Stall-Site mismatch.", variant: "destructive" });
+                toast({ title: "Error", description: "Stall-Site mismatch. Redirecting.", variant: "destructive" });
                 router.replace(`/admin/sites/${siteId}/stalls`);
                 return;
             }
             setStall({ id: stallDocSnap.id, ...stallData });
           } else {
+            console.warn(`${LOG_PREFIX} Stall not found for ID: ${stallId}. Redirecting.`);
             setError("Stall not found.");
             toast({ title: "Error", description: "Stall not found.", variant: "destructive" });
             router.replace(`/admin/sites/${siteId}/stalls`);
           }
         } catch (err: any) {
-          console.error("Error fetching stall/site:", err);
-          setError("Failed to load data.");
-          toast({ title: "Error", description: "Failed to load data.", variant: "destructive" });
+          console.error(`${LOG_PREFIX} Error fetching stall/site (SiteID: ${siteId}, StallID: ${stallId}):`, err.message, err.stack);
+          setError(`Failed to load data: ${err.message}`);
+          toast({ title: "Error", description: `Failed to load data: ${err.message}`, variant: "destructive" });
         } finally {
           setLoading(false);
+          console.log(`${LOG_PREFIX} Stall/site data fetching attempt finished. Loading: false.`);
         }
       };
       fetchStallAndSite();
     } else {
+      console.warn(`${LOG_PREFIX} Missing site or stall ID. Redirecting. SiteID: ${siteId}, StallID: ${stallId}`);
       setLoading(false);
       setError("Missing site or stall ID.");
       router.replace("/admin/sites");
@@ -114,10 +123,13 @@ export default function EditStallPage() {
     );
   }
 
-  if (!stall) {
+  if (!stall || !site) { // Added !site check
      return (
       <div className="flex justify-center items-center py-10">
-        <p className="ml-2">Stall data could not be loaded.</p>
+        <p className="ml-2">Stall or Site data could not be loaded. This might happen if the IDs are invalid or data was recently deleted.</p>
+         <Button onClick={() => router.push(siteId ? `/admin/sites/${siteId}/stalls` : '/admin/sites')} className="mt-4 ml-2">
+            Back
+          </Button>
       </div>
     );
   }

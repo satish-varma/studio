@@ -24,11 +24,13 @@ import { firebaseConfig } from "@/lib/firebaseConfig";
 import { getApps, initializeApp } from "firebase/app";
 import { useState } from "react";
 
+const LOG_PREFIX = "[SiteForm]";
+
 if (!getApps().length) {
   try {
     initializeApp(firebaseConfig);
   } catch (error) {
-    console.error("Firebase initialization error in SiteForm:", error);
+    console.error(`${LOG_PREFIX} Firebase initialization error:`, error);
   }
 }
 const db = getFirestore();
@@ -64,6 +66,7 @@ export default function SiteForm({ initialData, siteId }: SiteFormProps) {
 
   async function onSubmit(values: SiteFormValues) {
     setIsSubmitting(true);
+    console.log(`${LOG_PREFIX} Form submission started. Mode: ${isEditMode ? 'Edit' : 'Add'}. Values:`, values);
     try {
       const siteDataToSave = {
         ...values,
@@ -74,12 +77,14 @@ export default function SiteForm({ initialData, siteId }: SiteFormProps) {
       if (isEditMode && siteId) {
         const siteRef = doc(db, "sites", siteId);
         await setDoc(siteRef, siteDataToSave, { merge: true });
+        console.log(`${LOG_PREFIX} Site ${siteId} updated successfully.`);
         toast({
           title: "Site Updated",
           description: `${values.name} has been successfully updated.`,
         });
       } else {
-        await addDoc(collection(db, "sites"), siteDataToSave);
+        const newDocRef = await addDoc(collection(db, "sites"), siteDataToSave);
+        console.log(`${LOG_PREFIX} New site added successfully with ID: ${newDocRef.id}.`);
         toast({
           title: "Site Added",
           description: `${values.name} has been successfully added.`,
@@ -88,14 +93,15 @@ export default function SiteForm({ initialData, siteId }: SiteFormProps) {
       router.push("/admin/sites");
       router.refresh();
     } catch (error: any) {
-      console.error("Error saving site:", error);
+      console.error(`${LOG_PREFIX} Error saving site (Mode: ${isEditMode ? 'Edit' : 'Add'}, SiteID: ${siteId}):`, error.message, error.stack);
       toast({
         title: isEditMode ? "Update Failed" : "Add Failed",
-        description: error.message || "An unexpected error occurred. Please try again.",
+        description: `An error occurred: ${error.message || "Please try again."}`,
         variant: "destructive",
       });
     } finally {
       setIsSubmitting(false);
+      console.log(`${LOG_PREFIX} Form submission ended. Mode: ${isEditMode ? 'Edit' : 'Add'}.`);
     }
   }
 
