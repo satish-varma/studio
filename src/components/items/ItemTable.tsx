@@ -124,18 +124,18 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   const [itemToAllocate, setItemToAllocate] = useState<StockItem | null>(null);
   const [showAllocateDialog, setShowAllocateDialog] = useState(false);
   const [targetStallIdForAllocation, setTargetStallIdForAllocation] = useState("");
-  const [quantityToAllocate, setQuantityToAllocate] = useState<number | string>("");
+  const [quantityToAllocate, setQuantityToAllocate] = useState<number | string>(1);
   const [isAllocating, setIsAllocating] = useState(false);
 
   const [itemToReturn, setItemToReturn] = useState<StockItem | null>(null);
   const [showReturnDialog, setShowReturnDialog] = useState(false);
-  const [quantityToReturn, setQuantityToReturn] = useState<number | string>("");
+  const [quantityToReturn, setQuantityToReturn] = useState<number | string>(1);
   const [isReturning, setIsReturning] = useState(false);
 
   const [itemToTransfer, setItemToTransfer] = useState<StockItem | null>(null);
   const [showTransferDialog, setShowTransferDialog] = useState(false);
   const [destinationStallId, setDestinationStallId] = useState("");
-  const [quantityToTransfer, setQuantityToTransfer] = useState<number | string>("");
+  const [quantityToTransfer, setQuantityToTransfer] = useState<number | string>(1);
   const [isTransferring, setIsTransferring] = useState(false);
 
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
@@ -305,6 +305,39 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       setIsDeleting(false);
     }
   };
+
+  const parseAndCapInput = (value: string, max?: number, min: number = 0): number | string => {
+    if (value === "") return "";
+    let num = parseInt(value, 10);
+    if (isNaN(num)) { // If parsing results in NaN (e.g., user types non-numeric chars)
+        const currentValStr = String(max === 0 ? min : (max || min)); // Use min or max as string if input is bad
+        if (currentValStr === String(max)) return max; // If max is the current field value (string form)
+        return min; // Default to min if still bad
+    }
+    if (max !== undefined && num > max) num = max;
+    if (num < min) num = min;
+    return num;
+  };
+  
+  const parseAndCapFloatInput = (value: string, min: number = 0): number | string => {
+    if (value === "") return "";
+    // Regex allows numbers, a single decimal point, and digits after decimal.
+    // It prevents multiple decimal points or non-numeric characters (except the first decimal).
+    if (!/^\d*\.?\d*$/.test(value) || (value.split('.').length -1 > 1)) {
+        // If input is invalid (e.g. "1.2.3" or "abc"), try to parse what's valid or return current/min
+        const floatVal = parseFloat(value);
+        if (!isNaN(floatVal) && floatVal >= min) return floatVal.toString(); // if initial part is valid
+        return min.toString(); // fallback to min
+    }
+    
+    const num = parseFloat(value);
+    if (isNaN(num) && value !== "." && value !== "") { // Allow typing decimal point or clearing field
+        return min.toString(); // Or handle as you see fit, e.g. return current field value if parsing fails mid-type
+    }
+    if (!isNaN(num) && num < min) return min.toString(); // Enforce minimum
+    return value; // Return original valid string (allows "1." or "1.23")
+  };
+
 
   const handleOpenUpdateStockDialog = (item: StockItem) => {
     console.log(`${LOG_PREFIX} Opening update stock dialog for item: ${item.id} (${item.name})`);
@@ -1251,26 +1284,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       <ArrowUpDown className="ml-2 h-3 w-3 text-primary" style={{ transform: 'rotate(180deg)' }}/> :
       <ArrowUpDown className="ml-2 h-3 w-3 text-primary" />;
   };
-
-  const parseAndCapInput = (value: string, max?: number, min: number = 0): number | string => {
-    if (value === "") return "";
-    let num = parseInt(value, 10);
-    if (isNaN(num)) return ""; 
-    if (max !== undefined && num > max) num = max;
-    if (num < min) num = min;
-    return num;
-  };
   
-  const parseAndCapFloatInput = (value: string, min: number = 0): number | string => {
-    if (value === "") return "";
-    if (/^\d*\.?\d*$/.test(value)) {
-        const num = parseFloat(value);
-        if (isNaN(num) && value !== "" && value !== ".") return value; // Keep partial input like "1." or if it becomes NaN mid-type
-        if (!isNaN(num) && num < min) return min.toString();
-        return value; 
-    }
-    return ""; 
-  };
 
 
   if (loading && items.length === 0) {
@@ -1488,7 +1502,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                     <Image
                       src={item.imageUrl || `https://placehold.co/64x64.png?text=${item.name.substring(0,2)}`}
                       alt={item.name}
-                      data-ai-hint={`${item.category} item`}
+                      data-ai-hint={`${item.category || 'generic'} item`}
                       width={40}
                       height={40}
                       className="rounded-md object-cover"

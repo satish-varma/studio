@@ -3,7 +3,7 @@
 
 import { useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, RotateCcw, Home } from 'lucide-react'; // Added RotateCcw and Home icons
 
 const LOG_PREFIX = "[GlobalError]";
 
@@ -19,7 +19,6 @@ export default function GlobalError({
     if (error.digest) {
       console.error(`${LOG_PREFIX} Error Digest: ${error.digest}`);
     }
-    // In a real production app, you'd send this error to a reporting service like Sentry, LogRocket, etc.
     // Example: Sentry.captureException(error);
   }, [error]);
 
@@ -29,18 +28,17 @@ export default function GlobalError({
         <AlertTriangle className="h-16 w-16 text-destructive mx-auto mb-6" />
         <h1 className="text-3xl font-bold text-destructive mb-4">Oops! Something Went Wrong.</h1>
         <p className="text-muted-foreground mb-2">
-          An unexpected error occurred in the application. Our team has been notified (if error reporting is set up).
+          An unexpected error occurred. We apologize for the inconvenience.
         </p>
         <p className="text-muted-foreground mb-6">
-          You can try to refresh the page or go back to the dashboard. If the problem persists, please contact support.
+          You can try to recover the page or navigate back to the dashboard. If the problem persists, please contact support with the details below.
         </p>
         {error?.message && (
           <details className="mb-6 text-left bg-muted/50 p-3 rounded-md text-sm">
             <summary className="cursor-pointer font-medium text-destructive">Error Details (for debugging)</summary>
-            <pre className="mt-2 whitespace-pre-wrap break-all">
+            <pre className="mt-2 whitespace-pre-wrap break-all text-xs">
               Message: {error.message}
               {error.digest && `\nDigest: ${error.digest}`}
-              {/* In development, you might want to show error.stack, but be cautious in production. */}
               {process.env.NODE_ENV === 'development' && error.stack && `\nStack: ${error.stack}`}
             </pre>
           </details>
@@ -52,7 +50,7 @@ export default function GlobalError({
             variant="destructive"
             className="flex-1"
             >
-            Try to Recover
+            <RotateCcw className="mr-2 h-4 w-4" /> Try to Recover
             </Button>
             <Button
             onClick={() => window.location.href = '/dashboard'}
@@ -60,15 +58,13 @@ export default function GlobalError({
             variant="outline"
             className="flex-1"
             >
-            Go to Dashboard
+            <Home className="mr-2 h-4 w-4" /> Go to Dashboard
             </Button>
         </div>
         <p className="mt-4 text-xs text-muted-foreground">
-            If you continue to experience issues, please note the error details above and contact support.
+            If you continue to experience issues, please note the error details above and contact our support team.
         </p>
       </div>
     </div>
   );
 }
-
-    

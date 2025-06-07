@@ -26,11 +26,13 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 
+const LOG_PREFIX = "[SettingsPage]";
+
 if (!getApps().length) {
   try {
     initializeApp(firebaseConfig);
   } catch (error) {
-    console.error("Firebase initialization error in SettingsPage:", error);
+    console.error(`${LOG_PREFIX} Firebase initialization error:`, error);
   }
 }
 const db = getFirestore();
@@ -68,6 +70,7 @@ export default function SettingsPage() {
 
   const exportStockItemsToCsv = async () => {
     setIsExportingStockCsv(true);
+    console.log(`${LOG_PREFIX} Starting stock items CSV export.`);
     try {
       const stockItemsCollectionRef = collection(db, "stockItems");
       const q = query(stockItemsCollectionRef, orderBy("name"));
@@ -77,6 +80,7 @@ export default function SettingsPage() {
       querySnapshot.forEach((doc) => {
         items.push({ id: doc.id, ...doc.data() } as StockItem);
       });
+      console.log(`${LOG_PREFIX} Fetched ${items.length} stock items for CSV export.`);
 
       if (items.length === 0) {
         toast({ title: "No Stock Data", description: "There are no stock items to export.", variant: "default" });
@@ -124,10 +128,11 @@ export default function SettingsPage() {
         URL.revokeObjectURL(url);
       }
        toast({ title: "Export Successful", description: "Stock items CSV downloaded." });
+       console.log(`${LOG_PREFIX} Stock items CSV export successful.`);
 
     } catch (error: any) {
-      console.error("Error exporting stock items:", error);
-      toast({ title: "Export Failed", description: error.message || "Could not export stock items.", variant: "destructive" });
+      console.error(`${LOG_PREFIX} Error exporting stock items:`, error.message, error.stack);
+      toast({ title: "Export Failed", description: `Could not export stock items: ${error.message}`, variant: "destructive" });
     } finally {
       setIsExportingStockCsv(false);
     }
@@ -135,6 +140,7 @@ export default function SettingsPage() {
 
   const exportSalesDataToCsv = async () => {
     setIsExportingSalesCsv(true);
+    console.log(`${LOG_PREFIX} Starting sales data CSV export.`);
     try {
       const salesCollectionRef = collection(db, "salesTransactions");
       const q = query(
@@ -153,6 +159,7 @@ export default function SettingsPage() {
           transactionDate: (data.transactionDate as Timestamp).toDate().toISOString(),
         } as SaleTransaction);
       });
+      console.log(`${LOG_PREFIX} Fetched ${transactions.length} sales transactions for CSV export.`);
 
       if (transactions.length === 0) {
         toast({ title: "No Sales Data", description: "There are no sales transactions to export.", variant: "default" });
@@ -206,10 +213,11 @@ export default function SettingsPage() {
         URL.revokeObjectURL(url);
       }
       toast({ title: "Export Successful", description: "Sales data CSV downloaded." });
+      console.log(`${LOG_PREFIX} Sales data CSV export successful.`);
 
     } catch (error: any) {
-      console.error("Error exporting sales data:", error);
-      toast({ title: "Export Failed", description: error.message || "Could not export sales data.", variant: "destructive" });
+      console.error(`${LOG_PREFIX} Error exporting sales data:`, error.message, error.stack);
+      toast({ title: "Export Failed", description: `Could not export sales data: ${error.message}`, variant: "destructive" });
     } finally {
       setIsExportingSalesCsv(false);
     }
@@ -221,11 +229,14 @@ export default function SettingsPage() {
       case "exportStockItems": return setIsProcessingStockSheetsExport;
       case "importSalesHistory": return setIsProcessingSalesSheetsImport;
       case "exportSalesHistory": return setIsProcessingSalesSheetsExport;
-      default: return () => {}; // Should not happen
+      default: 
+        console.warn(`${LOG_PREFIX} Unknown GoogleSheetAction: ${action}`);
+        return () => {}; 
     }
   };
 
   const handleSheetIdDialogSubmit = () => {
+    console.log(`${LOG_PREFIX} handleSheetIdDialogSubmit. Action: ${currentSheetAction}, DataType: ${currentDataType}, SheetID: ${sheetIdInputValue}`);
     if (currentSheetAction && currentDataType) {
       if (currentSheetAction.toLowerCase().includes('import') && !sheetIdInputValue.trim()) {
         toast({ title: "Sheet ID Required", description: "Please provide a Google Sheet ID to import from.", variant: "default" });
@@ -240,6 +251,7 @@ export default function SettingsPage() {
   };
 
   const openSheetIdPrompt = (action: GoogleSheetAction, dataType: DataTypeForSheets) => {
+    console.log(`${LOG_PREFIX} openSheetIdPrompt. Action: ${action}, DataType: ${dataType}`);
     setCurrentSheetAction(action);
     setCurrentDataType(dataType);
     setShowSheetIdDialog(true);
@@ -254,6 +266,7 @@ export default function SettingsPage() {
     const setLoadingState = getLoadingStateSetter(action);
     setLoadingState(true);
     const friendlyAction = action.replace(/([A-Z])/g, ' $1').toLowerCase();
+    console.log(`${LOG_PREFIX} Starting Google Sheets API call. Action: ${friendlyAction}, DataType: ${dataType}, SheetID: ${sheetId}`);
     toast({
       title: "Processing Google Sheets Request...",
       description: `Attempting to ${friendlyAction} for ${dataType} data...`,
@@ -283,19 +296,21 @@ export default function SettingsPage() {
       let result;
       try {
         result = await response.json();
-      } catch (e) {
-        console.error(`Error parsing JSON response from /api/google-sheets-proxy. Status: ${response.status}`, await response.text());
+      } catch (e: any) {
+        const responseText = await response.text();
+        console.error(`${LOG_PREFIX} Error parsing JSON response from /api/google-sheets-proxy. Status: ${response.status}. Response Text:`, responseText, e.stack);
         toast({
           title: "API Error",
-          description: `Failed to process request. Server responded with status ${response.status}. Check console for details.`,
+          description: `Failed to process request. Server responded with status ${response.status} and non-JSON content. Check console for details.`,
           variant: "destructive",
         });
         setLoadingState(false);
         return;
       }
+      console.log(`${LOG_PREFIX} Google Sheets API call response. Status: ${response.status}, Result:`, result);
 
       if (!response.ok) {
-        console.error(`API Error (${response.status}) for ${friendlyAction}:`, result);
+        console.error(`${LOG_PREFIX} API Error (${response.status}) for ${friendlyAction}:`, result);
         if (result.needsAuth && result.authUrl) {
           toast({
             title: "Authorization Required",
@@ -325,15 +340,15 @@ export default function SettingsPage() {
              variant: "default",
              duration: 7000
            });
-           console.warn(`Import errors for ${dataType}:`, result.errors);
+           console.warn(`${LOG_PREFIX} Import errors for ${dataType}:`, result.errors);
          }
       }
 
     } catch (error: any) {
-      console.error(`Error during Google Sheets ${friendlyAction}:`, error);
+      console.error(`${LOG_PREFIX} Error during Google Sheets ${friendlyAction}:`, error.message, error.stack);
       toast({
         title: "Client-side Error",
-        description: error.message || `Failed to ${friendlyAction}. Check console for details.`,
+        description: `Failed to ${friendlyAction}. Error: ${error.message}. Check console for details.`,
         variant: "destructive"
       });
     } finally {
@@ -443,7 +458,7 @@ export default function SettingsPage() {
                 Google Sheets Integration
             </CardTitle>
             <CardDescription>
-                Import or export data directly with Google Sheets. This requires backend API, Google Cloud setup, and OAuth authorization.
+                Import or export data with Google Sheets. <strong>Note:</strong> This is an advanced feature requiring developer setup of Google Cloud Project credentials, OAuth 2.0 configuration (including Redirect URI setup in Google Cloud Console), and a properly configured backend API route (<code>/api/google-sheets-proxy</code>) to handle Google API calls securely.
             </CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -492,8 +507,9 @@ export default function SettingsPage() {
         </CardContent>
          <CardFooter>
             <p className="text-xs text-muted-foreground">
-              Note: Full Google Sheets integration requires setting up OAuth 2.0 credentials, configuring a Redirect URI,
-              and implementing the backend API route (`/api/google-sheets-proxy`) to handle Google API calls and token management.
+              Authorization with Google is required for this feature. If prompted, please allow access.
+              Ensure the provided Google Sheet ID is correct and that the sheet format matches the expected structure for imports.
+              For exports, if no Sheet ID is provided, a new sheet will be created in your Google Drive.
             </p>
         </CardFooter>
       </Card>
@@ -506,8 +522,8 @@ export default function SettingsPage() {
             </AlertDialogTitle>
             <AlertDialogDescription>
               {currentSheetAction?.toLowerCase().includes('import')
-                ? `Please provide the ID of the Google Sheet you want to import ${currentDataType} data from.`
-                : `If you provide a Sheet ID, ${currentDataType} data will be exported to that sheet. Otherwise, a new sheet will be created.`}
+                ? `Please provide the ID of the Google Sheet you want to import ${currentDataType} data from. The sheet must have the correct headers.`
+                : `If you provide a Sheet ID, ${currentDataType} data will be exported to that specific sheet (content will be overwritten). If left blank, a new Google Sheet will be created in your Drive.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="py-4">
