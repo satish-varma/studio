@@ -90,11 +90,22 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
   const selectedDefaultSiteId = form.watch("defaultSiteId");
 
   useEffect(() => {
+    let newStallsForSite: Stall[] = [];
     if (selectedRole === 'staff' && selectedDefaultSiteId) {
-      setStallsForSelectedSite(stalls.filter(s => s.siteId === selectedDefaultSiteId));
+      newStallsForSite = stalls.filter(s => s.siteId === selectedDefaultSiteId);
+      setStallsForSelectedSite(newStallsForSite);
+
+      const currentDefaultStallId = form.getValues("defaultStallId");
+      if (currentDefaultStallId && !newStallsForSite.find(s => s.id === currentDefaultStallId)) {
+          form.setValue('defaultStallId', null); // Clear stall if not valid for new site
+      }
     } else {
       setStallsForSelectedSite([]);
+      if (selectedRole === 'staff') { // Also clear stall if site is deselected for staff
+        form.setValue('defaultStallId', null);
+      }
     }
+
     if (selectedRole !== 'staff') {
         form.setValue('defaultSiteId', null);
         form.setValue('defaultStallId', null);
@@ -134,7 +145,6 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
       const result = await response.json();
 
       if (!response.ok) {
-        // Construct a more detailed error message from the API response
         let apiErrorMsg = `Failed to create auth user via API. Status: ${response.status}.`;
         if (result.error) {
           apiErrorMsg += ` Message: ${result.error}`;
@@ -177,9 +187,6 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
         form.reset();
         onClose();
       } else {
-         // This case should ideally be handled by onCreateUserFirestoreDoc throwing an error if it fails,
-         // which would be caught by the catch block below.
-         // If it returns false without throwing, this toast is a fallback.
          toast({ title: "Auth User Created, Firestore Failed", description: `User ${authData.email} created in Auth, but Firestore document creation failed. Please check user list and try again or manually create the Firestore doc.`, variant: "destructive", duration: 10000 });
       }
 
@@ -322,7 +329,7 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Default Site (for Staff)</FormLabel>
-                      <Select onValueChange={(value) => { field.onChange(value === 'none' ? null : value); form.setValue('defaultStallId', null); }} value={field.value || "none"} disabled={isSubmitting || adminAuthLoading || sites.length === 0}>
+                      <Select onValueChange={(value) => { field.onChange(value === 'none' ? null : value); }} value={field.value || "none"} disabled={isSubmitting || adminAuthLoading || sites.length === 0}>
                         <FormControl><SelectTrigger className="bg-input"><SelectValue placeholder={sites.length === 0 ? "No sites available" : "Select default site"} /></SelectTrigger></FormControl>
                         <SelectContent>
                           <SelectItem value="none">(None)</SelectItem>
@@ -412,3 +419,5 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
     </Dialog>
   );
 }
+
+    
