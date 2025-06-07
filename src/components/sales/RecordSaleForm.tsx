@@ -63,7 +63,7 @@ const saleItemSchema = z.object({
   itemId: z.string().min(1, "Please select an item."),
   quantity: z.coerce.number().min(1, "Quantity must be at least 1."),
   pricePerUnit: z.coerce.number().positive("Price must be positive."),
-  name: z.string(),
+  name: z.string(), // Not strictly required for submission but good for form state
 });
 
 const recordSaleFormSchema = z.object({
@@ -115,7 +115,7 @@ export default function RecordSaleForm() {
           ...docSnapshot.data()
         } as StockItem));
         const inStockItems = fetchedItems.filter(item => item.quantity > 0);
-        setAvailableItems(inStockItems);
+        setAvailableItems(inStockItems.sort((a, b) => a.name.localeCompare(b.name))); // Sort items alphabetically
         console.log(`${LOG_PREFIX} Fetched ${inStockItems.length} available items for stall ${activeStallId}.`);
         setLoadingItems(false);
       },
@@ -186,14 +186,14 @@ export default function RecordSaleForm() {
 
           if (currentStockData.siteId !== activeSiteId || currentStockData.stallId !== activeStallId) {
              console.error(`${LOG_PREFIX} Item ${formItem.name} (ID: ${formItem.itemId}) does not belong to active stall ${activeStallId}. Item Site: ${currentStockData.siteId}, Item Stall: ${currentStockData.stallId}`);
-             throw new Error(`Item ${formItem.name} does not belong to the currently active stall (${activeStallId}). Please refresh or re-select items.`);
+             throw new Error(`Item ${formItem.name} does not belong to the currently active stall. Please refresh or re-select items.`);
           }
           if (currentStockData.quantity < formItem.quantity) {
             console.error(`${LOG_PREFIX} Insufficient stock for ${formItem.name}. Available: ${currentStockData.quantity}, Requested: ${formItem.quantity}`);
             throw new Error(`Not enough stock for ${formItem.name}. Available: ${currentStockData.quantity}, Requested: ${formItem.quantity}.`);
           }
 
-          const pricePerUnit = currentStockData.price; // Use current price from DB for transaction
+          const pricePerUnit = currentStockData.price; 
           soldItemsForTransaction.push({
             itemId: formItem.itemId,
             name: formItem.name,
@@ -247,9 +247,11 @@ export default function RecordSaleForm() {
       console.log(`${LOG_PREFIX} Firestore transaction for sale ${saleTransactionId} committed successfully.`);
 
       for (const formItem of values.items) {
-          const soldStallItem = availableItems.find(i => i.id === formItem.itemId);
-          if (soldStallItem) {
-              const originalStallQuantity = (soldStallItem.quantity - formItem.quantity) + formItem.quantity;
+          // Re-fetch the sold stall item to get its state *after* the transaction for correct `quantityBefore` logging.
+          const soldStallItemSnap = await getDoc(doc(db, "stockItems", formItem.itemId));
+          if (soldStallItemSnap.exists()) {
+              const soldStallItem = { id: soldStallItemSnap.id, ...soldStallItemSnap.data() } as StockItem;
+              const originalStallQuantity = soldStallItem.quantity + formItem.quantity; // Calculate quantity before sale
 
               await logStockMovement(user, {
                   stockItemId: soldStallItem.id,
@@ -259,7 +261,7 @@ export default function RecordSaleForm() {
                   type: 'SALE_FROM_STALL',
                   quantityChange: -formItem.quantity,
                   quantityBefore: originalStallQuantity,
-                  quantityAfter: soldStallItem.quantity - formItem.quantity, 
+                  quantityAfter: soldStallItem.quantity, 
                   notes: `Sale ID: ${saleTransactionId}`,
                   relatedTransactionId: saleTransactionId,
               });
@@ -267,7 +269,7 @@ export default function RecordSaleForm() {
               if (soldStallItem.originalMasterItemId) {
                    const masterItemDoc = await getDoc(doc(db, "stockItems", soldStallItem.originalMasterItemId));
                    if(masterItemDoc.exists()){
-                       const masterItemData = masterItemDoc.data() as StockItem;
+                       const masterItemData = { id: masterItemDoc.id, ...masterItemDoc.data() } as StockItem;
                        const originalMasterQuantity = masterItemData.quantity + formItem.quantity; 
                         await logStockMovement(user, {
                             stockItemId: soldStallItem.originalMasterItemId,
@@ -341,7 +343,7 @@ export default function RecordSaleForm() {
   const parseAndCapQuantity = (rawValue: string, maxQuantity: number | undefined): number | "" => {
       if (rawValue === "") return "";
       let val = parseInt(rawValue, 10);
-      if (isNaN(val)) return 1; // Or some other default if non-numeric typed
+      if (isNaN(val)) return 1; 
       if (maxQuantity !== undefined && val > maxQuantity) val = maxQuantity;
       if (val < 1) val = 1;
       return val;
@@ -378,7 +380,7 @@ export default function RecordSaleForm() {
 
   if (loadingItems) {
     return (
-      <div className="flex justify-center items-center py-10">
+      <div className="flex justify-center items-center py-10" data-testid="loading-items-indicator">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
         <p className="ml-2">Loading items for sale at the current stall...</p>
       </div>
@@ -394,10 +396,10 @@ export default function RecordSaleForm() {
         </CardTitle>
       </CardHeader>
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)}>
+        <form onSubmit={form.handleSubmit(onSubmit)} data-testid="record-sale-form">
           <CardContent className="space-y-6">
             {availableItems.length === 0 && !loadingItems && (
-               <Alert variant="default">
+               <Alert variant="default" data-testid="no-items-alert">
                 <Info className="h-4 w-4" />
                 <AlertTitle>No Items Available at this Stall</AlertTitle>
                 <AlertDescription>
@@ -406,7 +408,7 @@ export default function RecordSaleForm() {
               </Alert>
             )}
             {fields.map((field, index) => (
-              <div key={field.id} className="flex items-end gap-4 p-4 border rounded-md bg-muted/30">
+              <div key={field.id} className="flex items-end gap-4 p-4 border rounded-md bg-muted/30" data-testid={`sale-item-row-${index}`}>
                 <FormField
                   control={form.control}
                   name={`items.${index}.itemId`}
@@ -418,8 +420,9 @@ export default function RecordSaleForm() {
                           formField.onChange(value);
                           handleItemChange(value, index);
                         }}
-                        defaultValue={formField.value}
+                        value={formField.value} // Ensure value prop is used for controlled component
                         disabled={isSubmitting || availableItems.length === 0}
+                        data-testid={`item-select-${index}`}
                       >
                         <FormControl>
                           <SelectTrigger className="bg-input">
@@ -460,6 +463,7 @@ export default function RecordSaleForm() {
                                 const parsedVal = parseAndCapQuantity(e.target.value, maxQuantity);
                                 formField.onChange(parsedVal);
                             }}
+                            data-testid={`quantity-input-${index}`}
                           />
                         </FormControl>
                         <FormMessage />
@@ -481,6 +485,7 @@ export default function RecordSaleForm() {
                             className="bg-input text-muted-foreground"
                             readOnly
                             disabled
+                            data-testid={`price-input-${index}`}
                         />
                       </FormControl>
                       <FormMessage />
@@ -494,6 +499,8 @@ export default function RecordSaleForm() {
                   onClick={() => remove(index)}
                   disabled={fields.length <= 1 || isSubmitting}
                   className="text-destructive hover:bg-destructive/10"
+                  data-testid={`remove-item-button-${index}`}
+                  aria-label={`Remove item ${index + 1}`}
                 >
                   <Trash2 className="h-5 w-5" />
                 </Button>
@@ -505,12 +512,13 @@ export default function RecordSaleForm() {
               onClick={() => append({ itemId: "", quantity: 1, pricePerUnit: 0, name: "" })}
               className="w-full border-dashed"
               disabled={isSubmitting || availableItems.length === 0}
+              data-testid="add-another-item-button"
             >
               <PlusCircle className="mr-2 h-4 w-4" /> Add Another Item
             </Button>
 
             <div className="pt-4 text-right">
-              <p className="text-2xl font-bold text-foreground">
+              <p className="text-2xl font-bold text-foreground" data-testid="total-sale-amount">
                 Total: ₹{totalSaleAmount.toFixed(2)}
               </p>
             </div>
@@ -520,9 +528,10 @@ export default function RecordSaleForm() {
               type="submit"
               className="w-full"
               size="lg"
-              disabled={isSubmitting || loadingItems || fields.some(f => !f.itemId || !f.quantity || f.quantity <=0 || f.pricePerUnit < 0 ) || availableItems.length === 0}
+              disabled={isSubmitting || loadingItems || fields.some(f => !f.itemId || !f.quantity || f.quantity <=0 || f.pricePerUnit < 0 ) || availableItems.length === 0 || !user || !activeSiteId || !activeStallId}
+              data-testid="record-sale-submit-button"
             >
-              {isSubmitting ? <Loader2 className="animate-spin mr-2" /> : null}
+              {isSubmitting ? <Loader2 className="animate-spin mr-2" data-testid="submit-loader"/> : null}
               Record Sale
             </Button>
           </CardFooter>
@@ -531,5 +540,4 @@ export default function RecordSaleForm() {
     </Card>
   );
 }
-
     
