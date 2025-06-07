@@ -5,55 +5,49 @@ import type { ReactNode } from 'react';
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import type { AppUser, UserRole } from '@/types/user';
 import { initializeApp, getApps, type FirebaseApp, getApp } from 'firebase/app';
-import { 
-  getAuth, 
-  onAuthStateChanged, 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
-  signOut as firebaseSignOut, 
-  type Auth, 
-  type User as FirebaseUser 
+import {
+  getAuth,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut as firebaseSignOut,
+  type Auth,
+  type User as FirebaseUser
 } from 'firebase/auth';
 import { getFirestore, doc, getDoc, setDoc, onSnapshot, type Firestore, Timestamp } from 'firebase/firestore';
-import { firebaseConfig } from '@/lib/firebaseConfig'; 
+import { firebaseConfig } from '@/lib/firebaseConfig';
 import { Loader2 } from 'lucide-react';
-import { Button } from '@/components/ui/button'; // For potential use in error display
+import { Button } from '@/components/ui/button';
 
-// console.log("AuthContext: Initializing with Firebase Config:", firebaseConfig);
-// REMOVED top-level console.error checks for projectId and apiKey
-// These checks are now handled inside the AuthProvider's useEffect
+const LOG_PREFIX_CONTEXT = "[AuthContext]";
 
-let _app: FirebaseApp | undefined; 
+let _app: FirebaseApp | undefined;
 let auth: Auth | undefined;
 let db: Firestore | undefined;
 
-// Attempt to initialize Firebase app, auth, and db
-// This section runs when the module is first loaded.
 if (!getApps().length) {
   try {
-    console.log("AuthContext: Attempting Firebase app initialization...");
+    console.log(`${LOG_PREFIX_CONTEXT} Attempting Firebase app initialization...`);
     _app = initializeApp(firebaseConfig);
-    console.log("AuthContext: Firebase app initialized successfully. Project ID from config:", firebaseConfig.projectId);
+    console.log(`${LOG_PREFIX_CONTEXT} Firebase app initialized. Project ID from config:`, firebaseConfig.projectId);
   } catch (error: any) {
-    console.error("AuthContext: Firebase app initialization error during initial app load:", error.message, error.stack);
-    // _app will remain undefined, caught by checks in AuthProvider
+    console.error(`${LOG_PREFIX_CONTEXT} Firebase app initialization error:`, error.message, error.stack);
   }
 } else {
-  _app = getApp(); 
-  console.log("AuthContext: Firebase app already initialized, got existing instance. Project ID from app options:", _app.options.projectId);
+  _app = getApp();
+  console.log(`${LOG_PREFIX_CONTEXT} Firebase app already initialized. Project ID from app options:`, _app?.options?.projectId);
 }
 
-if (_app) { 
+if (_app) {
   try {
     auth = getAuth(_app);
     db = getFirestore(_app);
-    console.log("AuthContext: Firebase Auth and Firestore services obtained successfully.");
-  } catch (error: any) {
-     console.error("AuthContext: Firebase Auth/DB services initialization error:", error.message, error.stack);
-     // auth and db might remain undefined, caught by checks in AuthProvider
+    console.log(`${LOG_PREFIX_CONTEXT} Firebase Auth and Firestore services obtained.`);
+  } catch (error: any) { // Added curly braces for the catch block here
+    console.warn(`${LOG_PREFIX_CONTEXT} Error obtaining Auth/Firestore services: ${error.message}. Firebase App object (_app) might be undefined if initialization failed.`);
   }
 } else {
-    console.warn("AuthContext: Firebase App object (_app) is undefined after initialization attempt. This indicates a problem with firebaseConfig or initializeApp itself.");
+  console.warn(`${LOG_PREFIX_CONTEXT} Firebase App object (_app) is undefined after initialization attempt. This indicates a problem with firebaseConfig or initializeApp itself.`);
 }
 
 
@@ -66,17 +60,15 @@ interface AuthContextType {
   signOutUser: () => Promise<void>;
   setUser: React.Dispatch<React.SetStateAction<AppUser | null>>;
   activeSiteId: string | null;
-  activeSite: Site | null; // Added activeSite for direct access
-  activeStallId: string | null; 
-  activeStall: Stall | null; // Added activeStall for direct access
+  activeSite: Site | null;
+  activeStallId: string | null;
+  activeStall: Stall | null;
   setActiveSite: (siteId: string | null) => void;
-  setActiveStall: (stallId: string | null) => void; 
+  setActiveStall: (stallId: string | null) => void;
 }
 
-// Define Site and Stall types locally or import if they exist elsewhere
 interface Site { id: string; name: string; location?: string; }
 interface Stall { id: string; name: string; siteId: string; stallType: string; }
-
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -84,7 +76,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUserState] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [initializationError, setInitializationError] = useState<string | null>(null);
-  
+
   const [activeSiteId, setActiveSiteState] = useState<string | null>(() => {
     if (typeof window !== 'undefined') return localStorage.getItem('activeSiteId');
     return null;
@@ -96,72 +88,82 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [activeSite, setActiveSiteObject] = useState<Site | null>(null);
   const [activeStall, setActiveStallObject] = useState<Stall | null>(null);
 
-
   const setUser: React.Dispatch<React.SetStateAction<AppUser | null>> = (newUser) => {
     setUserState(newUser);
   };
 
   const setActiveSite = useCallback((siteId: string | null) => {
+    console.log(`${LOG_PREFIX_CONTEXT} setActiveSite called. New siteId: ${siteId}, User role: ${user?.role}`);
     setActiveSiteState(siteId);
-    if (user?.role !== 'manager') setActiveStallState(null);
+    if (user?.role !== 'manager') {
+      console.log(`${LOG_PREFIX_CONTEXT} User is not manager, clearing activeStallId.`);
+      setActiveStallState(null);
+    }
     if (typeof window !== 'undefined') {
-      if (siteId) localStorage.setItem('activeSiteId', siteId);
-      else localStorage.removeItem('activeSiteId');
-      if (user?.role !== 'manager') localStorage.removeItem('activeStallId');
+      if (siteId) {
+        localStorage.setItem('activeSiteId', siteId);
+      } else {
+        localStorage.removeItem('activeSiteId');
+      }
+      if (user?.role !== 'manager') {
+        localStorage.removeItem('activeStallId');
+      }
     }
   }, [user?.role]);
 
   const setActiveStall = useCallback((stallId: string | null) => {
+    console.log(`${LOG_PREFIX_CONTEXT} setActiveStall called. New stallId: ${stallId}`);
     setActiveStallState(stallId);
     if (typeof window !== 'undefined') {
-      if (stallId) localStorage.setItem('activeStallId', stallId);
-      else localStorage.removeItem('activeStallId');
+      if (stallId) {
+        localStorage.setItem('activeStallId', stallId);
+      } else {
+        localStorage.removeItem('activeStallId');
+      }
     }
   }, []);
-  
 
   useEffect(() => {
-    // CRITICAL CONFIG CHECK
-    if (!firebaseConfig || firebaseConfig.projectId === "YOUR_PROJECT_ID" || !firebaseConfig.projectId || 
+    console.log(`${LOG_PREFIX_CONTEXT} useEffect: Initializing auth state listener.`);
+    if (!firebaseConfig || firebaseConfig.projectId === "YOUR_PROJECT_ID" || !firebaseConfig.projectId ||
         firebaseConfig.apiKey === "YOUR_API_KEY_HERE" || !firebaseConfig.apiKey) {
-      const configErrorMsg = "AuthContext CRITICAL CONFIG FAILURE: Firebase projectId or apiKey is a placeholder or missing in the resolved firebaseConfig object. " +
-        "This usually means your '.env.local' file is missing, misconfigured, or your development server was not restarted after changes. " +
-        "Please ensure your '.env.local' file in the project root has the correct values for NEXT_PUBLIC_FIREBASE_API_KEY, " +
-        "NEXT_PUBLIC_FIREBASE_PROJECT_ID, and other NEXT_PUBLIC_FIREBASE_... variables. " +
-        "After correcting, YOU MUST RESTART your Next.js development server.";
-      // console.error(configErrorMsg, { configUsed: firebaseConfig }); // Removed this console.error
+      const configErrorMsg = `${LOG_PREFIX_CONTEXT} CRITICAL CONFIG FAILURE: Firebase projectId or apiKey is a placeholder or missing. Review '.env.local' and restart the server.`;
+      console.error(configErrorMsg, { configUsed: firebaseConfig });
       setInitializationError(configErrorMsg);
       setLoading(false);
-      return; // Stop further execution of this useEffect
+      return;
     }
 
-    // Check if Firebase services were initialized correctly
     if (!auth || !db) {
-      const serviceErrorMsg = "AuthContext CRITICAL SERVICE FAILURE: Firebase Auth or Firestore service is not available. " +
-        "This often follows an app initialization failure due to incorrect firebaseConfig. " +
-        "Check previous logs for errors during `initializeApp(firebaseConfig)`.";
-      // console.error(serviceErrorMsg); // Removed this console.error
+      const serviceErrorMsg = `${LOG_PREFIX_CONTEXT} CRITICAL SERVICE FAILURE: Firebase Auth or Firestore service not initialized. Check Firebase config and app initialization.`;
+      console.error(serviceErrorMsg);
       setInitializationError(serviceErrorMsg);
       setLoading(false);
       return;
     }
-    
-    console.log("AuthContext: useEffect for auth state and active context started.");
-    setLoading(true);
 
+    setLoading(true);
+    console.log(`${LOG_PREFIX_CONTEXT} useEffect: Subscribing to onAuthStateChanged.`);
     let userDocUnsubscribe: (() => void) | null = null;
+
     const authUnsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
-      if (userDocUnsubscribe) userDocUnsubscribe();
+      console.log(`${LOG_PREFIX_CONTEXT} onAuthStateChanged triggered. FirebaseUser UID:`, firebaseUser?.uid);
+      if (userDocUnsubscribe) {
+        console.log(`${LOG_PREFIX_CONTEXT} Unsubscribing from previous user document listener.`);
+        userDocUnsubscribe();
+      }
       userDocUnsubscribe = null;
 
       if (firebaseUser) {
+        console.log(`${LOG_PREFIX_CONTEXT} User authenticated: ${firebaseUser.uid}. Fetching user document...`);
         const userDocRef = doc(db as Firestore, "users", firebaseUser.uid);
         userDocUnsubscribe = onSnapshot(userDocRef, (userDocSnap) => {
           let appUserToSet: AppUser;
           if (userDocSnap.exists()) {
+            console.log(`${LOG_PREFIX_CONTEXT} User document found for UID: ${firebaseUser.uid}.`);
             appUserToSet = mapFirestoreDataToAppUser(firebaseUser, userDocSnap.data());
           } else {
-            console.warn(`AuthContext: User document not found for UID: ${firebaseUser.uid}. Creating default.`);
+            console.warn(`${LOG_PREFIX_CONTEXT} User document NOT FOUND for UID: ${firebaseUser.uid}. Creating default user document.`);
             const defaultUserData: AppUser = {
               uid: firebaseUser.uid, email: firebaseUser.email, role: 'staff',
               displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User",
@@ -170,39 +172,49 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               defaultItemStallFilterOption: null, defaultSalesDateRangeFrom: null, defaultSalesDateRangeTo: null,
               defaultSalesStaffFilter: null,
             };
-            setDoc(userDocRef, defaultUserData).catch(error => console.error("Error creating user doc:", error));
+            setDoc(userDocRef, defaultUserData)
+              .then(() => console.log(`${LOG_PREFIX_CONTEXT} Default user document created for UID: ${firebaseUser.uid}`))
+              .catch(error => console.error(`${LOG_PREFIX_CONTEXT} Error creating default user document for UID: ${firebaseUser.uid}:`, error));
             appUserToSet = defaultUserData;
           }
           setUserState(appUserToSet);
-          
+          console.log(`${LOG_PREFIX_CONTEXT} AppUser state set for ${appUserToSet.uid}. Role: ${appUserToSet.role}`);
+
           const storedSiteId = typeof window !== 'undefined' ? localStorage.getItem('activeSiteId') : null;
           const storedStallId = typeof window !== 'undefined' ? localStorage.getItem('activeStallId') : null;
+          console.log(`${LOG_PREFIX_CONTEXT} Stored context - SiteId: ${storedSiteId}, StallId: ${storedStallId}`);
 
           if (appUserToSet.role === 'admin') {
               setActiveSiteState(storedSiteId);
               setActiveStallState(storedSiteId ? storedStallId : null);
+              console.log(`${LOG_PREFIX_CONTEXT} Admin user. Active context set to Site: ${storedSiteId}, Stall: ${storedSiteId ? storedStallId : null}`);
           } else if (appUserToSet.role === 'manager') {
               if (appUserToSet.managedSiteIds && appUserToSet.managedSiteIds.length > 0) {
                   if (storedSiteId && appUserToSet.managedSiteIds.includes(storedSiteId)) {
                       setActiveSiteState(storedSiteId);
+                      console.log(`${LOG_PREFIX_CONTEXT} Manager user. Active site set to stored: ${storedSiteId}`);
                   } else {
                       setActiveSiteState(appUserToSet.managedSiteIds[0]);
+                      console.log(`${LOG_PREFIX_CONTEXT} Manager user. Active site set to first managed: ${appUserToSet.managedSiteIds[0]}`);
                   }
               } else {
                   setActiveSiteState(null);
+                  console.log(`${LOG_PREFIX_CONTEXT} Manager user has no managed sites. Active site set to null.`);
               }
-              setActiveStallState(null);
+              setActiveStallState(null); // Managers always have stall set to null (all stalls for site)
           } else { // Staff
               setActiveSiteState(appUserToSet.defaultSiteId);
               setActiveStallState(appUserToSet.defaultSiteId ? appUserToSet.defaultStallId : null);
+              console.log(`${LOG_PREFIX_CONTEXT} Staff user. Active context set from defaults. Site: ${appUserToSet.defaultSiteId}, Stall: ${appUserToSet.defaultSiteId ? appUserToSet.defaultStallId : null}`);
           }
           setLoading(false);
         }, (error) => {
-          console.error("AuthContext: Error in user doc onSnapshot:", error);
-          setUserState(mapFirestoreDataToAppUser(firebaseUser)); // Fallback
+          console.error(`${LOG_PREFIX_CONTEXT} Error in user document onSnapshot listener for UID ${firebaseUser.uid}:`, error);
+          setUserState(mapFirestoreDataToAppUser(firebaseUser)); // Fallback to basic AppUser
           setLoading(false);
         });
       } else {
+        console.log(`${LOG_PREFIX_CONTEXT} No Firebase user authenticated. Clearing AppUser state and active context.`);
         setUserState(null);
         setActiveSiteState(null);
         setActiveStallState(null);
@@ -215,45 +227,62 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     });
 
     return () => {
+      console.log(`${LOG_PREFIX_CONTEXT} useEffect cleanup: Unsubscribing from onAuthStateChanged.`);
       authUnsubscribe();
-      if (userDocUnsubscribe) userDocUnsubscribe();
+      if (userDocUnsubscribe) {
+        console.log(`${LOG_PREFIX_CONTEXT} useEffect cleanup: Unsubscribing from user document listener.`);
+        userDocUnsubscribe();
+      }
     };
-  }, []);
+  }, []); // Empty dependency array ensures this runs only once on mount
 
-
-  // Effect to fetch active Site/Stall objects when their IDs change
   useEffect(() => {
     if (!db) return;
     if (activeSiteId) {
+      console.log(`${LOG_PREFIX_CONTEXT} Active site ID changed to: ${activeSiteId}. Fetching site object...`);
       const siteDocRef = doc(db as Firestore, "sites", activeSiteId);
       const unsubSite = onSnapshot(siteDocRef, (docSnap) => {
-        setActiveSiteObject(docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } as Site : null);
+        if (docSnap.exists()) {
+          console.log(`${LOG_PREFIX_CONTEXT} Active site object updated for ID: ${activeSiteId}`);
+          setActiveSiteObject({ id: docSnap.id, ...docSnap.data() } as Site);
+        } else {
+          console.warn(`${LOG_PREFIX_CONTEXT} Active site object NOT FOUND for ID: ${activeSiteId}. Setting to null.`);
+          setActiveSiteObject(null);
+        }
       }, (error) => {
-        console.error("Error fetching active site object:", error);
+        console.error(`${LOG_PREFIX_CONTEXT} Error fetching active site object for ID ${activeSiteId}:`, error);
         setActiveSiteObject(null);
       });
       return () => unsubSite();
     } else {
+      console.log(`${LOG_PREFIX_CONTEXT} Active site ID is null. Clearing active site object.`);
       setActiveSiteObject(null);
     }
   }, [activeSiteId]);
 
   useEffect(() => {
     if (!db) return;
-    if (activeStallId && activeSiteId) { // Stall only makes sense if site is also active
+    if (activeStallId && activeSiteId) {
+      console.log(`${LOG_PREFIX_CONTEXT} Active stall ID changed to: ${activeStallId} (Site: ${activeSiteId}). Fetching stall object...`);
       const stallDocRef = doc(db as Firestore, "stalls", activeStallId);
       const unsubStall = onSnapshot(stallDocRef, (docSnap) => {
-        setActiveStallObject(docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } as Stall : null);
+        if (docSnap.exists()) {
+          console.log(`${LOG_PREFIX_CONTEXT} Active stall object updated for ID: ${activeStallId}`);
+          setActiveStallObject({ id: docSnap.id, ...docSnap.data() } as Stall);
+        } else {
+          console.warn(`${LOG_PREFIX_CONTEXT} Active stall object NOT FOUND for ID: ${activeStallId}. Setting to null.`);
+          setActiveStallObject(null);
+        }
       }, (error) => {
-        console.error("Error fetching active stall object:", error);
+        console.error(`${LOG_PREFIX_CONTEXT} Error fetching active stall object for ID ${activeStallId}:`, error);
         setActiveStallObject(null);
       });
       return () => unsubStall();
     } else {
+      console.log(`${LOG_PREFIX_CONTEXT} Active stall ID or site ID is null. Clearing active stall object.`);
       setActiveStallObject(null);
     }
   }, [activeStallId, activeSiteId]);
-
 
   const mapFirestoreDataToAppUser = (firebaseUser: FirebaseUser, userDataFromFirestore: any = {}): AppUser => {
     return {
@@ -265,7 +294,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       createdAt: userDataFromFirestore.createdAt || new Date().toISOString(),
       defaultSiteId: userDataFromFirestore.defaultSiteId ?? null,
       defaultStallId: userDataFromFirestore.defaultStallId ?? null,
-      managedSiteIds: userDataFromFirestore.managedSiteIds ?? null, 
+      managedSiteIds: userDataFromFirestore.managedSiteIds ?? null,
       defaultItemSearchTerm: userDataFromFirestore.defaultItemSearchTerm ?? null,
       defaultItemCategoryFilter: userDataFromFirestore.defaultItemCategoryFilter ?? null,
       defaultItemStockStatusFilter: userDataFromFirestore.defaultItemStockStatusFilter ?? null,
@@ -275,21 +304,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       defaultSalesStaffFilter: userDataFromFirestore.defaultSalesStaffFilter ?? null,
     };
   };
-  
+
   const signIn = useCallback(async (email: string, pass: string): Promise<AppUser | null> => {
-    if (!auth || !db) throw new Error("Firebase not initialized for signIn.");
+    if (!auth || !db) {
+      console.error(`${LOG_PREFIX_CONTEXT}:signIn: Firebase Auth or DB not initialized.`);
+      throw new Error("Authentication service not available. Please try again later.");
+    }
+    console.log(`${LOG_PREFIX_CONTEXT}:signIn: Attempting sign-in for email: ${email}`);
     setLoading(true);
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, pass);
       const firebaseUser = userCredential.user;
+      console.log(`${LOG_PREFIX_CONTEXT}:signIn: Firebase Auth successful for UID: ${firebaseUser.uid}. Fetching user document...`);
       const userDocRef = doc(db as Firestore, "users", firebaseUser.uid);
       const userDocSnap = await getDoc(userDocRef);
       let appUserToReturn: AppUser;
 
       if (userDocSnap.exists()) {
         appUserToReturn = mapFirestoreDataToAppUser(firebaseUser, userDocSnap.data());
+        console.log(`${LOG_PREFIX_CONTEXT}:signIn: User document found for ${firebaseUser.uid}.`);
       } else {
-        console.warn(`AuthContext: User document not found for UID: ${firebaseUser.uid} during sign-in. Creating default staff user (onSnapshot will also do this).`);
+        console.warn(`${LOG_PREFIX_CONTEXT}:signIn: User document NOT FOUND for UID: ${firebaseUser.uid}. Creating default staff user.`);
         const defaultUserData: AppUser = {
             uid: firebaseUser.uid, email: firebaseUser.email, role: 'staff',
             displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User",
@@ -298,29 +333,33 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             defaultItemStallFilterOption: null, defaultSalesDateRangeFrom: null, defaultSalesDateRangeTo: null,
             defaultSalesStaffFilter: null,
         };
-        await setDoc(userDocRef, defaultUserData); 
+        await setDoc(userDocRef, defaultUserData);
         appUserToReturn = mapFirestoreDataToAppUser(firebaseUser, defaultUserData);
       }
-      // No need to call setUserState here, onAuthStateChanged will handle it.
-      // setLoading(false) will also be handled by onAuthStateChanged's effect.
-      return appUserToReturn; 
-    } catch (error) {
-      console.error("Sign in error:", error);
-      setLoading(false); 
-      throw error; 
+      // setLoading(false) and setUserState will be handled by onAuthStateChanged
+      return appUserToReturn;
+    } catch (error: any) {
+      console.error(`${LOG_PREFIX_CONTEXT}:signIn: Sign-in error for ${email}:`, error.code, error.message);
+      setLoading(false);
+      throw error;
     }
   }, []);
-  
+
   const signUp = useCallback(async (email: string, pass: string, displayName: string): Promise<AppUser | null> => {
-    if (!auth || !db) throw new Error("Firebase not initialized for signUp.");
+    if (!auth || !db) {
+      console.error(`${LOG_PREFIX_CONTEXT}:signUp: Firebase Auth or DB not initialized.`);
+      throw new Error("Sign-up service not available. Please try again later.");
+    }
+    console.log(`${LOG_PREFIX_CONTEXT}:signUp: Attempting sign-up for email: ${email}, displayName: ${displayName}`);
     setLoading(true);
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
       const firebaseUser = userCredential.user;
-      
-      const newUserDocData: AppUser = { 
-        uid: firebaseUser.uid, email: firebaseUser.email, role: 'staff' as UserRole, 
-        displayName: displayName, createdAt: new Date().toISOString(), defaultSiteId: null, 
+      console.log(`${LOG_PREFIX_CONTEXT}:signUp: Firebase Auth user created: ${firebaseUser.uid}. Creating Firestore document...`);
+
+      const newUserDocData: AppUser = {
+        uid: firebaseUser.uid, email: firebaseUser.email, role: 'staff' as UserRole,
+        displayName: displayName, createdAt: new Date().toISOString(), defaultSiteId: null,
         defaultStallId: null, managedSiteIds: null, defaultItemSearchTerm: null,
         defaultItemCategoryFilter: null, defaultItemStockStatusFilter: null,
         defaultItemStallFilterOption: null, defaultSalesDateRangeFrom: null,
@@ -328,27 +367,28 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       };
       const userDocRef = doc(db as Firestore, "users", firebaseUser.uid);
       await setDoc(userDocRef, newUserDocData);
-      // No need to call setUserState here, onAuthStateChanged will handle it.
-      // setLoading(false) will also be handled by onAuthStateChanged's effect.
+      console.log(`${LOG_PREFIX_CONTEXT}:signUp: Firestore document created for ${firebaseUser.uid}.`);
+      // setLoading(false) and setUserState will be handled by onAuthStateChanged
       return mapFirestoreDataToAppUser(firebaseUser, newUserDocData);
-    } catch (error) {
-      console.error("Sign up error:", error);
-      setLoading(false); 
+    } catch (error: any) {
+      console.error(`${LOG_PREFIX_CONTEXT}:signUp: Sign-up error for ${email}:`, error.code, error.message);
+      setLoading(false);
       throw error;
     }
   }, []);
 
   const signOutUser = useCallback(async () => {
     if (!auth) {
-      console.error("AuthContext: Firebase Auth not initialized for signOut.");
+      console.error(`${LOG_PREFIX_CONTEXT}:signOutUser: Firebase Auth not initialized.`);
       return;
     }
+    console.log(`${LOG_PREFIX_CONTEXT}:signOutUser: Attempting sign-out.`);
     try {
       await firebaseSignOut(auth);
-      console.log("AuthContext: User signed out successfully.");
-      // State updates (user, activeSite/Stall, loading) are handled by onAuthStateChanged
-    } catch (error) {
-      console.error("Sign out error:", error);
+      console.log(`${LOG_PREFIX_CONTEXT}:signOutUser: Firebase sign-out successful. State updates handled by onAuthStateChanged.`);
+      // No need to manually clear user state here; onAuthStateChanged will do it.
+    } catch (error: any) {
+      console.error(`${LOG_PREFIX_CONTEXT}:signOutUser: Sign-out error:`, error.code, error.message);
     }
   }, []);
 
@@ -380,15 +420,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       </div>
     );
   }
-  
+
   return (
-    <AuthContext.Provider value={{ 
-      user, 
-      loading, 
+    <AuthContext.Provider value={{
+      user,
+      loading,
       initializationError,
-      signIn, 
-      signUp, 
-      signOutUser, 
+      signIn,
+      signUp,
+      signOutUser,
       setUser,
       activeSiteId,
       activeSite,
@@ -409,3 +449,5 @@ export const useAuth = (): AuthContextType => {
   }
   return context;
 };
+
+    

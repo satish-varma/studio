@@ -26,12 +26,12 @@ import type { StockItem, SoldItem } from "@/types";
 import { PlusCircle, Trash2, IndianRupee, Loader2, Info } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { 
-  getFirestore, 
-  collection, 
-  onSnapshot, 
-  doc, 
-  runTransaction, 
+import {
+  getFirestore,
+  collection,
+  onSnapshot,
+  doc,
+  runTransaction,
   Timestamp,
   QuerySnapshot,
   DocumentData,
@@ -46,13 +46,15 @@ import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { logStockMovement } from "@/lib/stockLogger";
-import Link from "next/link"; // Added Link import
+import Link from "next/link";
+
+const LOG_PREFIX = "[RecordSaleForm]";
 
 if (!getApps().length) {
   try {
     initializeApp(firebaseConfig);
   } catch (error) {
-    console.error("Firebase initialization error in RecordSaleForm:", error);
+    console.error(`${LOG_PREFIX} Firebase initialization error:`, error);
   }
 }
 const db = getFirestore();
@@ -61,7 +63,7 @@ const saleItemSchema = z.object({
   itemId: z.string().min(1, "Please select an item."),
   quantity: z.coerce.number().min(1, "Quantity must be at least 1."),
   pricePerUnit: z.coerce.number().positive("Price must be positive."),
-  name: z.string(), 
+  name: z.string(),
 });
 
 const recordSaleFormSchema = z.object({
@@ -91,31 +93,35 @@ export default function RecordSaleForm() {
   });
 
   useEffect(() => {
-    if (!activeSiteId || !activeStallId) { 
+    console.log(`${LOG_PREFIX} useEffect for available items. ActiveSiteId: ${activeSiteId}, ActiveStallId: ${activeStallId}`);
+    if (!activeSiteId || !activeStallId) {
       setAvailableItems([]);
       setLoadingItems(false);
+      console.log(`${LOG_PREFIX} No active site/stall. Available items cleared.`);
       return;
     }
     setLoadingItems(true);
     const itemsCollectionRef = collection(db, "stockItems");
     const q = query(
-      itemsCollectionRef, 
+      itemsCollectionRef,
       where("siteId", "==", activeSiteId),
-      where("stallId", "==", activeStallId) 
+      where("stallId", "==", activeStallId)
     );
 
-    const unsubscribe = onSnapshot(q, 
+    const unsubscribe = onSnapshot(q,
       (snapshot: QuerySnapshot<DocumentData>) => {
-        const fetchedItems: StockItem[] = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
+        const fetchedItems: StockItem[] = snapshot.docs.map(docSnapshot => ({
+          id: docSnapshot.id,
+          ...docSnapshot.data()
         } as StockItem));
-        setAvailableItems(fetchedItems.filter(item => item.quantity > 0));
+        const inStockItems = fetchedItems.filter(item => item.quantity > 0);
+        setAvailableItems(inStockItems);
+        console.log(`${LOG_PREFIX} Fetched ${inStockItems.length} available items for stall ${activeStallId}.`);
         setLoadingItems(false);
       },
       (error) => {
-        console.error("Error fetching stock items for sale form:", error);
-        toast({ title: "Error", description: "Could not load items for the current stall. Please try again.", variant: "destructive"});
+        console.error(`${LOG_PREFIX} Error fetching stock items for stall ${activeStallId}:`, error);
+        toast({ title: "Error Loading Items", description: "Could not load items for the current stall. Please try again.", variant: "destructive"});
         setAvailableItems([]);
         setLoadingItems(false);
       }
@@ -136,23 +142,26 @@ export default function RecordSaleForm() {
   }, [watchedItems]);
 
   async function onSubmit(values: RecordSaleFormValues) {
+    console.log(`${LOG_PREFIX} onSubmit called. Values:`, values);
     if (!user) {
+      console.warn(`${LOG_PREFIX} User not authenticated. Sale recording aborted.`);
       toast({ title: "Authentication Error", description: "You must be logged in to record a sale.", variant: "destructive"});
-      setIsSubmitting(false);
+      setIsSubmitting(false); // Ensure submitting state is reset
       return;
     }
-    if (!activeSiteId || !activeStallId) { 
-      // This check is more for admins; staff/managers should be guided by profile settings.
-      // The UI already prevents form submission if this is true, but as a safeguard:
+    if (!activeSiteId || !activeStallId) {
+      console.warn(`${LOG_PREFIX} Site or stall context missing. Sale recording aborted. Site: ${activeSiteId}, Stall: ${activeStallId}`);
       toast({ title: "Context Error", description: "Cannot record sale without an active site and specific stall context.", variant: "destructive"});
-      setIsSubmitting(false);
+      setIsSubmitting(false); // Ensure submitting state is reset
       return;
     }
     setIsSubmitting(true);
-    const saleTransactionId = doc(collection(db, "salesTransactions")).id; 
+    const saleTransactionId = doc(collection(db, "salesTransactions")).id;
+    console.log(`${LOG_PREFIX} Generated SaleTransaction ID: ${saleTransactionId}`);
 
     try {
       await runTransaction(db, async (transaction) => {
+        console.log(`${LOG_PREFIX} Starting Firestore transaction for sale ${saleTransactionId}.`);
         const stockItemReads: Promise<DocumentSnapshot>[] = [];
         values.items.forEach(formItem => {
           const stockItemRef = doc(db, "stockItems", formItem.itemId);
@@ -162,39 +171,29 @@ export default function RecordSaleForm() {
 
         const soldItemsForTransaction: SoldItem[] = [];
         let calculatedTotalAmount = 0;
-        
-        const stockUpdatesAndLogs: {
-          ref: DocumentReference;
-          newQuantity: number;
-          log: Omit<Parameters<typeof logStockMovement>[1], 'stockItemId' | 'siteId' | 'stallId' | 'masterStockItemIdForContext'>;
-          originalData: StockItem;
-        }[] = [];
-
-        const masterStockUpdatesAndLogs: {
-          ref: DocumentReference;
-          newQuantity: number;
-          log: Omit<Parameters<typeof logStockMovement>[1], 'stockItemId' | 'siteId' | 'stallId' | 'masterStockItemIdForContext'>;
-          originalData: StockItem;
-        }[] = [];
-
 
         for (let i = 0; i < values.items.length; i++) {
           const formItem = values.items[i];
           const stockItemSnap = stockItemSnapshots[i];
 
           if (!stockItemSnap.exists()) {
+            console.error(`${LOG_PREFIX} Item ${formItem.name} (ID: ${formItem.itemId}) not found in stock during transaction.`);
             throw new Error(`Item ${formItem.name} (ID: ${formItem.itemId}) not found in stock.`);
           }
           const currentStockData = { id: stockItemSnap.id, ...stockItemSnap.data() } as StockItem;
+          console.log(`${LOG_PREFIX} Processing item ${currentStockData.name} (ID: ${currentStockData.id}) - Current Qty: ${currentStockData.quantity}, Requested: ${formItem.quantity}`);
+
 
           if (currentStockData.siteId !== activeSiteId || currentStockData.stallId !== activeStallId) {
-             throw new Error(`Item ${formItem.name} does not belong to the currently active stall.`);
+             console.error(`${LOG_PREFIX} Item ${formItem.name} (ID: ${formItem.itemId}) does not belong to active stall ${activeStallId}. Item Site: ${currentStockData.siteId}, Item Stall: ${currentStockData.stallId}`);
+             throw new Error(`Item ${formItem.name} does not belong to the currently active stall (${activeStallId}). Please refresh or re-select items.`);
           }
           if (currentStockData.quantity < formItem.quantity) {
+            console.error(`${LOG_PREFIX} Insufficient stock for ${formItem.name}. Available: ${currentStockData.quantity}, Requested: ${formItem.quantity}`);
             throw new Error(`Not enough stock for ${formItem.name}. Available: ${currentStockData.quantity}, Requested: ${formItem.quantity}.`);
           }
-          
-          const pricePerUnit = currentStockData.price; 
+
+          const pricePerUnit = currentStockData.price;
           soldItemsForTransaction.push({
             itemId: formItem.itemId,
             name: formItem.name,
@@ -204,45 +203,32 @@ export default function RecordSaleForm() {
           });
           calculatedTotalAmount += formItem.quantity * pricePerUnit;
 
-          stockUpdatesAndLogs.push({
-            ref: stockItemSnap.ref,
-            newQuantity: currentStockData.quantity - formItem.quantity,
-            log: {
-              type: 'SALE_FROM_STALL',
-              quantityChange: -formItem.quantity,
-              quantityBefore: currentStockData.quantity,
-              quantityAfter: currentStockData.quantity - formItem.quantity,
-              notes: `Sale ID: ${saleTransactionId}`,
-            },
-            originalData: currentStockData,
+          transaction.update(stockItemSnap.ref, {
+            quantity: currentStockData.quantity - formItem.quantity,
+            lastUpdated: Timestamp.now().toDate().toISOString()
           });
-          
+          console.log(`${LOG_PREFIX} Updated stock for item ${currentStockData.id} from ${currentStockData.quantity} to ${currentStockData.quantity - formItem.quantity}.`);
+
           if (currentStockData.originalMasterItemId) {
             const masterStockRef = doc(db, "stockItems", currentStockData.originalMasterItemId);
-            const masterStockSnap = await transaction.get(masterStockRef); 
+            console.log(`${LOG_PREFIX} Item ${currentStockData.id} linked to master ${currentStockData.originalMasterItemId}. Fetching master...`);
+            const masterStockSnap = await transaction.get(masterStockRef);
             if (masterStockSnap.exists()) {
               const masterItemData = { id: masterStockSnap.id, ...masterStockSnap.data() } as StockItem;
-              masterStockUpdatesAndLogs.push({
-                ref: masterStockRef,
-                newQuantity: Math.max(0, masterItemData.quantity - formItem.quantity),
-                log: {
-                  type: 'SALE_AFFECTS_MASTER',
-                  quantityChange: -formItem.quantity,
-                  quantityBefore: masterItemData.quantity,
-                  quantityAfter: Math.max(0, masterItemData.quantity - formItem.quantity),
-                  notes: `Sale ID: ${saleTransactionId} from stall item ${currentStockData.id}`,
-                  linkedStockItemId: currentStockData.id,
-                },
-                originalData: masterItemData,
+              const newMasterQuantity = Math.max(0, masterItemData.quantity - formItem.quantity);
+              transaction.update(masterStockRef, {
+                quantity: newMasterQuantity,
+                lastUpdated: Timestamp.now().toDate().toISOString()
               });
+              console.log(`${LOG_PREFIX} Updated master stock ${masterItemData.id} from ${masterItemData.quantity} to ${newMasterQuantity}.`);
             } else {
-              console.warn(`Master stock item ${currentStockData.originalMasterItemId} not found for sale of stall item ${currentStockData.id}.`);
+              console.warn(`${LOG_PREFIX} Master stock item ${currentStockData.originalMasterItemId} not found for sale of stall item ${currentStockData.id}. Master stock not adjusted.`);
             }
           }
         }
-        
+
         if (Math.abs(calculatedTotalAmount - totalSaleAmount) > 0.001) {
-             console.warn(`Frontend total ${totalSaleAmount} differs from backend calculated total ${calculatedTotalAmount}. Using backend total.`);
+             console.warn(`${LOG_PREFIX} Frontend total ${totalSaleAmount} differs from backend calculated total ${calculatedTotalAmount}. Using backend total.`);
         }
 
         const salesDocRef = doc(db, "salesTransactions", saleTransactionId);
@@ -252,30 +238,21 @@ export default function RecordSaleForm() {
           transactionDate: Timestamp.now(),
           staffId: user.uid,
           staffName: user.displayName || user.email,
-          siteId: activeSiteId, 
-          stallId: activeStallId, 
+          siteId: activeSiteId,
+          stallId: activeStallId,
           isDeleted: false,
         });
-
-        stockUpdatesAndLogs.forEach(update => {
-          transaction.update(update.ref, { 
-            quantity: update.newQuantity,
-            lastUpdated: Timestamp.now().toDate().toISOString() 
-          });
-        });
-
-        masterStockUpdatesAndLogs.forEach(update => {
-          transaction.update(update.ref, {
-            quantity: update.newQuantity,
-            lastUpdated: Timestamp.now().toDate().toISOString()
-          });
-        });
+        console.log(`${LOG_PREFIX} Sale document ${saleTransactionId} created in transaction.`);
       });
+      console.log(`${LOG_PREFIX} Firestore transaction for sale ${saleTransactionId} committed successfully.`);
 
-      const stockItemsProcessedForLogging = new Set<string>();
+      // Logging stock movements after successful transaction
       for (const formItem of values.items) {
-          const soldStallItem = availableItems.find(i => i.id === formItem.itemId); 
-          if (soldStallItem && !stockItemsProcessedForLogging.has(soldStallItem.id)) {
+          const soldStallItem = availableItems.find(i => i.id === formItem.itemId);
+          if (soldStallItem) {
+              // Original quantity before this sale would be current (just updated) quantity + sold quantity
+              const originalStallQuantity = (soldStallItem.quantity - formItem.quantity) + formItem.quantity;
+
               await logStockMovement(user, {
                   stockItemId: soldStallItem.id,
                   siteId: soldStallItem.siteId!,
@@ -283,63 +260,69 @@ export default function RecordSaleForm() {
                   masterStockItemIdForContext: soldStallItem.originalMasterItemId,
                   type: 'SALE_FROM_STALL',
                   quantityChange: -formItem.quantity,
-                  quantityBefore: soldStallItem.quantity, 
-                  quantityAfter: soldStallItem.quantity - formItem.quantity,
+                  quantityBefore: originalStallQuantity,
+                  quantityAfter: soldStallItem.quantity - formItem.quantity, // This is the new quantity after this sale if we refetch, or more simply (original - sold)
                   notes: `Sale ID: ${saleTransactionId}`,
                   relatedTransactionId: saleTransactionId,
               });
-              stockItemsProcessedForLogging.add(soldStallItem.id);
 
               if (soldStallItem.originalMasterItemId) {
                    const masterItemDoc = await getDoc(doc(db, "stockItems", soldStallItem.originalMasterItemId));
                    if(masterItemDoc.exists()){
                        const masterItemData = masterItemDoc.data() as StockItem;
+                       const originalMasterQuantity = masterItemData.quantity + formItem.quantity; // Before this specific sale impact
                         await logStockMovement(user, {
                             stockItemId: soldStallItem.originalMasterItemId,
                             siteId: masterItemData.siteId!,
-                            stallId: null, 
+                            stallId: null,
                             type: 'SALE_AFFECTS_MASTER',
                             quantityChange: -formItem.quantity,
-                            quantityBefore: masterItemData.quantity + formItem.quantity, 
-                            quantityAfter: masterItemData.quantity, 
+                            quantityBefore: originalMasterQuantity,
+                            quantityAfter: masterItemData.quantity,
                             notes: `Linked to sale of stall item ${soldStallItem.name} (ID: ${soldStallItem.id}), Sale ID: ${saleTransactionId}`,
                             relatedTransactionId: saleTransactionId,
                             linkedStockItemId: soldStallItem.id,
                         });
+                   } else {
+                       console.warn(`${LOG_PREFIX} Master item ${soldStallItem.originalMasterItemId} not found for logging after sale.`);
                    }
               }
+          } else {
+            console.warn(`${LOG_PREFIX} Could not find item ${formItem.itemId} in 'availableItems' for post-sale logging. This might indicate a rapid stock update or an issue.`);
           }
       }
 
       toast({
         title: "Sale Recorded Successfully!",
-        description: `Total: ₹${totalSaleAmount.toFixed(2)}. Stock levels updated.`,
+        description: `Total: ₹${totalSaleAmount.toFixed(2)}. Stock levels updated. Sale ID: ${saleTransactionId.substring(0,8)}...`,
       });
       form.reset({ items: [{ itemId: "", quantity: 1, pricePerUnit: 0, name: "" }] });
 
     } catch (error: any) {
-      console.error("Error recording sale transaction:", error);
+      console.error(`${LOG_PREFIX} Error recording sale transaction (ID: ${saleTransactionId}):`, error.message, error.stack);
       toast({
         title: "Sale Recording Failed",
-        description: error.message || "An unexpected error occurred. The sale was not recorded, and stock levels were not changed.",
+        description: error.message || "An unexpected error occurred. The sale was not recorded, and stock levels were not changed. Please check item availability and try again.",
         variant: "destructive",
+        duration: 7000,
       });
     } finally {
       setIsSubmitting(false);
     }
   }
-  
+
   const handleItemChange = (value: string, index: number) => {
     const selectedItem = availableItems.find(ai => ai.id === value);
+    console.log(`${LOG_PREFIX} handleItemChange. Index: ${index}, Selected item ID: ${value}, Found item:`, selectedItem);
     if (selectedItem) {
       const price = selectedItem.price;
-      update(index, { 
-        ...watchedItems[index], 
-        itemId: selectedItem.id, 
+      update(index, {
+        ...watchedItems[index],
+        itemId: selectedItem.id,
         name: selectedItem.name,
-        pricePerUnit: price 
+        pricePerUnit: price
       });
-    } else { 
+    } else {
         update(index, {
             ...watchedItems[index],
             itemId: "",
@@ -350,39 +333,31 @@ export default function RecordSaleForm() {
   };
 
   if (!user) {
-    // This case should ideally be handled by the AppLayout redirecting to /login
     return (
         <div className="flex justify-center items-center py-10">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <p className="ml-2">Loading user data...</p>
+            <p className="ml-2">Authenticating user...</p>
         </div>
     );
   }
 
-  if (!activeSiteId || !activeStallId) { 
-    if (user.role === 'admin') {
-        return (
-          <Alert variant="default" className="max-w-2xl mx-auto shadow-lg border-primary/50">
-            <Info className="h-4 w-4" />
-            <AlertTitle>Admin: Site & Specific Stall Context Required</AlertTitle>
-            <AlertDescription>
-              Please select an active Site AND a specific Stall from the dropdowns in the header bar to record a sale. Sales cannot be made from "Master Stock" or "All Stalls" views directly.
-            </AlertDescription>
-          </Alert>
-        );
-    } else { // Staff or Manager
-        return (
-          <Alert variant="default" className="max-w-2xl mx-auto shadow-lg border-primary/50">
-            <Info className="h-4 w-4" />
-            <AlertTitle>Default Site & Stall Required</AlertTitle>
-            <AlertDescription>
-              To record a sale, you need a default site and stall assigned to your profile.
-              Please go to your <Link href="/profile" className="text-primary hover:underline font-medium">Profile Page</Link> to set your default operational context.
-              If defaults are set, ensure they are valid and that stock items exist for that stall.
-            </AlertDescription>
-          </Alert>
-        );
-    }
+  if (!activeSiteId || !activeStallId) {
+    const message = user.role === 'admin'
+      ? "Admin: Please select an active Site AND a specific Stall from the dropdowns in the header bar to record a sale. Sales cannot be made from \"Master Stock\" or \"All Stalls\" views directly."
+      : "To record a sale, you need a default site and stall assigned to your profile and selected. Please go to your Profile Page to set your default operational context. If defaults are set, ensure they are valid and that stock items exist for that stall.";
+    const linkMessage = user.role !== 'admin' ? <Link href="/profile" className="text-primary hover:underline font-medium">Profile Page</Link> : null;
+
+    return (
+      <Alert variant="default" className="max-w-2xl mx-auto shadow-lg border-primary/50">
+        <Info className="h-4 w-4" />
+        <AlertTitle>Site & Stall Context Required</AlertTitle>
+        <AlertDescription>
+          {message.split("Profile Page")[0]}
+          {linkMessage}
+          {message.split("Profile Page")[1] || ""}
+        </AlertDescription>
+      </Alert>
+    );
   }
 
   if (loadingItems) {
@@ -422,11 +397,11 @@ export default function RecordSaleForm() {
                   render={({ field: formField }) => (
                     <FormItem className="flex-1">
                       <FormLabel>Item</FormLabel>
-                      <Select 
+                      <Select
                         onValueChange={(value) => {
                           formField.onChange(value);
                           handleItemChange(value, index);
-                        }} 
+                        }}
                         defaultValue={formField.value}
                         disabled={isSubmitting || availableItems.length === 0}
                       >
@@ -457,18 +432,18 @@ export default function RecordSaleForm() {
                       <FormItem className="w-24">
                         <FormLabel>Quantity</FormLabel>
                         <FormControl>
-                          <Input 
-                            type="number" 
-                            placeholder="Qty" 
-                            {...formField} 
-                            className="bg-input" 
+                          <Input
+                            type="number"
+                            placeholder="Qty"
+                            {...formField}
+                            className="bg-input"
                             min="1"
-                            max={maxQuantity?.toString()} 
+                            max={maxQuantity?.toString()}
                             disabled={isSubmitting || !watchedItems[index]?.itemId || availableItems.length === 0}
                             onChange={(e) => {
                                 let val = parseInt(e.target.value, 10);
                                 if (maxQuantity !== undefined && val > maxQuantity) val = maxQuantity;
-                                if (val < 1 && e.target.value !== "") val = 1; 
+                                if (val < 1 && e.target.value !== "") val = 1;
                                 formField.onChange(isNaN(val) ? "" : val);
                             }}
                           />
@@ -485,13 +460,13 @@ export default function RecordSaleForm() {
                     <FormItem className="w-28">
                       <FormLabel>Price/Unit (₹)</FormLabel>
                       <FormControl>
-                        <Input 
-                            type="number" 
-                            placeholder="Price" 
-                            {...formField} 
-                            className="bg-input text-muted-foreground" 
-                            readOnly 
-                            disabled 
+                        <Input
+                            type="number"
+                            placeholder="Price"
+                            {...formField}
+                            className="bg-input text-muted-foreground"
+                            readOnly
+                            disabled
                         />
                       </FormControl>
                       <FormMessage />
@@ -527,11 +502,11 @@ export default function RecordSaleForm() {
             </div>
           </CardContent>
           <CardFooter>
-            <Button 
-              type="submit" 
-              className="w-full" 
-              size="lg" 
-              disabled={isSubmitting || loadingItems || fields.some(f => !f.itemId || !f.quantity || f.quantity <=0 || f.pricePerUnit <= 0 ) || availableItems.length === 0}
+            <Button
+              type="submit"
+              className="w-full"
+              size="lg"
+              disabled={isSubmitting || loadingItems || fields.some(f => !f.itemId || !f.quantity || f.quantity <=0 || f.pricePerUnit < 0 ) || availableItems.length === 0}
             >
               {isSubmitting ? <Loader2 className="animate-spin mr-2" /> : null}
               Record Sale
@@ -542,6 +517,5 @@ export default function RecordSaleForm() {
     </Card>
   );
 }
-
 
     

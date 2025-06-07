@@ -39,6 +39,8 @@ import { useToast } from '@/hooks/use-toast';
 import { getAuth, type User as FirebaseUser } from 'firebase/auth';
 import { getApp } from 'firebase/app';
 
+const LOG_PREFIX = "[CreateUserDialog]";
+
 const createUserFormSchema = z.object({
   email: z.string().email({ message: "Invalid email address." }),
   password: z.string().min(6, { message: "Password must be at least 6 characters." }),
@@ -69,8 +71,8 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const { toast } = useToast();
-  const { user: adminAppUser, loading: adminAuthLoading } = useAuth(); // This is our AppUser type
-  const auth = getAuth(getApp()); // Get the Firebase Auth instance
+  const { user: adminAppUser, loading: adminAuthLoading } = useAuth();
+  const auth = getAuth(getApp());
 
   const form = useForm<CreateUserFormValues>({
     resolver: zodResolver(createUserFormSchema),
@@ -90,44 +92,54 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
   const selectedDefaultSiteId = form.watch("defaultSiteId");
 
   useEffect(() => {
+    console.log(`${LOG_PREFIX} useEffect for site/stall dependency. Role: ${selectedRole}, SiteID: ${selectedDefaultSiteId}`);
     let newStallsForSite: Stall[] = [];
     if (selectedRole === 'staff' && selectedDefaultSiteId) {
       newStallsForSite = stalls.filter(s => s.siteId === selectedDefaultSiteId);
       setStallsForSelectedSite(newStallsForSite);
+      console.log(`${LOG_PREFIX} Staff role, site ${selectedDefaultSiteId} selected. Stalls for site: ${newStallsForSite.length}`);
 
       const currentDefaultStallId = form.getValues("defaultStallId");
       if (currentDefaultStallId && !newStallsForSite.find(s => s.id === currentDefaultStallId)) {
-          form.setValue('defaultStallId', null); // Clear stall if not valid for new site
+          console.log(`${LOG_PREFIX} Current stall ${currentDefaultStallId} not valid for new site. Clearing stall.`);
+          form.setValue('defaultStallId', null);
       }
     } else {
       setStallsForSelectedSite([]);
-      if (selectedRole === 'staff') { // Also clear stall if site is deselected for staff
+      if (selectedRole === 'staff') {
+        console.log(`${LOG_PREFIX} Staff role, no site selected or role changed. Clearing stall selection.`);
         form.setValue('defaultStallId', null);
       }
     }
 
     if (selectedRole !== 'staff') {
+        console.log(`${LOG_PREFIX} Role is not staff. Clearing default site/stall.`);
         form.setValue('defaultSiteId', null);
         form.setValue('defaultStallId', null);
     }
      if (selectedRole !== 'manager') {
+        console.log(`${LOG_PREFIX} Role is not manager. Clearing managed sites.`);
         form.setValue('managedSiteIds', []);
     }
   }, [selectedRole, selectedDefaultSiteId, stalls, form]);
 
   const handleSubmit = async (values: CreateUserFormValues) => {
+    console.log(`${LOG_PREFIX} handleSubmit called. Values:`, { ...values, password: '***', confirmPassword: '***' });
     setIsSubmitting(true);
 
-    const currentFirebaseUser: FirebaseUser | null = auth.currentUser; 
+    const currentFirebaseUser: FirebaseUser | null = auth.currentUser;
 
     if (!adminAppUser || adminAuthLoading || !currentFirebaseUser) {
-        toast({ title: "Error", description: "Admin user not loaded or not authenticated. Please try again.", variant: "destructive" });
+        console.warn(`${LOG_PREFIX} Admin user not loaded or Firebase user not available. AdminAppUser: ${!!adminAppUser}, AdminAuthLoading: ${adminAuthLoading}, CurrentFirebaseUser: ${!!currentFirebaseUser}`);
+        toast({ title: "Authentication Error", description: "Admin user not properly authenticated. Please re-login and try again.", variant: "destructive" });
         setIsSubmitting(false);
         return;
     }
 
     try {
+      console.log(`${LOG_PREFIX} Attempting to get ID token for admin user: ${currentFirebaseUser.uid}`);
       const idToken = await currentFirebaseUser.getIdToken(true); // Force refresh token
+      console.log(`${LOG_PREFIX} ID token obtained. Calling /api/admin/create-user...`);
 
       const response = await fetch('/api/admin/create-user', {
         method: 'POST',
@@ -143,26 +155,22 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
       });
 
       const result = await response.json();
+      console.log(`${LOG_PREFIX} /api/admin/create-user response status: ${response.status}, body:`, result);
 
       if (!response.ok) {
-        let apiErrorMsg = `Failed to create auth user via API. Status: ${response.status}.`;
-        if (result.error) {
-          apiErrorMsg += ` Message: ${result.error}`;
-        }
-        if (result.details) {
-          apiErrorMsg += ` Details: ${result.details}`;
-        }
-        if (result.code) {
-          apiErrorMsg += ` Code: ${result.code}`;
-        }
-        console.error("API Error Response:", result);
+        let apiErrorMsg = `API Error: ${result.error || `Failed to create auth user (Status: ${response.status})`}.`;
+        if (result.details) apiErrorMsg += ` Details: ${result.details}.`;
+        if (result.code) apiErrorMsg += ` Code: ${result.code}.`;
+        console.error(`${LOG_PREFIX} API call failed:`, apiErrorMsg);
         throw new Error(apiErrorMsg);
       }
-      
+
       const authData = result as { uid: string; email: string; displayName: string };
       if (!authData.uid) {
+        console.error(`${LOG_PREFIX} API response OK, but UID missing from authData.`);
         throw new Error("API did not return a UID for the created auth user.");
       }
+      console.log(`${LOG_PREFIX} Auth user created via API. UID: ${authData.uid}. Proceeding to create Firestore doc.`);
 
       const firestoreUserData: Omit<AppUser, 'createdAt' | 'uid'> = {
         email: authData.email,
@@ -170,7 +178,7 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
         role: values.role as UserRole,
         defaultSiteId: values.role === 'staff' ? (values.defaultSiteId ?? null) : null,
         defaultStallId: values.role === 'staff' && values.defaultSiteId ? (values.defaultStallId ?? null) : null,
-        managedSiteIds: values.role === 'manager' ? (values.managedSiteIds ?? null) : null,
+        managedSiteIds: values.role === 'manager' ? (values.managedSiteIds ?? []) : null, // Ensure it's an array or null
         defaultItemSearchTerm: null,
         defaultItemCategoryFilter: null,
         defaultItemStockStatusFilter: null,
@@ -181,20 +189,22 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
       };
 
       const firestoreSuccess = await onCreateUserFirestoreDoc(authData.uid, firestoreUserData);
-      
+
       if (firestoreSuccess) {
-        toast({ title: "User Created Successfully", description: `User ${authData.email} created and Firestore document saved.`});
+        console.log(`${LOG_PREFIX} User ${authData.email} (UID: ${authData.uid}) created successfully (Auth + Firestore).`);
+        toast({ title: "User Created Successfully", description: `User ${authData.email} created.`});
         form.reset();
         onClose();
       } else {
-         toast({ title: "Auth User Created, Firestore Failed", description: `User ${authData.email} created in Auth, but Firestore document creation failed. Please check user list and try again or manually create the Firestore doc.`, variant: "destructive", duration: 10000 });
+         console.error(`${LOG_PREFIX} Auth user ${authData.email} created, but Firestore doc creation FAILED.`);
+         toast({ title: "Auth User Created, Firestore Failed", description: `User ${authData.email} was created in Authentication, but failed to save to user database. Please check the user list or server logs and try creating the Firestore document manually if needed.`, variant: "destructive", duration: 15000 });
       }
 
     } catch (error: any) {
-      console.error("Error creating user (API call or Firestore doc):", error);
+      console.error(`${LOG_PREFIX} Error during user creation process:`, error.message, error.stack);
       toast({
         title: "User Creation Failed",
-        description: error.message || "An unexpected error occurred.",
+        description: error.message || "An unexpected error occurred. Please check the console for more details.",
         variant: "destructive",
         duration: 10000,
       });

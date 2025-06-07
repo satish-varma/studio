@@ -14,26 +14,28 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea"; // Import Textarea
-import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription as UiCardDescription } from "@/components/ui/card"; // Aliased CardDescription
+import { Textarea } from "@/components/ui/textarea";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription as UiCardDescription } from "@/components/ui/card";
 import { stockItemSchema, type StockItemFormValues } from "@/types/item";
-import { Loader2, Save, Info, Sparkles } from "lucide-react"; // Added Sparkles
+import { Loader2, Save, Info, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
 import { getFirestore, doc, setDoc, addDoc, collection, getDoc } from "firebase/firestore";
-import { firebaseConfig } from "@/lib/firebaseConfig";
+import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp } from "firebase/app";
 import type { StockItem } from "@/types";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { logStockMovement } from "@/lib/stockLogger";
-import { generateItemDescription } from "@/ai/flows/generate-item-description-flow"; // Import the Genkit flow
+import { generateItemDescription } from "@/ai/flows/generate-item-description-flow";
+
+const LOG_PREFIX = "[ItemForm]";
 
 if (!getApps().length) {
   try {
     initializeApp(firebaseConfig);
   } catch (error) {
-    console.error("Firebase initialization error in ItemForm:", error);
+    console.error(`${LOG_PREFIX} Firebase initialization error:`, error);
   }
 }
 const db = getFirestore();
@@ -41,8 +43,8 @@ const db = getFirestore();
 interface ItemFormProps {
   initialData?: StockItem | null;
   itemId?: string | null;
-  sitesMap?: Record<string, string>; // Optional, for displaying names
-  stallsMap?: Record<string, string>; // Optional, for displaying names
+  sitesMap?: Record<string, string>;
+  stallsMap?: Record<string, string>;
 }
 
 export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap = {} }: ItemFormProps) {
@@ -59,7 +61,7 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
     defaultValues: initialData ? {
       name: initialData.name,
       category: initialData.category,
-      description: initialData.description || "", // Initialize description
+      description: initialData.description || "",
       quantity: initialData.quantity,
       unit: initialData.unit,
       price: initialData.price,
@@ -69,7 +71,7 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
     } : {
       name: "",
       category: "",
-      description: "", // Initialize description
+      description: "",
       quantity: 0,
       unit: "pcs",
       price: 0.00,
@@ -90,7 +92,7 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
           message += ` (Linked to Master ID: ${initialData.originalMasterItemId.substring(0,6)}...)`;
         }
       } else {
-        message += "Uncategorized Item";
+        message += "Uncategorized Item (no site/stall context)";
       }
       setItemStatusMessage(message);
     } else if (!isEditMode) {
@@ -107,6 +109,7 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
   const handleGenerateDescription = async () => {
     const itemName = form.getValues("name");
     const itemCategory = form.getValues("category");
+    console.log(`${LOG_PREFIX} handleGenerateDescription called. Item: ${itemName}, Category: ${itemCategory}`);
 
     if (!itemName || !itemCategory) {
       toast({
@@ -124,8 +127,9 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
         title: "Description Generated!",
         description: "The AI has suggested a description for your item.",
       });
+      console.log(`${LOG_PREFIX} AI description generated successfully for ${itemName}.`);
     } catch (error: any) {
-      console.error("Error generating item description:", error);
+      console.error(`${LOG_PREFIX} Error generating item description for ${itemName}:`, error);
       toast({
         title: "Generation Failed",
         description: error.message || "Could not generate description. Please try again.",
@@ -137,15 +141,17 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
   };
 
   async function onSubmit(values: StockItemFormValues) {
+    console.log(`${LOG_PREFIX} onSubmit called. Mode: ${isEditMode ? 'Edit' : 'Create'}. Values:`, values);
     if (!user) {
-      toast({ title: "Error", description: "User not authenticated.", variant: "destructive" });
+      console.warn(`${LOG_PREFIX} User not authenticated. Submission aborted.`);
+      toast({ title: "Error", description: "User not authenticated. Please log in.", variant: "destructive" });
       return;
     }
     setIsSubmitting(true);
     try {
       const newQuantity = Number(values.quantity);
       const baseItemData = {
-        ...values, // Includes description now
+        ...values,
         price: Number(values.price),
         costPrice: values.costPrice !== undefined ? Number(values.costPrice) : null,
         quantity: newQuantity,
@@ -154,17 +160,17 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
       };
 
       if (isEditMode && itemId && initialData) {
+        console.log(`${LOG_PREFIX} Updating item ID: ${itemId}`);
         const itemRef = doc(db, "stockItems", itemId);
-        // siteId, stallId, and originalMasterItemId are not directly editable by form but retained
-        const dataToSet = {
-            ...baseItemData, // Contains all form fields including description
+        const dataToSet: Omit<StockItem, 'id'> = {
+            ...baseItemData,
             siteId: initialData.siteId,
             stallId: initialData.stallId,
             originalMasterItemId: initialData.originalMasterItemId ?? null,
         };
-        // No need to destructure siteId/stallId from baseItemData as they are not in StockItemFormValues schema directly for form input
 
         await setDoc(itemRef, dataToSet, { merge: true });
+        console.log(`${LOG_PREFIX} Item ${itemId} updated successfully in Firestore.`);
 
         const oldQuantity = initialData.quantity;
         const quantityChange = newQuantity - oldQuantity;
@@ -173,7 +179,7 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
           await logStockMovement(user, {
             stockItemId: itemId,
             masterStockItemIdForContext: initialData.originalMasterItemId ?? undefined,
-            siteId: initialData.siteId!, 
+            siteId: initialData.siteId!,
             stallId: initialData.stallId,
             type: initialData.stallId ? 'DIRECT_STALL_UPDATE' : 'DIRECT_MASTER_UPDATE',
             quantityChange: quantityChange,
@@ -189,18 +195,20 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
         });
       } else {
         if (!activeSiteId) {
+          console.warn(`${LOG_PREFIX} Site context missing for new item. ActiveSiteId: ${activeSiteId}`);
           toast({ title: "Site Context Missing", description: "Please select an active site from the header to add an item.", variant: "destructive" });
           setIsSubmitting(false);
           return;
         }
+        console.log(`${LOG_PREFIX} Creating new item. ActiveSiteId: ${activeSiteId}, ActiveStallId: ${activeStallId}`);
         const itemDataToSave: Omit<StockItem, 'id'> = {
           ...baseItemData,
           siteId: activeSiteId,
-          stallId: activeStallId, 
-          originalMasterItemId: null, 
-          lastUpdated: baseItemData.lastUpdated, 
+          stallId: activeStallId,
+          originalMasterItemId: null,
         };
         const newItemRef = await addDoc(collection(db, "stockItems"), itemDataToSave);
+        console.log(`${LOG_PREFIX} New item created with ID: ${newItemRef.id}`);
 
         await logStockMovement(user, {
           stockItemId: newItemRef.id,
@@ -221,7 +229,7 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
       router.push("/items");
       router.refresh();
     } catch (error: any) {
-      console.error("Error saving item:", error);
+      console.error(`${LOG_PREFIX} Error saving item:`, error.message, error.stack);
       toast({
         title: isEditMode ? "Update Failed" : "Add Failed",
         description: error.message || "An unexpected error occurred. Please try again.",
@@ -236,7 +244,7 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
     <Card className="w-full max-w-2xl mx-auto shadow-xl">
       <CardHeader>
         <CardTitle className="text-2xl">
-          {isEditMode ? `Edit: ${initialData?.name}` : "Add New Stock Item"}
+          {isEditMode ? `Edit: ${initialData?.name ?? "Item"}` : "Add New Stock Item"}
         </CardTitle>
         {itemStatusMessage && (
             <UiCardDescription className="text-sm text-muted-foreground pt-1 flex items-center">
@@ -281,11 +289,11 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
                 <FormItem>
                   <div className="flex items-center justify-between">
                     <FormLabel>Description (Optional)</FormLabel>
-                    <Button 
-                      type="button" 
-                      variant="ghost" 
-                      size="sm" 
-                      onClick={handleGenerateDescription} 
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleGenerateDescription}
                       disabled={isGeneratingDesc || isSubmitting || !form.watch("name") || !form.watch("category")}
                       className="text-xs text-accent hover:text-accent/80"
                     >
@@ -294,10 +302,10 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
                     </Button>
                   </div>
                   <FormControl>
-                    <Textarea 
-                      placeholder="e.g., Crisp and juicy red apples, perfect for snacking." 
-                      {...field} 
-                      disabled={isSubmitting || isGeneratingDesc} 
+                    <Textarea
+                      placeholder="e.g., Crisp and juicy red apples, perfect for snacking."
+                      {...field}
+                      disabled={isSubmitting || isGeneratingDesc}
                       className="bg-input min-h-[80px]"
                       value={field.value || ""}
                     />
@@ -384,7 +392,7 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
                 <FormItem>
                   <FormLabel>Image URL (Optional)</FormLabel>
                   <FormControl>
-                    <Input type="url" placeholder="https://example.com/image.png" {...field} disabled={isSubmitting} className="bg-input"/>
+                    <Input type="url" placeholder="https://example.com/image.png" {...field} value={field.value ?? ""} disabled={isSubmitting} className="bg-input"/>
                   </FormControl>
                   <FormDescription>Enter the full URL of the item image.</FormDescription>
                   <FormMessage />
@@ -410,3 +418,5 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
     </Card>
   );
 }
+
+    
