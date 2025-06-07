@@ -47,6 +47,7 @@ export function SalesHistoryControls({
               "w-full sm:w-[260px] justify-start text-left font-normal bg-input",
               !dateRange && "text-muted-foreground"
             )}
+            data-testid="date-range-picker-button"
           >
             <CalendarIcon className="mr-2 h-4 w-4" />
             {dateRange?.from ? (
@@ -72,17 +73,25 @@ export function SalesHistoryControls({
             onSelect={onDateRangeChange}
             numberOfMonths={2}
             disabled={(date) => date > new Date() || date < new Date("2000-01-01")}
+            data-testid="sales-history-calendar"
           />
         </PopoverContent>
       </Popover>
 
       {showStaffFilter && (
-         <Select value={staffFilter} onValueChange={onStaffFilterChange} disabled={isLoadingStaff}>
-            <SelectTrigger className="w-full sm:w-[200px] bg-input">
+         <Select 
+            value={staffFilter} 
+            onValueChange={onStaffFilterChange} 
+            disabled={isLoadingStaff}
+          >
+            <SelectTrigger 
+              className="w-full sm:w-[200px] bg-input" 
+              data-testid="staff-filter-select-trigger"
+            >
                 <Users className="mr-2 h-4 w-4 text-muted-foreground" />
                 <SelectValue placeholder={isLoadingStaff ? "Loading staff..." : "Filter by staff"} />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent data-testid="staff-filter-select-content">
                 <SelectItem value="all">All Staff</SelectItem>
                 {staffMembers
                   .filter(staff => staff.uid && staff.uid.trim() !== "") // Filter out staff with empty UIDs
