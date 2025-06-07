@@ -1,61 +1,129 @@
 
-# Firebase Studio
+# StallSync - Stock & Sales Management
 
-This is a NextJS starter in Firebase Studio.
+StallSync is a comprehensive stock and sales management application designed for businesses operating multiple sites and stalls (e.g., retail counters, market stands, storage areas). It empowers users to efficiently track inventory, record sales transactions, manage staff roles and assignments, and gain valuable insights into their business operations through detailed reporting.
 
-To get started, take a look at src/app/page.tsx.
+The application features role-based access control (Admin, Manager, Staff) to ensure appropriate data access and functionality for different user types. It also leverages AI for features like product description generation and sales trend summarization.
 
+**For detailed technical documentation, setup instructions, feature explanations, and user journeys, please see [DOCUMENTATION.md](DOCUMENTATION.md).**
 
-You're on the right track! Your Next.js application is the "web app" that you'll register with your Firebase project. This registration process in the Firebase console is what gives you the specific configuration details (apiKey, authDomain, etc.) that your Next.js app needs to connect to your Firebase backend services.
+## Key Technologies
 
-The good news is that your project already has the necessary Firebase SDKs included (as seen in package.json) and the initialization logic is already present in src/contexts/AuthContext.tsx.
+*   **Frontend:** Next.js (App Router), React, TypeScript
+*   **UI:** ShadCN UI Components, Tailwind CSS
+*   **State Management:** React Context API
+*   **Backend & Database:** Firebase (Authentication, Firestore, Cloud Functions)
+*   **AI Integration:** Genkit (with Google AI/Gemini models)
 
-The main step for you is to:
+## Core Features
 
-Go to the Firebase Console (console.firebase.google.com).
-Select your Firebase project (or create one if you haven't).
-Go to Project settings (click the gear icon ⚙️ near "Project Overview").
-In the "General" tab, scroll down to the "Your apps" section.
-Click on "Add app" and select the Web icon (</>).
-Give your app a nickname (e.g., "StallSync Web App") and click "Register app".
-Firebase will then display an object called firebaseConfig containing your apiKey, authDomain, projectId, etc. These are the values you need.
-Once you have these values:
+*   Role-Based Authentication (Admin, Manager, Staff)
+*   Comprehensive Dashboard with KPIs and Quick Actions
+*   Multi-Site and Multi-Stall Inventory Management
+    *   Master Stock & Stall-Specific Stock Tracking
+    *   Allocations, Transfers, and Returns between Master/Stall
+*   Sales Recording and Detailed History
+*   User Management (Admin-controlled)
+*   Site and Stall Creation/Management (Admin-controlled)
+*   Stock Movement Activity Logging
+*   Sales & Inventory Reporting with AI Summaries
+*   Profile Management with User Preferences
+*   Data Export (CSV)
+*   Google Sheets Integration (Import/Export stock & sales)
+*   AI-Powered Product Description Generation
 
-Copy them into your .env.local file at the root of your project, making sure to prefix each key with NEXT_PUBLIC_ (for Firebase client SDK) or without (for backend/server-side use like Google OAuth credentials). For example:
+## Getting Started
 
+### Prerequisites
+
+*   Node.js (v18 or later recommended)
+*   npm or yarn
+*   Firebase CLI (`npm install -g firebase-tools`)
+*   A Firebase Project (set up as described in [DOCUMENTATION.md](DOCUMENTATION.md))
+
+### 1. Clone the Repository
+
+```bash
+git clone <repository-url>
+cd stallsync-project # Or your project directory name
 ```
-# .env.local
 
-# Firebase Client SDK Configuration (used by Next.js frontend)
-NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSyC...
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your-project-id.firebaseapp.com
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=your-project-id
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your-project-id.appspot.com
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=1234567890
-NEXT_PUBLIC_FIREBASE_APP_ID=1:1234567890:web:abcd1234efgh
-# NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=G-ABCDEF1234 (Optional, for Google Analytics)
+### 2. Environment Variables
 
-# Google OAuth Credentials (used by backend API routes/Firebase Functions for Sheets API)
-# These should NOT be prefixed with NEXT_PUBLIC_ as they are sensitive server-side credentials.
-GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=your-google-client-secret
-# This is the URL Google redirects to after user authorization.
-# It must be registered in your Google Cloud Console OAuth Client settings.
-# Example for local dev: http://localhost:9002/api/auth/google/callback
-# Example for prod: https://your-app-domain.com/api/auth/google/callback
-GOOGLE_REDIRECT_URI=your-configured-redirect-uri
+Create a `.env.local` file in the root of your project. This file is crucial for connecting to your Firebase project and other services.
+**Refer to the "Environment Variables (.env.local)" section in [DOCUMENTATION.md](DOCUMENTATION.md) for a complete list of required variables and how to obtain them.**
+
+_Example `.env.local` structure:_
+```env
+# Firebase Client SDK Configuration
+NEXT_PUBLIC_FIREBASE_API_KEY=YOUR_FIREBASE_API_KEY
+# ... other Firebase client vars
+
+# Firebase Admin SDK Configuration (if applicable, see docs)
+# GOOGLE_APPLICATION_CREDENTIALS_JSON='{...}' # Or use GOOGLE_APPLICATION_CREDENTIALS path
+
+# Google OAuth Credentials (for Google Sheets)
+GOOGLE_CLIENT_ID=YOUR_GOOGLE_CLIENT_ID
+# ... other Google OAuth vars
+
+# Genkit/Google AI (if applicable)
+# GEMINI_API_KEY=YOUR_GEMINI_API_KEY
+```
+**Ensure `.env.local` is added to your `.gitignore` file.**
+
+### 3. Firebase Project Setup
+
+Follow the detailed steps in the **"Firebase Project Setup"** section of [DOCUMENTATION.md](DOCUMENTATION.md). This includes:
+*   Creating a Firebase project.
+*   Registering your Web App.
+*   Enabling Firebase Authentication (Email/Password).
+*   Setting up Firestore Database and configuring Security Rules (`firestore.rules`) and Indexes (`firestore.indexes.json`).
+*   Enabling Cloud Functions.
+
+### 4. Install Dependencies
+
+```bash
+npm install
+# or
+yarn install
 ```
 
-The file `src/lib/firebaseConfig.ts` is already set up to read the `NEXT_PUBLIC_` environment variables for client-side Firebase.
-Your backend API routes (like `/api/google-sheets-proxy`) will read `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI` directly from `process.env`.
+### 5. Deploy Firebase Functions (if applicable)
 
-**Ensure `.env.local` is added to your `.gitignore` file to prevent committing sensitive credentials.**
+The application uses a Firebase Function (`createAuthUser`) for admin-initiated user creation via the `/api/admin/create-user` route, though the API route itself uses the Admin SDK. If you plan to use the callable Firebase Function directly or other functions are added, deploy them:
+```bash
+# If you have a 'functions' directory:
+cd functions
+npm install # If not already done at root
+npm run build
+cd ..
+firebase deploy --only functions
+```
+Alternatively, most backend logic is handled by Next.js API routes which are deployed with the Next.js app.
 
-To make this even clearer, I'll update the comments in src/lib/firebaseConfig.ts to emphasize exactly where these configuration values come from.
+### 6. Run the Development Server
 
-Here's the modification:
+```bash
+npm run dev
+```
+The application will typically be available at `http://localhost:9002`.
 
-0b8f94cc
-I've updated the comments in src/lib/firebaseConfig.ts to be more explicit. The key takeaway is that your Next.js app is the web app, and you just need to get its configuration details from your Firebase project settings.
+### 7. Build for Production
 
-Once you've put the correct configuration in your .env.local file (and restarted your dev server), the existing code should connect to your Firebase project successfully.
+```bash
+npm run build
+```
+
+### 8. Start Production Server (Locally)
+
+```bash
+npm run start
+```
+
+## Detailed Documentation
+
+For an in-depth understanding of the application architecture, all features, advanced setup (like Google Sheets integration), data models, and user journeys, please refer to the **[DOCUMENTATION.md](DOCUMENTATION.md)** file.
+
+## Deployment
+
+The application is structured for deployment to Firebase Hosting and Firebase App Hosting. Refer to the "Deployment" section in [DOCUMENTATION.md](DOCUMENTATION.md) for more details.
