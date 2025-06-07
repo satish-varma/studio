@@ -3,7 +3,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Package, IndianRupee, TrendingUp, AlertTriangle, Loader2, Info, BarChart2, PackageSearch } from "lucide-react"; // Added PackageSearch
+import { Package, IndianRupee, TrendingUp, AlertTriangle, Loader2, Info, BarChart2, PackageSearch } from "lucide-react";
 import PageHeader from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
@@ -14,13 +14,12 @@ import { getApps, initializeApp } from 'firebase/app';
 import type { StockItem, SaleTransaction } from '@/types';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { subDays, startOfDay, endOfDay, isWithinInterval, format, eachDayOfInterval } from 'date-fns';
-import { ScrollArea } from "@/components/ui/scroll-area"; // Added ScrollArea
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartConfig } from "@/components/ui/chart";
 import { BarChart, Bar, CartesianGrid, XAxis, YAxis } from "recharts";
 
 
-// Initialize Firebase only if it hasn't been initialized yet
 if (!getApps().length) {
   try {
     initializeApp(firebaseConfig);
@@ -61,60 +60,49 @@ export default function DashboardPage() {
   });
   const [recentSales, setRecentSales] = useState<SaleTransaction[]>([]);
   const [salesChartData, setSalesChartData] = useState<SalesChartDataPoint[]>([]);
-  const [lowStockItemsData, setLowStockItemsData] = useState<StockItem[]>([]); // New state for low stock items
+  const [lowStockItemsData, setLowStockItemsData] = useState<StockItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [loadingStock, setLoadingStock] = useState(true);
+  const [loadingSales, setLoadingSales] = useState(true);
 
   useEffect(() => {
     document.title = "Dashboard - StallSync";
     return () => { document.title = "StallSync - Stock Management"; }
   }, []);
+  
+  useEffect(() => {
+    if (!loadingStock && !loadingSales) {
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+  }, [loadingStock, loadingSales]);
 
+
+  // Effect for Stock Items
   useEffect(() => {
     if (!user) {
-      setLoading(false);
+      setLoadingStock(false);
       return;
     }
-
     if (user.role === 'admin' && !activeSiteId) {
-      setLoading(false);
-      setStats({ totalItems: 0, totalSalesLast7Days: 0, itemsSoldToday: 0, lowStockAlerts: 0 });
-      setRecentSales([]);
-      setSalesChartData([]);
-      setLowStockItemsData([]); // Clear low stock items
-      setError(null);
+      setLoadingStock(false);
+      setStats(prev => ({ ...prev, totalItems: 0, lowStockAlerts: 0 }));
+      setLowStockItemsData([]);
+      return;
+    }
+    if (!activeSiteId) {
+      setLoadingStock(false);
+      setError(prevError => prevError || "No active site context for stock items.");
       return;
     }
 
-    if (user.role !== 'admin' && !activeSiteId) {
-        setLoading(false);
-        setError("No active site context. Please check your profile or contact an administrator.");
-        setStats({ totalItems: 0, totalSalesLast7Days: 0, itemsSoldToday: 0, lowStockAlerts: 0 });
-        setRecentSales([]);
-        setSalesChartData([]);
-        setLowStockItemsData([]); // Clear low stock items
-        return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    const now = new Date();
-    const todayStart = startOfDay(now);
-    const todayEnd = endOfDay(now);
-    const sevenDaysAgo = startOfDay(subDays(now, 6)); 
-
-    // --- Stock Items Listener ---
-    let stockItemsQueryConstraints: QueryConstraint[] = [];
-    if (activeSiteId) {
-      stockItemsQueryConstraints.push(where("siteId", "==", activeSiteId));
-      if (activeStallId) {
-        stockItemsQueryConstraints.push(where("stallId", "==", activeStallId));
-      }
-    } else {
-        setLoading(false);
-        setError("Site context is missing for fetching stock items.");
-        return;
+    setLoadingStock(true);
+    let stockItemsQueryConstraints: QueryConstraint[] = [where("siteId", "==", activeSiteId)];
+    if (activeStallId) {
+      stockItemsQueryConstraints.push(where("stallId", "==", activeStallId));
     }
 
     const stockItemsRef = collection(db, "stockItems");
@@ -125,33 +113,55 @@ export default function DashboardPage() {
       const total = items.length;
       const lowStockAlertItems = items.filter(item => item.quantity <= item.lowStockThreshold);
       setStats(prevStats => ({ ...prevStats, totalItems: total, lowStockAlerts: lowStockAlertItems.length }));
-      setLowStockItemsData(lowStockAlertItems.sort((a,b) => a.quantity - b.quantity).slice(0, 5)); // Show top 5, sorted by lowest quantity first
+      setLowStockItemsData(lowStockAlertItems.sort((a, b) => a.quantity - b.quantity).slice(0, 5));
+      setLoadingStock(false);
+      setError(null); // Clear error if stock data loads
     }, (err) => {
       console.error("Error fetching stock items for dashboard:", err);
-      setError("Failed to load stock item data.");
+      setError(prevError => prevError || "Failed to load stock item data.");
       setLowStockItemsData([]);
-      setLoading(false);
+      setLoadingStock(false);
     });
 
-    // --- Sales Transactions Listener (Last 7 Days) ---
-    let salesQueryConstraints: QueryConstraint[] = [
-        where("isDeleted", "==", false), 
-        where("transactionDate", ">=", Timestamp.fromDate(sevenDaysAgo)),
-        orderBy("transactionDate", "desc")
-    ];
-     if (activeSiteId) {
-      salesQueryConstraints.push(where("siteId", "==", activeSiteId));
-      if (activeStallId) {
-        salesQueryConstraints.push(where("stallId", "==", activeStallId));
-      }
-    } else {
-        setLoading(false);
-        setError("Site context is missing for fetching sales transactions.");
-        return;
+    return () => unsubscribeStock();
+  }, [user, activeSiteId, activeStallId]);
+
+  // Effect for Sales Transactions
+  useEffect(() => {
+    if (!user) {
+      setLoadingSales(false);
+      return;
+    }
+     if (user.role === 'admin' && !activeSiteId) {
+      setLoadingSales(false);
+      setStats(prev => ({ ...prev, totalSalesLast7Days: 0, itemsSoldToday: 0 }));
+      setRecentSales([]);
+      setSalesChartData([]);
+      return;
+    }
+    if (!activeSiteId) {
+      setLoadingSales(false);
+      setError(prevError => prevError || "No active site context for sales data.");
+      return;
     }
 
+    setLoadingSales(true);
+    const now = new Date();
+    const todayStart = startOfDay(now);
+    const todayEnd = endOfDay(now);
+    const sevenDaysAgo = startOfDay(subDays(now, 6));
+
+    let salesQueryConstraints: QueryConstraint[] = [
+      where("siteId", "==", activeSiteId),
+      where("isDeleted", "==", false),
+      where("transactionDate", ">=", Timestamp.fromDate(sevenDaysAgo)),
+      orderBy("transactionDate", "desc")
+    ];
+    if (activeStallId) {
+      salesQueryConstraints.push(where("stallId", "==", activeStallId));
+    }
     if (user.role === 'staff') {
-        salesQueryConstraints.push(where("staffId", "==", user.uid));
+      salesQueryConstraints.push(where("staffId", "==", user.uid));
     }
 
     const salesTransactionsRef = collection(db, "salesTransactions");
@@ -169,7 +179,6 @@ export default function DashboardPage() {
 
       let salesLast7Days = 0;
       let itemsToday = 0;
-
       const dailySalesMap = new Map<string, number>();
       const dateRangeForChart = eachDayOfInterval({ start: sevenDaysAgo, end: now });
       dateRangeForChart.forEach(day => {
@@ -179,12 +188,10 @@ export default function DashboardPage() {
       transactions.forEach(sale => {
         const saleDate = new Date(sale.transactionDate);
         salesLast7Days += sale.totalAmount;
-
         const formattedSaleDate = format(saleDate, 'yyyy-MM-dd');
         if (dailySalesMap.has(formattedSaleDate)) {
-            dailySalesMap.set(formattedSaleDate, (dailySalesMap.get(formattedSaleDate) || 0) + sale.totalAmount);
+          dailySalesMap.set(formattedSaleDate, (dailySalesMap.get(formattedSaleDate) || 0) + sale.totalAmount);
         }
-
         if (isWithinInterval(saleDate, { start: todayStart, end: todayEnd })) {
           sale.items.forEach(item => {
             itemsToday += Number(item.quantity) || 0;
@@ -198,25 +205,21 @@ export default function DashboardPage() {
         itemsSoldToday: itemsToday,
       }));
       setRecentSales(transactions.slice(0, 3));
-
       const chartDataPoints: SalesChartDataPoint[] = Array.from(dailySalesMap.entries())
         .map(([date, totalSales]) => ({ date, totalSales }))
-        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()); 
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
       setSalesChartData(chartDataPoints);
-
-      setLoading(false);
+      setLoadingSales(false);
+      setError(null); // Clear error if sales data loads
     }, (err) => {
       console.error("Error fetching sales transactions for dashboard:", err);
-      setError("Failed to load sales transaction data. Check Firestore security rules and query constraints.");
-      setLoading(false);
+      setError(prevError => prevError || "Failed to load sales transaction data.");
+      setLoadingSales(false);
     });
 
-    return () => {
-      unsubscribeStock();
-      unsubscribeSales();
-    };
-
+    return () => unsubscribeSales();
   }, [user, activeSiteId, activeStallId]);
+
 
   const pageHeaderDescription = useMemo(() => {
     if (user?.role === 'admin' && !activeSite) {
@@ -261,8 +264,10 @@ export default function DashboardPage() {
       </div>
     );
   }
-
-  if (error) {
+  
+  // This error check should come after the admin/no-siteId check
+  // to allow admins to see the "Select a Site" message first.
+  if (error && !loading) { // Only show main error if not loading and admin no-site is not applicable
     return (
       <div className="space-y-6">
         <PageHeader title="Dashboard" description={pageHeaderDescription} />
@@ -274,6 +279,7 @@ export default function DashboardPage() {
       </div>
     );
   }
+
 
   const dashboardStatCards = [
     { title: "Total Items", value: stats.totalItems.toString(), icon: Package, change: "In current context", color: "text-primary" },
