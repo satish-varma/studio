@@ -183,7 +183,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   const handleEdit = (itemId: string) => {
     console.log(`${LOG_PREFIX} Navigating to edit item: ${itemId}`);
     router.push(`/items/${itemId}/edit`);
-    setSelectedItems([]); // Clear selection when navigating
+    setSelectedItems([]); 
   };
 
   const handleDelete = async (itemId: string, itemName: string) => {
@@ -342,7 +342,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             quantity: newMasterQuantityAfterUpdate,
             lastUpdated: new Date().toISOString(),
           });
-          console.log(`${LOG_PREFIX} Master stock ${originalMasterData.id} updated. Old: ${originalMasterData.quantity}, New: ${newMasterQuantityAfterUpdate}`);
+          console.log(`${LOG_PREFIX} Master stock ${originalMasterData.id} updated. Old Qty: ${originalMasterData.quantity}, New Qty: ${newMasterQuantityAfterUpdate}`);
         } else if (originalItemData.stallId && originalItemData.originalMasterItemId && !masterItemSnap?.exists()){
             console.warn(`${LOG_PREFIX} Master stock item ${originalItemData.originalMasterItemId} not found. Stall stock updated, but master cannot be adjusted.`);
         }
@@ -440,12 +440,11 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         );
 
         let targetStallItemRef: DocumentReference | null = null;
-        const existingStallItemsQuerySnap = await getDocs(stallItemsQuery); // Use getDocs inside transaction if needed, but careful with read limits. Here assuming one-time check before modifying is ok.
+        const existingStallItemsQuerySnap = await getDocs(stallItemsQuery); 
 
         if (!existingStallItemsQuerySnap.empty) {
             targetStallItemRef = existingStallItemsQuerySnap.docs[0].ref;
             existingStallItemIdForLog = existingStallItemsQuerySnap.docs[0].id;
-            // Re-fetch inside transaction to ensure consistency
             const targetStallItemSnap = await transaction.get(targetStallItemRef);
             if (targetStallItemSnap.exists()) {
                 stallItemDataBeforeTx = {id: targetStallItemSnap.id, ...targetStallItemSnap.data()} as StockItem;
@@ -680,17 +679,16 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         if (sourceItemDataBeforeTx.quantity < numQuantityToTransfer) throw new Error(`Concurrent update: Not enough source stock. Available: ${sourceItemDataBeforeTx.quantity}`);
 
         let destinationItemRef: DocumentReference | null = null;
-        // Query for existing item at destination stall with same originalMasterItemId
         const q = query(
             collection(db, "stockItems"),
             where("stallId", "==", destinationStallId),
-            where("originalMasterItemId", "==", sourceItemDataBeforeTx.originalMasterItemId ?? null) // Handle if master item ID is null (direct stall item)
+            where("originalMasterItemId", "==", sourceItemDataBeforeTx.originalMasterItemId ?? null) 
         );
-        const destQuerySnap = await getDocs(q); // Use getDocs within transaction if possible, or ensure it's a recent snapshot
+        const destQuerySnap = await getDocs(q); 
         if (!destQuerySnap.empty) {
             destinationItemRef = destQuerySnap.docs[0].ref;
             existingDestItemIdForLog = destQuerySnap.docs[0].id;
-            const destinationItemSnap = await transaction.get(destinationItemRef); // Re-fetch within transaction
+            const destinationItemSnap = await transaction.get(destinationItemRef); 
             if(destinationItemSnap.exists()){
                 destItemDataBeforeTx = {id: destinationItemSnap.id, ...destinationItemSnap.data()} as StockItem;
             }
@@ -1203,6 +1201,28 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       <ArrowUpDown className="ml-2 h-3 w-3 text-primary" />;
   };
 
+  const parseAndCapInput = (value: string, max?: number, min: number = 0): number | string => {
+    if (value === "") return "";
+    let num = parseInt(value, 10);
+    if (isNaN(num)) return ""; 
+    if (max !== undefined && num > max) num = max;
+    if (num < min) num = min;
+    return num;
+  };
+  
+  const parseAndCapFloatInput = (value: string, min: number = 0): number | string => {
+    if (value === "") return "";
+    // Allow for decimal input
+    if (/^\d*\.?\d*$/.test(value)) {
+        const num = parseFloat(value);
+        if (isNaN(num)) return value; // Keep partial input like "1."
+        if (num < min) return min.toString(); // or handle as error / keep value
+        return value; // Return string to allow ongoing decimal input
+    }
+    return ""; // Or return previous valid value
+  };
+
+
   if (loading && items.length === 0) {
     return (
       <div className="rounded-lg border shadow-sm overflow-hidden bg-card">
@@ -1449,9 +1469,9 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleOpenUpdateStockDialog(item)}>
-                            <PackageOpen className="mr-2 h-4 w-4" /> Update Stock
-                          </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleOpenUpdateStockDialog(item)}>
+                              <PackageOpen className="mr-2 h-4 w-4" /> Update Stock
+                            </DropdownMenuItem>
                            {item.stallId === null && item.siteId && (
                             <DropdownMenuItem onClick={() => handleOpenAllocateDialog(item)} disabled={availableStallsForAllocation.filter(s => s.siteId === item.siteId).length === 0}>
                               <MoveRight className="mr-2 h-4 w-4" /> Allocate to Stall
@@ -1501,7 +1521,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                               id="quantity"
                               type="number"
                               value={newQuantity}
-                              onChange={(e) => setNewQuantity(e.target.value)}
+                              onChange={(e) => setNewQuantity(parseAndCapInput(e.target.value))}
                               className="col-span-3 bg-input"
                               min="0"
                             />
@@ -1509,7 +1529,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                         </div>
                         <DialogFooter>
                           <Button type="button" variant="outline" onClick={() => setStockUpdateItem(null)} disabled={isUpdatingStock}>Cancel</Button>
-                          <Button type="button" onClick={handleStockQuantityChange} disabled={isUpdatingStock}>
+                          <Button type="button" onClick={handleStockQuantityChange} disabled={isUpdatingStock || newQuantity === "" || Number(newQuantity) < 0}>
                             {isUpdatingStock && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Save changes
                           </Button>
@@ -1564,7 +1584,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                 id="batchQuantity"
                 type="number"
                 value={batchUpdateQuantity}
-                onChange={(e) => setBatchUpdateQuantity(e.target.value)}
+                onChange={(e) => setBatchUpdateQuantity(parseAndCapInput(e.target.value))}
                 className="col-span-3 bg-input"
                 min="0"
                 placeholder="Enter new quantity"
@@ -1608,7 +1628,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                 id="batchUpdateLowStockThreshold"
                 type="number"
                 value={batchUpdateLowStockThreshold}
-                onChange={(e) => setBatchUpdateLowStockThreshold(e.target.value)}
+                onChange={(e) => setBatchUpdateLowStockThreshold(parseAndCapInput(e.target.value))}
                 placeholder="Enter new threshold"
                 className="bg-input"
                 min="0"
@@ -1643,13 +1663,11 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
               <Label htmlFor="batchUpdatePrice">New Selling Price (₹) (Optional)</Label>
               <Input
                 id="batchUpdatePrice"
-                type="number"
-                step="0.01"
+                type="text"
                 value={batchUpdatePrice}
-                onChange={(e) => setBatchUpdatePrice(e.target.value)}
+                onChange={(e) => setBatchUpdatePrice(parseAndCapFloatInput(e.target.value))}
                 placeholder="e.g., 199.99"
                 className="bg-input"
-                min="0"
                 disabled={isBatchUpdatingPrice}
               />
             </div>
@@ -1657,13 +1675,11 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
               <Label htmlFor="batchUpdateCostPrice">New Cost Price (₹) (Optional)</Label>
               <Input
                 id="batchUpdateCostPrice"
-                type="number"
-                step="0.01"
+                type="text" 
                 value={batchUpdateCostPrice}
-                onChange={(e) => setBatchUpdateCostPrice(e.target.value)}
+                onChange={(e) => setBatchUpdateCostPrice(parseAndCapFloatInput(e.target.value))}
                 placeholder="e.g., 99.50"
                 className="bg-input"
-                min="0"
                 disabled={isBatchUpdatingPrice}
               />
             </div>
@@ -1672,7 +1688,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             <AlertDialogCancel onClick={() => setShowBatchUpdatePriceDialog(false)} disabled={isBatchUpdatingPrice}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleConfirmBatchUpdatePrice}
-              disabled={isBatchUpdatingPrice || (batchUpdatePrice === "" && batchUpdateCostPrice === "") || (batchUpdatePrice !== "" && Number(batchUpdatePrice) < 0) || (batchUpdateCostPrice !== "" && Number(batchUpdateCostPrice) < 0) }
+              disabled={isBatchUpdatingPrice || (batchUpdatePrice === "" && batchUpdateCostPrice === "") || (batchUpdatePrice !== "" && (isNaN(Number(batchUpdatePrice)) || Number(batchUpdatePrice) < 0)) || (batchUpdateCostPrice !== "" && (isNaN(Number(batchUpdateCostPrice)) || Number(batchUpdateCostPrice) < 0)) }
             >
               {isBatchUpdatingPrice && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Apply Price Changes
@@ -1744,7 +1760,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                   id="quantityToAllocate"
                   type="number"
                   value={quantityToAllocate}
-                  onChange={(e) => setQuantityToAllocate(e.target.value)}
+                  onChange={(e) => setQuantityToAllocate(parseAndCapInput(e.target.value, itemToAllocate.quantity, 1))}
                   min="1"
                   max={itemToAllocate.quantity}
                   className="bg-input"
@@ -1780,7 +1796,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                   id="quantityToReturn"
                   type="number"
                   value={quantityToReturn}
-                  onChange={(e) => setQuantityToReturn(e.target.value)}
+                  onChange={(e) => setQuantityToReturn(parseAndCapInput(e.target.value, itemToReturn.quantity, 1))}
                   min="1"
                   max={itemToReturn.quantity}
                   className="bg-input"
@@ -1839,7 +1855,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                             id="quantityToTransfer"
                             type="number"
                             value={quantityToTransfer}
-                            onChange={(e) => setQuantityToTransfer(e.target.value)}
+                            onChange={(e) => setQuantityToTransfer(parseAndCapInput(e.target.value, itemToTransfer.quantity, 1))}
                             min="1"
                             max={itemToTransfer.quantity}
                             className="bg-input"
@@ -1868,3 +1884,4 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     </TooltipProvider>
   );
 }
+

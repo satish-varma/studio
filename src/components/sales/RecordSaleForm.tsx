@@ -146,13 +146,13 @@ export default function RecordSaleForm() {
     if (!user) {
       console.warn(`${LOG_PREFIX} User not authenticated. Sale recording aborted.`);
       toast({ title: "Authentication Error", description: "You must be logged in to record a sale.", variant: "destructive"});
-      setIsSubmitting(false); // Ensure submitting state is reset
+      setIsSubmitting(false);
       return;
     }
     if (!activeSiteId || !activeStallId) {
       console.warn(`${LOG_PREFIX} Site or stall context missing. Sale recording aborted. Site: ${activeSiteId}, Stall: ${activeStallId}`);
       toast({ title: "Context Error", description: "Cannot record sale without an active site and specific stall context.", variant: "destructive"});
-      setIsSubmitting(false); // Ensure submitting state is reset
+      setIsSubmitting(false);
       return;
     }
     setIsSubmitting(true);
@@ -246,11 +246,9 @@ export default function RecordSaleForm() {
       });
       console.log(`${LOG_PREFIX} Firestore transaction for sale ${saleTransactionId} committed successfully.`);
 
-      // Logging stock movements after successful transaction
       for (const formItem of values.items) {
           const soldStallItem = availableItems.find(i => i.id === formItem.itemId);
           if (soldStallItem) {
-              // Original quantity before this sale would be current (just updated) quantity + sold quantity
               const originalStallQuantity = (soldStallItem.quantity - formItem.quantity) + formItem.quantity;
 
               await logStockMovement(user, {
@@ -261,7 +259,7 @@ export default function RecordSaleForm() {
                   type: 'SALE_FROM_STALL',
                   quantityChange: -formItem.quantity,
                   quantityBefore: originalStallQuantity,
-                  quantityAfter: soldStallItem.quantity - formItem.quantity, // This is the new quantity after this sale if we refetch, or more simply (original - sold)
+                  quantityAfter: soldStallItem.quantity - formItem.quantity, 
                   notes: `Sale ID: ${saleTransactionId}`,
                   relatedTransactionId: saleTransactionId,
               });
@@ -270,7 +268,7 @@ export default function RecordSaleForm() {
                    const masterItemDoc = await getDoc(doc(db, "stockItems", soldStallItem.originalMasterItemId));
                    if(masterItemDoc.exists()){
                        const masterItemData = masterItemDoc.data() as StockItem;
-                       const originalMasterQuantity = masterItemData.quantity + formItem.quantity; // Before this specific sale impact
+                       const originalMasterQuantity = masterItemData.quantity + formItem.quantity; 
                         await logStockMovement(user, {
                             stockItemId: soldStallItem.originalMasterItemId,
                             siteId: masterItemData.siteId!,
@@ -320,14 +318,16 @@ export default function RecordSaleForm() {
         ...watchedItems[index],
         itemId: selectedItem.id,
         name: selectedItem.name,
-        pricePerUnit: price
+        pricePerUnit: price,
+        quantity: 1 // Reset quantity to 1 when item changes
       });
     } else {
         update(index, {
             ...watchedItems[index],
             itemId: "",
             name: "",
-            pricePerUnit: 0
+            pricePerUnit: 0,
+            quantity: 1
         });
     }
   };
@@ -441,10 +441,19 @@ export default function RecordSaleForm() {
                             max={maxQuantity?.toString()}
                             disabled={isSubmitting || !watchedItems[index]?.itemId || availableItems.length === 0}
                             onChange={(e) => {
-                                let val = parseInt(e.target.value, 10);
+                                const rawValue = e.target.value;
+                                if (rawValue === "") {
+                                    formField.onChange(""); // Allow empty string for clearing
+                                    return;
+                                }
+                                let val = parseInt(rawValue, 10);
+                                if (isNaN(val)) {
+                                    formField.onChange(formField.value); // Keep old value if NaN
+                                    return;
+                                }
                                 if (maxQuantity !== undefined && val > maxQuantity) val = maxQuantity;
-                                if (val < 1 && e.target.value !== "") val = 1;
-                                formField.onChange(isNaN(val) ? "" : val);
+                                if (val < 1) val = 1;
+                                formField.onChange(val);
                             }}
                           />
                         </FormControl>
