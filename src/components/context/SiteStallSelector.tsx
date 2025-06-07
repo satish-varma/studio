@@ -194,7 +194,7 @@ export default function SiteStallSelector() {
 
   if (user.role === 'manager' && (!user.managedSiteIds || user.managedSiteIds.length === 0)) {
       console.log("SiteStallSelector: Not rendering, manager has no assigned sites.");
-      return <span className="text-xs text-muted-foreground">Not assigned to any sites.</span>;
+      return <span className="text-xs text-muted-foreground" data-testid="manager-no-sites-message">Not assigned to any sites.</span>;
   }
 
   console.log("SiteStallSelector: Rendering selector. ActiveSiteId:", activeSiteId, "ActiveStallId:", activeStallId, "Sites for selector:", sitesForSelector.length);
@@ -209,13 +209,14 @@ export default function SiteStallSelector() {
   };
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2" data-testid="site-stall-selector-container">
       <Select
         value={activeSiteId || "all-sites"}
         onValueChange={handleSiteChange}
         disabled={loadingSites || (user.role !== 'admin' && sitesForSelector.length === 0)}
+        data-testid="site-select"
       >
-        <SelectTrigger className="w-[180px] h-9 text-xs bg-input">
+        <SelectTrigger className="w-[180px] h-9 text-xs bg-input" data-testid="site-select-trigger">
           <SelectValue placeholder={getSitePlaceholder()} />
         </SelectTrigger>
         <SelectContent>
@@ -231,8 +232,9 @@ export default function SiteStallSelector() {
             value={activeStallId || "all-stalls"}
             onValueChange={handleStallChange}
             disabled={!activeSiteId || loadingStalls || (stallsForSelector.length === 0 && !!activeSiteId)}
+            data-testid="stall-select"
         >
-            <SelectTrigger className="w-[180px] h-9 text-xs bg-input">
+            <SelectTrigger className="w-[180px] h-9 text-xs bg-input" data-testid="stall-select-trigger">
             <SelectValue placeholder={
                 !activeSiteId ? "Select site first" :
                 loadingStalls ? "Loading stalls..." :
@@ -248,9 +250,10 @@ export default function SiteStallSelector() {
         </Select>
       )}
        {user.role === 'manager' && activeSiteId && (
-         <Badge variant="outline" className="h-9 px-3 text-xs">All Stalls</Badge>
+         <Badge variant="outline" className="h-9 px-3 text-xs" data-testid="manager-all-stalls-badge">All Stalls</Badge>
        )}
-      {(loadingSites || (activeSiteId && loadingStalls && user.role === 'admin' )) && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+      {(loadingSites || (activeSiteId && loadingStalls && user.role === 'admin' )) && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" data-testid="selector-loader"/>}
     </div>
   );
 }
+
