@@ -56,15 +56,15 @@ const auth = getAuth(getApp());
 const profileFormSchema = z.object({
   displayName: z.string().min(2, { message: "Display name must be at least 2 characters." }),
   email: z.string().email().optional(),
-  defaultSiteId: z.string().nullable().optional(),
-  defaultStallId: z.string().nullable().optional(),
+  defaultSiteId: z.string().nullable().optional(), // Applicable for admin, read-only for staff
+  defaultStallId: z.string().nullable().optional(), // Applicable for admin, read-only for staff
   defaultItemSearchTerm: z.string().nullable().optional(),
   defaultItemCategoryFilter: z.string().nullable().optional(),
   defaultItemStockStatusFilter: z.string().nullable().optional(),
-  defaultItemStallFilterOption: z.string().nullable().optional(),
+  defaultItemStallFilterOption: z.string().nullable().optional(), // For admin/manager
   defaultSalesDateRangeFrom: z.string().nullable().optional(),
   defaultSalesDateRangeTo: z.string().nullable().optional(),
-  defaultSalesStaffFilter: z.string().nullable().optional(),
+  defaultSalesStaffFilter: z.string().nullable().optional(), // For admin/manager
 });
 
 type ProfileFormValues = z.infer<typeof profileFormSchema>;
@@ -114,12 +114,28 @@ export default function ProfilePage() {
       setLoadingContextData(true);
       try {
         console.log(`${LOG_PREFIX} Fetching sites...`);
-        const sitesSnapshot = await getDocs(collection(db, "sites"));
-        const fetchedSites: Site[] = sitesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Site));
+        let sitesQuery;
+        if (isAdminUser || isStaffUser) { // Admins and Staff can potentially see all sites for their default selection (staff's is assigned)
+          sitesQuery = query(collection(db, "sites"));
+        } else if (isManagerUser && user.managedSiteIds && user.managedSiteIds.length > 0) {
+          if (user.managedSiteIds.length <= 30) {
+            sitesQuery = query(collection(db, "sites"), where("__name__", "in", user.managedSiteIds));
+          } else {
+             sitesQuery = query(collection(db, "sites")); // Fetch all and filter client-side for managers with >30 sites
+          }
+        } else {
+           sitesQuery = query(collection(db, "sites"), where("__name__", "in", ["non_existent_id_to_fetch_none"])); // No sites if no role match or no managed sites
+        }
+        
+        const sitesSnapshot = await getDocs(sitesQuery);
+        let fetchedSites: Site[] = sitesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Site));
+        if (isManagerUser && user.managedSiteIds && user.managedSiteIds.length > 30) {
+            fetchedSites = fetchedSites.filter(site => user.managedSiteIds!.includes(site.id));
+        }
         setAllSites(fetchedSites.sort((a, b) => a.name.localeCompare(b.name)));
-        console.log(`${LOG_PREFIX} Fetched ${fetchedSites.length} sites.`);
+        console.log(`${LOG_PREFIX} Fetched ${fetchedSites.length} sites for profile page context.`);
 
-        if (user.role === 'admin' || user.role === 'manager') {
+        if (isAdminUser || isManagerUser) {
           console.log(`${LOG_PREFIX} Fetching users for staff filter (role: ${user.role})...`);
           const usersSnapshot = await getDocs(query(collection(db, "users"), where("role", "in", ["staff", "manager", "admin"])));
           const fetchedUsers: AppUser[] = usersSnapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser));
@@ -146,7 +162,7 @@ export default function ProfilePage() {
       }
     };
     if (user) fetchInitialData();
-  }, [user, toast]);
+  }, [user, toast, isAdminUser, isManagerUser, isStaffUser]);
 
   useEffect(() => {
     if (user) {
@@ -154,8 +170,8 @@ export default function ProfilePage() {
       form.reset({
         displayName: user.displayName || "",
         email: user.email || "",
-        defaultSiteId: (isStaffUser || isAdminUser) ? (user.defaultSiteId ?? null) : null,
-        defaultStallId: (isStaffUser || isAdminUser) ? (user.defaultStallId ?? null) : null,
+        defaultSiteId: user.defaultSiteId ?? null, // All roles can have this pref from DB
+        defaultStallId: user.defaultStallId ?? null, // All roles can have this pref from DB
         defaultItemSearchTerm: user.defaultItemSearchTerm ?? null,
         defaultItemCategoryFilter: user.defaultItemCategoryFilter ?? null,
         defaultItemStockStatusFilter: user.defaultItemStockStatusFilter ?? null,
@@ -169,7 +185,7 @@ export default function ProfilePage() {
           to: user.defaultSalesDateRangeTo && isValid(parseISO(user.defaultSalesDateRangeTo)) ? parseISO(user.defaultSalesDateRangeTo) : undefined,
       });
     }
-  }, [user, form, allSites, isStaffUser, isAdminUser]); // Added allSites as it was in original
+  }, [user, form]);
 
   useEffect(() => {
     const fetchStalls = async () => {
@@ -177,7 +193,7 @@ export default function ProfilePage() {
         console.log(`${LOG_PREFIX} fetchStalls: No DB or selectedDefaultSiteId. Clearing stalls. SiteID: ${selectedDefaultSiteId}`);
         setStallsForSelectedSite([]);
         form.setValue("defaultStallId", null); 
-        setLoadingContextData(false); // Ensure loading stops if we bail early
+        setLoadingContextData(false);
         return;
       }
       console.log(`${LOG_PREFIX} fetchStalls: Fetching stalls for site ID: ${selectedDefaultSiteId}`);
@@ -203,13 +219,14 @@ export default function ProfilePage() {
         console.log(`${LOG_PREFIX} fetchStalls: Finished for site ID: ${selectedDefaultSiteId}.`);
       }
     };
-    if (isStaffUser || isAdminUser) {
+    // Only Admins and Staff can have a default stall preference. Managers use 'All Stalls'.
+    if (isAdminUser || isStaffUser) {
         fetchStalls();
     } else {
         setStallsForSelectedSite([]);
-        setLoadingContextData(false); // Ensure loading stops if not applicable
+        setLoadingContextData(false); 
     }
-  }, [selectedDefaultSiteId, toast, form, isStaffUser, isAdminUser]);
+  }, [selectedDefaultSiteId, toast, form, isAdminUser, isStaffUser]);
 
 
   async function onSubmit(values: ProfileFormValues) {
@@ -226,16 +243,19 @@ export default function ProfilePage() {
         defaultItemSearchTerm: values.defaultItemSearchTerm && values.defaultItemSearchTerm.trim() !== "" ? values.defaultItemSearchTerm.trim() : null,
         defaultItemCategoryFilter: values.defaultItemCategoryFilter === "all" ? null : values.defaultItemCategoryFilter, 
         defaultItemStockStatusFilter: values.defaultItemStockStatusFilter === "all" ? null : values.defaultItemStockStatusFilter, 
-        defaultItemStallFilterOption: values.defaultItemStallFilterOption === "all" ? null : values.defaultItemStallFilterOption, 
+        defaultItemStallFilterOption: (isAdminUser || isManagerUser) ? (values.defaultItemStallFilterOption === "all" ? null : values.defaultItemStallFilterOption) : null, 
         defaultSalesDateRangeFrom: dateRange?.from && isValid(dateRange.from) ? dateRange.from.toISOString() : null,
         defaultSalesDateRangeTo: dateRange?.to && isValid(dateRange.to) ? dateRange.to.toISOString() : null,
-        defaultSalesStaffFilter: values.defaultSalesStaffFilter === "all" ? null : values.defaultSalesStaffFilter, 
+        defaultSalesStaffFilter: (isAdminUser || isManagerUser) ? (values.defaultSalesStaffFilter === "all" ? null : values.defaultSalesStaffFilter) : null, 
       };
 
-      if (isStaffUser || isAdminUser) {
+      if (isAdminUser) {
         dataToUpdate.defaultSiteId = values.defaultSiteId ? values.defaultSiteId : null;
         dataToUpdate.defaultStallId = (values.defaultSiteId && values.defaultStallId) ? values.defaultStallId : null;
       }
+      // Staff and Manager defaultSiteId/StallId are not set here as they are admin-assigned or implicit ("All Stalls" for manager).
+      // Their filter preferences are still saved.
+
       console.log(`${LOG_PREFIX} onSubmit: Data to update in Firestore:`, dataToUpdate);
 
       const userDocRef = doc(db, "users", user.uid);
@@ -250,17 +270,20 @@ export default function ProfilePage() {
       
       if (setAuthUser) {
         console.log(`${LOG_PREFIX} onSubmit: Calling setAuthUser to update AuthContext state.`);
-        setAuthUser(prevUser => prevUser ? {
-            ...prevUser, 
-            ...dataToUpdate, // Spread the locally prepared update object
-        } : null);
+        // Fetch the latest user data from Firestore to ensure AuthContext has the most up-to-date version
+        const updatedUserDoc = await getDoc(userDocRef);
+        if (updatedUserDoc.exists()) {
+            setAuthUser(prevUser => prevUser ? {
+                ...prevUser, 
+                ...updatedUserDoc.data(), // Spread latest from Firestore
+            } as AppUser : null);
+        }
       }
       
-      // Explicitly set active site/stall in AuthContext for immediate UI update, especially for admins changing their own context
-      if (isAdminUser || isStaffUser) {
-        console.log(`${LOG_PREFIX} onSubmit: User is admin or staff. Calling setActiveSite and setActiveStall.`);
-        setActiveSite(dataToUpdate.defaultSiteId || null);
-        setActiveStall(dataToUpdate.defaultSiteId ? (dataToUpdate.defaultStallId || null) : null);
+      if (isAdminUser) {
+        console.log(`${LOG_PREFIX} onSubmit: User is admin. Calling setActiveSite and setActiveStall if they were changed.`);
+        if(values.defaultSiteId !== user.defaultSiteId) setActiveSite(values.defaultSiteId || null);
+        if(values.defaultStallId !== user.defaultStallId) setActiveStall(values.defaultSiteId ? (values.defaultStallId || null) : null);
       }
 
       toast({
@@ -325,8 +348,7 @@ export default function ProfilePage() {
                 </CardTitle>
                 <CardDescription>
                   Your email is used for login and cannot be changed here.
-                  {isStaffUser && " Default site/stall are assigned by an administrator."}
-                  {isManagerUser && " Operational sites are assigned by an administrator. Set viewing preferences below."}
+                  {(isStaffUser || isManagerUser) && " Default site/stall and managed sites are assigned by an administrator."}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
@@ -360,7 +382,7 @@ export default function ProfilePage() {
                       name="defaultSiteId"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Default Site Context</FormLabel>
+                          <FormLabel>{isAdminUser ? "Default Viewing Site Context" : "Assigned Site"}</FormLabel>
                           <Select 
                               onValueChange={(value) => field.onChange(value === "none" ? null : value)} 
                               value={field.value || "none"}
@@ -386,8 +408,8 @@ export default function ProfilePage() {
                               ))}
                             </SelectContent>
                           </Select>
-                          {isStaffUser && <FormDescription>Your default site is assigned by an administrator.</FormDescription>}
-                          {isAdminUser && <FormDescription>This sets your default viewing context.</FormDescription>}
+                          {isStaffUser && <FormDescription>Your site assignment is managed by an administrator.</FormDescription>}
+                          {isAdminUser && <FormDescription>This sets your default viewing context in the header.</FormDescription>}
                           <FormMessage />
                         </FormItem>
                       )}
@@ -397,7 +419,7 @@ export default function ProfilePage() {
                       name="defaultStallId"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Default Stall Context</FormLabel>
+                          <FormLabel>{isAdminUser ? "Default Viewing Stall Context" : "Assigned Stall"}</FormLabel>
                           <Select 
                               onValueChange={(value) => field.onChange(value === "none" ? null : value)} 
                               value={field.value || "none"}
@@ -423,7 +445,7 @@ export default function ProfilePage() {
                               ))}
                             </SelectContent>
                           </Select>
-                          {isStaffUser && <FormDescription>Your default stall is assigned by an administrator.</FormDescription>}
+                          {isStaffUser && <FormDescription>Your stall assignment is managed by an administrator.</FormDescription>}
                            {isAdminUser && <FormDescription>This sets your default viewing context within the selected site.</FormDescription>}
                           <FormMessage />
                         </FormItem>
@@ -441,42 +463,44 @@ export default function ProfilePage() {
                   <FormField control={form.control} name="defaultItemSearchTerm" render={({ field }) => ( <FormItem><FormLabel>Search Term</FormLabel><FormControl><Input placeholder="e.g., Apples" {...field} value={field.value || ""} disabled={isSubmitting} className="bg-input"/></FormControl></FormItem> )} />
                   <FormField control={form.control} name="defaultItemCategoryFilter" render={({ field }) => ( <FormItem><FormLabel>Category</FormLabel><Select onValueChange={(v) => field.onChange(v === "all" ? null : v)} value={field.value || "all"} disabled={isSubmitting}><FormControl><SelectTrigger className="bg-input"><SelectValue placeholder="All Categories" /></SelectTrigger></FormControl><SelectContent><SelectItem value="all">All Categories</SelectItem>{itemCategories.map(cat => <SelectItem key={cat} value={cat}>{cat}</SelectItem>)}</SelectContent></Select></FormItem> )} />
                   <FormField control={form.control} name="defaultItemStockStatusFilter" render={({ field }) => ( <FormItem><FormLabel>Stock Status</FormLabel><Select onValueChange={(v) => field.onChange(v === "all" ? null : v)} value={field.value || "all"} disabled={isSubmitting}><FormControl><SelectTrigger className="bg-input"><SelectValue placeholder="All Statuses" /></SelectTrigger></FormControl><SelectContent><SelectItem value="all">All Statuses</SelectItem><SelectItem value="in-stock">In Stock</SelectItem><SelectItem value="low-stock">Low Stock</SelectItem><SelectItem value="out-of-stock">Out of Stock</SelectItem></SelectContent></Select></FormItem> )} />
-                  <FormField 
-                    control={form.control} 
-                    name="defaultItemStallFilterOption" 
-                    render={({ field }) => ( 
-                      <FormItem>
-                        <FormLabel>Stall/Location Filter</FormLabel>
-                        <Select 
-                          onValueChange={(v) => field.onChange(v === "all" ? null : v)} 
-                          value={field.value || "all"} 
-                          disabled={isSubmitting || (!selectedDefaultSiteId && !(isManagerUser && user.managedSiteIds && user.managedSiteIds.length > 0)) }
-                        >
-                          <FormControl>
-                            <SelectTrigger className="bg-input">
-                              <SelectValue placeholder={
-                                (!selectedDefaultSiteId && !(isManagerUser && user.managedSiteIds && user.managedSiteIds.length > 0)) 
-                                ? "Select site context first" 
-                                : "All Stock (Site-wide)"
-                              } />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {itemStallFilterOptions.map(opt => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                        <FormDescription>Applies to the currently active site view for managers, or default site view for admins/staff.</FormDescription>
-                      </FormItem> 
-                    )} 
-                  />
+                  {(isAdminUser || isManagerUser) && (
+                    <FormField 
+                      control={form.control} 
+                      name="defaultItemStallFilterOption" 
+                      render={({ field }) => ( 
+                        <FormItem>
+                          <FormLabel>Stall/Location Filter</FormLabel>
+                          <Select 
+                            onValueChange={(v) => field.onChange(v === "all" ? null : v)} 
+                            value={field.value || "all"} 
+                            disabled={isSubmitting || (!user.defaultSiteId && !isManagerUser) } // Managers might not have a *default* siteId, but they still have a managed site context
+                          >
+                            <FormControl>
+                              <SelectTrigger className="bg-input">
+                                <SelectValue placeholder={
+                                  (!user.defaultSiteId && !isManagerUser) 
+                                  ? "Select site context first" 
+                                  : "All Stock (Site-wide)"
+                                } />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {itemStallFilterOptions.map(opt => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                          <FormDescription>Applies to your active site view if no specific stall is selected in the header.</FormDescription>
+                        </FormItem> 
+                      )} 
+                    />
+                  )}
                 </CardContent>
               </Card>
               <Card className="shadow-lg">
                 <CardHeader><CardTitle className="text-xl flex items-center"><HistoryIcon className="mr-2 h-5 w-5 text-primary"/> Default Sales History Filters</CardTitle></CardHeader>
                 <CardContent className="space-y-4">
                    <FormItem><FormLabel>Date Range</FormLabel><Popover><PopoverTrigger asChild><Button variant={"outline"} className={`w-full justify-start text-left font-normal bg-input ${!dateRange?.from && "text-muted-foreground"}`} disabled={isSubmitting}><CalendarIcon className="mr-2 h-4 w-4" />{dateRange?.from && isValid(dateRange.from) ? (dateRange.to && isValid(dateRange.to) ? ( <> {format(dateRange.from, "LLL dd, y")} - {format(dateRange.to, "LLL dd, y")} </> ) : ( format(dateRange.from, "LLL dd, y") ) ) : ( <span>Pick a date range</span> )}</Button></PopoverTrigger><PopoverContent className="w-auto p-0" align="start"><Calendar initialFocus mode="range" defaultMonth={dateRange?.from} selected={dateRange} onSelect={setDateRange} numberOfMonths={2}/></PopoverContent></Popover></FormItem>
-                  {(user.role === 'admin' || user.role === 'manager') && (
-                    <FormField control={form.control} name="defaultSalesStaffFilter" render={({ field }) => ( <FormItem><FormLabel>Staff Member</FormLabel><Select onValueChange={(v) => field.onChange(v === "all" ? null : v)} value={field.value || "all"} disabled={isSubmitting}><FormControl><SelectTrigger className="bg-input"><SelectValue placeholder="All Staff" /></SelectTrigger></FormControl><SelectContent><SelectItem value="all">All Staff</SelectItem>{allUsersForStaffFilter.filter(staff => staff.uid && staff.uid.trim() !== "").map(staff => <SelectItem key={staff.uid} value={staff.uid}>{staff.displayName || staff.email}</SelectItem>)}</SelectContent></Select></FormItem> )} />
+                  {(isAdminUser || isManagerUser) && (
+                    <FormField control={form.control} name="defaultSalesStaffFilter" render={({ field }) => ( <FormItem><FormLabel>Staff Member</FormLabel><Select onValueChange={(v) => field.onChange(v === "all" ? null : v)} value={field.value || "all"} disabled={isSubmitting || allUsersForStaffFilter.length === 0}><FormControl><SelectTrigger className="bg-input"><SelectValue placeholder={allUsersForStaffFilter.length === 0 ? "No staff users found" : "All Staff"} /></SelectTrigger></FormControl><SelectContent><SelectItem value="all">All Staff</SelectItem>{allUsersForStaffFilter.filter(staff => staff.uid && staff.uid.trim() !== "").map(staff => <SelectItem key={staff.uid} value={staff.uid}>{staff.displayName || staff.email}</SelectItem>)}</SelectContent></Select></FormItem> )} />
                   )}
                 </CardContent>
               </Card>
@@ -493,3 +517,5 @@ export default function ProfilePage() {
     </div>
   );
 }
+
+    

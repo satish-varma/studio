@@ -92,7 +92,7 @@ export default function DashboardPage() {
       return;
     }
     if (user.role === 'admin' && !activeSiteId) {
-      console.log(`${LOG_PREFIX} Admin user, no active site. Clearing stock stats.`);
+      console.log(`${LOG_PREFIX} Admin user, no active site. Clearing stock stats and setting loadingStock to false.`);
       setLoadingStock(false);
       setStats(prev => ({ ...prev, totalItems: 0, lowStockAlerts: 0 }));
       setLowStockItemsData([]);
@@ -111,13 +111,10 @@ export default function DashboardPage() {
     if (activeStallId) {
       stockItemsQueryConstraints.push(where("stallId", "==", activeStallId));
     } else {
-      // When no specific stall is selected for an Admin/Manager, we show ALL items for the site.
-      // If a staff user has activeSiteId but no activeStallId, it means they see master stock.
       if (user.role === 'staff') {
         stockItemsQueryConstraints.push(where("stallId", "==", null));
       }
     }
-
 
     const stockItemsRef = collection(db, "stockItems");
     const stockQuery = query(stockItemsRef, ...stockItemsQueryConstraints);
@@ -130,7 +127,6 @@ export default function DashboardPage() {
       setStats(prevStats => ({ ...prevStats, totalItems: total, lowStockAlerts: lowStockAlertItems.length }));
       setLowStockItemsData(lowStockAlertItems.sort((a, b) => a.quantity - b.quantity).slice(0, 5));
       setLoadingStock(false);
-      //setError(null); // Clear only stock-related part of error if successful
     }, (err) => {
       console.error(`${LOG_PREFIX} Error fetching stock items for dashboard:`, err.message, err.stack);
       setError(prevError => (prevError ? prevError + " " : "") + "Failed to load stock item data.");
@@ -153,7 +149,7 @@ export default function DashboardPage() {
       return;
     }
      if (user.role === 'admin' && !activeSiteId) {
-      console.log(`${LOG_PREFIX} Admin user, no active site. Clearing sales stats.`);
+      console.log(`${LOG_PREFIX} Admin user, no active site. Clearing sales stats and setting loadingSales to false.`);
       setLoadingSales(false);
       setStats(prev => ({ ...prev, totalSalesLast7Days: 0, itemsSoldToday: 0 }));
       setRecentSales([]);
@@ -177,13 +173,12 @@ export default function DashboardPage() {
     let salesQueryConstraints: QueryConstraint[] = [
       where("siteId", "==", activeSiteId),
       where("isDeleted", "==", false),
-      where("transactionDate", ">=", Timestamp.fromDate(sevenDaysAgo)), // Fetch last 7 days for chart
-      orderBy("transactionDate", "desc") // Order for recentSales display
+      where("transactionDate", ">=", Timestamp.fromDate(sevenDaysAgo)),
+      orderBy("transactionDate", "desc")
     ];
     if (activeStallId) {
       salesQueryConstraints.push(where("stallId", "==", activeStallId));
     }
-    // For staff, dashboard sales should reflect their own sales in the context
     if (user.role === 'staff') {
       salesQueryConstraints.push(where("staffId", "==", user.uid));
     }
@@ -212,7 +207,6 @@ export default function DashboardPage() {
 
       transactions.forEach(sale => {
         const saleDate = new Date(sale.transactionDate);
-        // Check if the sale is within the last 7 days for salesLast7Days sum and chart
         if (isWithinInterval(saleDate, { start: sevenDaysAgo, end: endOfDay(now) })) {
             salesLast7Days += sale.totalAmount;
             const formattedSaleDate = format(saleDate, 'yyyy-MM-dd');
@@ -220,7 +214,6 @@ export default function DashboardPage() {
                 dailySalesMap.set(formattedSaleDate, (dailySalesMap.get(formattedSaleDate) || 0) + sale.totalAmount);
             }
         }
-        // Check if the sale is for today for itemsSoldToday sum
         if (isWithinInterval(saleDate, { start: todayStart, end: todayEnd })) {
           sale.items.forEach(item => {
             itemsToday += Number(item.quantity) || 0;
@@ -233,13 +226,12 @@ export default function DashboardPage() {
         totalSalesLast7Days: salesLast7Days,
         itemsSoldToday: itemsToday,
       }));
-      setRecentSales(transactions.slice(0, 3)); // Keep only the 3 most recent from the already ordered (desc) list.
+      setRecentSales(transactions.slice(0, 3)); 
       const chartDataPoints: SalesChartDataPoint[] = Array.from(dailySalesMap.entries())
         .map(([date, totalSales]) => ({ date, totalSales }))
-        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()); // Ensure dates are in ascending order for chart
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()); 
       setSalesChartData(chartDataPoints);
       setLoadingSales(false);
-      //setError(null); // Clear only sales-related part of error if successful
     }, (err) => {
       console.error(`${LOG_PREFIX} Error fetching sales transactions for dashboard:`, err.message, err.stack);
       setError(prevError => (prevError ? prevError + " " : "") + "Failed to load sales transaction data.");
@@ -254,19 +246,21 @@ export default function DashboardPage() {
 
 
   const pageHeaderDescription = useMemo(() => {
-    if (user?.role === 'admin' && !activeSite) {
-        return "Admin: Select a site to view its dashboard.";
+    if (!user) return "Overview of your activity and stock levels.";
+    if (user.role === 'admin' && !activeSite) {
+        return "Admin: Select a site from the header to view its dashboard.";
     }
     if (!activeSite) {
-        return "Overview of your activity and stock levels. Select a site to view details.";
+        return user.role === 'staff' ? "Your account needs a default site assigned for dashboard data." : "Select a site to view dashboard statistics.";
     }
-    let desc = "Overview of your activity and stock levels for ";
-    desc += `Site: "${activeSite.name}"`;
+    let desc = `Overview for Site: "${activeSite.name}"`;
 
     if (activeStall) {
         desc += ` (Stall: "${activeStall.name}")`;
-    } else {
+    } else if (user.role !== 'staff') { // Admins/Managers without a specific stall selected see all stalls
         desc += " (All Stalls)";
+    } else { // Staff with no activeStall means they are viewing master stock for their activeSite
+        desc += " (Master Stock)";
     }
     desc += ".";
     return desc;
@@ -281,7 +275,7 @@ export default function DashboardPage() {
     );
   }
 
-  if (user?.role === 'admin' && !activeSiteId) {
+  if (user?.role === 'admin' && !activeSiteId && !loading) {
     return (
       <div className="space-y-6">
         <PageHeader title="Dashboard" description={pageHeaderDescription} />
@@ -481,10 +475,17 @@ export default function DashboardPage() {
                 </p>
             </CardFooter>
           )}
-          {(activeSiteId && !activeStallId) && (
+          {(activeSiteId && !activeStallId && user?.role !== 'staff') && (
              <CardFooter className="pt-3 pb-4 justify-center">
                 <p className="text-xs text-muted-foreground text-center">
                     "Add New Item" is enabled for site master stock. Select a specific stall to record sales.
+                </p>
+            </CardFooter>
+          )}
+           {(activeSiteId && !activeStallId && user?.role === 'staff') && (
+             <CardFooter className="pt-3 pb-4 justify-center">
+                <p className="text-xs text-muted-foreground text-center">
+                    "Add New Item" is available for Master Stock. "Record New Sale" is disabled as no specific stall is assigned/selected for sales.
                 </p>
             </CardFooter>
           )}
@@ -493,3 +494,5 @@ export default function DashboardPage() {
     </div>
   );
 }
+
+    

@@ -93,7 +93,7 @@ export default function SalesSummaryReportClientPage() {
     }
 
     if (!activeSiteId) {
-      const msg = user.role === 'admin' ? "Admin: Please select a site to view its report." : "Manager: Please select one of your managed sites to view its report.";
+      const msg = user.role === 'admin' ? "Admin: Please select a site from the header to view its report." : "Manager: Please select one of your managed sites from the header to view its report.";
       console.warn(`${LOG_PREFIX} No active site selected for report. Message: ${msg}`);
       setErrorReport(msg);
       setLoadingReport(false);
@@ -159,7 +159,6 @@ export default function SalesSummaryReportClientPage() {
       }
 
       const stockItemsMap = new Map<string, StockItem>();
-      // Fetch all stock items for the site to get costPrice and category. This could be optimized if performance becomes an issue.
       const stockItemsQuery = query(collection(db, "stockItems"), where("siteId", "==", activeSiteId));
       const stockItemsSnapshot = await getDocs(stockItemsQuery);
       stockItemsSnapshot.forEach(doc => {
@@ -179,7 +178,7 @@ export default function SalesSummaryReportClientPage() {
           totalItems += quantity;
 
           const stockItemDetails = stockItemsMap.get(soldItem.itemId);
-          const costPrice = stockItemDetails?.costPrice ?? 0; // Default to 0 if not found or no cost price
+          const costPrice = stockItemDetails?.costPrice ?? 0; 
           totalCOGS += quantity * costPrice;
 
           const existingAggregatedItem = itemSalesAggregation.get(soldItem.itemId);
@@ -224,7 +223,6 @@ export default function SalesSummaryReportClientPage() {
       console.log(`${LOG_PREFIX} Sales summary data calculated:`, currentSummaryData);
       setLoadingReport(false);
 
-      // Call AI summary flow
       try {
         console.log(`${LOG_PREFIX} Calling AI for sales trend summary.`);
         const aiInput = {
@@ -259,9 +257,10 @@ export default function SalesSummaryReportClientPage() {
 
   const pageHeaderDescription = useMemo(() => {
     if (!user) return "Analyze your sales data, profit margins, and inventory performance.";
-    if (!activeSite) return "Select a site to view its reports.";
-    let desc = "Analyze sales data, profit margins, and inventory performance for ";
-    desc += `Site: "${activeSite.name}"`;
+    if (!activeSite) {
+        return user.role === 'admin' ? "Admin: Select a site from the header to view its report." : "Manager: Select one of your managed sites to view its report.";
+    }
+    let desc = `Sales & Inventory analysis for Site: "${activeSite.name}"`;
     desc += activeStall ? ` (Stall: "${activeStall.name}")` : " (All Stalls/Items for this site)";
     desc += ".";
     return desc;
@@ -326,7 +325,6 @@ export default function SalesSummaryReportClientPage() {
             <AlertTitle>Site Selection Required</AlertTitle>
             <AlertDescription>
             {user.role === 'admin' ? "Admin: Please select a site from the header to view its report." : "Manager: Please select one of your managed sites from the header to view its report."}
-            {activeStallId && " Sales will be shown for the specific stall selected."}
             </AlertDescription>
         </Alert>
       )}
@@ -458,3 +456,5 @@ export default function SalesSummaryReportClientPage() {
     </div>
   );
 }
+
+    
