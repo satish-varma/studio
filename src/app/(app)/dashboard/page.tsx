@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Package, IndianRupee, TrendingUp, AlertTriangle, Loader2, Info, BarChart2, PackageSearch } from "lucide-react"; // Added PackageSearch
 import PageHeader from "@/components/shared/PageHeader";
@@ -458,4 +458,6 @@ export default function DashboardPage() {
   );
 }
     
+    
+
     
