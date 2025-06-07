@@ -39,7 +39,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger, // Added DialogTrigger import
+  DialogTrigger, 
   DialogClose, 
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
@@ -122,6 +122,11 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   const [showBatchUpdateStockDialog, setShowBatchUpdateStockDialog] = useState(false);
   const [batchUpdateQuantity, setBatchUpdateQuantity] = useState<number | string>("");
   const [isBatchUpdatingStock, setIsBatchUpdatingStock] = useState(false);
+  
+  const [showBatchUpdateDetailsDialog, setShowBatchUpdateDetailsDialog] = useState(false);
+  const [batchUpdateCategory, setBatchUpdateCategory] = useState<string>("");
+  const [batchUpdateLowStockThreshold, setBatchUpdateLowStockThreshold] = useState<string | number>("");
+  const [isBatchUpdatingDetails, setIsBatchUpdatingDetails] = useState(false);
 
   const [itemForSingleDelete, setItemForSingleDelete] = useState<StockItem | null>(null);
   const [showSingleDeleteDialog, setShowSingleDeleteDialog] = useState(false);
@@ -939,6 +944,89 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     setShowBatchUpdateStockDialog(false);
   };
 
+  const handleOpenBatchUpdateDetailsDialog = () => {
+    if (selectedItems.length === 0) {
+      toast({ title: "No Stall Items Selected", description: "Please select stall items to edit.", variant: "default" });
+      return;
+    }
+    const actualStallItemsSelected = items.filter(item => selectedItems.includes(item.id) && !!item.stallId);
+    if (actualStallItemsSelected.length === 0) {
+        toast({ title: "No Stall Items Selected", description: "This action only applies to items within specific stalls. Master stock items cannot be batch edited this way.", variant: "default" });
+        return;
+    }
+    setBatchUpdateCategory("");
+    setBatchUpdateLowStockThreshold("");
+    setShowBatchUpdateDetailsDialog(true);
+  };
+
+  const handleConfirmBatchUpdateDetails = async () => {
+    if (batchUpdateCategory.trim() === "" && (batchUpdateLowStockThreshold === "" || isNaN(Number(batchUpdateLowStockThreshold)))) {
+      toast({ title: "No Changes Specified", description: "Please enter a new category and/or a new low stock threshold.", variant: "default" });
+      return;
+    }
+    const newThresholdNumber = batchUpdateLowStockThreshold !== "" ? Number(batchUpdateLowStockThreshold) : undefined;
+    if (newThresholdNumber !== undefined && (isNaN(newThresholdNumber) || newThresholdNumber < 0)) {
+      toast({ title: "Invalid Threshold", description: "Low stock threshold must be a non-negative number.", variant: "destructive" });
+      return;
+    }
+
+    setIsBatchUpdatingDetails(true);
+    const batch = writeBatch(db);
+    let successCount = 0;
+    const itemsToUpdateDetails = items.filter(item => selectedItems.includes(item.id) && !!item.stallId);
+
+    const updateData: Partial<Pick<StockItem, 'category' | 'lowStockThreshold' | 'lastUpdated'>> = {
+      lastUpdated: new Date().toISOString(),
+    };
+    if (batchUpdateCategory.trim() !== "") {
+      updateData.category = batchUpdateCategory.trim();
+    }
+    if (newThresholdNumber !== undefined) {
+      updateData.lowStockThreshold = newThresholdNumber;
+    }
+    
+    const logNotesParts: string[] = [];
+    if (updateData.category) logNotesParts.push(`Category to '${updateData.category}'`);
+    if (updateData.lowStockThreshold !== undefined) logNotesParts.push(`Threshold to ${updateData.lowStockThreshold}`);
+    const logNotes = `Batch update: ${logNotesParts.join(', ')}.`;
+
+    for (const item of itemsToUpdateDetails) {
+      const itemRef = doc(db, "stockItems", item.id);
+      batch.update(itemRef, updateData);
+      successCount++;
+      if (user) {
+        // Log this immediately as we loop, batch commit is for Firestore efficiency
+        logStockMovement(user, {
+            stockItemId: item.id,
+            masterStockItemIdForContext: item.originalMasterItemId,
+            siteId: item.siteId!,
+            stallId: item.stallId,
+            type: 'DIRECT_STALL_UPDATE',
+            quantityChange: 0,
+            quantityBefore: item.quantity,
+            quantityAfter: item.quantity,
+            notes: logNotes,
+        }).catch(logError => console.error("Error logging batch detail update:", logError));
+      }
+    }
+
+    try {
+      await batch.commit();
+      toast({
+        title: "Batch Update Successful",
+        description: `${successCount} stall item(s) updated. ${logNotes}`,
+      });
+      onDataNeedsRefresh();
+    } catch (error: any) {
+      console.error("Error batch updating item details:", error);
+      toast({ title: "Batch Update Failed", description: error.message, variant: "destructive" });
+    } finally {
+      setIsBatchUpdatingDetails(false);
+      setShowBatchUpdateDetailsDialog(false);
+      setSelectedItems([]);
+    }
+  };
+
 
   const formatDate = (dateString?: string) => {
     if (!dateString) return "N/A";
@@ -1002,16 +1090,22 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem
-                onClick={handleOpenBatchUpdateStockDialog}
-                disabled={isBatchUpdatingStock}
+                onClick={handleOpenBatchUpdateDetailsDialog}
+                disabled={isBatchUpdatingDetails || selectedItems.length === 0}
               >
-                <Edit3 className="mr-2 h-4 w-4" /> Set Stock Quantity
+                <Edit3 className="mr-2 h-4 w-4" /> Edit Category/Threshold
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={handleOpenBatchUpdateStockDialog}
+                disabled={isBatchUpdatingStock || selectedItems.length === 0}
+              >
+                <PackageOpen className="mr-2 h-4 w-4" /> Set Stock Quantity
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={handleOpenBatchDeleteDialog}
                 className="text-destructive focus:text-destructive-foreground focus:bg-destructive"
-                disabled={isBatchDeleting}
+                disabled={isBatchDeleting || selectedItems.length === 0}
               >
                 <Trash2 className="mr-2 h-4 w-4" /> Delete Selected
               </DropdownMenuItem>
@@ -1233,6 +1327,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         </Table>
       </div>
 
+      {/* Batch Delete Dialog */}
       <AlertDialog open={showBatchDeleteDialog} onOpenChange={setShowBatchDeleteDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1253,6 +1348,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* Batch Update Stock Quantity Dialog */}
       <AlertDialog open={showBatchUpdateStockDialog} onOpenChange={setShowBatchUpdateStockDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1285,6 +1381,55 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             <AlertDialogAction onClick={handleConfirmBatchUpdateStock} disabled={isBatchUpdatingStock || batchUpdateQuantity === "" || Number(batchUpdateQuantity) < 0}>
               {isBatchUpdatingStock && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Confirm Update
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Batch Update Category/Threshold Dialog */}
+      <AlertDialog open={showBatchUpdateDetailsDialog} onOpenChange={setShowBatchUpdateDetailsDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Batch Edit Category/Threshold for Stall Items</AlertDialogTitle>
+            <AlertDialogDescription>
+              Update category and/or low stock threshold for {selectedItems.filter(id => items.find(item => item.id === id && !!item.stallId)).length} selected stall item(s).
+              Leave a field blank to keep its current value. This action only applies to items within specific stalls.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label htmlFor="batchUpdateCategory">New Category (Optional)</Label>
+              <Input
+                id="batchUpdateCategory"
+                value={batchUpdateCategory}
+                onChange={(e) => setBatchUpdateCategory(e.target.value)}
+                placeholder="Enter new category"
+                className="bg-input"
+                disabled={isBatchUpdatingDetails}
+              />
+            </div>
+            <div>
+              <Label htmlFor="batchUpdateLowStockThreshold">New Low Stock Threshold (Optional)</Label>
+              <Input
+                id="batchUpdateLowStockThreshold"
+                type="number"
+                value={batchUpdateLowStockThreshold}
+                onChange={(e) => setBatchUpdateLowStockThreshold(e.target.value)}
+                placeholder="Enter new threshold"
+                className="bg-input"
+                min="0"
+                disabled={isBatchUpdatingDetails}
+              />
+            </div>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setShowBatchUpdateDetailsDialog(false)} disabled={isBatchUpdatingDetails}>Cancel</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleConfirmBatchUpdateDetails} 
+              disabled={isBatchUpdatingDetails || (batchUpdateCategory.trim() === "" && (batchUpdateLowStockThreshold === "" || isNaN(Number(batchUpdateLowStockThreshold))))}
+            >
+              {isBatchUpdatingDetails && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Apply Changes
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
