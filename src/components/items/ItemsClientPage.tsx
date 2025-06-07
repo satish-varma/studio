@@ -22,13 +22,15 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import Link from "next/link";
 
+const LOG_PREFIX = "[ItemsClientPage]";
+
 let db: ReturnType<typeof getFirestore> | undefined;
 if (!getApps().length) {
   try {
     initializeApp(firebaseConfig);
     db = getFirestore();
   } catch (error) {
-    console.error("Firebase initialization error in ItemsClientPage:", error);
+    console.error(`${LOG_PREFIX} Firebase initialization error:`, error);
   }
 } else {
   db = getFirestore(getApp());
@@ -59,25 +61,29 @@ export default function ItemsClientPage() {
 
   useEffect(() => {
     if (user && !authLoading) {
+      console.log(`${LOG_PREFIX} Setting initial filters from user preferences:`, user);
       setSearchTerm(user.defaultItemSearchTerm || "");
       setCategoryFilter(user.defaultItemCategoryFilter || "all");
       setStockStatusFilter(user.defaultItemStockStatusFilter || "all");
       if (user.role !== 'staff') {
         setStallFilterOption(user.defaultItemStallFilterOption || "all");
       } else {
-        setStallFilterOption(activeStallId || "master");
+        // For staff, their view is determined by their assigned stall (or master if no stall)
+        setStallFilterOption(activeStallId || "master"); 
       }
     }
   }, [user, authLoading, activeSiteId, activeStallId]);
 
 
   const fetchSupportingDataAndItems = useCallback(async () => {
+    console.log(`${LOG_PREFIX} fetchSupportingDataAndItems called. AuthLoading: ${authLoading}, User: ${!!user}, DB: ${!!db}`);
     if (authLoading) {
         setLoadingPageData(true);
         return;
     }
 
     if (!user) {
+      console.warn(`${LOG_PREFIX} No user authenticated. Clearing data and showing login prompt.`);
       setErrorPageData("Please log in to view items.");
       setItems([]);
       setStallsForFilterDropdown([]);
@@ -87,15 +93,18 @@ export default function ItemsClientPage() {
       return;
     }
     if (!db) {
-      setErrorPageData("Firestore DB instance is not available.");
+      console.error(`${LOG_PREFIX} Firestore DB instance is not available.`);
+      setErrorPageData("Firestore DB instance is not available. Cannot fetch data.");
       setLoadingPageData(false);
       return;
     }
 
     setLoadingPageData(true);
     setErrorPageData(null);
+    console.log(`${LOG_PREFIX} Starting data fetch. User: ${user.uid}, ActiveSite: ${activeSiteId}, ActiveStall: ${activeStallId}, StallFilter: ${stallFilterOption}`);
 
     try {
+      console.log(`${LOG_PREFIX} Fetching sites map...`);
       const sitesCollectionRef = collection(db, "sites");
       const sitesSnapshot = await getDocs(sitesCollectionRef);
       const newSitesMap: Record<string, string> = {};
@@ -103,7 +112,9 @@ export default function ItemsClientPage() {
         newSitesMap[doc.id] = (doc.data() as Site).name;
       });
       setSitesMap(newSitesMap);
+      console.log(`${LOG_PREFIX} Sites map fetched. ${sitesSnapshot.size} sites loaded.`);
 
+      console.log(`${LOG_PREFIX} Fetching all stalls map...`);
       const allStallsCollectionRef = collection(db, "stalls");
       const allStallsSnapshot = await getDocs(allStallsCollectionRef);
       const newStallsMap: Record<string, string> = {};
@@ -111,24 +122,33 @@ export default function ItemsClientPage() {
         newStallsMap[doc.id] = (doc.data() as Stall).name;
       });
       setStallsMap(newStallsMap);
+      console.log(`${LOG_PREFIX} All stalls map fetched. ${allStallsSnapshot.size} stalls loaded.`);
 
       if (activeSiteId && user.role !== 'staff') {
+        console.log(`${LOG_PREFIX} Fetching stalls for filter dropdown for site: ${activeSiteId}`);
         const qStalls = query(collection(db, "stalls"), where("siteId", "==", activeSiteId));
         const querySnapshotStalls = await getDocs(qStalls);
         const fetchedStalls = querySnapshotStalls.docs.map(doc => ({ id: doc.id, ...doc.data() } as Stall));
         fetchedStalls.sort((a, b) => a.name.localeCompare(b.name));
         setStallsForFilterDropdown(fetchedStalls);
+        console.log(`${LOG_PREFIX} Stalls for filter dropdown fetched: ${fetchedStalls.length}`);
 
+        // Validate current stallFilterOption against fetched stalls
         if (stallFilterOption !== 'all' && stallFilterOption !== 'master' && !fetchedStalls.find(s => s.id === stallFilterOption)) {
-            setStallFilterOption('all');
+            console.log(`${LOG_PREFIX} Current stallFilterOption '${stallFilterOption}' invalid for site ${activeSiteId}. Resetting to 'all'.`);
+            setStallFilterOption('all'); // Reset if current selection is no longer valid
         }
       } else {
+        console.log(`${LOG_PREFIX} No active site or user is staff. Clearing stallsForFilterDropdown.`);
         setStallsForFilterDropdown([]);
+         // If not staff and filter was specific, reset it if activeSiteId is now null
          if (user.role !== 'staff' && stallFilterOption !== 'all' && stallFilterOption !== 'master') {
+             console.log(`${LOG_PREFIX} No active site, resetting stallFilterOption to 'all'.`);
              setStallFilterOption('all');
         }
       }
 
+      // Fetch stock items based on context
       if (!activeSiteId) {
         setItems([]);
         let message = "Please select an active site to view stock items.";
@@ -140,6 +160,7 @@ export default function ItemsClientPage() {
           message = "Manager: Please select one of your managed sites from the header to view its stock.";
         }
         setErrorPageData(message);
+        console.warn(`${LOG_PREFIX} No active site ID. Items not fetched. Error message set: ${message}`);
       } else {
         const itemsCollectionRef = collection(db, "stockItems");
         let qConstraints: QueryConstraint[] = [
@@ -148,15 +169,18 @@ export default function ItemsClientPage() {
 
         let effectiveStallFilter = stallFilterOption;
         if (user.role === 'staff') {
-            effectiveStallFilter = activeStallId || "master";
+            // Staff's view is locked to their activeStallId (which can be null for master stock)
+            effectiveStallFilter = activeStallId || "master"; 
         }
+        console.log(`${LOG_PREFIX} Effective stall filter for query: ${effectiveStallFilter}`);
 
         if (effectiveStallFilter === "master") {
             qConstraints.push(where("stallId", "==", null));
-        } else if (effectiveStallFilter !== "all") {
+        } else if (effectiveStallFilter !== "all") { // "all" means no stallId filter
             qConstraints.push(where("stallId", "==", effectiveStallFilter));
         }
 
+        console.log(`${LOG_PREFIX} Fetching items with constraints:`, qConstraints);
         const finalItemsQuery = query(itemsCollectionRef, ...qConstraints);
         const itemsSnapshot = await getDocs(finalItemsQuery);
         let fetchedItems: StockItem[] = itemsSnapshot.docs.map(doc => ({
@@ -164,20 +188,22 @@ export default function ItemsClientPage() {
           ...doc.data()
         } as StockItem));
         setItems(fetchedItems);
+        console.log(`${LOG_PREFIX} Items fetched: ${fetchedItems.length}`);
       }
 
     } catch (error: any) {
-      console.error("ItemsClientPage: Error fetching data:", error);
+      console.error(`${LOG_PREFIX} Error fetching data:`, error.message, error.stack);
       const errorMessage = error.message && error.message.includes("requires an index")
           ? `Query requires a Firestore index. Please create it. Details: ${error.message.substring(error.message.indexOf('https://'))}`
-          : "Failed to load data. Error: " + error.message;
+          : `Failed to load data. Error: ${error.message || "Unknown error"}. Please check console for details.`;
       setErrorPageData(errorMessage);
       setItems([]);
       setStallsForFilterDropdown([]);
     } finally {
       setLoadingPageData(false);
+      console.log(`${LOG_PREFIX} Data fetch attempt finished. Loading: false.`);
     }
-  }, [user, activeSiteId, activeStallId, stallFilterOption, db, authLoading]);
+  }, [user, activeSiteId, activeStallId, stallFilterOption, db, authLoading]); // stallFilterOption needs to trigger re-fetch
 
   useEffect(() => {
     fetchSupportingDataAndItems();
@@ -195,6 +221,7 @@ export default function ItemsClientPage() {
       direction = 'descending';
     }
     setSortConfig({ key, direction });
+    console.log(`${LOG_PREFIX} Sorting requested. Key: ${key}, Direction: ${direction}`);
   };
 
   const sortedAndFilteredItems = useMemo(() => {
@@ -212,7 +239,6 @@ export default function ItemsClientPage() {
             ? valA.localeCompare(valB)
             : valB.localeCompare(valA);
         }
-        // Fallback for other types or null/undefined - place nulls/undefined at the end
         if (valA == null && valB != null) return 1;
         if (valA != null && valB == null) return -1;
         if (valA == null && valB == null) return 0;
@@ -255,16 +281,16 @@ export default function ItemsClientPage() {
       desc += ` (Stall: "${activeStall.name}")`;
     } else if (user.role !== 'staff') {
         if (stallFilterOption === 'master') {
-            desc += " (Master Stock).";
+            desc += " (Master Stock)";
         } else if (stallFilterOption === 'all' || !stallFilterOption) {
-            desc += " (All items in site).";
+            desc += " (All items in site)";
         } else if (stallsMap[stallFilterOption]) {
-            desc += ` (Stall: "${stallsMap[stallFilterOption]}").`;
+            desc += ` (Stall: "${stallsMap[stallFilterOption]}")`;
         } else {
-             desc += " (All items in site).";
+             desc += " (All items in site)";
         }
-    } else if (user.role === 'staff' && !activeStallId) {
-        desc += " (Master Stock).";
+    } else if (user.role === 'staff' && !activeStallId) { // Staff viewing master stock of their assigned site
+        desc += " (Master Stock)";
     }
      desc += ".";
     return desc;

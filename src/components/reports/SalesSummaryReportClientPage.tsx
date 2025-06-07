@@ -33,15 +33,16 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import PageHeader from "@/components/shared/PageHeader";
-import { summarizeSalesTrends } from "@/ai/flows/summarize-sales-trends-flow"; // Import AI flow
-import { Skeleton } from "@/components/ui/skeleton"; // Import Skeleton
+import { summarizeSalesTrends } from "@/ai/flows/summarize-sales-trends-flow";
+import { Skeleton } from "@/components/ui/skeleton";
 
+const LOG_PREFIX = "[SalesSummaryReportClientPage]";
 
 if (!getApps().length) {
   try {
     initializeApp(firebaseConfig);
   } catch (error) {
-    console.error("Firebase initialization error in SalesSummaryReportClientPage:", error);
+    console.error(`${LOG_PREFIX} Firebase initialization error:`, error);
   }
 }
 const db = getFirestore();
@@ -81,16 +82,20 @@ export default function SalesSummaryReportClientPage() {
   const [loadingAiSummary, setLoadingAiSummary] = useState(false);
 
   const fetchReportData = useCallback(async () => {
+    console.log(`${LOG_PREFIX} fetchReportData called. AuthLoading: ${authLoading}, User: ${!!user}`);
     if (authLoading) return;
 
     if (!user || (user.role !== 'admin' && user.role !== 'manager')) {
+      console.warn(`${LOG_PREFIX} User not authorized to view reports. Role: ${user?.role}`);
       setErrorReport("Access Denied: You do not have permission to view reports.");
       setLoadingReport(false);
       return;
     }
 
     if (!activeSiteId) {
-      setErrorReport(user.role === 'admin' ? "Admin: Please select a site to view its report." : "Manager: Please select one of your managed sites to view its report.");
+      const msg = user.role === 'admin' ? "Admin: Please select a site to view its report." : "Manager: Please select one of your managed sites to view its report.";
+      console.warn(`${LOG_PREFIX} No active site selected for report. Message: ${msg}`);
+      setErrorReport(msg);
       setLoadingReport(false);
       setSummaryData(null);
       setTopSellingItems([]);
@@ -99,6 +104,7 @@ export default function SalesSummaryReportClientPage() {
     }
 
     if (!dateRange?.from || !dateRange?.to || !isValid(dateRange.from) || !isValid(dateRange.to)) {
+        console.warn(`${LOG_PREFIX} Invalid date range for report.`);
         setErrorReport("Please select a valid date range.");
         setLoadingReport(false);
         setSummaryData(null);
@@ -106,7 +112,7 @@ export default function SalesSummaryReportClientPage() {
         setAiSummary(null);
         return;
     }
-
+    console.log(`${LOG_PREFIX} Starting report data fetch. Site: ${activeSiteId}, Stall: ${activeStallId || 'All'}, DateRange: ${dateRange.from.toISOString()} to ${dateRange.to.toISOString()}`);
     setLoadingReport(true);
     setLoadingAiSummary(true);
     setErrorReport(null);
@@ -137,8 +143,10 @@ export default function SalesSummaryReportClientPage() {
           transactionDate: (data.transactionDate as Timestamp).toDate().toISOString(),
         } as SaleTransaction;
       });
+      console.log(`${LOG_PREFIX} Fetched ${transactions.length} transactions for report.`);
 
       if (transactions.length === 0) {
+        console.log(`${LOG_PREFIX} No sales data found for the selected criteria.`);
         setSummaryData({
           totalSalesAmount: 0, totalItemsSold: 0, totalCostOfGoodsSold: 0,
           totalProfit: 0, averageSaleValue: 0, profitMargin: 0, numberOfSales: 0,
@@ -151,11 +159,13 @@ export default function SalesSummaryReportClientPage() {
       }
 
       const stockItemsMap = new Map<string, StockItem>();
+      // Fetch all stock items for the site to get costPrice and category. This could be optimized if performance becomes an issue.
       const stockItemsQuery = query(collection(db, "stockItems"), where("siteId", "==", activeSiteId));
       const stockItemsSnapshot = await getDocs(stockItemsQuery);
       stockItemsSnapshot.forEach(doc => {
         stockItemsMap.set(doc.id, { id: doc.id, ...doc.data() } as StockItem);
       });
+      console.log(`${LOG_PREFIX} Fetched ${stockItemsMap.size} stock items for cost/category lookup.`);
 
       let totalSales = 0;
       let totalItems = 0;
@@ -169,7 +179,7 @@ export default function SalesSummaryReportClientPage() {
           totalItems += quantity;
 
           const stockItemDetails = stockItemsMap.get(soldItem.itemId);
-          const costPrice = stockItemDetails?.costPrice ?? 0;
+          const costPrice = stockItemDetails?.costPrice ?? 0; // Default to 0 if not found or no cost price
           totalCOGS += quantity * costPrice;
 
           const existingAggregatedItem = itemSalesAggregation.get(soldItem.itemId);
@@ -195,6 +205,7 @@ export default function SalesSummaryReportClientPage() {
         .slice(0, MAX_TOP_ITEMS);
 
       setTopSellingItems(sortedTopItems);
+      console.log(`${LOG_PREFIX} Aggregated top selling items. Count: ${sortedTopItems.length}`);
 
       const totalProfitCalc = totalSales - totalCOGS;
       const averageSaleCalc = transactions.length > 0 ? totalSales / transactions.length : 0;
@@ -210,10 +221,12 @@ export default function SalesSummaryReportClientPage() {
         numberOfSales: transactions.length,
       };
       setSummaryData(currentSummaryData);
-      setLoadingReport(false); // Report data is ready
+      console.log(`${LOG_PREFIX} Sales summary data calculated:`, currentSummaryData);
+      setLoadingReport(false);
 
       // Call AI summary flow
       try {
+        console.log(`${LOG_PREFIX} Calling AI for sales trend summary.`);
         const aiInput = {
           summaryStats: currentSummaryData,
           topSellingItems: sortedTopItems,
@@ -224,15 +237,16 @@ export default function SalesSummaryReportClientPage() {
         };
         const aiResult = await summarizeSalesTrends(aiInput);
         setAiSummary(aiResult.summary);
+        console.log(`${LOG_PREFIX} AI summary generated successfully.`);
       } catch (aiError: any) {
-        console.error("Error generating AI sales summary:", aiError);
-        setAiSummary("Could not generate AI summary for this period.");
+        console.error(`${LOG_PREFIX} Error generating AI sales summary:`, aiError.message, aiError.stack);
+        setAiSummary("Could not generate AI summary for this period. " + aiError.message);
       } finally {
         setLoadingAiSummary(false);
       }
 
     } catch (error: any) {
-      console.error("Error fetching report data:", error);
+      console.error(`${LOG_PREFIX} Error fetching report data:`, error.message, error.stack);
       setErrorReport("Failed to load report data. " + error.message);
       setLoadingReport(false);
       setLoadingAiSummary(false);
@@ -423,11 +437,11 @@ export default function SalesSummaryReportClientPage() {
               </CardContent>
             </Card>
           )}
-           {summaryData.numberOfSales > 0 && topSellingItems.length === 0 && (
+           {summaryData.numberOfSales > 0 && topSellingItems.length === 0 && !loadingReport && (
              <Card className="shadow-lg">
               <CardHeader><CardTitle>Top Selling Items</CardTitle></CardHeader>
               <CardContent>
-                <p className="text-muted-foreground text-center py-4">Item sales data is being processed or not available for top sellers display.</p>
+                <p className="text-muted-foreground text-center py-4">No specific top-selling items data to display for this period.</p>
               </CardContent>
             </Card>
            )}

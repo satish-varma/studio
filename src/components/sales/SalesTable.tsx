@@ -1,3 +1,4 @@
+
 "use client";
 
 import {
@@ -10,7 +11,7 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import type { SaleTransaction, UserRole } from "@/types";
-import { MoreHorizontal, Eye, Printer, Trash2, Loader2, ChevronLeft, ChevronRight, ShoppingCart } from "lucide-react"; // Added ShoppingCart
+import { MoreHorizontal, Eye, Printer, Trash2, Loader2, ChevronLeft, ChevronRight, ShoppingCart } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,6 +34,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+
+const LOG_PREFIX = "[SalesTable]";
 
 interface SalesTableProps {
   transactions: SaleTransaction[];
@@ -75,15 +78,18 @@ export function SalesTable({
         hour12: true
       });
     } catch (e) {
+      console.warn(`${LOG_PREFIX} Invalid date string for formatting: ${dateString}`, e);
       return "Invalid Date";
     }
   };
 
   const handleViewDetails = (transactionId: string) => {
+    console.log(`${LOG_PREFIX} Navigating to view details for sale ID: ${transactionId}`);
     router.push(`/sales/history/${transactionId}`);
   };
 
   const handlePrintReceipt = (transactionId: string) => {
+    console.log(`${LOG_PREFIX} Navigating to details for printing sale ID: ${transactionId}`);
     router.push(`/sales/history/${transactionId}?print=true`);
     toast({
       title: "Navigating to Details for Printing",
@@ -92,11 +98,13 @@ export function SalesTable({
   };
 
   const openDeleteDialog = (sale: SaleTransaction) => {
+    console.log(`${LOG_PREFIX} Opening delete dialog for sale ID: ${sale.id}`);
     setSaleToDelete(sale);
     setJustification("");
   };
 
   const closeDeleteDialog = () => {
+    console.log(`${LOG_PREFIX} Closing delete dialog.`);
     setSaleToDelete(null);
   };
 
@@ -105,10 +113,19 @@ export function SalesTable({
         toast({title: "Error", description: "Justification cannot be empty.", variant: "destructive"});
         return;
     }
+    console.log(`${LOG_PREFIX} Confirming deletion for sale ID: ${saleToDelete.id}`);
     setIsDeleting(true);
-    await onDeleteSale(saleToDelete.id, justification.trim());
-    setIsDeleting(false);
-    closeDeleteDialog();
+    try {
+      await onDeleteSale(saleToDelete.id, justification.trim());
+      // Success toast is handled by the parent component after successful deletion
+      console.log(`${LOG_PREFIX} Deletion successful for sale ID: ${saleToDelete.id}`);
+    } catch (error: any) {
+        console.error(`${LOG_PREFIX} Error in onDeleteSale callback for sale ID ${saleToDelete.id}:`, error.message, error.stack);
+        // Toast for error is also expected to be handled by parent or onDeleteSale itself
+    } finally {
+      setIsDeleting(false);
+      closeDeleteDialog();
+    }
   };
 
   const showPagination = transactions.length > 0 || !isFirstPage || !isLastPage;

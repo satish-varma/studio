@@ -19,12 +19,13 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartConfig } from "@/components/ui/chart";
 import { BarChart, Bar, CartesianGrid, XAxis, YAxis } from "recharts";
 
+const LOG_PREFIX = "[DashboardPage]";
 
 if (!getApps().length) {
   try {
     initializeApp(firebaseConfig);
   } catch (error) {
-    console.error("Firebase initialization error in DashboardPage:", error);
+    console.error(`${LOG_PREFIX} Firebase initialization error:`, error);
   }
 }
 const db = getFirestore();
@@ -74,6 +75,7 @@ export default function DashboardPage() {
   
   useEffect(() => {
     if (!loadingStock && !loadingSales) {
+      console.log(`${LOG_PREFIX} Both stock and sales data loaded/failed. Main loading set to false.`);
       setLoading(false);
     } else {
       setLoading(true);
@@ -83,27 +85,39 @@ export default function DashboardPage() {
 
   // Effect for Stock Items
   useEffect(() => {
+    console.log(`${LOG_PREFIX} Stock items useEffect triggered. User: ${user?.uid}, ActiveSite: ${activeSiteId}, ActiveStall: ${activeStallId}`);
     if (!user) {
+      console.log(`${LOG_PREFIX} No user for stock items. Setting loadingStock to false.`);
       setLoadingStock(false);
       return;
     }
     if (user.role === 'admin' && !activeSiteId) {
+      console.log(`${LOG_PREFIX} Admin user, no active site. Clearing stock stats.`);
       setLoadingStock(false);
       setStats(prev => ({ ...prev, totalItems: 0, lowStockAlerts: 0 }));
       setLowStockItemsData([]);
       return;
     }
     if (!activeSiteId) {
+      console.warn(`${LOG_PREFIX} No active site for stock items. User role: ${user.role}.`);
       setLoadingStock(false);
-      setError(prevError => prevError || "No active site context for stock items.");
+      setError(prevError => (prevError ? prevError + " " : "") + "No active site context for stock items.");
       return;
     }
 
+    console.log(`${LOG_PREFIX} Fetching stock items for site: ${activeSiteId}, stall: ${activeStallId || 'All'}`);
     setLoadingStock(true);
     let stockItemsQueryConstraints: QueryConstraint[] = [where("siteId", "==", activeSiteId)];
     if (activeStallId) {
       stockItemsQueryConstraints.push(where("stallId", "==", activeStallId));
+    } else {
+      // When no specific stall is selected for an Admin/Manager, we show ALL items for the site.
+      // If a staff user has activeSiteId but no activeStallId, it means they see master stock.
+      if (user.role === 'staff') {
+        stockItemsQueryConstraints.push(where("stallId", "==", null));
+      }
     }
+
 
     const stockItemsRef = collection(db, "stockItems");
     const stockQuery = query(stockItemsRef, ...stockItemsQueryConstraints);
@@ -112,27 +126,34 @@ export default function DashboardPage() {
       const items: StockItem[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as StockItem));
       const total = items.length;
       const lowStockAlertItems = items.filter(item => item.quantity <= item.lowStockThreshold);
+      console.log(`${LOG_PREFIX} Stock items snapshot received. Total: ${total}, Low stock: ${lowStockAlertItems.length}`);
       setStats(prevStats => ({ ...prevStats, totalItems: total, lowStockAlerts: lowStockAlertItems.length }));
       setLowStockItemsData(lowStockAlertItems.sort((a, b) => a.quantity - b.quantity).slice(0, 5));
       setLoadingStock(false);
-      setError(null); // Clear error if stock data loads
+      //setError(null); // Clear only stock-related part of error if successful
     }, (err) => {
-      console.error("Error fetching stock items for dashboard:", err);
-      setError(prevError => prevError || "Failed to load stock item data.");
+      console.error(`${LOG_PREFIX} Error fetching stock items for dashboard:`, err.message, err.stack);
+      setError(prevError => (prevError ? prevError + " " : "") + "Failed to load stock item data.");
       setLowStockItemsData([]);
       setLoadingStock(false);
     });
 
-    return () => unsubscribeStock();
+    return () => {
+      console.log(`${LOG_PREFIX} Unsubscribing from stock items listener.`);
+      unsubscribeStock();
+    };
   }, [user, activeSiteId, activeStallId]);
 
   // Effect for Sales Transactions
   useEffect(() => {
+    console.log(`${LOG_PREFIX} Sales transactions useEffect triggered. User: ${user?.uid}, ActiveSite: ${activeSiteId}, ActiveStall: ${activeStallId}`);
     if (!user) {
+      console.log(`${LOG_PREFIX} No user for sales data. Setting loadingSales to false.`);
       setLoadingSales(false);
       return;
     }
      if (user.role === 'admin' && !activeSiteId) {
+      console.log(`${LOG_PREFIX} Admin user, no active site. Clearing sales stats.`);
       setLoadingSales(false);
       setStats(prev => ({ ...prev, totalSalesLast7Days: 0, itemsSoldToday: 0 }));
       setRecentSales([]);
@@ -140,11 +161,13 @@ export default function DashboardPage() {
       return;
     }
     if (!activeSiteId) {
+      console.warn(`${LOG_PREFIX} No active site for sales data. User role: ${user.role}.`);
       setLoadingSales(false);
-      setError(prevError => prevError || "No active site context for sales data.");
+      setError(prevError => (prevError ? prevError + " " : "") + "No active site context for sales data.");
       return;
     }
 
+    console.log(`${LOG_PREFIX} Fetching sales transactions for site: ${activeSiteId}, stall: ${activeStallId || 'All'}`);
     setLoadingSales(true);
     const now = new Date();
     const todayStart = startOfDay(now);
@@ -154,12 +177,13 @@ export default function DashboardPage() {
     let salesQueryConstraints: QueryConstraint[] = [
       where("siteId", "==", activeSiteId),
       where("isDeleted", "==", false),
-      where("transactionDate", ">=", Timestamp.fromDate(sevenDaysAgo)),
-      orderBy("transactionDate", "desc")
+      where("transactionDate", ">=", Timestamp.fromDate(sevenDaysAgo)), // Fetch last 7 days for chart
+      orderBy("transactionDate", "desc") // Order for recentSales display
     ];
     if (activeStallId) {
       salesQueryConstraints.push(where("stallId", "==", activeStallId));
     }
+    // For staff, dashboard sales should reflect their own sales in the context
     if (user.role === 'staff') {
       salesQueryConstraints.push(where("staffId", "==", user.uid));
     }
@@ -176,6 +200,7 @@ export default function DashboardPage() {
           transactionDate: (data.transactionDate as Timestamp).toDate().toISOString()
         } as SaleTransaction;
       });
+      console.log(`${LOG_PREFIX} Sales transactions snapshot received. Count: ${transactions.length}`);
 
       let salesLast7Days = 0;
       let itemsToday = 0;
@@ -187,11 +212,15 @@ export default function DashboardPage() {
 
       transactions.forEach(sale => {
         const saleDate = new Date(sale.transactionDate);
-        salesLast7Days += sale.totalAmount;
-        const formattedSaleDate = format(saleDate, 'yyyy-MM-dd');
-        if (dailySalesMap.has(formattedSaleDate)) {
-          dailySalesMap.set(formattedSaleDate, (dailySalesMap.get(formattedSaleDate) || 0) + sale.totalAmount);
+        // Check if the sale is within the last 7 days for salesLast7Days sum and chart
+        if (isWithinInterval(saleDate, { start: sevenDaysAgo, end: endOfDay(now) })) {
+            salesLast7Days += sale.totalAmount;
+            const formattedSaleDate = format(saleDate, 'yyyy-MM-dd');
+            if (dailySalesMap.has(formattedSaleDate)) {
+                dailySalesMap.set(formattedSaleDate, (dailySalesMap.get(formattedSaleDate) || 0) + sale.totalAmount);
+            }
         }
+        // Check if the sale is for today for itemsSoldToday sum
         if (isWithinInterval(saleDate, { start: todayStart, end: todayEnd })) {
           sale.items.forEach(item => {
             itemsToday += Number(item.quantity) || 0;
@@ -204,20 +233,23 @@ export default function DashboardPage() {
         totalSalesLast7Days: salesLast7Days,
         itemsSoldToday: itemsToday,
       }));
-      setRecentSales(transactions.slice(0, 3));
+      setRecentSales(transactions.slice(0, 3)); // Keep only the 3 most recent from the already ordered (desc) list.
       const chartDataPoints: SalesChartDataPoint[] = Array.from(dailySalesMap.entries())
         .map(([date, totalSales]) => ({ date, totalSales }))
-        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()); // Ensure dates are in ascending order for chart
       setSalesChartData(chartDataPoints);
       setLoadingSales(false);
-      setError(null); // Clear error if sales data loads
+      //setError(null); // Clear only sales-related part of error if successful
     }, (err) => {
-      console.error("Error fetching sales transactions for dashboard:", err);
-      setError(prevError => prevError || "Failed to load sales transaction data.");
+      console.error(`${LOG_PREFIX} Error fetching sales transactions for dashboard:`, err.message, err.stack);
+      setError(prevError => (prevError ? prevError + " " : "") + "Failed to load sales transaction data.");
       setLoadingSales(false);
     });
 
-    return () => unsubscribeSales();
+    return () => {
+      console.log(`${LOG_PREFIX} Unsubscribing from sales transactions listener.`);
+      unsubscribeSales();
+    };
   }, [user, activeSiteId, activeStallId]);
 
 
@@ -265,9 +297,7 @@ export default function DashboardPage() {
     );
   }
   
-  // This error check should come after the admin/no-siteId check
-  // to allow admins to see the "Select a Site" message first.
-  if (error && !loading) { // Only show main error if not loading and admin no-site is not applicable
+  if (error && !loading) {
     return (
       <div className="space-y-6">
         <PageHeader title="Dashboard" description={pageHeaderDescription} />
@@ -463,7 +493,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-    
-    
-
-    

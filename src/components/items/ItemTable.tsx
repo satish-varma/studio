@@ -71,12 +71,13 @@ import { logStockMovement } from "@/lib/stockLogger";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { SortConfig } from "./ItemsClientPage";
 
+const LOG_PREFIX = "[ItemTable]";
 
 if (!getApps().length) {
   try {
     initializeApp(firebaseConfig);
   } catch (error) {
-    console.error("Firebase initialization error in ItemTable:", error);
+    console.error(`${LOG_PREFIX} Firebase initialization error:`, error);
   }
 }
 const db = getFirestore();
@@ -170,7 +171,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
 
   const handleSelectItem = (itemId: string, checked: boolean | 'indeterminate') => {
     const item = items.find(i => i.id === itemId);
-    if (item && !item.stallId) return;
+    if (item && !item.stallId) return; // Only allow selection of stall items
 
     if (checked === true) {
       setSelectedItems(prev => [...prev, itemId]);
@@ -180,11 +181,13 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   };
 
   const handleEdit = (itemId: string) => {
+    console.log(`${LOG_PREFIX} Navigating to edit item: ${itemId}`);
     router.push(`/items/${itemId}/edit`);
-    setSelectedItems([]);
+    setSelectedItems([]); // Clear selection when navigating
   };
 
   const handleDelete = async (itemId: string, itemName: string) => {
+    console.log(`${LOG_PREFIX} Attempting to delete item: ${itemId} (${itemName})`);
     setIsDeleting(true);
     let itemDataForLog: StockItem | null = null;
     try {
@@ -226,11 +229,12 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
               lastUpdated: new Date().toISOString(),
             });
           } else {
-            console.warn(`Master item ${itemDataForLog!.originalMasterItemId} not found during deletion of stall item ${itemDataForLog!.id}. Master stock not adjusted.`);
+            console.warn(`${LOG_PREFIX} Master item ${itemDataForLog!.originalMasterItemId} not found during deletion of stall item ${itemDataForLog!.id}. Master stock not adjusted.`);
           }
         }
         transaction.delete(itemRef);
       });
+      console.log(`${LOG_PREFIX} Item ${itemId} deleted successfully from Firestore.`);
 
       if (user && itemDataForLog) {
         await logStockMovement(user, {
@@ -274,7 +278,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         setItemForSingleDelete(null);
       }
     } catch (error: any) {
-      console.error("Error deleting item:", error);
+      console.error(`${LOG_PREFIX} Error deleting item ${itemId}:`, error.message, error.stack);
       toast({
         title: "Deletion Failed",
         description: error.message || "Could not delete the item. Please try again.",
@@ -286,6 +290,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   };
 
   const handleOpenUpdateStockDialog = (item: StockItem) => {
+    console.log(`${LOG_PREFIX} Opening update stock dialog for item: ${item.id} (${item.name})`);
     setStockUpdateItem(item);
     setNewQuantity(item.quantity);
   };
@@ -295,6 +300,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       toast({ title: "Invalid Quantity", description: "Please enter a valid non-negative number for the quantity.", variant: "destructive" });
       return;
     }
+    console.log(`${LOG_PREFIX} Attempting to update stock for item ${stockUpdateItem.id}. New quantity: ${newQuantity}`);
     setIsUpdatingStock(true);
     const updatedQuantityNum = Number(newQuantity);
     let originalItemData: StockItem | null = null;
@@ -327,6 +333,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           quantity: updatedQuantityNum,
           lastUpdated: new Date().toISOString(),
         });
+        console.log(`${LOG_PREFIX} Stock updated in transaction for item ${originalItemData.id}. Old: ${oldQuantity}, New: ${updatedQuantityNum}`);
 
         if (masterItemSnap && masterItemSnap.exists() && masterItemRef && originalMasterData) {
           const quantityDelta = updatedQuantityNum - oldQuantity;
@@ -335,8 +342,9 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             quantity: newMasterQuantityAfterUpdate,
             lastUpdated: new Date().toISOString(),
           });
+          console.log(`${LOG_PREFIX} Master stock ${originalMasterData.id} updated. Old: ${originalMasterData.quantity}, New: ${newMasterQuantityAfterUpdate}`);
         } else if (originalItemData.stallId && originalItemData.originalMasterItemId && !masterItemSnap?.exists()){
-            console.warn(`Master stock item ${originalItemData.originalMasterItemId} not found. Stall stock updated, but master cannot be adjusted.`);
+            console.warn(`${LOG_PREFIX} Master stock item ${originalItemData.originalMasterItemId} not found. Stall stock updated, but master cannot be adjusted.`);
         }
       });
 
@@ -375,7 +383,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       setNewQuantity("");
       onDataNeedsRefresh();
     } catch (error: any) {
-      console.error("Error updating stock:", error);
+      console.error(`${LOG_PREFIX} Error updating stock for item ${stockUpdateItem.id}:`, error.message, error.stack);
       toast({
         title: "Stock Update Failed",
         description: error.message || "Could not update stock. Please try again.",
@@ -387,6 +395,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   };
 
   const handleOpenAllocateDialog = (item: StockItem) => {
+    console.log(`${LOG_PREFIX} Opening allocate dialog for item: ${item.id} (${item.name})`);
     setItemToAllocate(item);
     setQuantityToAllocate(1);
     setTargetStallIdForAllocation("");
@@ -404,7 +413,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       toast({ title: "Insufficient Stock", description: `Cannot allocate ${numQuantityToAllocate}. Only ${itemToAllocate.quantity} available in master stock.`, variant: "destructive" });
       return;
     }
-
+    console.log(`${LOG_PREFIX} Attempting allocation for item ${itemToAllocate.id}. Quantity: ${numQuantityToAllocate}, Target Stall: ${targetStallIdForAllocation}`);
     setIsAllocating(true);
     let masterStockDataBeforeTx: StockItem | null = null;
     let stallItemDataBeforeTx: StockItem | null = null;
@@ -431,18 +440,21 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         );
 
         let targetStallItemRef: DocumentReference | null = null;
-        const existingStallItemsQuerySnap = await getDocs(stallItemsQuery);
+        const existingStallItemsQuerySnap = await getDocs(stallItemsQuery); // Use getDocs inside transaction if needed, but careful with read limits. Here assuming one-time check before modifying is ok.
 
         if (!existingStallItemsQuerySnap.empty) {
             targetStallItemRef = existingStallItemsQuerySnap.docs[0].ref;
             existingStallItemIdForLog = existingStallItemsQuerySnap.docs[0].id;
+            // Re-fetch inside transaction to ensure consistency
             const targetStallItemSnap = await transaction.get(targetStallItemRef);
             if (targetStallItemSnap.exists()) {
                 stallItemDataBeforeTx = {id: targetStallItemSnap.id, ...targetStallItemSnap.data()} as StockItem;
             }
         }
+        console.log(`${LOG_PREFIX} Allocation: Existing stall item? ${!!targetStallItemRef}. NewStallItemID (if new): ${newStallItemIdForLog}`);
 
         if (targetStallItemRef && stallItemDataBeforeTx) {
+            console.log(`${LOG_PREFIX} Updating existing stall item ${existingStallItemIdForLog}. Old Qty: ${stallItemDataBeforeTx.quantity}, Allocating: ${numQuantityToAllocate}`);
             transaction.update(targetStallItemRef, {
                 quantity: stallItemDataBeforeTx.quantity + numQuantityToAllocate,
                 lastUpdated: new Date().toISOString(),
@@ -450,6 +462,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         } else {
             const newStallItemDocRef = doc(collection(db, "stockItems"));
             newStallItemIdForLog = newStallItemDocRef.id;
+            console.log(`${LOG_PREFIX} Creating new stall item ${newStallItemIdForLog}. Allocating: ${numQuantityToAllocate}`);
             const newStallItemDataToSave: Omit<StockItem, 'id'> = {
                 name: masterStockDataBeforeTx.name,
                 category: masterStockDataBeforeTx.category,
@@ -472,6 +485,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           quantity: masterStockDataBeforeTx.quantity - numQuantityToAllocate,
           lastUpdated: new Date().toISOString(),
         });
+        console.log(`${LOG_PREFIX} Master stock ${masterStockDataBeforeTx.id} updated. Old Qty: ${masterStockDataBeforeTx.quantity}, New Qty: ${masterStockDataBeforeTx.quantity - numQuantityToAllocate}`);
       });
 
       if (user && masterStockDataBeforeTx) {
@@ -512,7 +526,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       setItemToAllocate(null);
       onDataNeedsRefresh();
     } catch (error: any) {
-      console.error("Error allocating stock:", error);
+      console.error(`${LOG_PREFIX} Error allocating stock for item ${itemToAllocate.id}:`, error.message, error.stack);
       toast({
         title: "Allocation Failed",
         description: error.message || "Could not allocate stock. Please try again.",
@@ -524,6 +538,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   };
 
   const handleOpenReturnDialog = (item: StockItem) => {
+    console.log(`${LOG_PREFIX} Opening return dialog for item: ${item.id} (${item.name})`);
     setItemToReturn(item);
     setQuantityToReturn(1);
     setShowReturnDialog(true);
@@ -539,7 +554,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       toast({ title: "Insufficient Stall Stock", description: `Cannot return ${numQuantityToReturn}. Only ${itemToReturn.quantity} available in this stall.`, variant: "destructive" });
       return;
     }
-
+    console.log(`${LOG_PREFIX} Attempting to return item ${itemToReturn.id} to master. Quantity: ${numQuantityToReturn}`);
     setIsReturning(true);
     let stallItemDataBeforeTx: StockItem | null = null;
     let masterItemDataBeforeTx: StockItem | null = null;
@@ -570,11 +585,13 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           quantity: masterItemDataBeforeTx.quantity + numQuantityToReturn,
           lastUpdated: new Date().toISOString(),
         });
+        console.log(`${LOG_PREFIX} Master stock ${masterItemDataBeforeTx.id} updated. Old Qty: ${masterItemDataBeforeTx.quantity}, New Qty: ${masterItemDataBeforeTx.quantity + numQuantityToReturn}`);
 
         transaction.update(stallItemRef, {
           quantity: stallItemDataBeforeTx.quantity - numQuantityToReturn,
           lastUpdated: new Date().toISOString(),
         });
+        console.log(`${LOG_PREFIX} Stall stock ${stallItemDataBeforeTx.id} updated. Old Qty: ${stallItemDataBeforeTx.quantity}, New Qty: ${stallItemDataBeforeTx.quantity - numQuantityToReturn}`);
       });
 
       if (user && stallItemDataBeforeTx && masterItemDataBeforeTx) {
@@ -614,7 +631,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     }
     catch (error: any)
     {
-      console.error("Error returning stock to master:", error);
+      console.error(`${LOG_PREFIX} Error returning item ${itemToReturn.id} to master:`, error.message, error.stack);
       toast({
         title: "Return Failed",
         description: error.message || "Could not return stock to master. Please try again.",
@@ -626,6 +643,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   };
 
   const handleOpenTransferDialog = (item: StockItem) => {
+    console.log(`${LOG_PREFIX} Opening transfer dialog for item: ${item.id} (${item.name})`);
     setItemToTransfer(item);
     setQuantityToTransfer(1);
     setDestinationStallId("");
@@ -646,7 +664,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       toast({ title: "Insufficient Stock", description: `Cannot transfer ${numQuantityToTransfer}. Only ${itemToTransfer.quantity} available at source stall.`, variant: "destructive" });
       return;
     }
-
+    console.log(`${LOG_PREFIX} Attempting transfer for item ${itemToTransfer.id}. Qty: ${numQuantityToTransfer}, From: ${itemToTransfer.stallId}, To: ${destinationStallId}`);
     setIsTransferring(true);
     let sourceItemDataBeforeTx: StockItem | null = null;
     let destItemDataBeforeTx: StockItem | null = null;
@@ -662,27 +680,31 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         if (sourceItemDataBeforeTx.quantity < numQuantityToTransfer) throw new Error(`Concurrent update: Not enough source stock. Available: ${sourceItemDataBeforeTx.quantity}`);
 
         let destinationItemRef: DocumentReference | null = null;
+        // Query for existing item at destination stall with same originalMasterItemId
         const q = query(
             collection(db, "stockItems"),
             where("stallId", "==", destinationStallId),
-            where("originalMasterItemId", "==", sourceItemDataBeforeTx.originalMasterItemId ?? null)
+            where("originalMasterItemId", "==", sourceItemDataBeforeTx.originalMasterItemId ?? null) // Handle if master item ID is null (direct stall item)
         );
-        const destQuerySnap = await getDocs(q);
+        const destQuerySnap = await getDocs(q); // Use getDocs within transaction if possible, or ensure it's a recent snapshot
         if (!destQuerySnap.empty) {
             destinationItemRef = destQuerySnap.docs[0].ref;
             existingDestItemIdForLog = destQuerySnap.docs[0].id;
-            const destinationItemSnap = await transaction.get(destinationItemRef);
+            const destinationItemSnap = await transaction.get(destinationItemRef); // Re-fetch within transaction
             if(destinationItemSnap.exists()){
                 destItemDataBeforeTx = {id: destinationItemSnap.id, ...destinationItemSnap.data()} as StockItem;
             }
         }
+        console.log(`${LOG_PREFIX} Transfer: Source Qty: ${sourceItemDataBeforeTx.quantity}, Destination Exists? ${!!destinationItemRef}`);
 
         transaction.update(sourceItemRef, {
           quantity: sourceItemDataBeforeTx.quantity - numQuantityToTransfer,
           lastUpdated: new Date().toISOString()
         });
+        console.log(`${LOG_PREFIX} Source item ${sourceItemDataBeforeTx.id} updated. New Qty: ${sourceItemDataBeforeTx.quantity - numQuantityToTransfer}`);
 
         if (destinationItemRef && destItemDataBeforeTx) {
+          console.log(`${LOG_PREFIX} Updating existing destination item ${existingDestItemIdForLog}. Old Qty: ${destItemDataBeforeTx.quantity}, Transferring: ${numQuantityToTransfer}`);
           transaction.update(destinationItemRef, {
             quantity: destItemDataBeforeTx.quantity + numQuantityToTransfer,
             lastUpdated: new Date().toISOString()
@@ -690,6 +712,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         } else {
           const newDestItemDocRef = doc(collection(db, "stockItems"));
           newDestItemIdForLog = newDestItemDocRef.id;
+          console.log(`${LOG_PREFIX} Creating new destination item ${newDestItemIdForLog}. Transferring: ${numQuantityToTransfer}`);
           transaction.set(newDestItemDocRef, {
             name: sourceItemDataBeforeTx.name,
             category: sourceItemDataBeforeTx.category,
@@ -747,8 +770,8 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       setItemToTransfer(null);
       onDataNeedsRefresh();
     } catch (error: any) {
-      console.error("Error transferring stock:", error);
-      toast({ title: "Transfer Failed", description: error.message, variant: "destructive" });
+      console.error(`${LOG_PREFIX} Error transferring stock for item ${itemToTransfer.id}:`, error.message, error.stack);
+      toast({ title: "Transfer Failed", description: error.message || "Could not transfer stock. Please try again.", variant: "destructive" });
     } finally {
       setIsTransferring(false);
     }
@@ -759,10 +782,12 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       toast({ title: "No Stall Items Selected", description: "Please select stall items to delete.", variant: "default" });
       return;
     }
+    console.log(`${LOG_PREFIX} Opening batch delete dialog for ${selectedItems.length} items.`);
     setShowBatchDeleteDialog(true);
   };
 
   const handleConfirmBatchDelete = async () => {
+    console.log(`${LOG_PREFIX} Confirming batch delete for ${selectedItems.length} items.`);
     setIsBatchDeleting(true);
     let successCount = 0;
     let errorCount = 0;
@@ -770,6 +795,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
 
     for (const itemToDelete of itemsToDeleteInfo) {
       if (!itemToDelete) continue;
+      console.log(`${LOG_PREFIX} Batch deleting item: ${itemToDelete.id} (${itemToDelete.name})`);
       let originalItemData: StockItem | null = null;
       let originalMasterData: StockItem | null = null;
       try {
@@ -791,8 +817,9 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                 quantity: originalMasterData.quantity + originalItemData.quantity,
                 lastUpdated: new Date().toISOString(),
               });
+              console.log(`${LOG_PREFIX} Master stock ${originalMasterData.id} updated. Old Qty: ${originalMasterData.quantity}, Adding: ${originalItemData.quantity}`);
             } else {
-              console.warn(`Master item ${originalItemData.originalMasterItemId} for stall item ${originalItemData.id} not found. Master stock not adjusted during batch delete.`);
+              console.warn(`${LOG_PREFIX} Master item ${originalItemData.originalMasterItemId} for stall item ${originalItemData.id} not found. Master stock not adjusted during batch delete.`);
             }
           }
           transaction.delete(stallItemRef);
@@ -826,7 +853,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             }
          }
       } catch (error: any) {
-        console.error(`Error deleting item ${itemToDelete.id} in batch:`, error);
+        console.error(`${LOG_PREFIX} Error deleting item ${itemToDelete.id} in batch:`, error.message, error.stack);
         errorCount++;
       }
     }
@@ -856,6 +883,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       toast({ title: "No Stall Items Selected", description: "Please select stall items to update.", variant: "default" });
       return;
     }
+    console.log(`${LOG_PREFIX} Opening batch update stock dialog for ${selectedItems.length} items.`);
     setBatchUpdateQuantity("");
     setShowBatchUpdateStockDialog(true);
   };
@@ -865,6 +893,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       toast({ title: "Invalid Quantity", description: "Please enter a valid non-negative number.", variant: "destructive" });
       return;
     }
+    console.log(`${LOG_PREFIX} Confirming batch update stock for ${selectedItems.length} items. New Qty: ${batchUpdateQuantity}`);
     setIsBatchUpdatingStock(true);
     const newBatchQtyNum = Number(batchUpdateQuantity);
     let successCount = 0;
@@ -873,6 +902,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
 
     for (const itemToUpdate of itemsToUpdateInfo) {
        if (!itemToUpdate) continue;
+       console.log(`${LOG_PREFIX} Batch updating stock for item: ${itemToUpdate.id} (${itemToUpdate.name})`);
        let originalStallData: StockItem | null = null;
        let originalMasterData: StockItem | null = null;
        let newMasterQtyAfterUpdate: number | null = null;
@@ -902,6 +932,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             quantity: newBatchQtyNum,
             lastUpdated: new Date().toISOString(),
           });
+          console.log(`${LOG_PREFIX} Stall item ${originalStallData.id} updated. Old Qty: ${oldStallQuantity}, New Qty: ${newBatchQtyNum}`);
 
           if (masterItemSnap && masterItemSnap.exists() && masterItemRefToUpdate && originalMasterData) {
             const quantityDelta = newBatchQtyNum - oldStallQuantity;
@@ -910,8 +941,9 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
               quantity: newMasterQtyAfterUpdate,
               lastUpdated: new Date().toISOString(),
             });
+            console.log(`${LOG_PREFIX} Master stock ${originalMasterData.id} updated. Old Qty: ${originalMasterData.quantity}, New Qty: ${newMasterQtyAfterUpdate}`);
           } else if (originalStallData.originalMasterItemId && !masterItemSnap?.exists()){
-             console.warn(`Master item ${originalStallData.originalMasterItemId} for stall item ${originalStallData.id} not found. Master stock not adjusted during batch update.`);
+             console.warn(`${LOG_PREFIX} Master item ${originalStallData.originalMasterItemId} for stall item ${originalStallData.id} not found. Master stock not adjusted during batch update.`);
           }
         });
         successCount++;
@@ -942,7 +974,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             }
          }
       } catch (error: any) {
-        console.error(`Error batch updating stock for item ${itemToUpdate.id}:`, error);
+        console.error(`${LOG_PREFIX} Error batch updating stock for item ${itemToUpdate.id}:`, error.message, error.stack);
         errorCount++;
       }
     }
@@ -977,6 +1009,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         toast({ title: "No Stall Items Selected", description: "This action only applies to items within specific stalls. Master stock items cannot be batch edited this way.", variant: "default" });
         return;
     }
+    console.log(`${LOG_PREFIX} Opening batch update details dialog for ${actualStallItemsSelected.length} stall items.`);
     setBatchUpdateCategory("");
     setBatchUpdateLowStockThreshold("");
     setShowBatchUpdateDetailsDialog(true);
@@ -992,7 +1025,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       toast({ title: "Invalid Threshold", description: "Low stock threshold must be a non-negative number.", variant: "destructive" });
       return;
     }
-
+    console.log(`${LOG_PREFIX} Confirming batch update details. Category: '${batchUpdateCategory}', Threshold: ${newThresholdNumber}`);
     setIsBatchUpdatingDetails(true);
     const batch = writeBatch(db);
     let successCount = 0;
@@ -1014,6 +1047,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     const logNotes = `Batch update: ${logNotesParts.join(', ')}.`;
 
     for (const item of itemsToUpdateDetails) {
+      console.log(`${LOG_PREFIX} Batch updating details for item: ${item.id} (${item.name})`);
       const itemRef = doc(db, "stockItems", item.id);
       batch.update(itemRef, updateData);
       successCount++;
@@ -1028,20 +1062,21 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             quantityBefore: item.quantity,
             quantityAfter: item.quantity,
             notes: logNotes,
-        }).catch(logError => console.error("Error logging batch detail update:", logError));
+        }).catch(logError => console.error(`${LOG_PREFIX} Error logging batch detail update for item ${item.id}:`, logError));
       }
     }
 
     try {
       await batch.commit();
+      console.log(`${LOG_PREFIX} Batch update details committed. ${successCount} items updated.`);
       toast({
         title: "Batch Update Successful",
         description: `${successCount} stall item(s) updated. ${logNotes}`,
       });
       onDataNeedsRefresh();
     } catch (error: any) {
-      console.error("Error batch updating item details:", error);
-      toast({ title: "Batch Update Failed", description: error.message, variant: "destructive" });
+      console.error(`${LOG_PREFIX} Error batch updating item details:`, error.message, error.stack);
+      toast({ title: "Batch Update Failed", description: error.message || "Could not update item details.", variant: "destructive" });
     } finally {
       setIsBatchUpdatingDetails(false);
       setShowBatchUpdateDetailsDialog(false);
@@ -1059,6 +1094,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         toast({ title: "No Stall Items Selected", description: "This action only applies to items within specific stalls.", variant: "default" });
         return;
     }
+    console.log(`${LOG_PREFIX} Opening batch update price dialog for ${actualStallItemsSelected.length} stall items.`);
     setBatchUpdatePrice("");
     setBatchUpdateCostPrice("");
     setShowBatchUpdatePriceDialog(true);
@@ -1080,7 +1116,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
       toast({ title: "Invalid Cost Price", description: "Cost price must be a non-negative number.", variant: "destructive" });
       return;
     }
-
+    console.log(`${LOG_PREFIX} Confirming batch update prices. Price: ${newPrice}, Cost Price: ${newCostPrice}`);
     setIsBatchUpdatingPrice(true);
     const batch = writeBatch(db);
     let successCount = 0;
@@ -1098,6 +1134,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     const logNotes = `Batch price update: ${logNotesParts.join(', ')}.`;
 
     for (const item of itemsToUpdatePrices) {
+      console.log(`${LOG_PREFIX} Batch updating prices for item: ${item.id} (${item.name})`);
       const itemRef = doc(db, "stockItems", item.id);
       batch.update(itemRef, updateData);
       successCount++;
@@ -1112,20 +1149,21 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             quantityBefore: item.quantity,
             quantityAfter: item.quantity,
             notes: logNotes,
-        }).catch(logError => console.error("Error logging batch price update:", logError));
+        }).catch(logError => console.error(`${LOG_PREFIX} Error logging batch price update for item ${item.id}:`, logError));
       }
     }
 
     try {
       await batch.commit();
+      console.log(`${LOG_PREFIX} Batch update prices committed. ${successCount} items updated.`);
       toast({
         title: "Batch Price Update Successful",
         description: `${successCount} stall item(s) prices updated. ${logNotes}`,
       });
       onDataNeedsRefresh();
     } catch (error: any) {
-      console.error("Error batch updating item prices:", error);
-      toast({ title: "Batch Price Update Failed", description: error.message, variant: "destructive" });
+      console.error(`${LOG_PREFIX} Error batch updating item prices:`, error.message, error.stack);
+      toast({ title: "Batch Price Update Failed", description: error.message || "Could not update item prices.", variant: "destructive" });
     } finally {
       setIsBatchUpdatingPrice(false);
       setShowBatchUpdatePriceDialog(false);
@@ -1142,6 +1180,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         day: 'numeric',
       });
     } catch (e) {
+      console.warn(`${LOG_PREFIX} Invalid date string for formatting: ${dateString}`, e);
       return "Invalid Date";
     }
   };
@@ -1150,6 +1189,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   const isIndeterminate = useMemo(() => selectedItems.length > 0 && selectedItems.length < selectableItems.length, [selectableItems, selectedItems]);
 
   const handleOpenSingleDeleteDialog = (item: StockItem) => {
+    console.log(`${LOG_PREFIX} Opening single delete dialog for item: ${item.id} (${item.name})`);
     setItemForSingleDelete(item);
     setShowSingleDeleteDialog(true);
   };
@@ -1409,7 +1449,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          {/* Remove DialogTrigger from here */}
                           <DropdownMenuItem onClick={() => handleOpenUpdateStockDialog(item)}>
                             <PackageOpen className="mr-2 h-4 w-4" /> Update Stock
                           </DropdownMenuItem>
