@@ -287,6 +287,8 @@ describe('StallSync Firestore Security Rules', () => {
     let masterItemId: string;
     let stallItemId: string; // Item in staffUserId's default stall
     let otherStallItemId: string; // Item in a different stall but same site
+    let masterItemForAllocationId: string;
+
 
     beforeEach(async () => {
         await setupUserRole(adminUserId, 'admin');
@@ -306,23 +308,30 @@ describe('StallSync Firestore Security Rules', () => {
         await setupUserRole(managerUserId, 'manager', { managedSiteIds: [siteId] }); // Manages siteId, not otherSiteId
         await setupUserRole(staffUserId, 'staff', { defaultSiteId: siteId, defaultStallId: stallId });
 
-        const masterItemDocRef = await adminDb.collection('stockItems').add({
+        const masterItemDocRef = await adminDb.collection('stockItems').doc('masterItem001').set({
             name: "Master Product", category: "Test", quantity: 100, unit: "pcs", price: 10,
-            siteId, stallId: null, originalMasterItemId: null, lastUpdated: '2023-01-01T00:00:00Z'
+            siteId, stallId: null, originalMasterItemId: null, lastUpdated: '2023-01-01T00:00:00Z', id: 'masterItem001'
         });
-        masterItemId = masterItemDocRef.id;
+        masterItemId = 'masterItem001';
 
-        const stallItemDocRef = await adminDb.collection('stockItems').add({
+        const stallItemDocRef = await adminDb.collection('stockItems').doc('stallItem001').set({
             name: "Master Product (Stall)", category: "Test", quantity: 10, unit: "pcs", price: 10,
-            siteId, stallId, originalMasterItemId: masterItemId, lastUpdated: '2023-01-01T00:00:00Z'
+            siteId, stallId, originalMasterItemId: masterItemId, lastUpdated: '2023-01-01T00:00:00Z', id: 'stallItem001'
         });
-        stallItemId = stallItemDocRef.id;
+        stallItemId = 'stallItem001';
         
-        const otherStallItemDocRef = await adminDb.collection('stockItems').add({
+        const otherStallItemDocRef = await adminDb.collection('stockItems').doc('otherStallItem001').set({
             name: "Other Stall Item", category: "Test", quantity: 5, unit: "pcs", price: 10,
-            siteId, stallId: otherStallId, originalMasterItemId: masterItemId, lastUpdated: '2023-01-01T00:00:00Z'
+            siteId, stallId: otherStallId, originalMasterItemId: masterItemId, lastUpdated: '2023-01-01T00:00:00Z', id: 'otherStallItem001'
         });
-        otherStallItemId = otherStallItemDocRef.id;
+        otherStallItemId = 'otherStallItem001';
+        
+        const masterItemAllocRef = await adminDb.collection('stockItems').doc('masterItemForAlloc').set({
+            name: "Master For Allocation", category: "Alloc", quantity: 200, unit: "pcs", price: 50,
+            siteId, stallId: null, originalMasterItemId: null, lastUpdated: '2023-01-01T00:00:00Z', id: 'masterItemForAlloc'
+        });
+        masterItemForAllocationId = 'masterItemForAlloc';
+
     });
 
     it('authenticated user CAN read stock items in their allowed site context', async () => {
@@ -339,7 +348,7 @@ describe('StallSync Firestore Security Rules', () => {
     });
 
     it('staff CAN update ONLY quantity and lastUpdated of an item in their assigned stall', async () => {
-        await setupUserRole(staffUserId, 'staff', { defaultSiteId: siteId, defaultStallId: stallId });
+        // Note: setupUserRole was already called in beforeEach for staffUserId with defaultSiteId=siteId, defaultStallId=stallId
         const staffDb = getFirestoreAs({ uid: staffUserId });
         await assertSucceeds(staffDb.collection('stockItems').doc(stallItemId).update({ 
             quantity: 5, 
@@ -348,7 +357,6 @@ describe('StallSync Firestore Security Rules', () => {
     });
 
     it('staff CANNOT update fields other than quantity/lastUpdated in their assigned stall', async () => {
-        await setupUserRole(staffUserId, 'staff', { defaultSiteId: siteId, defaultStallId: stallId });
         const staffDb = getFirestoreAs({ uid: staffUserId });
         await assertFails(staffDb.collection('stockItems').doc(stallItemId).update({ name: 'Staff New Name' }));
         await assertFails(staffDb.collection('stockItems').doc(stallItemId).update({ price: 99.99 }));
@@ -356,22 +364,19 @@ describe('StallSync Firestore Security Rules', () => {
     });
 
     it('staff CANNOT update items (even quantity) in a stall NOT assigned to them', async () => {
-        await setupUserRole(staffUserId, 'staff', { defaultSiteId: siteId, defaultStallId: stallId }); // Assigned to stallId
-        const staffDb = getFirestoreAs({ uid: staffUserId });
+        const staffDb = getFirestoreAs({ uid: staffUserId }); // Assigned to stallId
         // otherStallItemId is in otherStallId, not staff's default stallId
         await assertFails(staffDb.collection('stockItems').doc(otherStallItemId).update({ quantity: 3 }));
     });
     
     it('staff CANNOT update master stock items (even quantity)', async () => {
-        await setupUserRole(staffUserId, 'staff', { defaultSiteId: siteId, defaultStallId: stallId });
         const staffDb = getFirestoreAs({ uid: staffUserId });
         await assertFails(staffDb.collection('stockItems').doc(masterItemId).update({ quantity: 90 }));
     });
 
 
     it('manager CAN create/update any field of stock items in their managed sites', async () => {
-        await setupUserRole(managerUserId, 'manager', { managedSiteIds: [siteId] });
-        const managerDb = getFirestoreAs({ uid: managerUserId });
+        const managerDb = getFirestoreAs({ uid: managerUserId }); // Manages siteId
         
         const newMasterByManagerRef = managerDb.collection('stockItems').doc();
         await assertSucceeds(newMasterByManagerRef.set({
@@ -384,23 +389,23 @@ describe('StallSync Firestore Security Rules', () => {
     });
 
     it('manager CANNOT create/update stock items in NON-managed sites', async () => {
-        await setupUserRole(managerUserId, 'manager', { managedSiteIds: [otherSiteId] }); // Manages otherSiteId, not siteId where masterItemId exists
+        await setupUserRole(managerUserId, 'manager', { managedSiteIds: [otherSiteId] }); // Re-setup to manage ONLY otherSiteId
         const managerDb = getFirestoreAs({ uid: managerUserId });
 
         const newItemInNonManagedSiteRef = managerDb.collection('stockItems').doc();
+        // Attempt to create item in siteId, which manager no longer manages
         await assertFails(newItemInNonManagedSiteRef.set({ name: "Illegal Item", siteId, stallId: null, quantity: 1, lastUpdated: new Date().toISOString() }));
+        // Attempt to update masterItemId which is in siteId
         await assertFails(managerDb.collection('stockItems').doc(masterItemId).update({ price: 99, lastUpdated: new Date().toISOString() })); 
     });
 
     it('manager CANNOT delete a master item if it has linked stall items with quantity > 0', async () => {
-        // stallItemId has quantity 10 and is linked to masterItemId
-        await setupUserRole(managerUserId, 'manager', { managedSiteIds: [siteId] });
+        // stallItemId (qty 10) is linked to masterItemId
         const managerDb = getFirestoreAs({ uid: managerUserId });
         await assertFails(managerDb.collection('stockItems').doc(masterItemId).delete());
     });
     
     it('manager CAN delete a master item if linked stall items have 0 quantity', async () => {
-        await setupUserRole(managerUserId, 'manager', { managedSiteIds: [siteId] });
         const managerDb = getFirestoreAs({ uid: managerUserId });
         // First, set stall item quantity to 0 (manager can do this)
         await assertSucceeds(managerDb.collection('stockItems').doc(stallItemId).update({ quantity: 0, lastUpdated: new Date().toISOString() }));
@@ -409,7 +414,6 @@ describe('StallSync Firestore Security Rules', () => {
     });
 
     it('manager CAN delete a stall item', async () => {
-        await setupUserRole(managerUserId, 'manager', { managedSiteIds: [siteId] });
         const managerDb = getFirestoreAs({ uid: managerUserId });
         await assertSucceeds(managerDb.collection('stockItems').doc(stallItemId).delete());
     });
@@ -426,6 +430,87 @@ describe('StallSync Firestore Security Rules', () => {
         // Delete the stall item too for cleanup
         await assertSucceeds(adminDb.collection('stockItems').doc(stallItemId).delete());
     });
+
+    // --- Stock Allocation Rule Tests ---
+    describe('Stock Allocation (isAllocationAllowed)', () => {
+        const managerValidSite = managerUserId; // Already set up to manage siteId
+        let masterItemForAllocDocRef: any; // FirebaseFirestore.DocumentReference<FirebaseFirestore.DocumentData>;
+
+        beforeEach(async () => {
+            // masterItemForAllocationId was created with 200 quantity in outer beforeEach
+            masterItemForAllocDocRef = getFirestoreAs({ uid: adminUserId }).collection('stockItems').doc(masterItemForAllocationId);
+        });
+
+        it('manager CAN allocate master stock to a new stall item (batch write)', async () => {
+            const managerDb = getFirestoreAs({ uid: managerValidSite });
+            const batch = managerDb.batch();
+            const quantityToAllocate = 30;
+
+            // 1. Update (decrease) master item quantity
+            batch.update(masterItemForAllocDocRef, { quantity: 200 - quantityToAllocate, lastUpdated: new Date().toISOString() });
+
+            // 2. Create new stall item
+            const newStallItemRef = managerDb.collection('stockItems').doc(); // Auto-generate ID
+            batch.set(newStallItemRef, {
+                name: "Master For Allocation (Stall)", category: "Alloc", quantity: quantityToAllocate, unit: "pcs", price: 50,
+                siteId, stallId, originalMasterItemId: masterItemForAllocationId, lastUpdated: new Date().toISOString(),
+            });
+
+            await assertSucceeds(batch.commit());
+        });
+        
+        it('manager CAN allocate master stock to an existing stall item (batch write)', async () => {
+            const managerDb = getFirestoreAs({ uid: managerValidSite });
+            const adminDb = getFirestoreAs({uid: adminUserId});
+            const quantityToAllocate = 25;
+            const initialStallQuantity = 5;
+
+            // Setup: Create an existing stall item linked to masterItemForAllocationId
+            const existingStallItemRef = adminDb.collection('stockItems').doc('existingStallItemForAlloc');
+            await existingStallItemRef.set({
+                name: "Master For Allocation (Existing Stall)", category: "Alloc", quantity: initialStallQuantity, unit: "pcs", price: 50,
+                siteId, stallId, originalMasterItemId: masterItemForAllocationId, lastUpdated: new Date().toISOString(),
+            });
+
+            const batch = managerDb.batch();
+            // 1. Update (decrease) master item quantity
+            batch.update(masterItemForAllocDocRef, { quantity: 200 - quantityToAllocate, lastUpdated: new Date().toISOString() });
+            // 2. Update (increase) existing stall item quantity
+            batch.update(existingStallItemRef, { quantity: initialStallQuantity + quantityToAllocate, lastUpdated: new Date().toISOString() });
+
+            await assertSucceeds(batch.commit());
+        });
+
+        it('manager CANNOT allocate if master quantity reduction does not match new stall item quantity', async () => {
+            const managerDb = getFirestoreAs({ uid: managerValidSite });
+            const batch = managerDb.batch();
+            const quantityToAllocateToStall = 30;
+            const incorrectMasterReduction = 20; // Should be 30
+
+            batch.update(masterItemForAllocDocRef, { quantity: 200 - incorrectMasterReduction, lastUpdated: new Date().toISOString() });
+            const newStallItemRef = managerDb.collection('stockItems').doc();
+            batch.set(newStallItemRef, {
+                name: "Mismatch Alloc", category: "Alloc", quantity: quantityToAllocateToStall, unit: "pcs", price: 50,
+                siteId, stallId, originalMasterItemId: masterItemForAllocationId, lastUpdated: new Date().toISOString(),
+            });
+            await assertFails(batch.commit());
+        });
+        
+        it('manager CANNOT allocate if new stall item originalMasterItemId is incorrect', async () => {
+            const managerDb = getFirestoreAs({ uid: managerValidSite });
+            const batch = managerDb.batch();
+            const quantityToAllocate = 30;
+
+            batch.update(masterItemForAllocDocRef, { quantity: 200 - quantityToAllocate, lastUpdated: new Date().toISOString() });
+            const newStallItemRef = managerDb.collection('stockItems').doc();
+            batch.set(newStallItemRef, {
+                name: "Wrong Master Alloc", category: "Alloc", quantity: quantityToAllocate, unit: "pcs", price: 50,
+                siteId, stallId, originalMasterItemId: 'wrong-master-id', lastUpdated: new Date().toISOString(), // Incorrect master ID
+            });
+            await assertFails(batch.commit());
+        });
+    });
+
   });
 
   // --- SalesTransactions Collection Tests (/salesTransactions/{saleId}) ---
@@ -539,3 +624,6 @@ describe('StallSync Firestore Security Rules', () => {
     });
   });
 });
+
+
+    
