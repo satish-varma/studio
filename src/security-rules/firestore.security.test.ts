@@ -33,16 +33,22 @@ function getFirestoreAs(auth?: { uid: string; token?: TokenOptions; [key: string
 }
 
 // Helper function to set up a user document with a specific role (requires admin privileges or permissive rules for /users/{userId})
-// This needs to be done with an admin-like context if rules for /users are restrictive.
 async function setupUserRole(userId: string, role: string, data: Record<string, any> = {}) {
-  const adminDb = testEnv.unauthenticatedContext().firestore(); // Or a pre-defined admin context if needed for setup
+  const adminDb = testEnv.unauthenticatedContext().firestore(); 
   // console.log(`${LOG_PREFIX_RULES_TEST} setupUserRole: Setting up user document /users/${userId} with role: ${role}`);
   try {
-    await adminDb.collection('users').doc(userId).set({ role, email: `${userId}@example.com`, displayName: `User ${userId}`, ...data });
+    await adminDb.collection('users').doc(userId).set({ 
+      uid: userId, // ensure uid is part of the document as rules might use it
+      role, 
+      email: `${userId}@example.com`, 
+      displayName: `User ${userId}`, 
+      createdAt: new Date().toISOString(),
+      ...data 
+    });
     // console.log(`${LOG_PREFIX_RULES_TEST} setupUserRole: User document /users/${userId} created/updated successfully.`);
   } catch (error) {
     console.error(`${LOG_PREFIX_RULES_TEST} setupUserRole: Error setting up user document /users/${userId}:`, error);
-    throw error; // Re-throw to fail the test if setup fails
+    throw error; 
   }
 }
 
@@ -51,7 +57,7 @@ describe('StallSync Firestore Security Rules', () => {
   beforeAll(async () => {
     console.log(`${LOG_PREFIX_RULES_TEST} beforeAll: Initializing test environment and loading rules...`);
     try {
-      const rulesPath = path.join(__dirname, '../../..', 'firestore.rules'); // Adjust path if necessary
+      const rulesPath = path.join(__dirname, '../../..', 'firestore.rules'); 
       const rules = fs.readFileSync(rulesPath, 'utf8');
       testEnv = await initializeTestEnvironment({
         projectId: TEST_PROJECT_ID,
@@ -64,7 +70,7 @@ describe('StallSync Firestore Security Rules', () => {
       console.log(`${LOG_PREFIX_RULES_TEST} beforeAll: Test environment initialized and rules loaded.`);
     } catch (error) {
       console.error(`${LOG_PREFIX_RULES_TEST} beforeAll: CRITICAL ERROR initializing test environment or loading rules:`, error);
-      process.exit(1); // Exit if setup fails catastrophically
+      process.exit(1); 
     }
   });
 
@@ -97,15 +103,14 @@ describe('StallSync Firestore Security Rules', () => {
     });
 
     it('authenticated user CAN read their OWN user document', async () => {
-      // Setup: Create the user document so the rule can read it
       await setupUserRole(testUserId, 'staff', { displayName: 'Test User' });
       const db = getFirestoreAs({ uid: testUserId });
       await assertSucceeds(db.collection('users').doc(testUserId).get());
     });
 
     it('authenticated user CANNOT read OTHER users documents (if not admin)', async () => {
-      await setupUserRole(testUserId, 'staff'); // User making the request
-      await setupUserRole(otherUserId, 'staff', { displayName: 'Other User Data' }); // Target document
+      await setupUserRole(testUserId, 'staff'); 
+      await setupUserRole(otherUserId, 'staff', { displayName: 'Other User Data' }); 
 
       const db = getFirestoreAs({ uid: testUserId });
       await assertFails(db.collection('users').doc(otherUserId).get());
@@ -113,7 +118,7 @@ describe('StallSync Firestore Security Rules', () => {
     
     it('authenticated user CAN update their OWN displayName and preferences', async () => {
       await setupUserRole(testUserId, 'staff', { displayName: 'Old Name' });
-      const db = getFirestoreAs({ uid: testUserId }); // Authenticated as testUser
+      const db = getFirestoreAs({ uid: testUserId }); 
       await assertSucceeds(db.collection('users').doc(testUserId).update({ displayName: 'New Name', defaultSiteId: 'siteX' }));
     });
 
@@ -131,34 +136,33 @@ describe('StallSync Firestore Security Rules', () => {
     });
 
     it('admin user CAN read ANY user document', async () => {
-      // Setup admin's own user document with 'admin' role
       await setupUserRole(adminUserId, 'admin');
-      // Setup target user document
       await setupUserRole(testUserId, 'staff', { displayName: 'Target User Data' });
 
       const dbAsAdmin = getFirestoreAs({ uid: adminUserId });
-      await assertSucceeds(db.collection('users').doc(testUserId).get());
+      await assertSucceeds(dbAsAdmin.collection('users').doc(testUserId).get());
     });
 
     it('admin user CAN update ANY user document (including role and assignments)', async () => {
-      await setupUserRole(adminUserId, 'admin'); // The admin performing the action
-      await setupUserRole(testUserId, 'staff', { displayName: 'Initial Name', role: 'staff' }); // The user being modified
+      await setupUserRole(adminUserId, 'admin'); 
+      await setupUserRole(testUserId, 'staff', { displayName: 'Initial Name', role: 'staff' }); 
 
       const dbAsAdmin = getFirestoreAs({ uid: adminUserId });
       await assertSucceeds(dbAsAdmin.collection('users').doc(testUserId).update({
         displayName: 'Updated by Admin',
         role: 'manager',
         managedSiteIds: ['siteAlpha'],
-        defaultSiteId: null, // Admins can also clear these
+        defaultSiteId: null, 
         defaultStallId: null,
       }));
     });
 
     it('admin user CAN create a new user document', async () => {
-        await setupUserRole(adminUserId, 'admin'); // Admin performing action
+        await setupUserRole(adminUserId, 'admin'); 
         const dbAsAdmin = getFirestoreAs({uid: adminUserId});
         const newUserId = "newUserByAdmin";
         await assertSucceeds(dbAsAdmin.collection("users").doc(newUserId).set({
+            uid: newUserId, // Ensure uid is part of the document as rules might use it
             email: "new@example.com",
             displayName: "New User",
             role: "staff",
@@ -182,7 +186,6 @@ describe('StallSync Firestore Security Rules', () => {
       await setupUserRole(managerUserId, 'manager', { managedSiteIds: ['existingSiteId'] });
       await setupUserRole(staffUserId, 'staff', { defaultSiteId: 'existingSiteId' });
       
-      // Create a sample site for read/update/delete tests by admin context
       const adminDb = getFirestoreAs({ uid: adminUserId });
       const siteRef = await adminDb.collection('sites').add({ name: 'Test Site Alpha', location: 'HQ', createdAt: '2023-01-01', updatedAt: '2023-01-01'});
       siteId = siteRef.id;
@@ -197,15 +200,13 @@ describe('StallSync Firestore Security Rules', () => {
       await assertSucceeds(db.collection('sites').doc(siteId).delete());
     });
 
-    it('manager CAN read sites (even if not directly managing all, if rules allow general read)', async () => {
-      // Your current rules: `allow read: if isAuthenticated();`
+    it('manager CAN read sites', async () => {
       const db = getFirestoreAs({ uid: managerUserId });
-      await assertSucceeds(db.collection('sites').doc(siteId).get()); // manager reading a site potentially not in their managedSiteIds list
+      await assertSucceeds(db.collection('sites').doc(siteId).get()); 
       await assertSucceeds(db.collection('sites').where('name', '==', 'Test Site Alpha').get());
     });
     
     it('staff CAN read sites', async () => {
-      // Your current rules: `allow read: if isAuthenticated();`
       const db = getFirestoreAs({ uid: staffUserId });
       await assertSucceeds(db.collection('sites').doc(siteId).get());
     });
@@ -214,13 +215,10 @@ describe('StallSync Firestore Security Rules', () => {
       const dbManager = getFirestoreAs({ uid: managerUserId });
       const dbStaff = getFirestoreAs({ uid: staffUserId });
 
-      // Create
       await assertFails(dbManager.collection('sites').doc('managerSite').set({ name: 'Manager Site' }));
       await assertFails(dbStaff.collection('sites').doc('staffSite').set({ name: 'Staff Site' }));
-      // Update
       await assertFails(dbManager.collection('sites').doc(siteId).update({ location: 'Manager Update' }));
       await assertFails(dbStaff.collection('sites').doc(siteId).update({ location: 'Staff Update' }));
-      // Delete
       await assertFails(dbManager.collection('sites').doc(siteId).delete());
       await assertFails(dbStaff.collection('sites').doc(siteId).delete());
     });
@@ -236,7 +234,6 @@ describe('StallSync Firestore Security Rules', () => {
 
     beforeEach(async () => {
       await setupUserRole(adminUserId, 'admin');
-       // Create a site first (as admin)
       const adminDb = getFirestoreAs({ uid: adminUserId });
       const siteRef = await adminDb.collection('sites').add({ name: 'Site For Stalls', location: 'Test Location', createdAt: '2023-01-01', updatedAt: '2023-01-01'});
       siteForStallsId = siteRef.id;
@@ -244,7 +241,6 @@ describe('StallSync Firestore Security Rules', () => {
       await setupUserRole(managerUserId, 'manager', { managedSiteIds: [siteForStallsId] });
       await setupUserRole(staffUserId, 'staff', { defaultSiteId: siteForStallsId, defaultStallId: null });
 
-      // Create a sample stall for read/update/delete tests by admin context
       const stallRef = await adminDb.collection('stalls').add({ name: 'Test Stall X', siteId: siteForStallsId, stallType: 'Retail Counter', createdAt: '2023-01-01', updatedAt: '2023-01-01'});
       stallId = stallRef.id;
     });
@@ -259,7 +255,6 @@ describe('StallSync Firestore Security Rules', () => {
     });
 
     it('manager and staff CAN read stalls', async () => {
-      // Your current rules: `allow read: if isAuthenticated();`
       const dbManager = getFirestoreAs({ uid: managerUserId });
       const dbStaff = getFirestoreAs({ uid: staffUserId });
       await assertSucceeds(dbManager.collection('stalls').doc(stallId).get());
@@ -273,25 +268,25 @@ describe('StallSync Firestore Security Rules', () => {
 
       await assertFails(dbManager.collection('stalls').doc('managerStall').set({ name: 'Manager Stall', siteId: siteForStallsId, stallType: 'Pop-up Booth' }));
       await assertFails(dbStaff.collection('stalls').doc('staffStall').set({ name: 'Staff Stall', siteId: siteForStallsId, stallType: 'Information Kiosk'}));
-      
       await assertFails(dbManager.collection('stalls').doc(stallId).update({ name: 'Manager Update' }));
       await assertFails(dbStaff.collection('stalls').doc(stallId).update({ name: 'Staff Update' }));
-      
       await assertFails(dbManager.collection('stalls').doc(stallId).delete());
       await assertFails(dbStaff.collection('stalls').doc(stallId).delete());
     });
   });
 
   // --- StockItems Collection Tests (/stockItems/{itemId}) ---
-  // These will be more complex due to master/stall relationships and quantity updates
   describe('StockItems Collection (/stockItems/{itemId})', () => {
     const adminUserId = 'adminSI';
     const managerUserId = 'managerSI';
     const staffUserId = 'staffSI';
     let siteId: string;
+    let otherSiteId: string;
     let stallId: string;
+    let otherStallId: string;
     let masterItemId: string;
-    let stallItemId: string;
+    let stallItemId: string; // Item in staffUserId's default stall
+    let otherStallItemId: string; // Item in a different stall but same site
 
     beforeEach(async () => {
         await setupUserRole(adminUserId, 'admin');
@@ -299,35 +294,41 @@ describe('StallSync Firestore Security Rules', () => {
         const adminDb = getFirestoreAs({ uid: adminUserId });
         const siteRef = await adminDb.collection('sites').add({ name: 'SiteForStock', location: 'StockLocation' });
         siteId = siteRef.id;
+        const otherSiteRef = await adminDb.collection('sites').add({ name: 'OtherSite', location: 'RemoteLocation' });
+        otherSiteId = otherSiteRef.id;
+
         const stallRef = await adminDb.collection('stalls').add({ name: 'StallForStock', siteId, stallType: 'Retail' });
         stallId = stallRef.id;
+        const otherStallRef = await adminDb.collection('stalls').add({ name: 'OtherStallInSite', siteId, stallType: 'Storage' });
+        otherStallId = otherStallRef.id;
 
-        await setupUserRole(managerUserId, 'manager', { managedSiteIds: [siteId] });
+
+        await setupUserRole(managerUserId, 'manager', { managedSiteIds: [siteId] }); // Manages siteId, not otherSiteId
         await setupUserRole(staffUserId, 'staff', { defaultSiteId: siteId, defaultStallId: stallId });
 
-        // Create a master item
         const masterItemDocRef = await adminDb.collection('stockItems').add({
             name: "Master Product", category: "Test", quantity: 100, unit: "pcs", price: 10,
-            siteId, stallId: null, originalMasterItemId: null,
+            siteId, stallId: null, originalMasterItemId: null, lastUpdated: '2023-01-01T00:00:00Z'
         });
         masterItemId = masterItemDocRef.id;
 
-        // Create a stall item linked to master
         const stallItemDocRef = await adminDb.collection('stockItems').add({
             name: "Master Product (Stall)", category: "Test", quantity: 10, unit: "pcs", price: 10,
-            siteId, stallId, originalMasterItemId: masterItemId,
+            siteId, stallId, originalMasterItemId: masterItemId, lastUpdated: '2023-01-01T00:00:00Z'
         });
         stallItemId = stallItemDocRef.id;
+        
+        const otherStallItemDocRef = await adminDb.collection('stockItems').add({
+            name: "Other Stall Item", category: "Test", quantity: 5, unit: "pcs", price: 10,
+            siteId, stallId: otherStallId, originalMasterItemId: masterItemId, lastUpdated: '2023-01-01T00:00:00Z'
+        });
+        otherStallItemId = otherStallItemDocRef.id;
     });
 
-    it('any authenticated user CAN read stock items in their site context', async () => {
-        // Your `stockItems` read rule: `allow read: if isAuthenticated() && isUserAllowedForSite(resource.data.siteId);`
-        // This means staff needs to read from their defaultSiteId, manager from their managedSiteIds.
-        // Admin can read any.
-        
+    it('authenticated user CAN read stock items in their allowed site context', async () => {
         const staffDb = getFirestoreAs({ uid: staffUserId });
-        await assertSucceeds(staffDb.collection('stockItems').doc(stallItemId).get()); // Staff reading item in their default site/stall
-        await assertSucceeds(staffDb.collection('stockItems').doc(masterItemId).get());// Staff reading master item in their default site
+        await assertSucceeds(staffDb.collection('stockItems').doc(stallItemId).get()); 
+        await assertSucceeds(staffDb.collection('stockItems').doc(masterItemId).get());
 
         const managerDb = getFirestoreAs({ uid: managerUserId });
         await assertSucceeds(managerDb.collection('stockItems').doc(stallItemId).get());
@@ -337,67 +338,94 @@ describe('StallSync Firestore Security Rules', () => {
         await assertSucceeds(adminDb.collection('stockItems').doc(stallItemId).get());
     });
 
-    it('staff CAN update quantity of an item in their assigned stall (within transaction context - simplified here)', async () => {
-        // Rule: `isStaff() && resource.data.stallId == getUserData().defaultStallId && isUpdatingQuantityOnly()`
-        // Simplified: Test direct update if the rule for update allows it without full transaction context.
-        // The `isUpdatingQuantityOnly` and transaction aspects are harder to test directly here.
-        // We'll assume for this unit test, a direct update for quantity by staff on their stall item.
-        const staffDb = getFirestoreAs({ uid: staffUserId });
-        // Ensure the 'users' doc for staffUserId is correctly set up with defaultStallId = stallId
+    it('staff CAN update ONLY quantity and lastUpdated of an item in their assigned stall', async () => {
         await setupUserRole(staffUserId, 'staff', { defaultSiteId: siteId, defaultStallId: stallId });
-        await assertSucceeds(staffDb.collection('stockItems').doc(stallItemId).update({ quantity: 5 }));
+        const staffDb = getFirestoreAs({ uid: staffUserId });
+        await assertSucceeds(staffDb.collection('stockItems').doc(stallItemId).update({ 
+            quantity: 5, 
+            lastUpdated: new Date().toISOString() 
+        }));
     });
 
-    it('staff CANNOT update quantity of an item NOT in their assigned stall', async () => {
-        const otherStallItemRef = await getFirestoreAs({uid: adminUserId}).collection('stockItems').add({
-            name: "Other Stall Item", quantity: 5, siteId, stallId: 'otherStallXYZ', originalMasterItemId: masterItemId
-        });
-        await setupUserRole(staffUserId, 'staff', { defaultSiteId: siteId, defaultStallId: stallId }); // Assigned to `stallId`
+    it('staff CANNOT update fields other than quantity/lastUpdated in their assigned stall', async () => {
+        await setupUserRole(staffUserId, 'staff', { defaultSiteId: siteId, defaultStallId: stallId });
         const staffDb = getFirestoreAs({ uid: staffUserId });
-        await assertFails(staffDb.collection('stockItems').doc(otherStallItemRef.id).update({ quantity: 3 }));
+        await assertFails(staffDb.collection('stockItems').doc(stallItemId).update({ name: 'Staff New Name' }));
+        await assertFails(staffDb.collection('stockItems').doc(stallItemId).update({ price: 99.99 }));
+        await assertFails(staffDb.collection('stockItems').doc(stallItemId).update({ quantity: 7, category: 'Changed Cat' }));
+    });
+
+    it('staff CANNOT update items (even quantity) in a stall NOT assigned to them', async () => {
+        await setupUserRole(staffUserId, 'staff', { defaultSiteId: siteId, defaultStallId: stallId }); // Assigned to stallId
+        const staffDb = getFirestoreAs({ uid: staffUserId });
+        // otherStallItemId is in otherStallId, not staff's default stallId
+        await assertFails(staffDb.collection('stockItems').doc(otherStallItemId).update({ quantity: 3 }));
     });
     
-    it('manager CAN create/update stock items in their managed sites', async () => {
-        // Rule for create: `(isAdmin() || (isManager() && isUserAllowedForSite(request.resource.data.siteId)))`
-        // Rule for update: `(isAdmin() || (isManager() && isUserAllowedForSite(resource.data.siteId)))`
+    it('staff CANNOT update master stock items (even quantity)', async () => {
+        await setupUserRole(staffUserId, 'staff', { defaultSiteId: siteId, defaultStallId: stallId });
+        const staffDb = getFirestoreAs({ uid: staffUserId });
+        await assertFails(staffDb.collection('stockItems').doc(masterItemId).update({ quantity: 90 }));
+    });
+
+
+    it('manager CAN create/update any field of stock items in their managed sites', async () => {
         await setupUserRole(managerUserId, 'manager', { managedSiteIds: [siteId] });
         const managerDb = getFirestoreAs({ uid: managerUserId });
         
-        // Create new master item in managed site
         const newMasterByManagerRef = managerDb.collection('stockItems').doc();
         await assertSucceeds(newMasterByManagerRef.set({
             name: "Manager Master", category: "CatM", quantity: 50, unit: "pcs", price: 20,
-            siteId, stallId: null, originalMasterItemId: null,
+            siteId, stallId: null, originalMasterItemId: null, lastUpdated: new Date().toISOString()
         }));
         
-        // Update existing master item in managed site
-        await assertSucceeds(managerDb.collection('stockItems').doc(masterItemId).update({ price: 12, description: "Updated by Manager" }));
-        // Update existing stall item in managed site
-        await assertSucceeds(managerDb.collection('stockItems').doc(stallItemId).update({ quantity: 8 }));
+        await assertSucceeds(managerDb.collection('stockItems').doc(masterItemId).update({ price: 12, description: "Updated by Manager", quantity: 95, lastUpdated: new Date().toISOString() }));
+        await assertSucceeds(managerDb.collection('stockItems').doc(stallItemId).update({ quantity: 8, name: "Stall Item Updated by Mgr", lastUpdated: new Date().toISOString() }));
     });
 
     it('manager CANNOT create/update stock items in NON-managed sites', async () => {
-        await setupUserRole(managerUserId, 'manager', { managedSiteIds: ['someOtherSiteId'] }); // Does not manage `siteId`
+        await setupUserRole(managerUserId, 'manager', { managedSiteIds: [otherSiteId] }); // Manages otherSiteId, not siteId where masterItemId exists
         const managerDb = getFirestoreAs({ uid: managerUserId });
 
         const newItemInNonManagedSiteRef = managerDb.collection('stockItems').doc();
-        await assertFails(newItemInNonManagedSiteRef.set({ name: "Illegal Item", siteId, stallId: null, quantity: 1 }));
-        await assertFails(managerDb.collection('stockItems').doc(masterItemId).update({ price: 99 })); // masterItemId is in `siteId`
+        await assertFails(newItemInNonManagedSiteRef.set({ name: "Illegal Item", siteId, stallId: null, quantity: 1, lastUpdated: new Date().toISOString() }));
+        await assertFails(managerDb.collection('stockItems').doc(masterItemId).update({ price: 99, lastUpdated: new Date().toISOString() })); 
+    });
+
+    it('manager CANNOT delete a master item if it has linked stall items with quantity > 0', async () => {
+        // stallItemId has quantity 10 and is linked to masterItemId
+        await setupUserRole(managerUserId, 'manager', { managedSiteIds: [siteId] });
+        const managerDb = getFirestoreAs({ uid: managerUserId });
+        await assertFails(managerDb.collection('stockItems').doc(masterItemId).delete());
     });
     
-    it('admin CAN create/update/delete any stock item', async () => {
+    it('manager CAN delete a master item if linked stall items have 0 quantity', async () => {
+        await setupUserRole(managerUserId, 'manager', { managedSiteIds: [siteId] });
+        const managerDb = getFirestoreAs({ uid: managerUserId });
+        // First, set stall item quantity to 0 (manager can do this)
+        await assertSucceeds(managerDb.collection('stockItems').doc(stallItemId).update({ quantity: 0, lastUpdated: new Date().toISOString() }));
+        // Now, deleting master should succeed
+        await assertSucceeds(managerDb.collection('stockItems').doc(masterItemId).delete());
+    });
+
+    it('manager CAN delete a stall item', async () => {
+        await setupUserRole(managerUserId, 'manager', { managedSiteIds: [siteId] });
+        const managerDb = getFirestoreAs({ uid: managerUserId });
+        await assertSucceeds(managerDb.collection('stockItems').doc(stallItemId).delete());
+    });
+    
+    it('admin CAN create/update/delete any stock item, ignoring most restrictions', async () => {
         const adminDb = getFirestoreAs({uid: adminUserId});
         const newItemByAdminRef = adminDb.collection('stockItems').doc();
-        await assertSucceeds(newItemByAdminRef.set({name: "Admin Item", siteId, quantity: 10}));
-        await assertSucceeds(adminDb.collection('stockItems').doc(masterItemId).update({name: "Admin Updated Master"}));
-        await assertSucceeds(adminDb.collection('stockItems').doc(stallItemId).update({name: "Admin Updated Stall Item"}));
-        await assertSucceeds(adminDb.collection('stockItems').doc(stallItemId).delete());
+        await assertSucceeds(newItemByAdminRef.set({name: "Admin Item", siteId, quantity: 10, lastUpdated: new Date().toISOString()}));
+        await assertSucceeds(adminDb.collection('stockItems').doc(masterItemId).update({name: "Admin Updated Master", quantity: 1, lastUpdated: new Date().toISOString()}));
+        await assertSucceeds(adminDb.collection('stockItems').doc(stallItemId).update({name: "Admin Updated Stall Item", price: 100, lastUpdated: new Date().toISOString()}));
+        
+        // Admin can delete master even if linked stall items have quantity (rule allows admin to bypass isItemDeletionAllowed)
         await assertSucceeds(adminDb.collection('stockItems').doc(masterItemId).delete());
+        // Delete the stall item too for cleanup
+        await assertSucceeds(adminDb.collection('stockItems').doc(stallItemId).delete());
     });
-    
-    // More detailed scenarios for isItemDeletionAllowed, isAllocation, isReturn, isTransfer would be complex
-    // as they involve checking multiple documents in rules. These are good candidates for testing
-    // application-level logic that calls these transactions, ensuring the transaction itself would pass rules.
   });
 
   // --- SalesTransactions Collection Tests (/salesTransactions/{saleId}) ---
@@ -405,6 +433,7 @@ describe('StallSync Firestore Security Rules', () => {
     const adminUserId = 'adminST';
     const managerUserId = 'managerST';
     const staffUserId = 'staffST';
+    const otherStaffId = 'otherStaff';
     let siteId: string;
     let stallId: string;
     let stockItemIdForSale: string;
@@ -421,11 +450,11 @@ describe('StallSync Firestore Security Rules', () => {
 
       await setupUserRole(managerUserId, 'manager', { managedSiteIds: [siteId] });
       await setupUserRole(staffUserId, 'staff', { defaultSiteId: siteId, defaultStallId: stallId });
+      await setupUserRole(otherStaffId, 'staff', { defaultSiteId: siteId, defaultStallId: 'otherStall' });
       
       const stockItemRef = await adminDb.collection('stockItems').add({ name: 'Sold Item', quantity: 100, siteId, stallId });
       stockItemIdForSale = stockItemRef.id;
 
-      // Create a sample sale for read/update/delete tests
       const saleRef = await adminDb.collection('salesTransactions').add({
           items: [{ itemId: stockItemIdForSale, name: 'Sold Item', quantity: 1, pricePerUnit: 10, totalPrice: 10 }],
           totalAmount: 10, transactionDate: new Date().toISOString(),
@@ -435,49 +464,46 @@ describe('StallSync Firestore Security Rules', () => {
     });
 
     it('authenticated user CAN read sales from their allowed site/stall context', async () => {
-        // Rules: `allow read: if isAuthenticated() && isUserAllowedForSite(resource.data.siteId) && (resource.data.stallId == null || resource.data.stallId == getUserData().defaultStallId || isAdmin() || isManager());`
-        // This means staff can read sales from their specific stall, or site-wide sales if their defaultStallId is null.
-        // Managers and Admins can read any sale within an allowed site.
-        
-        // Staff reading sale from their specific stall
-        const staffDb = getFirestoreAs({ uid: staffUserId }); // staffUserId is set up with defaultStallId = stallId
+        const staffDb = getFirestoreAs({ uid: staffUserId }); 
         await assertSucceeds(staffDb.collection('salesTransactions').doc(saleId).get());
 
-        // Manager reading sale from a managed site
         const managerDb = getFirestoreAs({ uid: managerUserId });
         await assertSucceeds(managerDb.collection('salesTransactions').doc(saleId).get());
         
-        // Admin reading any sale
         const adminDb = getFirestoreAs({uid: adminUserId});
         await assertSucceeds(adminDb.collection('salesTransactions').doc(saleId).get());
     });
     
-    it('staff/manager/admin CAN create a sale for their current context', async () => {
-        // Rule: `allow create: if isAuthenticated() && isUserAllowedForSite(request.resource.data.siteId) && request.resource.data.staffId == request.auth.uid ...;`
+    it('staff/manager/admin CAN create a sale for their current context AND matching staffId', async () => {
         const staffDb = getFirestoreAs({ uid: staffUserId });
         await assertSucceeds(staffDb.collection('salesTransactions').add({
             items: [{ itemId: 'itemX', name: 'New Sale Item', quantity: 1, pricePerUnit: 5, totalPrice: 5 }],
             totalAmount: 5, transactionDate: new Date().toISOString(),
-            staffId: staffUserId, siteId, stallId, isDeleted: false // staffId matches request.auth.uid
+            staffId: staffUserId, siteId, stallId, isDeleted: false 
         }));
         
         const managerDb = getFirestoreAs({ uid: managerUserId });
         await assertSucceeds(managerDb.collection('salesTransactions').add({
             items: [], totalAmount: 0, transactionDate: new Date().toISOString(),
-            staffId: managerUserId, siteId, stallId, isDeleted: false // manager making sale for themselves
+            staffId: managerUserId, siteId, stallId, isDeleted: false 
         }));
     });
 
-    it('staff/manager CANNOT create a sale for another staffId', async () => {
+    it('staff/manager CANNOT create a sale with a staffId different from their own auth uid', async () => {
         const staffDb = getFirestoreAs({ uid: staffUserId });
         await assertFails(staffDb.collection('salesTransactions').add({
             items: [], totalAmount: 0, transactionDate: new Date().toISOString(),
-            staffId: managerUserId, siteId, stallId, isDeleted: false // staffId does NOT match request.auth.uid
+            staffId: managerUserId, siteId, stallId, isDeleted: false 
+        }));
+        
+        const managerDb = getFirestoreAs({ uid: managerUserId });
+        await assertFails(managerDb.collection('salesTransactions').add({
+            items: [], totalAmount: 0, transactionDate: new Date().toISOString(),
+            staffId: staffUserId, siteId, stallId, isDeleted: false
         }));
     });
     
-    it('admin CAN mark a sale as deleted (update)', async () => {
-        // Rule: `allow update: if isAdmin() && isUpdatingDeletionFieldsOnly();`
+    it('admin CAN mark a sale as deleted (update specific fields only)', async () => {
         const adminDb = getFirestoreAs({ uid: adminUserId });
         await assertSucceeds(adminDb.collection('salesTransactions').doc(saleId).update({
             isDeleted: true,
@@ -486,16 +512,23 @@ describe('StallSync Firestore Security Rules', () => {
             deletionJustification: "Test deletion by admin"
         }));
     });
+    
+    it('admin CANNOT update other fields of a sale when marking as deleted', async () => {
+        const adminDb = getFirestoreAs({ uid: adminUserId });
+        await assertFails(adminDb.collection('salesTransactions').doc(saleId).update({
+            isDeleted: true,
+            totalAmount: 999 // Attempting to change a non-deletion field
+        }));
+    });
 
-    it('manager/staff CANNOT mark a sale as deleted', async () => {
+    it('manager/staff CANNOT mark a sale as deleted (or update any field)', async () => {
         const managerDb = getFirestoreAs({uid: managerUserId});
         const staffDb = getFirestoreAs({uid: staffUserId});
         await assertFails(managerDb.collection('salesTransactions').doc(saleId).update({ isDeleted: true }));
-        await assertFails(staffDb.collection('salesTransactions').doc(saleId).update({ isDeleted: true }));
+        await assertFails(staffDb.collection('salesTransactions').doc(saleId).update({ totalAmount: 100 }));
     });
     
     it('NO ONE can fully delete a sales transaction document', async () => {
-        // Rule: `allow delete: if false;`
         const adminDb = getFirestoreAs({ uid: adminUserId });
         const managerDb = getFirestoreAs({uid: managerUserId});
         const staffDb = getFirestoreAs({uid: staffUserId});
@@ -505,9 +538,4 @@ describe('StallSync Firestore Security Rules', () => {
         await assertFails(staffDb.collection('salesTransactions').doc(saleId).delete());
     });
   });
-  
-  // StockMovementLogs tests can be added later, typically append-only for admins or system.
-  // UserGoogleOAuthTokens tests can also be added, typically very restricted.
-
 });
-
