@@ -348,7 +348,6 @@ describe('StallSync Firestore Security Rules', () => {
     });
 
     it('staff CAN update ONLY quantity and lastUpdated of an item in their assigned stall', async () => {
-        // Note: setupUserRole was already called in beforeEach for staffUserId with defaultSiteId=siteId, defaultStallId=stallId
         const staffDb = getFirestoreAs({ uid: staffUserId });
         await assertSucceeds(staffDb.collection('stockItems').doc(stallItemId).update({ 
             quantity: 5, 
@@ -365,7 +364,6 @@ describe('StallSync Firestore Security Rules', () => {
 
     it('staff CANNOT update items (even quantity) in a stall NOT assigned to them', async () => {
         const staffDb = getFirestoreAs({ uid: staffUserId }); // Assigned to stallId
-        // otherStallItemId is in otherStallId, not staff's default stallId
         await assertFails(staffDb.collection('stockItems').doc(otherStallItemId).update({ quantity: 3 }));
     });
     
@@ -400,16 +398,13 @@ describe('StallSync Firestore Security Rules', () => {
     });
 
     it('manager CANNOT delete a master item if it has linked stall items with quantity > 0', async () => {
-        // stallItemId (qty 10) is linked to masterItemId
         const managerDb = getFirestoreAs({ uid: managerUserId });
         await assertFails(managerDb.collection('stockItems').doc(masterItemId).delete());
     });
     
     it('manager CAN delete a master item if linked stall items have 0 quantity', async () => {
         const managerDb = getFirestoreAs({ uid: managerUserId });
-        // First, set stall item quantity to 0 (manager can do this)
         await assertSucceeds(managerDb.collection('stockItems').doc(stallItemId).update({ quantity: 0, lastUpdated: new Date().toISOString() }));
-        // Now, deleting master should succeed
         await assertSucceeds(managerDb.collection('stockItems').doc(masterItemId).delete());
     });
 
@@ -425,47 +420,41 @@ describe('StallSync Firestore Security Rules', () => {
         await assertSucceeds(adminDb.collection('stockItems').doc(masterItemId).update({name: "Admin Updated Master", quantity: 1, lastUpdated: new Date().toISOString()}));
         await assertSucceeds(adminDb.collection('stockItems').doc(stallItemId).update({name: "Admin Updated Stall Item", price: 100, lastUpdated: new Date().toISOString()}));
         
-        // Admin can delete master even if linked stall items have quantity (rule allows admin to bypass isItemDeletionAllowed)
         await assertSucceeds(adminDb.collection('stockItems').doc(masterItemId).delete());
-        // Delete the stall item too for cleanup
         await assertSucceeds(adminDb.collection('stockItems').doc(stallItemId).delete());
     });
 
-    // --- Stock Allocation Rule Tests ---
     describe('Stock Allocation (isAllocationAllowed)', () => {
-        const managerValidSite = managerUserId; // Already set up to manage siteId
-        let masterItemForAllocDocRef: any; // FirebaseFirestore.DocumentReference<FirebaseFirestore.DocumentData>;
+        let managerDb: any; // Firestore
+        let masterItemRef: any; // DocumentReference
+        let newStallItemRef: any; // DocumentReference
+        const quantityToAllocate = 30;
+        const initialMasterQuantity = 200;
 
         beforeEach(async () => {
-            // masterItemForAllocationId was created with 200 quantity in outer beforeEach
-            masterItemForAllocDocRef = getFirestoreAs({ uid: adminUserId }).collection('stockItems').doc(masterItemForAllocationId);
+            managerDb = getFirestoreAs({ uid: managerUserId }); // User who is manager of siteId
+            masterItemRef = managerDb.collection('stockItems').doc(masterItemForAllocationId);
+            // Ensure masterItemForAllocationId exists with initial quantity
+            await getFirestoreAs({ uid: adminUserId }).collection('stockItems').doc(masterItemForAllocationId).set({
+                name: "Master For Allocation", category: "Alloc", quantity: initialMasterQuantity, unit: "pcs", price: 50,
+                siteId, stallId: null, originalMasterItemId: null, lastUpdated: '2023-01-01T00:00:00Z', id: masterItemForAllocationId
+            });
+            newStallItemRef = managerDb.collection('stockItems').doc(); // For new stall item
         });
 
-        it('manager CAN allocate master stock to a new stall item (batch write)', async () => {
-            const managerDb = getFirestoreAs({ uid: managerValidSite });
+        it('manager CAN allocate master stock to a NEW stall item (batch write)', async () => {
             const batch = managerDb.batch();
-            const quantityToAllocate = 30;
-
-            // 1. Update (decrease) master item quantity
-            batch.update(masterItemForAllocDocRef, { quantity: 200 - quantityToAllocate, lastUpdated: new Date().toISOString() });
-
-            // 2. Create new stall item
-            const newStallItemRef = managerDb.collection('stockItems').doc(); // Auto-generate ID
+            batch.update(masterItemRef, { quantity: initialMasterQuantity - quantityToAllocate, lastUpdated: new Date().toISOString() });
             batch.set(newStallItemRef, {
                 name: "Master For Allocation (Stall)", category: "Alloc", quantity: quantityToAllocate, unit: "pcs", price: 50,
                 siteId, stallId, originalMasterItemId: masterItemForAllocationId, lastUpdated: new Date().toISOString(),
             });
-
             await assertSucceeds(batch.commit());
         });
         
-        it('manager CAN allocate master stock to an existing stall item (batch write)', async () => {
-            const managerDb = getFirestoreAs({ uid: managerValidSite });
+        it('manager CAN allocate master stock to an EXISTING stall item (batch write)', async () => {
             const adminDb = getFirestoreAs({uid: adminUserId});
-            const quantityToAllocate = 25;
             const initialStallQuantity = 5;
-
-            // Setup: Create an existing stall item linked to masterItemForAllocationId
             const existingStallItemRef = adminDb.collection('stockItems').doc('existingStallItemForAlloc');
             await existingStallItemRef.set({
                 name: "Master For Allocation (Existing Stall)", category: "Alloc", quantity: initialStallQuantity, unit: "pcs", price: 50,
@@ -473,44 +462,163 @@ describe('StallSync Firestore Security Rules', () => {
             });
 
             const batch = managerDb.batch();
-            // 1. Update (decrease) master item quantity
-            batch.update(masterItemForAllocDocRef, { quantity: 200 - quantityToAllocate, lastUpdated: new Date().toISOString() });
-            // 2. Update (increase) existing stall item quantity
+            batch.update(masterItemRef, { quantity: initialMasterQuantity - quantityToAllocate, lastUpdated: new Date().toISOString() });
             batch.update(existingStallItemRef, { quantity: initialStallQuantity + quantityToAllocate, lastUpdated: new Date().toISOString() });
-
             await assertSucceeds(batch.commit());
         });
 
         it('manager CANNOT allocate if master quantity reduction does not match new stall item quantity', async () => {
-            const managerDb = getFirestoreAs({ uid: managerValidSite });
             const batch = managerDb.batch();
-            const quantityToAllocateToStall = 30;
             const incorrectMasterReduction = 20; // Should be 30
-
-            batch.update(masterItemForAllocDocRef, { quantity: 200 - incorrectMasterReduction, lastUpdated: new Date().toISOString() });
-            const newStallItemRef = managerDb.collection('stockItems').doc();
+            batch.update(masterItemRef, { quantity: initialMasterQuantity - incorrectMasterReduction, lastUpdated: new Date().toISOString() });
             batch.set(newStallItemRef, {
-                name: "Mismatch Alloc", category: "Alloc", quantity: quantityToAllocateToStall, unit: "pcs", price: 50,
+                name: "Mismatch Alloc", category: "Alloc", quantity: quantityToAllocate, unit: "pcs", price: 50,
                 siteId, stallId, originalMasterItemId: masterItemForAllocationId, lastUpdated: new Date().toISOString(),
             });
             await assertFails(batch.commit());
         });
         
         it('manager CANNOT allocate if new stall item originalMasterItemId is incorrect', async () => {
-            const managerDb = getFirestoreAs({ uid: managerValidSite });
             const batch = managerDb.batch();
-            const quantityToAllocate = 30;
-
-            batch.update(masterItemForAllocDocRef, { quantity: 200 - quantityToAllocate, lastUpdated: new Date().toISOString() });
-            const newStallItemRef = managerDb.collection('stockItems').doc();
+            batch.update(masterItemRef, { quantity: initialMasterQuantity - quantityToAllocate, lastUpdated: new Date().toISOString() });
             batch.set(newStallItemRef, {
                 name: "Wrong Master Alloc", category: "Alloc", quantity: quantityToAllocate, unit: "pcs", price: 50,
-                siteId, stallId, originalMasterItemId: 'wrong-master-id', lastUpdated: new Date().toISOString(), // Incorrect master ID
+                siteId, stallId, originalMasterItemId: 'wrong-master-id', lastUpdated: new Date().toISOString(),
             });
             await assertFails(batch.commit());
         });
     });
 
+    describe('Stock Return to Master (isReturnToMasterAllowed)', () => {
+        let managerDb: any;
+        let masterItemRef: any;
+        let stallItemForReturnRef: any;
+        const initialMasterQty = 50;
+        const initialStallQty = 20;
+        const quantityToReturn = 10;
+
+        beforeEach(async () => {
+            managerDb = getFirestoreAs({ uid: managerUserId });
+            const adminDb = getFirestoreAs({uid: adminUserId});
+
+            masterItemRef = adminDb.collection('stockItems').doc('masterForReturn');
+            await masterItemRef.set({
+                name: "Master For Return", category: "Return", quantity: initialMasterQty, unit: "pcs", price: 30,
+                siteId, stallId: null, originalMasterItemId: null, lastUpdated: '2023-01-01T00:00:00Z', id: 'masterForReturn'
+            });
+
+            stallItemForReturnRef = adminDb.collection('stockItems').doc('stallItemForReturn');
+            await stallItemForReturnRef.set({
+                name: "Stall Item For Return", category: "Return", quantity: initialStallQty, unit: "pcs", price: 30,
+                siteId, stallId, originalMasterItemId: 'masterForReturn', lastUpdated: '2023-01-01T00:00:00Z', id: 'stallItemForReturn'
+            });
+        });
+
+        it('manager CAN return stall stock to master (batch write)', async () => {
+            const batch = managerDb.batch();
+            batch.update(stallItemForReturnRef, { quantity: initialStallQty - quantityToReturn, lastUpdated: new Date().toISOString() });
+            batch.update(masterItemRef, { quantity: initialMasterQty + quantityToReturn, lastUpdated: new Date().toISOString() });
+            await assertSucceeds(batch.commit());
+        });
+
+        it('manager CANNOT return if quantity updates do not match', async () => {
+            const batch = managerDb.batch();
+            batch.update(stallItemForReturnRef, { quantity: initialStallQty - quantityToReturn, lastUpdated: new Date().toISOString() });
+            batch.update(masterItemRef, { quantity: initialMasterQty + (quantityToReturn - 5), lastUpdated: new Date().toISOString() }); // Mismatch
+            await assertFails(batch.commit());
+        });
+
+        it('manager CANNOT return if stall item is not linked to the specified master item', async () => {
+            const batch = managerDb.batch();
+            const otherMasterRef = managerDb.collection('stockItems').doc('otherMaster');
+            await getFirestoreAs({uid:adminUserId}).collection('stockItems').doc('otherMaster').set({name: 'Other Master', siteId, quantity: 100});
+
+            batch.update(stallItemForReturnRef, { quantity: initialStallQty - quantityToReturn, lastUpdated: new Date().toISOString() });
+            batch.update(otherMasterRef, { quantity: 100 + quantityToReturn, lastUpdated: new Date().toISOString() }); // Returning to wrong master
+            await assertFails(batch.commit());
+        });
+    });
+
+    describe('Stock Transfer Between Stalls (isTransferAllowed)', () => {
+        let managerDb: any;
+        let masterItemForTransferRef: any;
+        let sourceStallItemRef: any;
+        let destStallItemRef: any; // For existing dest item test
+        let newDestStallItemRef: any; // For new dest item test
+        const otherStallIdForTransfer = 'stallTransferDest'; // Different from 'stallId' used in beforeEach
+        const initialMasterQtyForTransfer = 100;
+        const initialSourceStallQty = 30;
+        const quantityToTransfer = 10;
+
+        beforeEach(async () => {
+            managerDb = getFirestoreAs({ uid: managerUserId });
+            const adminDb = getFirestoreAs({ uid: adminUserId });
+
+            await adminDb.collection('stalls').doc(otherStallIdForTransfer).set({ name: 'Destination Transfer Stall', siteId, stallType: 'Retail' });
+
+
+            masterItemForTransferRef = adminDb.collection('stockItems').doc('masterForTransfer');
+            await masterItemForTransferRef.set({
+                name: "Master For Transfer", category: "Transfer", quantity: initialMasterQtyForTransfer, unit: "pcs", price: 40,
+                siteId, stallId: null, originalMasterItemId: null, lastUpdated: '2023-01-01T00:00:00Z', id: 'masterForTransfer'
+            });
+
+            sourceStallItemRef = adminDb.collection('stockItems').doc('sourceStallItem');
+            await sourceStallItemRef.set({
+                name: "Source Stall Item", category: "Transfer", quantity: initialSourceStallQty, unit: "pcs", price: 40,
+                siteId, stallId, originalMasterItemId: 'masterForTransfer', lastUpdated: '2023-01-01T00:00:00Z', id: 'sourceStallItem'
+            });
+            
+            destStallItemRef = adminDb.collection('stockItems').doc('destStallItemExisting');
+            // For existing dest item test, create it:
+             await destStallItemRef.set({
+                name: "Dest Stall Item Existing", category: "Transfer", quantity: 5, unit: "pcs", price: 40,
+                siteId, stallId: otherStallIdForTransfer, originalMasterItemId: 'masterForTransfer', lastUpdated: '2023-01-01T00:00:00Z', id: 'destStallItemExisting'
+            });
+
+            newDestStallItemRef = managerDb.collection('stockItems').doc(); // For new dest item test
+        });
+
+        it('manager CAN transfer to a new stall item (batch write)', async () => {
+            const batch = managerDb.batch();
+            batch.update(sourceStallItemRef, { quantity: initialSourceStallQty - quantityToTransfer, lastUpdated: new Date().toISOString() });
+            batch.set(newDestStallItemRef, {
+                name: "Source Stall Item", category: "Transfer", quantity: quantityToTransfer, unit: "pcs", price: 40,
+                siteId, stallId: otherStallIdForTransfer, originalMasterItemId: 'masterForTransfer', lastUpdated: new Date().toISOString(),
+            });
+            // Master quantity should not change
+            await assertSucceeds(batch.commit());
+        });
+
+        it('manager CAN transfer to an existing stall item (batch write)', async () => {
+            const batch = managerDb.batch();
+            const initialDestQty = (await destStallItemRef.get()).data().quantity;
+            batch.update(sourceStallItemRef, { quantity: initialSourceStallQty - quantityToTransfer, lastUpdated: new Date().toISOString() });
+            batch.update(destStallItemRef, { quantity: initialDestQty + quantityToTransfer, lastUpdated: new Date().toISOString() });
+            await assertSucceeds(batch.commit());
+        });
+
+        it('manager CANNOT transfer if master item quantity changes', async () => {
+            const batch = managerDb.batch();
+            batch.update(sourceStallItemRef, { quantity: initialSourceStallQty - quantityToTransfer, lastUpdated: new Date().toISOString() });
+            batch.set(newDestStallItemRef, {
+                name: "Transfer New", category: "Transfer", quantity: quantityToTransfer, unit: "pcs", price: 40,
+                siteId, stallId: otherStallIdForTransfer, originalMasterItemId: 'masterForTransfer', lastUpdated: new Date().toISOString(),
+            });
+            batch.update(masterItemForTransferRef, { quantity: initialMasterQtyForTransfer - 5, lastUpdated: new Date().toISOString() }); // Incorrectly changing master
+            await assertFails(batch.commit());
+        });
+        
+        it('manager CANNOT transfer if items are not linked to the same master', async () => {
+            const batch = managerDb.batch();
+            batch.update(sourceStallItemRef, { quantity: initialSourceStallQty - quantityToTransfer, lastUpdated: new Date().toISOString() });
+            batch.set(newDestStallItemRef, { // Setting up a new dest item
+                name: "Transfer Wrong Master Link", category: "Transfer", quantity: quantityToTransfer, unit: "pcs", price: 40,
+                siteId, stallId: otherStallIdForTransfer, originalMasterItemId: 'differentMasterId123', lastUpdated: new Date().toISOString(),
+            });
+            await assertFails(batch.commit());
+        });
+    });
   });
 
   // --- SalesTransactions Collection Tests (/salesTransactions/{saleId}) ---
@@ -624,6 +732,4 @@ describe('StallSync Firestore Security Rules', () => {
     });
   });
 });
-
-
     
