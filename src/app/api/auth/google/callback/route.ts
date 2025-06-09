@@ -2,7 +2,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { initializeApp, getApps, getApp, App as AdminApp } from 'firebase-admin/app';
-import { getFirestore as getAdminFirestore, doc as adminDoc, getDoc as getAdminDoc } from 'firebase-admin/firestore'; // Added adminDoc and getAdminDoc
+import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
 import { google, Auth } from 'googleapis';
 import type { UserGoogleOAuthTokens } from '@/types'; 
 
@@ -72,8 +72,8 @@ export async function GET(request: NextRequest) {
 
   // Optional: Validate UID (e.g., check if user exists in Firestore)
   try {
-    const userRef = adminDoc(adminDb, 'users', uid);
-    const userSnap = await getAdminDoc(userRef);
+    const userRef = adminDb.collection('users').doc(uid);
+    const userSnap = await userRef.get();
     if (!userSnap.exists()) {
         console.warn(`${LOG_PREFIX} UID from state ('${uid}') does not correspond to an existing user in Firestore.`);
         return NextResponse.redirect(new URL('/settings?error=oauth_invalid_user_state&details=User identified by state parameter not found.', request.nextUrl.origin), { status: 302 });
@@ -90,26 +90,26 @@ export async function GET(request: NextRequest) {
     const { tokens } = await oauth2Client.getToken(code);
     console.log(`${LOG_PREFIX} Tokens received for UID: ${uid}. Access token present: ${!!tokens.access_token}, Refresh token present: ${!!tokens.refresh_token}`);
 
-    if (!tokens.access_token) { // Refresh token might not be present on subsequent authorizations if already granted.
+    if (!tokens.access_token) { 
         console.error(`${LOG_PREFIX} Missing access_token from Google for UID ${uid}. Tokens:`, tokens);
         return NextResponse.redirect(new URL('/settings?error=oauth_token_exchange_failed_no_access_token&details=Google did not return an access token.', request.nextUrl.origin), { status: 302 });
     }
-    if (!tokens.refresh_token && !tokens.id_token) { // At least one should be there
+    if (!tokens.refresh_token && !tokens.id_token) { 
         console.warn(`${LOG_PREFIX} No refresh_token or id_token received for UID ${uid}. This is unusual if this is the first authorization.`);
     }
 
 
     const userGoogleTokens: UserGoogleOAuthTokens = {
       access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token || "", // Store empty string if not present, though ideally it should be for first auth
+      refresh_token: tokens.refresh_token || "", 
       scope: tokens.scope,
       token_type: tokens.token_type!, 
       expiry_date: tokens.expiry_date,
       id_token: tokens.id_token,
     };
 
-    const tokenDocRef = adminDoc(adminDb, 'userGoogleOAuthTokens', uid);
-    await tokenDocRef.set(userGoogleTokens, { merge: true }); // Use merge to update existing tokens if only access token changed
+    const tokenDocRef = adminDb.collection('userGoogleOAuthTokens').doc(uid);
+    await tokenDocRef.set(userGoogleTokens, { merge: true }); 
     console.log(`${LOG_PREFIX} Tokens stored successfully in Firestore for UID: ${uid}`);
 
     return NextResponse.redirect(new URL('/settings?oauth_success=true', request.nextUrl.origin), { status: 302 });
