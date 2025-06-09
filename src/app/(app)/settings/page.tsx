@@ -3,7 +3,7 @@
 
 import PageHeader from "@/components/shared/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
-import { Settings as SettingsIcon, Palette, BellRing, DatabaseZap, Download, Loader2, MailWarning, SheetIcon } from "lucide-react";
+import { Settings as SettingsIcon, Palette, BellRing, DatabaseZap, Download, Loader2, MailWarning, SheetIcon, ShieldAlert, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -23,8 +23,10 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
+import { useAuth as useAppAuth } from "@/contexts/AuthContext"; // Renamed useAuth to useAppAuth
 
 const LOG_PREFIX = "[SettingsPage]";
 
@@ -36,12 +38,13 @@ if (!getApps().length) {
   }
 }
 const db = getFirestore();
-const auth = getAuth(getApp());
+const firebaseAuth = getAuth(getApp()); // Used firebaseAuth instead of auth to avoid conflict with useAppAuth
 
 type GoogleSheetAction = "importStockItems" | "exportStockItems" | "importSalesHistory" | "exportSalesHistory";
 type DataTypeForSheets = 'stock' | 'sales';
 
 export default function SettingsPage() {
+  const { user: appUser } = useAppAuth(); // Use the hook from AuthContext
   const { toast } = useToast();
   const [isExportingStockCsv, setIsExportingStockCsv] = useState(false);
   const [isExportingSalesCsv, setIsExportingSalesCsv] = useState(false);
@@ -55,6 +58,11 @@ export default function SettingsPage() {
   const [sheetIdInputValue, setSheetIdInputValue] = useState("");
   const [currentSheetAction, setCurrentSheetAction] = useState<GoogleSheetAction | null>(null);
   const [currentDataType, setCurrentDataType] = useState<DataTypeForSheets | null>(null);
+
+  const [showResetDataDialog, setShowResetDataDialog] = useState(false);
+  const [resetConfirmationInput, setResetConfirmationInput] = useState("");
+  const [isResettingData, setIsResettingData] = useState(false);
+  const RESET_CONFIRMATION_PHRASE = "RESET DATA";
 
 
   const escapeCsvCell = (cellData: any): string => {
@@ -273,12 +281,12 @@ export default function SettingsPage() {
     });
 
     try {
-      if (!auth.currentUser) {
+      if (!firebaseAuth.currentUser) {
         toast({ title: "Authentication Error", description: "User not authenticated. Please re-login.", variant: "destructive" });
         setLoadingState(false);
         return;
       }
-      const idToken = await auth.currentUser.getIdToken();
+      const idToken = await firebaseAuth.currentUser.getIdToken();
 
       const response = await fetch('/api/google-sheets-proxy', {
         method: 'POST',
@@ -353,6 +361,51 @@ export default function SettingsPage() {
       });
     } finally {
       setLoadingState(false);
+    }
+  };
+
+  const handleResetDataConfirm = async () => {
+    if (resetConfirmationInput !== RESET_CONFIRMATION_PHRASE) {
+      toast({ title: "Confirmation Mismatch", description: `Please type "${RESET_CONFIRMATION_PHRASE}" to confirm.`, variant: "destructive" });
+      return;
+    }
+    console.log(`${LOG_PREFIX} Starting data reset process.`);
+    setIsResettingData(true);
+    toast({ title: "Resetting Data...", description: "Please wait, this may take a few moments.", duration: 10000 });
+
+    try {
+      if (!firebaseAuth.currentUser) {
+        toast({ title: "Authentication Error", description: "User not authenticated. Please re-login.", variant: "destructive" });
+        setIsResettingData(false);
+        return;
+      }
+      const idToken = await firebaseAuth.currentUser.getIdToken();
+      const response = await fetch('/api/admin/reset-data', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ confirmation: RESET_CONFIRMATION_PHRASE }),
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        console.error(`${LOG_PREFIX} Data reset API error (${response.status}):`, result);
+        toast({ title: "Data Reset Failed", description: result.error || `Server error: ${response.status}. Check server logs.`, variant: "destructive", duration: 10000 });
+      } else {
+        console.log(`${LOG_PREFIX} Data reset successful:`, result.message);
+        toast({ title: "Data Reset Successful", description: result.message || "Application data (excluding users) has been reset.", duration: 7000 });
+        setShowResetDataDialog(false);
+        setResetConfirmationInput("");
+        // Optionally, trigger a page reload or redirect to refresh context
+        // window.location.reload();
+      }
+    } catch (error: any) {
+      console.error(`${LOG_PREFIX} Error calling data reset API:`, error.message, error.stack);
+      toast({ title: "Client-side Reset Error", description: `Failed to initiate data reset. Error: ${error.message}`, variant: "destructive", duration: 10000 });
+    } finally {
+      setIsResettingData(false);
     }
   };
 
@@ -513,6 +566,76 @@ export default function SettingsPage() {
             </p>
         </CardFooter>
       </Card>
+
+      {appUser?.role === 'admin' && (
+        <Card className="shadow-lg border-destructive">
+          <CardHeader>
+            <CardTitle className="flex items-center text-destructive">
+              <AlertTriangle className="mr-2 h-5 w-5" />
+              Danger Zone
+            </CardTitle>
+            <CardDescription>
+              These actions are irreversible and can lead to data loss. Proceed with extreme caution.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <AlertDialog open={showResetDataDialog} onOpenChange={setShowResetDataDialog}>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive" className="w-full">
+                  <ShieldAlert className="mr-2 h-4 w-4" />
+                  Reset Application Data (Excluding Users)
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Confirm Data Reset</AlertDialogTitle>
+                  <AlertDialogDescription className="space-y-2">
+                    <p>You are about to delete all application data including:</p>
+                    <ul className="list-disc list-inside text-sm text-destructive pl-4">
+                      <li>All Stock Items (Master & Stall)</li>
+                      <li>All Sales Transactions</li>
+                      <li>All Stock Movement Logs</li>
+                      <li>All Sites and Stalls</li>
+                      <li>All Google OAuth Tokens</li>
+                    </ul>
+                    <p className="font-bold">The 'users' collection (user accounts, roles, and preferences) WILL NOT be deleted.</p>
+                    <p>This action is irreversible. To proceed, please type "<strong className="text-foreground">{RESET_CONFIRMATION_PHRASE}</strong>" into the box below.</p>
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <div className="py-2">
+                  <Label htmlFor="resetConfirmationInput" className="sr-only">Confirmation Phrase</Label>
+                  <Input
+                    id="resetConfirmationInput"
+                    value={resetConfirmationInput}
+                    onChange={(e) => setResetConfirmationInput(e.target.value)}
+                    placeholder={`Type "${RESET_CONFIRMATION_PHRASE}" here`}
+                    className="border-destructive focus:ring-destructive bg-input"
+                    disabled={isResettingData}
+                  />
+                </div>
+                <AlertDialogFooter>
+                  <AlertDialogCancel onClick={() => {setShowResetDataDialog(false); setResetConfirmationInput("");}} disabled={isResettingData}>
+                    Cancel
+                  </AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={handleResetDataConfirm}
+                    disabled={isResettingData || resetConfirmationInput !== RESET_CONFIRMATION_PHRASE}
+                    className="bg-destructive hover:bg-destructive/90"
+                  >
+                    {isResettingData ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldAlert className="mr-2 h-4 w-4" />}
+                    Reset Data Now
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </CardContent>
+           <CardFooter>
+             <p className="text-xs text-muted-foreground">
+                This operation will permanently remove all specified data. It's recommended to back up your data (e.g., using CSV export) before proceeding if you might need it later.
+            </p>
+           </CardFooter>
+        </Card>
+      )}
 
       <AlertDialog open={showSheetIdDialog} onOpenChange={setShowSheetIdDialog}>
         <AlertDialogContent>
