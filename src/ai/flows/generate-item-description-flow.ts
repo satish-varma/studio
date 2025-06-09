@@ -32,7 +32,7 @@ export async function generateItemDescription(input: GenerateItemDescriptionInpu
     return result;
   } catch (error: any) {
     console.error(`${LOG_PREFIX} Error generating description for item ${input.itemName}:`, error.message, error.stack);
-    throw new Error(`Failed to generate description: ${error.message}`);
+    throw new Error(`Failed to generate description: ${error.message || error.toString()}`);
   }
 }
 
@@ -59,16 +59,16 @@ const generateItemDescriptionFlow = ai.defineFlow(
   },
   async (input) => {
     console.log(`${LOG_PREFIX} Flow execution started with input:`, input);
-    const {output, error} = await prompt(input); // Destructure to get potential error
-    if (error) {
-        console.error(`${LOG_PREFIX} Error from AI prompt for item ${input.itemName}:`, error);
-        throw new Error(`AI model failed to generate description. Details: ${error.message || error}`);
-    }
-    if (!output || !output.description) {
-        console.warn(`${LOG_PREFIX} AI model returned no output or empty description for item: ${input.itemName}`);
-        throw new Error("AI model returned no output or an empty description.");
+    // In Genkit 1.x, prompt errors typically throw. The response object contains the output.
+    const response = await prompt(input);
+    const outputData = response.output;
+
+    if (!outputData || !outputData.description) {
+        console.warn(`${LOG_PREFIX} AI model returned invalid output for item: ${input.itemName}. Output:`, outputData);
+        throw new Error("AI model returned an invalid output (empty or missing description).");
     }
     console.log(`${LOG_PREFIX} Flow successfully generated output for item: ${input.itemName}`);
-    return output;
+    return outputData;
   }
 );
+

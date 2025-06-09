@@ -54,7 +54,7 @@ export async function summarizeSalesTrends(input: SummarizeSalesTrendsInput): Pr
     return result;
   } catch (error: any) {
     console.error(`${LOG_PREFIX} Error generating sales trend summary:`, error.message, error.stack);
-    throw new Error(`Failed to generate sales trend summary: ${error.message}`);
+    throw new Error(`Failed to generate sales trend summary: ${error.message || error.toString()}`);
   }
 }
 
@@ -96,16 +96,16 @@ const summarizeSalesTrendsFlow = ai.defineFlow(
   },
   async (input) => {
     console.log(`${LOG_PREFIX} Flow execution started with input:`, input);
-    const {output, error} = await prompt(input); // Destructure to get potential error
-    if (error) {
-        console.error(`${LOG_PREFIX} Error from AI prompt for sales summary:`, error);
-        throw new Error(`AI model failed to generate sales summary. Details: ${error.message || error}`);
-    }
-    if (!output || !output.summary) {
-        console.warn(`${LOG_PREFIX} AI model returned no output or empty summary for sales trends.`);
-        throw new Error("AI model returned no output or an empty sales summary.");
+    // In Genkit 1.x, prompt errors typically throw. The response object contains the output.
+    const response = await prompt(input);
+    const outputData = response.output;
+
+    if (!outputData || !outputData.summary) {
+        console.warn(`${LOG_PREFIX} AI model returned invalid output for sales summary. Output:`, outputData);
+        throw new Error("AI model returned an invalid output (empty or missing summary).");
     }
     console.log(`${LOG_PREFIX} Flow successfully generated sales summary output.`);
-    return output;
+    return outputData;
   }
 );
+
