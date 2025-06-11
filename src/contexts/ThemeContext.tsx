@@ -10,6 +10,9 @@ interface ThemeProviderProps {
   children: ReactNode;
   defaultTheme?: Theme;
   storageKey?: string;
+  attribute?: string; // Typically "class"
+  enableSystem?: boolean;
+  disableTransitionOnChange?: boolean;
 }
 
 interface ThemeProviderState {
@@ -28,6 +31,8 @@ export function ThemeProvider({
   children,
   defaultTheme = "system",
   storageKey = "vite-ui-theme", // Using a common key example
+  attribute = "class", // Default attribute
+  enableSystem = true, // Default enableSystem
   ...props
 }: ThemeProviderProps) {
   const [theme, setTheme] = useState<Theme>(() => {
@@ -49,7 +54,7 @@ export function ThemeProvider({
     root.classList.remove("light", "dark");
 
     let effectiveTheme = theme;
-    if (theme === "system") {
+    if (theme === "system" && enableSystem) {
       const systemTheme = window.matchMedia("(prefers-color-scheme: dark)")
         .matches
         ? "dark"
@@ -57,34 +62,40 @@ export function ThemeProvider({
       effectiveTheme = systemTheme;
     }
     
-    root.classList.add(effectiveTheme);
+    if (attribute === "class") {
+      root.classList.add(effectiveTheme);
+    } else {
+      root.setAttribute(attribute, effectiveTheme);
+    }
+    
     try {
       localStorage.setItem(storageKey, theme); // Store the user's actual preference (light, dark, or system)
     } catch (e) {
       console.warn("Failed to save theme to localStorage", e);
     }
-  }, [theme, storageKey]);
+  }, [theme, storageKey, attribute, enableSystem]);
 
 
   // Listener for system theme changes when theme is 'system'
   useEffect(() => {
-    if (typeof window === 'undefined' || theme !== 'system') return;
+    if (typeof window === 'undefined' || theme !== 'system' || !enableSystem) return;
 
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
     const handleChange = () => {
-      // This effect will re-run due to `theme` dependency if `setTheme` was called.
-      // For system changes, we need to re-apply based on the new system preference.
       const systemTheme = mediaQuery.matches ? "dark" : "light";
       const root = window.document.documentElement;
       root.classList.remove("light", "dark");
-      root.classList.add(systemTheme);
-      // No need to call setTheme here as this effect is only for re-applying when system changes
-      // and 'theme' state is still 'system'.
+      
+      if (attribute === "class") {
+        root.classList.add(systemTheme);
+      } else {
+        root.setAttribute(attribute, systemTheme);
+      }
     };
 
     mediaQuery.addEventListener("change", handleChange);
     return () => mediaQuery.removeEventListener("change", handleChange);
-  }, [theme]); // Re-run if theme itself changes (e.g., from 'system' to 'light')
+  }, [theme, attribute, enableSystem]);
 
 
   const value = {
