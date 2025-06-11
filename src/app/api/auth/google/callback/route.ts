@@ -9,8 +9,8 @@ import type { UserGoogleOAuthTokens } from '@/types';
 const LOG_PREFIX = "[API:GoogleCallback]";
 
 // Ensure Firebase Admin SDK is initialized
-let adminApp: AdminApp;
-let adminDb: ReturnType<typeof getAdminFirestore>;
+let adminApp: AdminApp | undefined;
+let adminDb: ReturnType<typeof getAdminFirestore> | undefined;
 
 if (!getApps().length) {
   try {
@@ -18,13 +18,14 @@ if (!getApps().length) {
     console.log(`${LOG_PREFIX} Firebase Admin SDK initialized successfully.`);
   } catch (e: any) {
     console.error(`${LOG_PREFIX} Firebase Admin SDK initialization error:`, e.message);
+    adminApp = undefined;
   }
 } else {
   adminApp = getApp();
   console.log(`${LOG_PREFIX} Firebase Admin SDK already initialized, got existing instance.`);
 }
 
-if (adminApp!) {
+if (adminApp) {
     adminDb = getAdminFirestore(adminApp);
 } else {
     console.error(`${LOG_PREFIX} CRITICAL: Firebase Admin App is not initialized. Firestore Admin DB cannot be obtained.`);
@@ -74,7 +75,7 @@ export async function GET(request: NextRequest) {
   try {
     const userRef = adminDb.collection('users').doc(uid);
     const userSnap = await userRef.get();
-    if (!userSnap.exists()) {
+    if (!userSnap.exists) { // Corrected: .exists is a property
         console.warn(`${LOG_PREFIX} UID from state ('${uid}') does not correspond to an existing user in Firestore.`);
         return NextResponse.redirect(new URL('/settings?error=oauth_invalid_user_state&details=User identified by state parameter not found.', request.nextUrl.origin), { status: 302 });
     }
