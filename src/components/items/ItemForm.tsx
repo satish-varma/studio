@@ -151,9 +151,9 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
     try {
       const newQuantity = Number(values.quantity);
       const baseItemData = {
-        ...values,
+        ...values, // `values` is StockItemFormValues. values.costPrice is number due to Zod default.
         price: Number(values.price),
-        costPrice: values.costPrice !== undefined ? Number(values.costPrice) : null,
+        costPrice: values.costPrice, // Directly use values.costPrice as it's already a number.
         quantity: newQuantity,
         lowStockThreshold: Number(values.lowStockThreshold),
         lastUpdated: new Date().toISOString(),
