@@ -150,10 +150,11 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
     setIsSubmitting(true);
     try {
       const newQuantity = Number(values.quantity);
+      
       const baseItemData = {
-        ...values, // `values` is StockItemFormValues. values.costPrice is number due to Zod default.
+        ...values, 
         price: Number(values.price),
-        costPrice: values.costPrice, // Directly use values.costPrice as it's already a number.
+        costPrice: values.costPrice ?? 0, // Ensure costPrice is number, defaulting to 0 if values.costPrice is null/undefined
         quantity: newQuantity,
         lowStockThreshold: Number(values.lowStockThreshold),
         lastUpdated: new Date().toISOString(),
@@ -419,5 +420,3 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
     </Card>
   );
 }
-
-    
