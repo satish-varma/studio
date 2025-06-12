@@ -65,7 +65,7 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
       quantity: initialData.quantity,
       unit: initialData.unit,
       price: initialData.price,
-      costPrice: initialData.costPrice ?? 0.00,
+      costPrice: initialData.costPrice ?? 0.00, // Zod default will make this a number in 'values'
       lowStockThreshold: initialData.lowStockThreshold,
       imageUrl: initialData.imageUrl || "",
     } : {
@@ -75,7 +75,7 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
       quantity: 0,
       unit: "pcs",
       price: 0.00,
-      costPrice: 0.00,
+      costPrice: 0.00, // Zod default will make this a number in 'values'
       lowStockThreshold: 10,
       imageUrl: "",
     },
@@ -151,26 +151,29 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
     try {
       const newQuantity = Number(values.quantity);
       
-      const baseItemData = {
-        ...values, 
-        price: Number(values.price),
-        costPrice: values.costPrice ?? 0, // Ensure costPrice is number, defaulting to 0 if values.costPrice is null/undefined
+      // Construct the data object explicitly to ensure correct types.
+      // values.costPrice is guaranteed to be 'number' by Zod schema's .default(0).
+      const dataForFirestore: Omit<StockItem, 'id'> = {
+        name: values.name,
+        category: values.category,
+        description: values.description || "",
         quantity: newQuantity,
+        unit: values.unit,
+        price: Number(values.price),
+        costPrice: values.costPrice, // Directly use Zod validated value
         lowStockThreshold: Number(values.lowStockThreshold),
+        imageUrl: values.imageUrl || "",
         lastUpdated: new Date().toISOString(),
+        // Site, Stall, and OriginalMasterItemId are set based on mode
+        siteId: isEditMode && initialData ? initialData.siteId : activeSiteId,
+        stallId: isEditMode && initialData ? initialData.stallId : activeStallId,
+        originalMasterItemId: isEditMode && initialData ? (initialData.originalMasterItemId ?? null) : null,
       };
 
       if (isEditMode && itemId && initialData) {
         console.log(`${LOG_PREFIX} Updating item ID: ${itemId}`);
         const itemRef = doc(db, "stockItems", itemId);
-        const dataToSet: Omit<StockItem, 'id'> = {
-            ...baseItemData,
-            siteId: initialData.siteId,
-            stallId: initialData.stallId,
-            originalMasterItemId: initialData.originalMasterItemId ?? null,
-        };
-
-        await setDoc(itemRef, dataToSet, { merge: true });
+        await setDoc(itemRef, dataForFirestore, { merge: true });
         console.log(`${LOG_PREFIX} Item ${itemId} updated successfully in Firestore.`);
 
         const oldQuantity = initialData.quantity;
@@ -202,13 +205,8 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
           return;
         }
         console.log(`${LOG_PREFIX} Creating new item. ActiveSiteId: ${activeSiteId}, ActiveStallId: ${activeStallId}`);
-        const itemDataToSave: Omit<StockItem, 'id'> = {
-          ...baseItemData,
-          siteId: activeSiteId,
-          stallId: activeStallId,
-          originalMasterItemId: null,
-        };
-        const newItemRef = await addDoc(collection(db, "stockItems"), itemDataToSave);
+        
+        const newItemRef = await addDoc(collection(db, "stockItems"), dataForFirestore);
         console.log(`${LOG_PREFIX} New item created with ID: ${newItemRef.id}`);
 
         await logStockMovement(user, {
