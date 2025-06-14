@@ -307,16 +307,18 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   };
 
   const parseAndCapInput = (value: string, max?: number, min: number = 0): number | string => {
-    if (value === "") return "";
+    if (value === "") return ""; // Handles empty string input, returns string
     let num = parseInt(value, 10);
     if (isNaN(num)) {
-        const currentValStr = String(max === 0 ? min : (max || min));
-        if (currentValStr === String(max)) return max;
-        return min;
+        // If 'value' is not a number (e.g., "abc")
+        // If max is defined, return max. Otherwise, return min.
+        // Both max (when defined) and min are numbers.
+        return max !== undefined ? max : min;
     }
+    // At this point, num is a valid number.
     if (max !== undefined && num > max) num = max;
     if (num < min) num = min;
-    return num;
+    return num; // Returns a number
   };
 
   const parseAndCapFloatInput = (value: string, min: number = 0): number | string => {
@@ -1979,4 +1981,3 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     </TooltipProvider>
   );
 }
-
