@@ -10,6 +10,7 @@ export type StockMovementType =
   | 'SALE_AFFECTS_MASTER' // Master stock reduced due to linked stall sale
   | 'DIRECT_STALL_UPDATE'
   | 'DIRECT_MASTER_UPDATE'
+  | 'DIRECT_STALL_UPDATE_AFFECTS_MASTER' // Added this type
   | 'TRANSFER_OUT_FROM_STALL'
   | 'TRANSFER_IN_TO_STALL'
   | 'BATCH_STALL_UPDATE_SET' // Indicates quantity was set, not just delta. Could be complex to get 'before' for each.
