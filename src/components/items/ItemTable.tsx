@@ -197,13 +197,14 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     let itemDataForLog: StockItem | null = null;
     try {
       const itemRef = doc(db, "stockItems", itemId);
-      const itemDocSnap = await getDoc(itemRef);
+      const itemDocSnap = await getDoc(itemRef); // Get current data for logging
       if (!itemDocSnap.exists()) {
         console.warn(`${LOG_PREFIX} Item ${itemId} not found for deletion.`);
         throw new Error("Item not found for deletion.");
       }
       itemDataForLog = { id: itemDocSnap.id, ...itemDocSnap.data() } as StockItem;
 
+      // Check for linked stall items if deleting a master item
       if (itemDataForLog.stallId === null && itemDataForLog.siteId) {
           const linkedStallsQuery = query(
             collection(db, "stockItems"),
@@ -211,76 +212,80 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           );
           const linkedStallsSnap = await getDocs(linkedStallsQuery);
           if (!linkedStallsSnap.empty) {
-            console.warn(`${LOG_PREFIX} Deletion prevented for master item ${itemId}. ${linkedStallsSnap.size} stall items linked.`);
-            toast({
-              title: "Deletion Prevented",
-              description: `Master item "${itemName}" cannot be deleted because ${linkedStallsSnap.size} stall item(s) are still allocated from it. Please return or re-allocate stock from these stalls first.`,
-              variant: "destructive",
-              duration: 7000,
-            });
-            setIsDeleting(false);
-            setShowSingleDeleteDialog(false);
-            setItemForSingleDelete(null);
-            return;
+            const activeLinkedStalls = linkedStallsSnap.docs.filter(doc => (doc.data() as StockItem).quantity > 0);
+            if (activeLinkedStalls.length > 0) {
+              console.warn(`${LOG_PREFIX} Deletion prevented for master item ${itemId}. ${activeLinkedStalls.length} stall items with stock linked.`);
+              toast({
+                title: "Deletion Prevented",
+                description: `Master item "${itemName}" cannot be deleted. ${activeLinkedStalls.length} stall(s) still have stock allocated from it. Please return or re-allocate stock from these stalls first.`,
+                variant: "destructive",
+                duration: 7000,
+              });
+              setIsDeleting(false);
+              setShowSingleDeleteDialog(false); // Close the dialog
+              setItemForSingleDelete(null); // Clear the item to delete
+              return;
+            }
           }
       }
 
-      await runTransaction(db, async (transaction) => {
-        const masterItemRef = itemDataForLog!.originalMasterItemId ? doc(db, "stockItems", itemDataForLog!.originalMasterItemId) : null;
-        let masterItemSnap: DocumentSnapshot | null = null;
-        let masterData: StockItem | null = null;
+      // Transaction to delete item and update master stock if necessary
+      const transactionResult = await runTransaction(db, async (transaction) => {
+        const currentItemRef = doc(db, "stockItems", itemId);
+        const currentItemSnap = await transaction.get(currentItemRef);
+        if (!currentItemSnap.exists()) {
+          console.warn(`${LOG_PREFIX} Item ${itemId} disappeared during transaction. Deletion aborted.`);
+          throw new Error("Item to delete was not found during transaction.");
+        }
+        const itemToDeleteData = { id: currentItemSnap.id, ...currentItemSnap.data() } as StockItem;
+        let masterItemDataForLog: StockItem | null = null;
+        let masterItemQtyAfterUpdate: number | null = null;
 
-        if (masterItemRef) {
-          masterItemSnap = await transaction.get(masterItemRef);
+        if (itemToDeleteData.stallId && itemToDeleteData.originalMasterItemId) {
+          const masterItemRef = doc(db, "stockItems", itemToDeleteData.originalMasterItemId);
+          const masterItemSnap = await transaction.get(masterItemRef);
           if (masterItemSnap.exists()) {
-             masterData = {id: masterItemSnap.id, ...masterItemSnap.data()} as StockItem;
+            masterItemDataForLog = { id: masterItemSnap.id, ...masterItemSnap.data() } as StockItem;
+            masterItemQtyAfterUpdate = masterItemDataForLog.quantity + itemToDeleteData.quantity;
+            transaction.update(masterItemRef, {
+              quantity: masterItemQtyAfterUpdate,
+              lastUpdated: new Date().toISOString(),
+            });
+            console.log(`${LOG_PREFIX} Master stock ${masterItemDataForLog.id} updated in transaction. Adding ${itemToDeleteData.quantity} due to deletion of stall item ${itemToDeleteData.id}. New Qty: ${masterItemQtyAfterUpdate}`);
           } else {
-             console.warn(`${LOG_PREFIX} Master item ${itemDataForLog!.originalMasterItemId} not found during deletion of stall item ${itemDataForLog!.id}. Master stock not adjusted.`);
+            console.warn(`${LOG_PREFIX} Master item ${itemToDeleteData.originalMasterItemId} not found during deletion of stall item ${itemToDeleteData.id}. Master stock not adjusted.`);
           }
         }
-
-        if (itemDataForLog!.stallId && masterItemRef && masterData) {
-          transaction.update(masterItemRef, {
-            quantity: masterData.quantity + itemDataForLog!.quantity,
-            lastUpdated: new Date().toISOString(),
-          });
-          console.log(`${LOG_PREFIX} Master stock ${masterData.id} updated in transaction. Adding ${itemDataForLog!.quantity} due to deletion of stall item ${itemDataForLog!.id}.`);
-        }
-        transaction.delete(itemRef);
+        transaction.delete(currentItemRef);
+        return { deletedItemData: itemToDeleteData, returnedMasterData: masterItemDataForLog, finalMasterQty: masterItemQtyAfterUpdate };
       });
-      console.log(`${LOG_PREFIX} Item ${itemId} deleted successfully from Firestore.`);
+      console.log(`${LOG_PREFIX} Item ${itemId} deleted successfully from Firestore via transaction.`);
+      const { deletedItemData, returnedMasterData, finalMasterQty } = transactionResult;
 
-      if (user && itemDataForLog) {
+      if (user && deletedItemData) {
         await logStockMovement(user, {
-            stockItemId: itemDataForLog.id,
-            masterStockItemIdForContext: itemDataForLog.originalMasterItemId,
-            siteId: itemDataForLog.siteId!,
-            stallId: itemDataForLog.stallId,
-            type: itemDataForLog.stallId ? 'DELETE_STALL_ITEM' : 'DELETE_MASTER_ITEM',
-            quantityChange: -itemDataForLog.quantity,
-            quantityBefore: itemDataForLog.quantity,
+            stockItemId: deletedItemData.id,
+            masterStockItemIdForContext: deletedItemData.originalMasterItemId,
+            siteId: deletedItemData.siteId!,
+            stallId: deletedItemData.stallId,
+            type: deletedItemData.stallId ? 'DELETE_STALL_ITEM' : 'DELETE_MASTER_ITEM',
+            quantityChange: -deletedItemData.quantity,
+            quantityBefore: deletedItemData.quantity,
             quantityAfter: 0,
-            notes: `Item "${itemDataForLog.name}" deleted. ${itemDataForLog.stallId && itemDataForLog.originalMasterItemId ? 'Quantity returned to master implicitly.' : ''}`,
+            notes: `Item "${deletedItemData.name}" deleted. ${deletedItemData.stallId && deletedItemData.originalMasterItemId ? 'Quantity returned to master implicitly.' : ''}`,
         });
-         if (itemDataForLog.stallId && itemDataForLog.originalMasterItemId) {
-             const masterItemAfterDeletionSnap = await getDoc(doc(db, "stockItems", itemDataForLog.originalMasterItemId));
-             if (masterItemAfterDeletionSnap.exists()) {
-                const masterItemAfter = masterItemAfterDeletionSnap.data() as StockItem;
-                console.log(`${LOG_PREFIX} Logging implicit return to master ${masterItemAfter.id}. Quantity before this log entry was ${masterItemAfter.quantity - itemDataForLog.quantity}, new quantity is ${masterItemAfter.quantity}.`);
-                 await logStockMovement(user, {
-                    stockItemId: itemDataForLog.originalMasterItemId,
-                    siteId: masterItemAfter.siteId!,
-                    stallId: null,
-                    type: 'RECEIVE_RETURN_FROM_STALL',
-                    quantityChange: itemDataForLog.quantity,
-                    quantityBefore: masterItemAfter.quantity - itemDataForLog.quantity,
-                    quantityAfter: masterItemAfter.quantity,
-                    notes: `Implicit return from deleted stall item "${itemDataForLog.name}" (ID: ${itemDataForLog.id}).`,
-                    linkedStockItemId: itemDataForLog.id,
-                 });
-             } else {
-                 console.warn(`${LOG_PREFIX} Master item ${itemDataForLog.originalMasterItemId} no longer exists after deleting stall item ${itemDataForLog.id}. Cannot log return.`);
-             }
+         if (deletedItemData.stallId && returnedMasterData && finalMasterQty !== null) {
+             await logStockMovement(user, {
+                stockItemId: returnedMasterData.id,
+                siteId: returnedMasterData.siteId!,
+                stallId: null,
+                type: 'RECEIVE_RETURN_FROM_STALL',
+                quantityChange: deletedItemData.quantity, // The amount returned to master
+                quantityBefore: returnedMasterData.quantity, // Master quantity before *this specific return*
+                quantityAfter: finalMasterQty, // Master quantity after *this specific return*
+                notes: `Implicit return from deleted stall item "${deletedItemData.name}" (ID: ${deletedItemData.id}).`,
+                linkedStockItemId: deletedItemData.id,
+             });
          }
       }
 
@@ -289,8 +294,8 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         description: `${itemName} has been successfully deleted. Master stock (if applicable) adjusted.`,
       });
       onDataNeedsRefresh();
-      setSelectedItems(prev => prev.filter(id => id !== itemId));
-      if (itemForSingleDelete?.id === itemId) {
+      setSelectedItems(prev => prev.filter(id => id !== itemId)); // Update selection state
+      if (itemForSingleDelete?.id === itemId) { // If this was triggered from single delete dialog
         setShowSingleDeleteDialog(false);
         setItemForSingleDelete(null);
       }
@@ -322,16 +327,17 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     if (value === "") return "";
     if (!/^\d*\.?\d*$/.test(value) || (value.split('.').length -1 > 1)) {
         const floatVal = parseFloat(value);
-        if (!isNaN(floatVal) && floatVal >= min) return floatVal.toString();
-        return min.toString();
+        if (!isNaN(floatVal) && floatVal >= min) return floatVal.toString(); // Return as string if valid
+        return min.toString(); // Return min as string if invalid
     }
 
+    // Allows typing numbers like "0.0" or "." before full number
     const num = parseFloat(value);
-    if (isNaN(num) && value !== "." && value !== "") {
+    if (isNaN(num) && value !== "." && value !== "" && value !== "0." && !value.endsWith(".")) { // Allow partial inputs
         return min.toString();
     }
     if (!isNaN(num) && num < min) return min.toString();
-    return value;
+    return value; // Return the valid (or partial) string
   };
 
 
@@ -502,19 +508,21 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
         let stallItemBeforeTx: StockItem | null = null;
         let finalStallItemId: string;
 
-        const existingStallItemsQuerySnap = await getDocs(stallItemsQuery); // Must be outside transaction.get for rules
+        // Note: Firestore transactions cannot read results from queries directly.
+        // This query outside the transaction is to check existence and get a ref if it exists.
+        // The actual read (transaction.get) must happen inside on the specific ref.
+        const existingStallItemsQuerySnap = await getDocs(stallItemsQuery); 
 
         if (!existingStallItemsQuerySnap.empty) {
             const existingStallItemDoc = existingStallItemsQuerySnap.docs[0];
             targetStallItemRef = existingStallItemDoc.ref;
             finalStallItemId = existingStallItemDoc.id;
-            // Need to get this within transaction to avoid race conditions on its quantity
+            // Now get it within transaction
             const targetStallItemSnap = await transaction.get(targetStallItemRef);
             if (targetStallItemSnap.exists()) {
                 stallItemBeforeTx = {id: targetStallItemSnap.id, ...targetStallItemSnap.data()} as StockItem;
             } else {
-                // This case is unlikely if query found it, but good to handle
-                stallItemBeforeTx = null; // Will be treated as new creation path internally for transaction
+                 stallItemBeforeTx = null;
                  console.warn(`${LOG_PREFIX} Queried existing stall item ${finalStallItemId} but not found in transaction. Will create new.`);
             }
         } else {
@@ -530,7 +538,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                 quantity: stallItemBeforeTx.quantity + numQuantityToAllocate,
                 lastUpdated: new Date().toISOString(),
             });
-        } else { // Create new
+        } else if (targetStallItemRef) { // Create new
             console.log(`${LOG_PREFIX} Creating new stall item ${finalStallItemId}. Allocating: ${numQuantityToAllocate}`);
             const newStallItemDataToSave: Omit<StockItem, 'id'> = {
                 name: masterItemBeforeTx.name, category: masterItemBeforeTx.category,
@@ -542,6 +550,8 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                 lastUpdated: new Date().toISOString(),
             };
             transaction.set(targetStallItemRef, newStallItemDataToSave);
+        } else {
+            throw new Error("Could not establish target stall item reference.");
         }
 
         transaction.update(masterStockRef, {
@@ -773,7 +783,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             where("stallId", "==", destinationStallId),
             where("originalMasterItemId", "==", sourceItemBeforeTx.originalMasterItemId ?? null)
         );
-        const destQuerySnap = await getDocs(q); // Must be outside transaction.get for rules
+        const destQuerySnap = await getDocs(q); 
         if (!destQuerySnap.empty) {
             const existingDestDoc = destQuerySnap.docs[0];
             destinationItemRef = existingDestDoc.ref;
@@ -804,7 +814,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             quantity: destItemBeforeTx.quantity + numQuantityToTransfer,
             lastUpdated: new Date().toISOString()
           });
-        } else if (destinationItemRef) { // New item
+        } else if (destinationItemRef) { 
           console.log(`${LOG_PREFIX} Creating new destination item ${finalDestItemId}. Transferring: ${numQuantityToTransfer}`);
           transaction.set(destinationItemRef, {
             name: sourceItemBeforeTx.name, category: sourceItemBeforeTx.category,
@@ -888,10 +898,13 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     for (const itemToDelete of itemsToDeleteInfo) {
       if (!itemToDelete) continue;
       console.log(`${LOG_PREFIX} Batch deleting item: ${itemToDelete.id} (${itemToDelete.name})`);
-      let originalItemData: StockItem | null = null;
-      let originalMasterData: StockItem | null = null;
+      
       try {
-        await runTransaction(db, async (transaction) => {
+        const transactionResult = await runTransaction(db, async (transaction): Promise<{
+            deletedItemData: StockItem;
+            returnedMasterData: StockItem | null;
+            finalMasterQty: number | null;
+        }> => {
           const stallItemRef = doc(db, "stockItems", itemToDelete.id);
           const stallItemSnap = await transaction.get(stallItemRef);
 
@@ -899,50 +912,55 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             console.warn(`${LOG_PREFIX} Stall item ${itemToDelete.name} (ID: ${itemToDelete.id}) not found during batch delete transaction.`);
             throw new Error(`Stall item ${itemToDelete.name} not found during batch delete.`);
           }
-          originalItemData = { id: stallItemSnap.id, ...stallItemSnap.data() } as StockItem;
+          const currentItemData = { id: stallItemSnap.id, ...stallItemSnap.data() } as StockItem;
+          let currentMasterData: StockItem | null = null;
+          let newMasterQuantityAfterUpdate: number | null = null;
 
-          if (originalItemData.originalMasterItemId) {
-            const masterItemRef = doc(db, "stockItems", originalItemData.originalMasterItemId);
+          if (currentItemData.originalMasterItemId) {
+            const masterItemRef = doc(db, "stockItems", currentItemData.originalMasterItemId);
             const masterItemSnap = await transaction.get(masterItemRef);
             if (masterItemSnap.exists()) {
-              originalMasterData = { id: masterItemSnap.id, ...masterItemSnap.data() } as StockItem;
+              currentMasterData = { id: masterItemSnap.id, ...masterItemSnap.data() } as StockItem;
+              newMasterQuantityAfterUpdate = currentMasterData.quantity + currentItemData.quantity;
               transaction.update(masterItemRef, {
-                quantity: originalMasterData.quantity + originalItemData.quantity,
+                quantity: newMasterQuantityAfterUpdate,
                 lastUpdated: new Date().toISOString(),
               });
-              console.log(`${LOG_PREFIX} Master stock ${originalMasterData.id} updated in transaction. Adding ${originalItemData.quantity} due to batch deletion of stall item ${originalItemData.id}.`);
+              console.log(`${LOG_PREFIX} Master stock ${currentMasterData.id} updated in transaction. Adding ${currentItemData.quantity} due to batch deletion of stall item ${currentItemData.id}. New Qty: ${newMasterQuantityAfterUpdate}`);
             } else {
-              console.warn(`${LOG_PREFIX} Master item ${originalItemData.originalMasterItemId} for stall item ${originalItemData.id} not found. Master stock not adjusted during batch delete.`);
+              console.warn(`${LOG_PREFIX} Master item ${currentItemData.originalMasterItemId} for stall item ${currentItemData.id} not found. Master stock not adjusted during batch delete.`);
             }
           }
           transaction.delete(stallItemRef);
+          return { deletedItemData: currentItemData, returnedMasterData: currentMasterData, finalMasterQty: newMasterQuantityAfterUpdate };
         });
+        
+        const { deletedItemData, returnedMasterData, finalMasterQty } = transactionResult;
         successCount++;
-         if (user && originalItemData) {
+
+         if (user && deletedItemData) {
             await logStockMovement(user, {
-                stockItemId: originalItemData.id,
-                masterStockItemIdForContext: originalItemData.originalMasterItemId,
-                siteId: originalItemData.siteId!,
-                stallId: originalItemData.stallId,
+                stockItemId: deletedItemData.id,
+                masterStockItemIdForContext: deletedItemData.originalMasterItemId,
+                siteId: deletedItemData.siteId!,
+                stallId: deletedItemData.stallId,
                 type: 'BATCH_STALL_DELETE',
-                quantityChange: -originalItemData.quantity,
-                quantityBefore: originalItemData.quantity,
+                quantityChange: -deletedItemData.quantity,
+                quantityBefore: deletedItemData.quantity,
                 quantityAfter: 0,
-                notes: `Batch deleted item "${originalItemData.name}". ${originalItemData.originalMasterItemId ? 'Quantity returned to master.' : ''}`,
+                notes: `Batch deleted item "${deletedItemData.name}". ${deletedItemData.originalMasterItemId ? 'Quantity returned to master.' : ''}`,
             });
-            if (originalMasterData && originalItemData.originalMasterItemId) {
-                const masterQtyAfter = originalMasterData.quantity + originalItemData.quantity;
-                console.log(`${LOG_PREFIX} Logging implicit return to master ${originalMasterData.id} for batch delete. Qty before this log: ${originalMasterData.quantity}, Qty after: ${masterQtyAfter}.`);
+            if (returnedMasterData && finalMasterQty !== null) {
                  await logStockMovement(user, {
-                    stockItemId: originalMasterData.id,
-                    siteId: originalMasterData.siteId!,
+                    stockItemId: returnedMasterData.id,
+                    siteId: returnedMasterData.siteId!,
                     stallId: null,
                     type: 'RECEIVE_RETURN_FROM_STALL',
-                    quantityChange: originalItemData.quantity,
-                    quantityBefore: originalMasterData.quantity,
-                    quantityAfter: masterQtyAfter,
-                    notes: `Implicit return from batch deleted stall item "${originalItemData.name}" (ID: ${originalItemData.id}).`,
-                    linkedStockItemId: originalItemData.id,
+                    quantityChange: deletedItemData.quantity,
+                    quantityBefore: returnedMasterData.quantity,
+                    quantityAfter: finalMasterQty,
+                    notes: `Implicit return from batch deleted stall item "${deletedItemData.name}" (ID: ${deletedItemData.id}).`,
+                    linkedStockItemId: deletedItemData.id,
                  });
             }
          }
@@ -997,11 +1015,13 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     for (const itemToUpdate of itemsToUpdateInfo) {
        if (!itemToUpdate) continue;
        console.log(`${LOG_PREFIX} Batch updating stock for item: ${itemToUpdate.id} (${itemToUpdate.name})`);
-       let originalStallData: StockItem | null = null;
-       let originalMasterData: StockItem | null = null;
-       let newMasterQtyAfterUpdate: number | null = null;
+       
       try {
-        await runTransaction(db, async (transaction) => {
+        const transactionResult = await runTransaction(db, async (transaction): Promise<{
+            originalStallData: StockItem;
+            originalMasterData: StockItem | null;
+            newMasterQtyAfterUpdate: number | null;
+        }> => {
           const stallItemRef = doc(db, "stockItems", itemToUpdate.id);
           const stallItemSnap = await transaction.get(stallItemRef);
 
@@ -1009,39 +1029,39 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
             console.warn(`${LOG_PREFIX} Stall item ${itemToUpdate.name} (ID: ${itemToUpdate.id}) not found during batch update stock transaction.`);
             throw new Error(`Stall item ${itemToUpdate.name} not found during batch update.`);
           }
-          originalStallData = { id: stallItemSnap.id, ...stallItemSnap.data() } as StockItem;
-          const oldStallQuantity = originalStallData.quantity;
+          const currentStallData = { id: stallItemSnap.id, ...stallItemSnap.data() } as StockItem;
+          const oldStallQuantity = currentStallData.quantity;
+          let currentMasterData: StockItem | null = null;
+          let newMasterQuantity: number | null = null;
 
-          let masterItemSnap: DocumentSnapshot | null = null;
-          let masterItemRefToUpdate: DocumentReference | null = null;
 
-          if (originalStallData.originalMasterItemId) {
-            masterItemRefToUpdate = doc(db, "stockItems", originalStallData.originalMasterItemId);
-            masterItemSnap = await transaction.get(masterItemRefToUpdate);
+          if (currentStallData.originalMasterItemId) {
+            const masterItemRefToUpdate = doc(db, "stockItems", currentStallData.originalMasterItemId);
+            const masterItemSnap = await transaction.get(masterItemRefToUpdate);
             if (masterItemSnap.exists()) {
-                originalMasterData = { id: masterItemSnap.id, ...masterItemSnap.data() } as StockItem;
+                currentMasterData = { id: masterItemSnap.id, ...masterItemSnap.data() } as StockItem;
+                const quantityDelta = newBatchQtyNum - oldStallQuantity;
+                newMasterQuantity = Math.max(0, currentMasterData.quantity - quantityDelta);
+                transaction.update(masterItemRefToUpdate, {
+                quantity: newMasterQuantity,
+                lastUpdated: new Date().toISOString(),
+                });
+                console.log(`${LOG_PREFIX} Master stock ${currentMasterData.id} updated. Old Qty: ${currentMasterData.quantity}, New Qty: ${newMasterQuantity}`);
+            } else {
+                 console.warn(`${LOG_PREFIX} Master item ${currentStallData.originalMasterItemId} for stall item ${currentStallData.id} not found. Master stock not adjusted during batch update.`);
             }
           }
-
           transaction.update(stallItemRef, {
             quantity: newBatchQtyNum,
             lastUpdated: new Date().toISOString(),
           });
-          console.log(`${LOG_PREFIX} Stall item ${originalStallData.id} updated. Old Qty: ${oldStallQuantity}, New Qty: ${newBatchQtyNum}`);
-
-          if (masterItemSnap && masterItemSnap.exists() && masterItemRefToUpdate && originalMasterData) {
-            const quantityDelta = newBatchQtyNum - oldStallQuantity;
-            newMasterQtyAfterUpdate = Math.max(0, originalMasterData.quantity - quantityDelta);
-            transaction.update(masterItemRefToUpdate, {
-              quantity: newMasterQtyAfterUpdate,
-              lastUpdated: new Date().toISOString(),
-            });
-            console.log(`${LOG_PREFIX} Master stock ${originalMasterData.id} updated. Old Qty: ${originalMasterData.quantity}, New Qty: ${newMasterQtyAfterUpdate}`);
-          } else if (originalStallData.originalMasterItemId && !masterItemSnap?.exists()){
-             console.warn(`${LOG_PREFIX} Master item ${originalStallData.originalMasterItemId} for stall item ${originalStallData.id} not found. Master stock not adjusted during batch update.`);
-          }
+          console.log(`${LOG_PREFIX} Stall item ${currentStallData.id} updated. Old Qty: ${oldStallQuantity}, New Qty: ${newBatchQtyNum}`);
+          return { originalStallData: currentStallData, originalMasterData: currentMasterData, newMasterQtyAfterUpdate: newMasterQuantity };
         });
+
+        const { originalStallData, originalMasterData, newMasterQtyAfterUpdate } = transactionResult;
         successCount++;
+
          if (user && originalStallData) {
              await logStockMovement(user, {
                 stockItemId: originalStallData.id,
@@ -1055,7 +1075,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                 notes: `Batch stock update set quantity to ${newBatchQtyNum}.`,
             });
             if (originalMasterData && newMasterQtyAfterUpdate !== null) {
-                console.log(`${LOG_PREFIX} Logging master stock adjustment for batch update. Master ID: ${originalMasterData.id}, Change: ${newMasterQtyAfterUpdate - originalMasterData.quantity}`);
                  await logStockMovement(user, {
                     stockItemId: originalMasterData.id,
                     siteId: originalMasterData.siteId!,
