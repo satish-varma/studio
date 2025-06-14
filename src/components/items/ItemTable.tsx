@@ -307,19 +307,16 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   };
 
   const parseAndCapInput = (value: string, max?: number, min: number = 0): number | string => {
-    if (value === "") return ""; // Handles empty string input, returns string
+    if (value === "") return "";
     let num = parseInt(value, 10);
     if (isNaN(num)) {
-        // If 'value' is not a number (e.g., "abc")
-        // If max is defined, return max. Otherwise, return min.
-        // Both max (when defined) and min are numbers.
         return max !== undefined ? max : min;
     }
-    // At this point, num is a valid number.
     if (max !== undefined && num > max) num = max;
     if (num < min) num = min;
-    return num; // Returns a number
+    return num;
   };
+
 
   const parseAndCapFloatInput = (value: string, min: number = 0): number | string => {
     if (value === "") return "";
@@ -352,30 +349,40 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     console.log(`${LOG_PREFIX} Attempting to update stock for item ${stockUpdateItem.id}. New quantity: ${newQuantity}`);
     setIsUpdatingStock(true);
     const updatedQuantityNum = Number(newQuantity);
-    let originalItemData: StockItem | null = null;
-    let originalMasterData: StockItem | null = null;
-    let newMasterQuantityAfterUpdate: number | null = null;
 
     try {
-      await runTransaction(db, async (transaction) => {
-        const itemRef = doc(db, "stockItems", stockUpdateItem.id);
+      const transactionResult = await runTransaction(db, async (transaction): Promise<{
+        itemBeforeUpdate: StockItem;
+        masterItemBeforeUpdate: StockItem | null;
+        finalMasterQuantityAfterUpdate: number | null;
+      }> => {
+        const itemRef = doc(db, "stockItems", stockUpdateItem!.id);
         const itemSnap = await transaction.get(itemRef);
 
         if (!itemSnap.exists()) {
-          console.warn(`${LOG_PREFIX} Item ${stockUpdateItem.id} being updated not found during transaction.`);
+          console.warn(`${LOG_PREFIX} Item ${stockUpdateItem!.id} being updated not found during transaction.`);
           throw new Error("Item being updated not found.");
         }
-        originalItemData = { id: itemSnap.id, ...itemSnap.data() } as StockItem;
-        const oldQuantity = originalItemData.quantity;
+        const itemBeforeUpdate = { id: itemSnap.id, ...itemSnap.data() } as StockItem;
+        const oldQuantity = itemBeforeUpdate.quantity;
 
-        let masterItemSnap: DocumentSnapshot | null = null;
-        let masterItemRef: DocumentReference | null = null;
+        let masterItemBeforeUpdate: StockItem | null = null;
+        let finalMasterQuantityAfterUpdate: number | null = null;
 
-        if (originalItemData.stallId && originalItemData.originalMasterItemId) {
-            masterItemRef = doc(db, "stockItems", originalItemData.originalMasterItemId);
-            masterItemSnap = await transaction.get(masterItemRef);
+        if (itemBeforeUpdate.stallId && itemBeforeUpdate.originalMasterItemId) {
+            const masterItemRef = doc(db, "stockItems", itemBeforeUpdate.originalMasterItemId);
+            const masterItemSnap = await transaction.get(masterItemRef);
             if (masterItemSnap.exists()) {
-                originalMasterData = { id: masterItemSnap.id, ...masterItemSnap.data() } as StockItem;
+                masterItemBeforeUpdate = { id: masterItemSnap.id, ...masterItemSnap.data() } as StockItem;
+                const quantityDelta = updatedQuantityNum - oldQuantity;
+                finalMasterQuantityAfterUpdate = Math.max(0, masterItemBeforeUpdate.quantity - quantityDelta);
+                transaction.update(masterItemRef, {
+                    quantity: finalMasterQuantityAfterUpdate,
+                    lastUpdated: new Date().toISOString(),
+                });
+                console.log(`${LOG_PREFIX} Master stock ${masterItemBeforeUpdate.id} updated. Old Qty: ${masterItemBeforeUpdate.quantity}, New Qty: ${finalMasterQuantityAfterUpdate}`);
+            } else {
+              console.warn(`${LOG_PREFIX} Master stock item ${itemBeforeUpdate.originalMasterItemId} not found. Stall stock updated, but master cannot be adjusted.`);
             }
         }
 
@@ -383,45 +390,37 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
           quantity: updatedQuantityNum,
           lastUpdated: new Date().toISOString(),
         });
-        console.log(`${LOG_PREFIX} Stock updated in transaction for item ${originalItemData.id}. Old: ${oldQuantity}, New: ${updatedQuantityNum}`);
-
-        if (masterItemSnap && masterItemSnap.exists() && masterItemRef && originalMasterData) {
-          const quantityDelta = updatedQuantityNum - oldQuantity;
-          newMasterQuantityAfterUpdate = Math.max(0, originalMasterData.quantity - quantityDelta);
-          transaction.update(masterItemRef, {
-            quantity: newMasterQuantityAfterUpdate,
-            lastUpdated: new Date().toISOString(),
-          });
-          console.log(`${LOG_PREFIX} Master stock ${originalMasterData.id} updated. Old Qty: ${originalMasterData.quantity}, New Qty: ${newMasterQuantityAfterUpdate}`);
-        } else if (originalItemData.stallId && originalItemData.originalMasterItemId && !masterItemSnap?.exists()){
-            console.warn(`${LOG_PREFIX} Master stock item ${originalItemData.originalMasterItemId} not found. Stall stock updated, but master cannot be adjusted.`);
-        }
+        console.log(`${LOG_PREFIX} Stock updated in transaction for item ${itemBeforeUpdate.id}. Old: ${oldQuantity}, New: ${updatedQuantityNum}`);
+        
+        return { itemBeforeUpdate, masterItemBeforeUpdate, finalMasterQuantityAfterUpdate };
       });
+      
       console.log(`${LOG_PREFIX} Stock update transaction successful for item ${stockUpdateItem.id}.`);
+      const { itemBeforeUpdate, masterItemBeforeUpdate, finalMasterQuantityAfterUpdate } = transactionResult;
 
-      if (user && originalItemData) {
+      if (user && itemBeforeUpdate) {
          await logStockMovement(user, {
-            stockItemId: originalItemData.id,
-            masterStockItemIdForContext: originalItemData.originalMasterItemId,
-            siteId: originalItemData.siteId!,
-            stallId: originalItemData.stallId,
-            type: originalItemData.stallId ? 'DIRECT_STALL_UPDATE' : 'DIRECT_MASTER_UPDATE',
-            quantityChange: updatedQuantityNum - originalItemData.quantity,
-            quantityBefore: originalItemData.quantity,
+            stockItemId: itemBeforeUpdate.id,
+            masterStockItemIdForContext: itemBeforeUpdate.originalMasterItemId,
+            siteId: itemBeforeUpdate.siteId!,
+            stallId: itemBeforeUpdate.stallId,
+            type: itemBeforeUpdate.stallId ? 'DIRECT_STALL_UPDATE' : 'DIRECT_MASTER_UPDATE',
+            quantityChange: updatedQuantityNum - itemBeforeUpdate.quantity,
+            quantityBefore: itemBeforeUpdate.quantity,
             quantityAfter: updatedQuantityNum,
             notes: "Direct stock quantity update via item table.",
           });
-        if (originalMasterData && newMasterQuantityAfterUpdate !== null) {
+        if (masterItemBeforeUpdate && finalMasterQuantityAfterUpdate !== null) {
              await logStockMovement(user, {
-                stockItemId: originalMasterData.id,
-                siteId: originalMasterData.siteId!,
+                stockItemId: masterItemBeforeUpdate.id,
+                siteId: masterItemBeforeUpdate.siteId!,
                 stallId: null,
                 type: 'DIRECT_STALL_UPDATE_AFFECTS_MASTER',
-                quantityChange: newMasterQuantityAfterUpdate - originalMasterData.quantity,
-                quantityBefore: originalMasterData.quantity,
-                quantityAfter: newMasterQuantityAfterUpdate,
-                notes: `Master stock adjusted due to direct update of linked stall item ${originalItemData.name} (ID: ${originalItemData.id}).`,
-                linkedStockItemId: originalItemData.id,
+                quantityChange: finalMasterQuantityAfterUpdate - masterItemBeforeUpdate.quantity,
+                quantityBefore: masterItemBeforeUpdate.quantity,
+                quantityAfter: finalMasterQuantityAfterUpdate,
+                notes: `Master stock adjusted due to direct update of linked stall item ${itemBeforeUpdate.name} (ID: ${itemBeforeUpdate.id}).`,
+                linkedStockItemId: itemBeforeUpdate.id,
             });
         }
       }
