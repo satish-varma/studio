@@ -89,7 +89,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [activeStall, setActiveStallObject] = useState<Stall | null>(null);
 
   const setUser: React.Dispatch<React.SetStateAction<AppUser | null>> = (newUser) => {
-    console.log(`${LOG_PREFIX_CONTEXT} setUser manually called. New user UID:`, newUser?.uid);
+    if (typeof newUser === 'function') {
+      console.log(`${LOG_PREFIX_CONTEXT} setUser manually called with an updater function.`);
+    } else {
+      console.log(`${LOG_PREFIX_CONTEXT} setUser manually called. New user UID:`, newUser?.uid);
+    }
     setUserState(newUser);
   };
 
