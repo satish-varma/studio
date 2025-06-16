@@ -590,7 +590,7 @@ export default function SettingsPage() {
                 <AlertDialogHeader>
                   <AlertDialogTitle>Confirm Data Reset</AlertDialogTitle>
                   <AlertDialogDescription className="space-y-2">
-                    <p>You are about to delete all application data including:</p>
+                    <div>You are about to delete all application data including:</div>
                     <ul className="list-disc list-inside text-sm text-destructive pl-4">
                       <li>All Stock Items (Master & Stall)</li>
                       <li>All Sales Transactions</li>
@@ -598,8 +598,8 @@ export default function SettingsPage() {
                       <li>All Sites and Stalls</li>
                       <li>All Google OAuth Tokens</li>
                     </ul>
-                    <p className="font-bold">The 'users' collection (user accounts, roles, and preferences) WILL NOT be deleted.</p>
-                    <p>This action is irreversible. To proceed, please type "<strong className="text-foreground">{RESET_CONFIRMATION_PHRASE}</strong>" into the box below.</p>
+                    <div className="font-bold">The 'users' collection (user accounts, roles, and preferences) WILL NOT be deleted.</div>
+                    <div>This action is irreversible. To proceed, please type "<strong className="text-foreground">{RESET_CONFIRMATION_PHRASE}</strong>" into the box below.</div>
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <div className="py-2">
@@ -678,3 +678,4 @@ export default function SettingsPage() {
     </div>
   );
 }
+
