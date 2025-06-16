@@ -175,7 +175,7 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
                 form.setError("email", { type: "manual", message: apiErrorMsg });
             }
         }
-        console.error(`${LOG_PREFIX} API call failed:`, apiErrorMsg);
+        // console.error(`${LOG_PREFIX} API call failed:`, apiErrorMsg); // Removed redundant log here, catch block will log.
         throw new Error(apiErrorMsg);
       }
 
@@ -216,9 +216,13 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
 
     } catch (error: any) {
       console.error(`${LOG_PREFIX} Error during user creation process:`, error.message, error.stack);
+      let toastDescription = error.message || "An unexpected error occurred. Please check the console for more details.";
+      if (typeof error.message === 'string' && error.message.includes("Firebase Admin SDK not initialized")) {
+        toastDescription = "Server Error: Firebase Admin SDK failed to initialize. Please check server logs and environment configuration (e.g., GOOGLE_APPLICATION_CREDENTIALS_JSON).";
+      }
       toast({
         title: "User Creation Failed",
-        description: error.message || "An unexpected error occurred. Please check the console for more details.",
+        description: toastDescription,
         variant: "destructive",
         duration: 10000,
       });
@@ -445,3 +449,4 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
     </Dialog>
   );
 }
+
