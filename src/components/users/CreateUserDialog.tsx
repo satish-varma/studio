@@ -144,6 +144,7 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
         return;
     }
 
+    let apiErrorMsg = "";
     try {
       console.log(`${LOG_PREFIX} Attempting to get ID token for admin user: ${currentFirebaseUser.uid}`);
       const idToken = await currentFirebaseUser.getIdToken(true);
@@ -166,16 +167,10 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
       console.log(`${LOG_PREFIX} /api/admin/create-user response status: ${response.status}, body:`, result);
 
       if (!response.ok) {
-        let apiErrorMsg = `API Error: ${result.error || `Failed to create auth user (Status: ${response.status})`}.`;
+        apiErrorMsg = `API Error: ${result.error || `Failed to create auth user (Status: ${response.status})`}.`;
         if (result.details) apiErrorMsg += ` Details: ${result.details}.`;
-        if (result.code) {
-            apiErrorMsg += ` Code: ${result.code}.`;
-            if (result.code === 'auth/email-already-exists') {
-                apiErrorMsg = `The email address ${values.email} is already in use.`;
-                form.setError("email", { type: "manual", message: apiErrorMsg });
-            }
-        }
-        // Error is now caught by the outer catch block.
+        if (result.code) apiErrorMsg += ` Code: ${result.code}.`;
+        // Error will be caught by the outer catch block.
         throw new Error(apiErrorMsg);
       }
 
@@ -211,26 +206,38 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
         onClose();
       } else {
          console.error(`${LOG_PREFIX} Auth user ${authData.email} created, but Firestore doc creation FAILED.`);
-         toast({ title: "Auth User Created, Firestore Failed", description: `User ${authData.email} was created in Authentication, but failed to save to user database. Please check the user list or server logs and try creating the Firestore document manually if needed.`, variant: "destructive", duration: 15000 });
+         // The onCreateUserFirestoreDoc should ideally throw an error if it fails, which would be caught below.
+         // If it returns false, we construct an error message.
+         throw new Error(`Auth user ${authData.email} created, but Firestore doc creation FAILED.`);
       }
 
     } catch (error: any) {
-      console.error(`${LOG_PREFIX} Error during user creation process: ${error.message}`);
       let toastDescription = error.message || "An unexpected error occurred. Please check the console for more details.";
+      let isHandledApiError = false;
       
       if (typeof error.message === 'string') {
-          if (error.message.includes("Firebase Admin SDK not initialized") || error.message.includes("Server Configuration Error")) {
-              toastDescription = "Server Error: Firebase Admin SDK failed to initialize. Please check server logs and environment configuration (e.g., GOOGLE_APPLICATION_CREDENTIALS_JSON). The API route is returning an error.";
-          } else if (error.message.includes("The email address") && error.message.includes("is already in use")) {
-              toastDescription = error.message;
+          if (error.message.includes("Firebase Admin SDK not initialized")) {
+            toastDescription = "Server Error: Firebase Admin SDK failed to initialize. Please check server logs and environment configuration (e.g., GOOGLE_APPLICATION_CREDENTIALS_JSON).";
+            console.error(`${LOG_PREFIX} Error during user creation process: ${error.message}`);
+          } else if (error.message.includes("is already in use")) {
+            toastDescription = error.message;
+            form.setError("email", { type: "manual", message: toastDescription });
+            console.warn(`${LOG_PREFIX} User creation failed (handled): ${error.message}`);
+            isHandledApiError = true;
+          } else {
+            // For other errors, log them as console.error
+            console.error(`${LOG_PREFIX} Error during user creation process: ${error.message}`);
           }
+      } else {
+        // If error.message is not a string or error is not typical
+        console.error(`${LOG_PREFIX} Unexpected error during user creation process:`, error);
       }
       
       toast({
         title: "User Creation Failed",
         description: toastDescription,
         variant: "destructive",
-        duration: 10000,
+        duration: isHandledApiError ? 7000 : 10000,
       });
     } finally {
       setIsSubmitting(false);
