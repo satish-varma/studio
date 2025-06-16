@@ -175,7 +175,7 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
                 form.setError("email", { type: "manual", message: apiErrorMsg });
             }
         }
-        // console.error(`${LOG_PREFIX} API call failed:`, apiErrorMsg); // Removed redundant log here, catch block will log.
+        // Error is now caught by the outer catch block.
         throw new Error(apiErrorMsg);
       }
 
@@ -215,11 +215,17 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
       }
 
     } catch (error: any) {
-      console.error(`${LOG_PREFIX} Error during user creation process:`, error.message, error.stack);
+      console.error(`${LOG_PREFIX} Error during user creation process: ${error.message}`);
       let toastDescription = error.message || "An unexpected error occurred. Please check the console for more details.";
-      if (typeof error.message === 'string' && error.message.includes("Firebase Admin SDK not initialized")) {
-        toastDescription = "Server Error: Firebase Admin SDK failed to initialize. Please check server logs and environment configuration (e.g., GOOGLE_APPLICATION_CREDENTIALS_JSON).";
+      
+      if (typeof error.message === 'string') {
+          if (error.message.includes("Firebase Admin SDK not initialized") || error.message.includes("Server Configuration Error")) {
+              toastDescription = "Server Error: Firebase Admin SDK failed to initialize. Please check server logs and environment configuration (e.g., GOOGLE_APPLICATION_CREDENTIALS_JSON). The API route is returning an error.";
+          } else if (error.message.includes("The email address") && error.message.includes("is already in use")) {
+              toastDescription = error.message;
+          }
       }
+      
       toast({
         title: "User Creation Failed",
         description: toastDescription,
@@ -450,3 +456,4 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
   );
 }
 
+    
