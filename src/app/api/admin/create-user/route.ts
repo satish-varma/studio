@@ -19,50 +19,70 @@ if (!admin.apps.length) {
 
   try {
     if (serviceAccountJsonEnv) {
-      console.log(`${LOG_PREFIX} Initializing with GOOGLE_APPLICATION_CREDENTIALS_JSON env var.`);
+      console.log(`${LOG_PREFIX} Attempting initialization with GOOGLE_APPLICATION_CREDENTIALS_JSON env var.`);
       const serviceAccount = JSON.parse(serviceAccountJsonEnv);
       adminApp = admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
-      });
-      console.log(`${LOG_PREFIX} Firebase Admin SDK initialized successfully using JSON env var. Project: ${adminApp.options.projectId}`);
-    } else if (serviceAccountPathEnv) {
-      console.log(`${LOG_PREFIX} Initializing with GOOGLE_APPLICATION_CREDENTIALS path: ${serviceAccountPathEnv}.`);
-      adminApp = admin.initializeApp(); 
-      console.log(`${LOG_PREFIX} Firebase Admin SDK initialized via initializeApp() (likely ADC with path). Project: ${adminApp.options.projectId}`);
-    } else {
-      console.log(`${LOG_PREFIX} No service account JSON or path found in env. Attempting Application Default Credentials.`);
-      adminApp = admin.initializeApp(); 
-      console.log(`${LOG_PREFIX} Firebase Admin SDK initialized successfully using Application Default Credentials. Project: ${adminApp.options.projectId}`);
-    }
-    if (!adminApp.options.projectId) {
-        initializationErrorDetails = "Admin SDK initialized but project ID is missing. This is highly unusual.";
+      }, 'create-user-api-json-init'); // Unique app name for this init attempt
+      if (!adminApp.options.projectId) {
+        initializationErrorDetails = "Admin SDK initialized via JSON_ENV, but the resulting app instance is missing a projectId.";
         console.error(`${LOG_PREFIX} ${initializationErrorDetails}`);
         adminApp = undefined; // Treat as failure
+      } else {
+        console.log(`${LOG_PREFIX} Firebase Admin SDK initialized successfully using JSON_ENV. Project: ${adminApp.options.projectId}`);
+      }
+    } else if (serviceAccountPathEnv) {
+      console.log(`${LOG_PREFIX} Attempting initialization with GOOGLE_APPLICATION_CREDENTIALS path: ${serviceAccountPathEnv}. This typically uses Application Default Credentials (ADC) mechanism guided by the path.`);
+      // When GOOGLE_APPLICATION_CREDENTIALS (path) is set, initializeApp() without args should pick it up.
+      adminApp = admin.initializeApp(undefined, 'create-user-api-path-init'); // Unique app name
+      if (!adminApp.options.projectId) {
+        initializationErrorDetails = "Admin SDK initialized via PATH_ENV (ADC), but the resulting app instance is missing a projectId. Check the service account file content and path.";
+        console.error(`${LOG_PREFIX} ${initializationErrorDetails}`);
+        adminApp = undefined; // Treat as failure
+      } else {
+        console.log(`${LOG_PREFIX} Firebase Admin SDK initialized successfully using PATH_ENV (ADC). Project: ${adminApp.options.projectId}`);
+      }
+    } else {
+      console.log(`${LOG_PREFIX} No specific service account JSON or path found in env. Attempting generic Application Default Credentials (ADC).`);
+      adminApp = admin.initializeApp(undefined, 'create-user-api-adc-init'); // Unique app name
+      if (!adminApp.options.projectId) {
+        initializationErrorDetails = "Admin SDK initialized via generic ADC, but the resulting app instance is missing a projectId. Ensure ADC are correctly configured for your environment.";
+        console.error(`${LOG_PREFIX} ${initializationErrorDetails}`);
+        adminApp = undefined; // Treat as failure
+      } else {
+        console.log(`${LOG_PREFIX} Firebase Admin SDK initialized successfully using generic ADC. Project: ${adminApp.options.projectId}`);
+      }
     }
   } catch (error: any) {
-    initializationErrorDetails = error.message;
-    console.error(`${LOG_PREFIX} Firebase Admin SDK initialization CRITICAL error:`, error.message, error.stack);
-    adminApp = undefined; 
+    initializationErrorDetails = `Initialization attempt failed with error: ${error.message}. Code: ${error.code || 'UNKNOWN'}`;
+    console.error(`${LOG_PREFIX} Firebase Admin SDK initialization CRITICAL error during attempt:`, error.message, error.stack);
+    adminApp = undefined;
   }
 } else {
-  adminApp = admin.app(); 
-  console.log(`${LOG_PREFIX} Firebase Admin SDK already initialized. Project ID: ${adminApp.options.projectId}`);
+  adminApp = admin.app(); // Use the default app if already initialized
+  console.log(`${LOG_PREFIX} Firebase Admin SDK already initialized. Using default app. Project ID from existing app: ${adminApp.options.projectId}`);
+  if (!adminApp.options.projectId) {
+      initializationErrorDetails = "Firebase Admin SDK was pre-initialized, but the default app instance is missing a projectId. This is highly unusual.";
+      console.error(`${LOG_PREFIX} ${initializationErrorDetails}`);
+      adminApp = undefined; // Treat as failure, even if pre-initialized but invalid
+  }
 }
 
 
 export async function POST(request: NextRequest) {
   console.log(`${LOG_PREFIX} POST request received.`);
-  if (!adminApp || !adminApp.options.projectId) {
-    let detailMessage = 'Firebase Admin SDK not properly initialized. ';
+  if (!adminApp || !adminApp.options.projectId) { // Check both adminApp and its projectId
+    let detailMessage = 'Firebase Admin SDK not properly initialized or is in an invalid state. ';
     if (initializationAttempted) {
-        detailMessage += `Initialization attempt failed. Ensure GOOGLE_APPLICATION_CREDENTIALS_JSON (as a JSON string) or GOOGLE_APPLICATION_CREDENTIALS (as a file path) environment variable is correctly set with your service account key, or that Application Default Credentials (ADC) are configured for your server environment. Specific error during init: ${initializationErrorDetails || 'Unknown error'}.`;
+        detailMessage += `An initialization attempt was made. Specific error during init: ${initializationErrorDetails || 'Unknown issue during initialization attempt, or initializeApp() did not throw but returned an invalid app object.'}.`;
     } else if (admin.apps.length > 0 && (!adminApp || !adminApp.options.projectId)) {
-        detailMessage += 'SDK was reported as pre-initialized by admin.apps.length, but is not in a valid state (adminApp or projectId missing). This is an unusual server error.';
+        detailMessage += `SDK was reported as pre-initialized (admin.apps.length > 0), but is not in a valid state (adminApp or projectId missing). ${initializationErrorDetails || 'This suggests an issue with the default app instance.'}`;
     } else {
-        detailMessage += 'SDK was not initialized and no attempt was made in this module instance. This might indicate an issue with module loading or prior initialization failures.';
+        detailMessage += 'SDK was not initialized, and no attempt was made in this module instance. This might indicate an issue with module loading or prior initialization failures.';
     }
-    console.error(`${LOG_PREFIX} ${detailMessage} Check server logs for more details.`);
-    return NextResponse.json({ error: 'Server Configuration Error', details: detailMessage }, { status: 500 });
+    detailMessage += " Please ensure GOOGLE_APPLICATION_CREDENTIALS_JSON (as a JSON string) or GOOGLE_APPLICATION_CREDENTIALS (as a file path) environment variable is correctly set with your service account key, or that Application Default Credentials (ADC) are configured for your server environment. The service account JSON must contain a valid 'project_id'.";
+    console.error(`${LOG_PREFIX} Critical Faiure: ${detailMessage} Check server logs for more details.`);
+    return NextResponse.json({ error: 'Server Configuration Error.', details: detailMessage }, { status: 500 });
   }
 
   let callingUser: DecodedIdToken | null = null;
