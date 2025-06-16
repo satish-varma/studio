@@ -6,21 +6,32 @@ import type { App as AdminApp } from 'firebase-admin/app';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 const LOG_PREFIX = "[API:CreateUser]";
-const UNIQUE_APP_NAME = `firebase-admin-app-create-user-route-${Date.now()}`; // Unique name for each instance of this route logic
 
-let adminApp: AdminApp | undefined;
-let initializationErrorDetails: string | null = null;
-let adminAppInitializedInThisScope = false;
+// Store app instances in a map to manage them by name
+const adminAppInstances = new Map<string, AdminApp>();
+let initializationErrorDetails: string | null = null; // Keep a global store for initialization errors
 
 function initializeAdminSdk(): AdminApp | undefined {
-  if (admin.apps.some(app => app?.name === UNIQUE_APP_NAME)) {
+  const UNIQUE_APP_NAME = `firebase-admin-app-create-user-route-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+
+  if (adminAppInstances.has(UNIQUE_APP_NAME)) {
+    // This should ideally not happen with unique names per call, but as a safeguard.
     console.log(`${LOG_PREFIX} Re-using existing Admin SDK instance for this request: ${UNIQUE_APP_NAME}`);
-    return admin.app(UNIQUE_APP_NAME);
+    const existingApp = adminAppInstances.get(UNIQUE_APP_NAME);
+    if (existingApp && existingApp.options.projectId) {
+        return existingApp;
+    }
+    // If existing app is invalid, proceed to re-initialize.
+     console.warn(`${LOG_PREFIX} Existing app instance ${UNIQUE_APP_NAME} was invalid. Attempting re-initialization.`);
   }
+  
+  // Reset global error details for this attempt
+  initializationErrorDetails = null; 
 
   console.log(`${LOG_PREFIX} Attempting Firebase Admin SDK initialization with unique name: ${UNIQUE_APP_NAME}`);
   const serviceAccountJsonEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
   const serviceAccountPathEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  let newAdminApp: AdminApp | undefined;
 
   try {
     if (serviceAccountJsonEnv) {
@@ -36,44 +47,67 @@ function initializeAdminSdk(): AdminApp | undefined {
       }
       
       if (!serviceAccount.project_id) {
-        initializationErrorDetails = `GOOGLE_APPLICATION_CREDENTIALS_JSON was parsed, but 'project_id' is missing in the JSON content.`;
+        initializationErrorDetails = `GOOGLE_APPLICATION_CREDENTIALS_JSON was parsed, but 'project_id' is missing in the JSON content. Parsed service account project_id was: '${serviceAccount.project_id}'.`;
         console.error(`${LOG_PREFIX} ${initializationErrorDetails}`);
         return undefined;
       }
 
-      adminApp = admin.initializeApp({
+      newAdminApp = admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
       }, UNIQUE_APP_NAME);
-      console.log(`${LOG_PREFIX} Admin SDK initialized via JSON_ENV. App name: ${adminApp.name}`);
-      if (!adminApp.options.projectId) {
-        initializationErrorDetails = `Admin SDK initialized via JSON_ENV, but the resulting app instance is missing a projectId. Service account project_id: ${serviceAccount.project_id}.`;
+      
+      if (!newAdminApp) {
+        initializationErrorDetails = `Admin SDK initializeApp call with JSON_ENV returned undefined for app name ${UNIQUE_APP_NAME}. This is highly unusual.`;
         console.error(`${LOG_PREFIX} ${initializationErrorDetails}`);
         return undefined;
       }
+      // Critical check immediately after initialization
+      if (!newAdminApp.options.projectId) {
+        initializationErrorDetails = `Admin SDK initialized via JSON_ENV, but the resulting app instance (name: ${newAdminApp.name}) is missing a projectId. Service account's parsed project_id was: '${serviceAccount.project_id}'. App options: ${JSON.stringify(newAdminApp.options)}`;
+        console.error(`${LOG_PREFIX} ${initializationErrorDetails}`);
+        // Do not return undefined here, let the main POST handler check and report more gracefully.
+        // The app instance might still be created but invalid.
+      } else {
+        console.log(`${LOG_PREFIX} Admin SDK initialized via JSON_ENV. App name: ${newAdminApp.name}, Project ID: ${newAdminApp.options.projectId}`);
+      }
+
     } else if (serviceAccountPathEnv) {
       console.log(`${LOG_PREFIX} Found GOOGLE_APPLICATION_CREDENTIALS (path): ${serviceAccountPathEnv}. Attempting initialization via file path.`);
-      adminApp = admin.initializeApp({
-        credential: admin.credential.applicationDefault(), // Uses path from GOOGLE_APPLICATION_CREDENTIALS
+      newAdminApp = admin.initializeApp({
+        credential: admin.credential.applicationDefault(), 
       }, UNIQUE_APP_NAME);
-      console.log(`${LOG_PREFIX} Admin SDK initialized via PATH_ENV. App name: ${adminApp.name}`);
-      if (!adminApp.options.projectId) {
-        initializationErrorDetails = `Admin SDK initialized via PATH_ENV (path: ${serviceAccountPathEnv}), but the resulting app instance is missing a projectId. Check the service account file content and path.`;
+      if (!newAdminApp) {
+        initializationErrorDetails = `Admin SDK initializeApp call with PATH_ENV returned undefined for app name ${UNIQUE_APP_NAME}.`;
         console.error(`${LOG_PREFIX} ${initializationErrorDetails}`);
         return undefined;
       }
+      if (!newAdminApp.options.projectId) {
+        initializationErrorDetails = `Admin SDK initialized via PATH_ENV (path: ${serviceAccountPathEnv}), but the resulting app instance (name: ${newAdminApp.name}) is missing a projectId. App options: ${JSON.stringify(newAdminApp.options)}`;
+        console.error(`${LOG_PREFIX} ${initializationErrorDetails}`);
+      } else {
+         console.log(`${LOG_PREFIX} Admin SDK initialized via PATH_ENV. App name: ${newAdminApp.name}, Project ID: ${newAdminApp.options.projectId}`);
+      }
+
     } else {
       console.log(`${LOG_PREFIX} No specific service account JSON or path found in env. Attempting generic Application Default Credentials (ADC).`);
-      adminApp = admin.initializeApp(undefined, UNIQUE_APP_NAME);
-      console.log(`${LOG_PREFIX} Admin SDK initialized via generic ADC. App name: ${adminApp.name}`);
-      if (!adminApp.options.projectId) {
-        initializationErrorDetails = `Admin SDK initialized via generic ADC, but the resulting app instance is missing a projectId. Ensure ADC are correctly configured for your server environment.`;
+      newAdminApp = admin.initializeApp(undefined, UNIQUE_APP_NAME);
+       if (!newAdminApp) {
+        initializationErrorDetails = `Admin SDK initializeApp call with generic ADC returned undefined for app name ${UNIQUE_APP_NAME}.`;
         console.error(`${LOG_PREFIX} ${initializationErrorDetails}`);
         return undefined;
       }
+      if (!newAdminApp.options.projectId) {
+        initializationErrorDetails = `Admin SDK initialized via generic ADC, but the resulting app instance (name: ${newAdminApp.name}) is missing a projectId. App options: ${JSON.stringify(newAdminApp.options)}`;
+        console.error(`${LOG_PREFIX} ${initializationErrorDetails}`);
+      } else {
+        console.log(`${LOG_PREFIX} Admin SDK initialized via generic ADC. App name: ${newAdminApp.name}, Project ID: ${newAdminApp.options.projectId}`);
+      }
     }
-    adminAppInitializedInThisScope = true;
-    console.log(`${LOG_PREFIX} Firebase Admin SDK initialized successfully. Method used: ${serviceAccountJsonEnv ? 'JSON_ENV' : serviceAccountPathEnv ? 'PATH_ENV' : 'ADC'}. Project: ${adminApp.options.projectId}`);
-    return adminApp;
+    
+    if (newAdminApp) { // Store even if potentially invalid, so POST can check it
+        adminAppInstances.set(UNIQUE_APP_NAME, newAdminApp);
+    }
+    return newAdminApp;
   } catch (error: any) {
     initializationErrorDetails = `Initialization attempt failed with error: ${error.message}. Code: ${error.code || 'UNKNOWN'}. Method: ${serviceAccountJsonEnv ? 'JSON_ENV' : serviceAccountPathEnv ? 'PATH_ENV' : 'ADC Attempt'}`;
     console.error(`${LOG_PREFIX} Firebase Admin SDK initialization CRITICAL error:`, error.message, error.stack);
@@ -85,14 +119,17 @@ export async function POST(request: NextRequest) {
   console.log(`${LOG_PREFIX} POST request received.`);
   const currentAdminApp = initializeAdminSdk();
 
-  if (!currentAdminApp || !currentAdminApp.options.projectId) {
+  // Check currentAdminApp and its projectId directly.
+  // initializationErrorDetails will contain specific issues from the initializeAdminSdk function.
+  if (!currentAdminApp || !currentAdminApp.options || !currentAdminApp.options.projectId) {
     let detailMessage = `Firebase Admin SDK not properly initialized or is in an invalid state. `;
-    if (adminAppInitializedInThisScope && (!currentAdminApp || !currentAdminApp.options.projectId)) {
-      detailMessage += `An initialization attempt was made within this route's scope. Specific error during init: ${initializationErrorDetails || 'An app instance was created but is invalid (e.g., missing projectId).'}.`;
-    } else if (!adminAppInitializedInThisScope && initializationErrorDetails) {
+    if (initializationErrorDetails) {
+      // Use the specific error captured during initialization attempt
       detailMessage += `Initialization attempt failed. ${initializationErrorDetails}.`;
-    } else {
-      detailMessage += `No successful initialization attempt details available, or relying on a global instance that might be misconfigured. ${initializationErrorDetails || ''}`;
+    } else if (!currentAdminApp) {
+      detailMessage += `initializeAdminSdk() returned undefined, and no specific error was captured. This indicates a failure during the SDK initialization process.`;
+    } else { // currentAdminApp exists but options or projectId is missing
+      detailMessage += `Admin SDK instance (name: ${currentAdminApp.name}) was created, but its options.projectId is missing or invalid. This is highly unusual. App options: ${JSON.stringify(currentAdminApp.options || {})}.`;
     }
     detailMessage += " Please ensure GOOGLE_APPLICATION_CREDENTIALS_JSON (as a JSON string) or GOOGLE_APPLICATION_CREDENTIALS (as a file path) environment variable is correctly set with your service account key, or that Application Default Credentials (ADC) are configured for your server environment. The service account JSON must contain a valid 'project_id'.";
     console.error(`${LOG_PREFIX} Critical Failure: ${detailMessage} Check server logs for more details.`);
@@ -107,7 +144,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized: Missing or invalid token format.' }, { status: 401 });
     }
     const idToken = authorization.split('Bearer ')[1];
-    console.log(`${LOG_PREFIX} Verifying ID Token...`);
+    console.log(`${LOG_PREFIX} Verifying ID Token using app: ${currentAdminApp.name}`);
 
     try {
       callingUser = await admin.auth(currentAdminApp).verifyIdToken(idToken);
@@ -117,7 +154,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized: Invalid or expired token.', details: tokenError.message, code: tokenError.code }, { status: 401 });
     }
 
-    console.log(`${LOG_PREFIX} Checking admin privileges for UID: ${callingUser.uid}`);
+    console.log(`${LOG_PREFIX} Checking admin privileges for UID: ${callingUser.uid} using app: ${currentAdminApp.name}`);
     const adminUserDoc = await admin.firestore(currentAdminApp).collection('users').doc(callingUser.uid).get();
     if (!adminUserDoc.exists || adminUserDoc.data()?.role !== 'admin') {
       console.warn(`${LOG_PREFIX} Forbidden. Caller UID ${callingUser.uid} is not an admin. Role: ${adminUserDoc.data()?.role ?? 'not found'}`);
@@ -141,7 +178,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Display name must be a string and at least 2 characters long." }, { status: 400 });
     }
 
-    console.log(`${LOG_PREFIX} Attempting to create Firebase Auth user for email: ${email}`);
+    console.log(`${LOG_PREFIX} Attempting to create Firebase Auth user for email: ${email} using app: ${currentAdminApp.name}`);
     const newUserRecord = await admin.auth(currentAdminApp).createUser({
       email,
       password,
@@ -175,3 +212,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: errorMessage, details: error.code || 'UNKNOWN_SERVER_ERROR' }, { status: 500 });
   }
 }
+
+    
