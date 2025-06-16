@@ -7,7 +7,7 @@ import { Settings as SettingsIcon, Palette, BellRing, DatabaseZap, Download, Loa
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { getFirestore, collection, getDocs, query, orderBy, where, Timestamp } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
@@ -389,20 +389,43 @@ export default function SettingsPage() {
         body: JSON.stringify({ confirmation: RESET_CONFIRMATION_PHRASE }),
       });
 
-      const result = await response.json();
       if (!response.ok) {
-        console.error(`${LOG_PREFIX} Data reset API error (${response.status}):`, result);
-        toast({ title: "Data Reset Failed", description: result.error || `Server error: ${response.status}. Check server logs.`, variant: "destructive", duration: 10000 });
+        const errorText = await response.text();
+        console.error(`${LOG_PREFIX} Data reset API error (${response.status}):`, errorText);
+        toast({ 
+          title: `Data Reset Failed (Status: ${response.status})`, 
+          description: `Server error: ${errorText.substring(0, 150)}... Check server logs.`, 
+          variant: "destructive", 
+          duration: 10000 
+        });
+        setIsResettingData(false);
+        return; 
+      }
+
+      const contentType = response.headers.get("content-type");
+      if (contentType && contentType.indexOf("application/json") !== -1) {
+        const result = await response.json();
+        if (result.error) {
+            console.error(`${LOG_PREFIX} Data reset API returned JSON error:`, result);
+            toast({ title: "Data Reset Failed", description: result.error, variant: "destructive", duration: 10000 });
+        } else {
+            console.log(`${LOG_PREFIX} Data reset successful:`, result.message);
+            toast({ title: "Data Reset Successful", description: result.message || "Application data (excluding users) has been reset.", duration: 7000 });
+            setShowResetDataDialog(false);
+            setResetConfirmationInput("");
+        }
       } else {
-        console.log(`${LOG_PREFIX} Data reset successful:`, result.message);
-        toast({ title: "Data Reset Successful", description: result.message || "Application data (excluding users) has been reset.", duration: 7000 });
-        setShowResetDataDialog(false);
-        setResetConfirmationInput("");
-        // Optionally, trigger a page reload or redirect to refresh context
-        // window.location.reload();
+        const responseText = await response.text();
+        console.error(`${LOG_PREFIX} Data reset API returned non-JSON response despite OK status. Status: ${response.status}. Response Text:`, responseText);
+        toast({
+          title: "Data Reset Failed",
+          description: `Server returned an unexpected response type (Status: ${response.status}). Content: ${responseText.substring(0,100)}...`,
+          variant: "destructive",
+          duration: 10000,
+        });
       }
     } catch (error: any) {
-      console.error(`${LOG_PREFIX} Error calling data reset API:`, error.message, error.stack);
+      console.error(`${LOG_PREFIX} Error calling data reset API (client-side):`, error.message, error.stack);
       toast({ title: "Client-side Reset Error", description: `Failed to initiate data reset. Error: ${error.message}`, variant: "destructive", duration: 10000 });
     } finally {
       setIsResettingData(false);
@@ -570,27 +593,25 @@ export default function SettingsPage() {
       {appUser?.role === 'admin' && (
         <Card className="shadow-lg border-destructive">
           <AlertDialog open={showResetDataDialog} onOpenChange={setShowResetDataDialog}>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Confirm Data Reset</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This action will permanently delete the specified application data. This is irreversible.
-                </AlertDialogDescription>
-                 {/* Detailed explanation and list moved here */}
-                <div className="text-sm text-muted-foreground space-y-2 pt-2">
-                  <div>You are about to delete all application data including:</div>
-                  <ul className="list-disc list-inside text-sm text-destructive pl-4">
-                    <li>All Stock Items (Master & Stall)</li>
-                    <li>All Sales Transactions</li>
-                    <li>All Stock Movement Logs</li>
-                    <li>All Sites and Stalls</li>
-                    <li>All Google OAuth Tokens</li>
-                  </ul>
-                  <div className="font-bold">The 'users' collection (user accounts, roles, and preferences) WILL NOT be deleted.</div>
-                  <div>To proceed, please type "<strong className="text-foreground">{RESET_CONFIRMATION_PHRASE}</strong>" into the box below.</div>
-                </div>
-              </AlertDialogHeader>
-              {/* Input field for confirmation */}
+            <AlertDialogHeader className="p-6">
+              <AlertDialogTitle>Confirm Data Reset</AlertDialogTitle>
+              <AlertDialogDescription>
+                This action will permanently delete the specified application data. This is irreversible.
+              </AlertDialogDescription>
+              <div className="text-sm text-muted-foreground space-y-2 pt-2">
+                <div>You are about to delete all application data including:</div>
+                <ul className="list-disc list-inside text-sm text-destructive pl-4">
+                  <li>All Stock Items (Master & Stall)</li>
+                  <li>All Sales Transactions</li>
+                  <li>All Stock Movement Logs</li>
+                  <li>All Sites and Stalls</li>
+                  <li>All Google OAuth Tokens</li>
+                </ul>
+                <div className="font-bold">The 'users' collection (user accounts, roles, and preferences) WILL NOT be deleted.</div>
+                <div>To proceed, please type "<strong className="text-foreground">{RESET_CONFIRMATION_PHRASE}</strong>" into the box below.</div>
+              </div>
+            </AlertDialogHeader>
+            <AlertDialogContent> {/* This content will appear below the header due to default AlertDialog structure */}
               <div className="py-2">
                 <Label htmlFor="resetConfirmationInput" className="sr-only">Confirmation Phrase</Label>
                 <Input
@@ -616,13 +637,12 @@ export default function SettingsPage() {
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
-            {/* Card Header and Content for "Danger Zone" */}
-            <CardHeader>
+            <CardHeader className="pt-0"> {/* This part is for the trigger button, should be above AlertDialog */}
               <CardTitle className="flex items-center text-destructive">
                 <AlertTriangle className="mr-2 h-5 w-5" />
                 Danger Zone
               </CardTitle>
-              <CardDescription> {/* Changed this from AlertDialogDescription to CardDescription */}
+              <CardDescription> 
                 These actions are irreversible and can lead to data loss. Proceed with extreme caution.
               </CardDescription>
             </CardHeader>
@@ -634,12 +654,12 @@ export default function SettingsPage() {
                 </Button>
               </AlertDialogTrigger>
             </CardContent>
-          </AlertDialog>
            <CardFooter>
              <p className="text-xs text-muted-foreground">
                 This operation will permanently remove all specified data. It's recommended to back up your data (e.g., using CSV export) before proceeding if you might need it later.
             </p>
            </CardFooter>
+          </AlertDialog>
         </Card>
       )}
 
@@ -684,6 +704,5 @@ export default function SettingsPage() {
     </div>
   );
 }
-
-
     
+
