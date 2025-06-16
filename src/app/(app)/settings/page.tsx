@@ -574,9 +574,9 @@ export default function SettingsPage() {
               <AlertTriangle className="mr-2 h-5 w-5" />
               Danger Zone
             </CardTitle>
-            <CardDescription>
+            <AlertDialogDescription> {/* Changed from CardDescription to allow more direct text */}
               These actions are irreversible and can lead to data loss. Proceed with extreme caution.
-            </CardDescription>
+            </AlertDialogDescription>
           </CardHeader>
           <CardContent>
             <AlertDialog open={showResetDataDialog} onOpenChange={setShowResetDataDialog}>
@@ -589,7 +589,10 @@ export default function SettingsPage() {
               <AlertDialogContent>
                 <AlertDialogHeader>
                   <AlertDialogTitle>Confirm Data Reset</AlertDialogTitle>
-                  <AlertDialogDescription className="space-y-2">
+                  <AlertDialogDescription>
+                    This action will permanently delete the specified application data. This is irreversible.
+                  </AlertDialogDescription>
+                  <div className="text-sm text-muted-foreground space-y-2 pt-2">
                     <div>You are about to delete all application data including:</div>
                     <ul className="list-disc list-inside text-sm text-destructive pl-4">
                       <li>All Stock Items (Master & Stall)</li>
@@ -599,8 +602,8 @@ export default function SettingsPage() {
                       <li>All Google OAuth Tokens</li>
                     </ul>
                     <div className="font-bold">The 'users' collection (user accounts, roles, and preferences) WILL NOT be deleted.</div>
-                    <div>This action is irreversible. To proceed, please type "<strong className="text-foreground">{RESET_CONFIRMATION_PHRASE}</strong>" into the box below.</div>
-                  </AlertDialogDescription>
+                    <div>To proceed, please type "<strong className="text-foreground">{RESET_CONFIRMATION_PHRASE}</strong>" into the box below.</div>
+                  </div>
                 </AlertDialogHeader>
                 <div className="py-2">
                   <Label htmlFor="resetConfirmationInput" className="sr-only">Confirmation Phrase</Label>
