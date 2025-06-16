@@ -30,6 +30,7 @@ function initializeAdminSdk(): AdminApp | undefined {
   const serviceAccountPathEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS;
   let newAdminApp: AdminApp | undefined;
   let methodUsed = "";
+  let parsedServiceAccountProjectId: string | undefined = undefined;
 
   try {
     let serviceAccount;
@@ -38,15 +39,16 @@ function initializeAdminSdk(): AdminApp | undefined {
       console.log(`${LOG_PREFIX} Found GOOGLE_APPLICATION_CREDENTIALS_JSON. Length: ${serviceAccountJsonEnv.length}. Attempting to parse...`);
       try {
         serviceAccount = JSON.parse(serviceAccountJsonEnv);
-        console.log(`${LOG_PREFIX} GOOGLE_APPLICATION_CREDENTIALS_JSON parsed successfully. project_id from parsed JSON: ${serviceAccount.project_id}`);
+        parsedServiceAccountProjectId = serviceAccount.project_id;
+        console.log(`${LOG_PREFIX} GOOGLE_APPLICATION_CREDENTIALS_JSON parsed successfully. project_id from parsed JSON: ${parsedServiceAccountProjectId}`);
       } catch (parseError: any) {
         initializationErrorDetails = `Failed to parse GOOGLE_APPLICATION_CREDENTIALS_JSON. Error: ${parseError.message}. JSON (first 100 chars): ${serviceAccountJsonEnv.substring(0, 100)}`;
         console.error(`${LOG_PREFIX} ${initializationErrorDetails}`);
         return undefined;
       }
       
-      if (!serviceAccount.project_id) {
-        initializationErrorDetails = `GOOGLE_APPLICATION_CREDENTIALS_JSON was parsed, but 'project_id' is missing. Parsed service account project_id was: '${serviceAccount.project_id}'.`;
+      if (!parsedServiceAccountProjectId) {
+        initializationErrorDetails = `GOOGLE_APPLICATION_CREDENTIALS_JSON was parsed, but 'project_id' is missing.`;
         console.error(`${LOG_PREFIX} ${initializationErrorDetails}`);
         return undefined;
       }
@@ -70,18 +72,14 @@ function initializeAdminSdk(): AdminApp | undefined {
     }
 
     // Critical check after initialization
-    if (!newAdminApp.options.projectId) {
-      if (newAdminApp.options.credential?.projectId) {
-        const credProjectId = newAdminApp.options.credential.projectId;
-        initializationErrorDetails = `Admin SDK initialized via ${methodUsed}, but the resulting app instance (name: ${newAdminApp.name}) is missing a top-level options.projectId. However, options.credential.projectId ('${credProjectId}') IS present. Service account's parsed project_id was: '${serviceAccount?.project_id || 'N/A for PATH/ADC'}'. App options: ${JSON.stringify(newAdminApp.options)}.`;
-        console.warn(`${LOG_PREFIX} POTENTIAL ISSUE: ${initializationErrorDetails} Proceeding with caution.`);
-        // Do not return undefined here; let the POST handler make the final check.
-      } else {
-        initializationErrorDetails = `Admin SDK initialized via ${methodUsed}, but the resulting app instance (name: ${newAdminApp.name}) is missing a projectId (both options.projectId and options.credential.projectId). Service account's parsed project_id was: '${serviceAccount?.project_id || 'N/A for PATH/ADC'}'. App options: ${JSON.stringify(newAdminApp.options)}.`;
+    if (!newAdminApp.options.projectId && !newAdminApp.options.credential?.projectId) {
+        initializationErrorDetails = `Admin SDK initialized via ${methodUsed}, but the resulting app instance (name: ${newAdminApp.name}) is missing a projectId (both options.projectId and options.credential.projectId). Service account's parsed project_id was: '${parsedServiceAccountProjectId || 'N/A for PATH/ADC'}'. App options: ${JSON.stringify(newAdminApp.options)}.`;
         console.error(`${LOG_PREFIX} ${initializationErrorDetails}`);
-        // For this critical failure (no project ID anywhere), we should return undefined.
         return undefined; 
-      }
+    } else if (!newAdminApp.options.projectId && newAdminApp.options.credential?.projectId) {
+        const credProjectId = newAdminApp.options.credential.projectId;
+        console.warn(`${LOG_PREFIX} Admin SDK initialized via ${methodUsed}. App name: ${newAdminApp.name}. Top-level options.projectId is MISSING, but options.credential.projectId ('${credProjectId}') IS present. Using credential.projectId. Service account's parsed project_id was: '${parsedServiceAccountProjectId || 'N/A for PATH/ADC'}'. App options: ${JSON.stringify(newAdminApp.options)}.`);
+        // This is acceptable; the SDK should still work.
     } else {
       console.log(`${LOG_PREFIX} Admin SDK initialized successfully via ${methodUsed}. App name: ${newAdminApp.name}, Project ID: ${newAdminApp.options.projectId}`);
     }
@@ -98,6 +96,14 @@ function initializeAdminSdk(): AdminApp | undefined {
 
 export async function POST(request: NextRequest) {
   console.log(`${LOG_PREFIX} POST request received.`);
+  let values;
+  try {
+    values = await request.json();
+  } catch (jsonError: any) {
+    console.error(`${LOG_PREFIX} Invalid JSON in request body:`, jsonError.message);
+    return NextResponse.json({ error: "Invalid JSON in request body.", details: jsonError.message }, { status: 400 });
+  }
+
   const currentAdminApp = initializeAdminSdk();
 
   if (!currentAdminApp || !currentAdminApp.options || (!currentAdminApp.options.projectId && !currentAdminApp.options.credential?.projectId)) {
@@ -116,7 +122,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Server Configuration Error.', details: detailMessage }, { status: 500 });
   }
   
-  // Proceed with existing logic if currentAdminApp is valid
   let callingUser: DecodedIdToken | null = null;
   try {
     const authorization = request.headers.get('Authorization');
@@ -143,7 +148,7 @@ export async function POST(request: NextRequest) {
     }
     console.log(`${LOG_PREFIX} Caller ${callingUser.uid} authorized as admin.`);
 
-    const { email, password, displayName } = await request.json();
+    const { email, password, displayName } = values;
     console.log(`${LOG_PREFIX} Request body parsed. Email: ${email}, DisplayName: ${displayName}, Password provided: ${!!password}`);
 
     if (!email || !password || !displayName) {
@@ -176,21 +181,28 @@ export async function POST(request: NextRequest) {
 
   } catch (error: any) {
     console.error(`${LOG_PREFIX} Error during user creation process: Code: ${error.code}, Message: ${error.message}`, error.stack);
-    if (error.code === 'auth/email-already-exists') {
-      return NextResponse.json({ error: `The email address ${error.customData?.email || 'provided'} is already in use by another account.`, code: error.code }, { status: 409 });
-    }
-    if (error.code === 'auth/invalid-password') {
-      return NextResponse.json({ error: 'Password must be at least 6 characters long (Firebase requirement).', code: error.code }, { status: 400 });
-    }
-    
     let errorMessage = 'Internal Server Error';
-    if (error instanceof SyntaxError && error.message.includes("JSON")) {
-        errorMessage = "Invalid JSON in request body.";
-        return NextResponse.json({ error: errorMessage, details: error.message }, { status: 400 });
+    let statusCode = 500;
+
+    if (error.code === 'auth/email-already-exists') {
+      errorMessage = `The email address ${values?.email || 'provided'} is already in use by another account.`;
+      statusCode = 409;
+    } else if (error.code === 'auth/invalid-password') {
+      errorMessage = 'Password must be at least 6 characters long (Firebase requirement).';
+      statusCode = 400;
+    } else if (error.message?.includes('UNAUTHENTICATED') && (error.code === 'auth/internal-error' || error.code === 16 || error.code === '16')) {
+        // GRPC status code 16 is UNAUTHENTICATED
+        errorMessage = `Firebase service (e.g., Auth) reported an UNAUTHENTICATED error. This usually means the service account used by the Admin SDK (via GOOGLE_APPLICATION_CREDENTIALS_JSON or ADC) lacks the necessary IAM permissions (e.g., 'Firebase Authentication Admin') to perform this action. Please check the service account's roles in the Google Cloud Console. Original error: ${error.message}`;
+        statusCode = 403; // Forbidden or Insufficient Permissions
+    } else if (error.code === 'auth/insufficient-permission') {
+        errorMessage = `Firebase service reported an INSUFFICIENT_PERMISSION error. The service account used by the Admin SDK likely lacks the necessary IAM permissions (e.g., 'Firebase Authentication Admin'). Please check its roles in Google Cloud Console. Details: ${error.message}`;
+        statusCode = 403;
     } else if (error.message) {
         errorMessage = error.message;
     }
-    return NextResponse.json({ error: errorMessage, details: error.code || 'UNKNOWN_SERVER_ERROR' }, { status: 500 });
+    return NextResponse.json({ error: errorMessage, details: error.code || error.message || 'UNKNOWN_SERVER_ERROR' }, { status: statusCode });
   }
 }
+    
+
     
