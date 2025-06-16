@@ -569,69 +569,72 @@ export default function SettingsPage() {
 
       {appUser?.role === 'admin' && (
         <Card className="shadow-lg border-destructive">
-          <CardHeader>
-            <CardTitle className="flex items-center text-destructive">
-              <AlertTriangle className="mr-2 h-5 w-5" />
-              Danger Zone
-            </CardTitle>
-            <AlertDialogDescription> {/* Changed from CardDescription to allow more direct text */}
-              These actions are irreversible and can lead to data loss. Proceed with extreme caution.
-            </AlertDialogDescription>
-          </CardHeader>
-          <CardContent>
-            <AlertDialog open={showResetDataDialog} onOpenChange={setShowResetDataDialog}>
+          <AlertDialog open={showResetDataDialog} onOpenChange={setShowResetDataDialog}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Confirm Data Reset</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This action will permanently delete the specified application data. This is irreversible.
+                </AlertDialogDescription>
+                 {/* Detailed explanation and list moved here */}
+                <div className="text-sm text-muted-foreground space-y-2 pt-2">
+                  <div>You are about to delete all application data including:</div>
+                  <ul className="list-disc list-inside text-sm text-destructive pl-4">
+                    <li>All Stock Items (Master & Stall)</li>
+                    <li>All Sales Transactions</li>
+                    <li>All Stock Movement Logs</li>
+                    <li>All Sites and Stalls</li>
+                    <li>All Google OAuth Tokens</li>
+                  </ul>
+                  <div className="font-bold">The 'users' collection (user accounts, roles, and preferences) WILL NOT be deleted.</div>
+                  <div>To proceed, please type "<strong className="text-foreground">{RESET_CONFIRMATION_PHRASE}</strong>" into the box below.</div>
+                </div>
+              </AlertDialogHeader>
+              {/* Input field for confirmation */}
+              <div className="py-2">
+                <Label htmlFor="resetConfirmationInput" className="sr-only">Confirmation Phrase</Label>
+                <Input
+                  id="resetConfirmationInput"
+                  value={resetConfirmationInput}
+                  onChange={(e) => setResetConfirmationInput(e.target.value)}
+                  placeholder={`Type "${RESET_CONFIRMATION_PHRASE}" here`}
+                  className="border-destructive focus:ring-destructive bg-input"
+                  disabled={isResettingData}
+                />
+              </div>
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={() => {setShowResetDataDialog(false); setResetConfirmationInput("");}} disabled={isResettingData}>
+                  Cancel
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={handleResetDataConfirm}
+                  disabled={isResettingData || resetConfirmationInput !== RESET_CONFIRMATION_PHRASE}
+                  className="bg-destructive hover:bg-destructive/90"
+                >
+                  {isResettingData ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldAlert className="mr-2 h-4 w-4" />}
+                  Reset Data Now
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+            {/* Card Header and Content for "Danger Zone" */}
+            <CardHeader>
+              <CardTitle className="flex items-center text-destructive">
+                <AlertTriangle className="mr-2 h-5 w-5" />
+                Danger Zone
+              </CardTitle>
+              <CardDescription> {/* Changed this from AlertDialogDescription to CardDescription */}
+                These actions are irreversible and can lead to data loss. Proceed with extreme caution.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
               <AlertDialogTrigger asChild>
                 <Button variant="destructive" className="w-full">
                   <ShieldAlert className="mr-2 h-4 w-4" />
                   Reset Application Data (Excluding Users)
                 </Button>
               </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Confirm Data Reset</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    This action will permanently delete the specified application data. This is irreversible.
-                  </AlertDialogDescription>
-                  <div className="text-sm text-muted-foreground space-y-2 pt-2">
-                    <div>You are about to delete all application data including:</div>
-                    <ul className="list-disc list-inside text-sm text-destructive pl-4">
-                      <li>All Stock Items (Master & Stall)</li>
-                      <li>All Sales Transactions</li>
-                      <li>All Stock Movement Logs</li>
-                      <li>All Sites and Stalls</li>
-                      <li>All Google OAuth Tokens</li>
-                    </ul>
-                    <div className="font-bold">The 'users' collection (user accounts, roles, and preferences) WILL NOT be deleted.</div>
-                    <div>To proceed, please type "<strong className="text-foreground">{RESET_CONFIRMATION_PHRASE}</strong>" into the box below.</div>
-                  </div>
-                </AlertDialogHeader>
-                <div className="py-2">
-                  <Label htmlFor="resetConfirmationInput" className="sr-only">Confirmation Phrase</Label>
-                  <Input
-                    id="resetConfirmationInput"
-                    value={resetConfirmationInput}
-                    onChange={(e) => setResetConfirmationInput(e.target.value)}
-                    placeholder={`Type "${RESET_CONFIRMATION_PHRASE}" here`}
-                    className="border-destructive focus:ring-destructive bg-input"
-                    disabled={isResettingData}
-                  />
-                </div>
-                <AlertDialogFooter>
-                  <AlertDialogCancel onClick={() => {setShowResetDataDialog(false); setResetConfirmationInput("");}} disabled={isResettingData}>
-                    Cancel
-                  </AlertDialogCancel>
-                  <AlertDialogAction
-                    onClick={handleResetDataConfirm}
-                    disabled={isResettingData || resetConfirmationInput !== RESET_CONFIRMATION_PHRASE}
-                    className="bg-destructive hover:bg-destructive/90"
-                  >
-                    {isResettingData ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldAlert className="mr-2 h-4 w-4" />}
-                    Reset Data Now
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </CardContent>
+            </CardContent>
+          </AlertDialog>
            <CardFooter>
              <p className="text-xs text-muted-foreground">
                 This operation will permanently remove all specified data. It's recommended to back up your data (e.g., using CSV export) before proceeding if you might need it later.
@@ -682,3 +685,5 @@ export default function SettingsPage() {
   );
 }
 
+
+    
