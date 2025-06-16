@@ -15,7 +15,6 @@ function initializeAdminSdk(): AdminApp | undefined {
   const instanceSuffix = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
   const UNIQUE_APP_NAME = `firebase-admin-app-delete-user-route-${instanceSuffix}`;
 
-  // Check if a valid instance already exists (less likely for per-request unique names, but good practice)
   if (adminAppInstances.has(UNIQUE_APP_NAME)) {
     const existingApp = adminAppInstances.get(UNIQUE_APP_NAME)!;
     if (existingApp.options.projectId || existingApp.options.credential?.projectId) {
@@ -44,12 +43,12 @@ function initializeAdminSdk(): AdminApp | undefined {
         console.log(`${LOG_PREFIX} GOOGLE_APPLICATION_CREDENTIALS_JSON parsed successfully. project_id from parsed JSON: ${parsedServiceAccountProjectId}`);
       } catch (parseError: any) {
         initializationErrorDetails = `Failed to parse GOOGLE_APPLICATION_CREDENTIALS_JSON. Error: ${parseError.message}. JSON (first 100 chars): ${serviceAccountJsonEnv.substring(0, 100)}`;
-        throw new Error(initializationErrorDetails); // Throw to be caught by outer catch
+        throw new Error(initializationErrorDetails); 
       }
       
       if (!parsedServiceAccountProjectId) {
         initializationErrorDetails = `GOOGLE_APPLICATION_CREDENTIALS_JSON was parsed, but 'project_id' is missing.`;
-        throw new Error(initializationErrorDetails); // Throw
+        throw new Error(initializationErrorDetails); 
       }
       newAdminApp = admin.initializeApp({ credential: admin.credential.cert(serviceAccount) }, UNIQUE_APP_NAME);
 
@@ -66,35 +65,40 @@ function initializeAdminSdk(): AdminApp | undefined {
     
     if (!newAdminApp) {
       initializationErrorDetails = `Admin SDK initializeApp call with ${methodUsed} returned undefined for app name ${UNIQUE_APP_NAME}. This is highly unusual.`;
-      throw new Error(initializationErrorDetails); // Throw
+      throw new Error(initializationErrorDetails); 
     }
 
     const finalProjectId = newAdminApp.options.projectId || newAdminApp.options.credential?.projectId;
     if (!finalProjectId) {
       initializationErrorDetails = `Admin SDK initialized via ${methodUsed}, but the resulting app instance (name: ${newAdminApp.name}) is missing a projectId (both options.projectId and options.credential.projectId). Service account's parsed project_id was: '${parsedServiceAccountProjectId || 'N/A for PATH/ADC'}'. App options: ${JSON.stringify(newAdminApp.options)}.`;
-      throw new Error(initializationErrorDetails); // Throw
+      throw new Error(initializationErrorDetails); 
     } else {
       console.log(`${LOG_PREFIX} Admin SDK initialized successfully via ${methodUsed}. App name: ${newAdminApp.name}, Project ID: ${finalProjectId}`);
     }
     
-    adminAppInstances.set(UNIQUE_APP_NAME, newAdminApp); // Store if successful
+    adminAppInstances.set(UNIQUE_APP_NAME, newAdminApp); 
     return newAdminApp;
 
   } catch (error: any) {
-    // If initializationErrorDetails was not set by a specific check, set it from the caught error.
     if (!initializationErrorDetails) {
       initializationErrorDetails = `Initialization attempt (${methodUsed}) failed with error: ${error.message}. Code: ${error.code || 'UNKNOWN'}.`;
     }
     console.error(`${LOG_PREFIX} Firebase Admin SDK initialization CRITICAL error: ${initializationErrorDetails}`, error.stack);
-    return undefined; // Return undefined on failure
+    return undefined; 
   }
+}
+
+interface DeleteUserContext {
+  params: {
+    uid: string;
+  };
 }
 
 export async function DELETE(
   request: NextRequest,
-  context: { params: { uid: string } } // Changed signature here
+  context: DeleteUserContext
 ) {
-  const uidToDelete = context.params.uid; // Access uid from context.params
+  const uidToDelete = context.params.uid; 
   console.log(`${LOG_PREFIX} DELETE request received for UID: ${uidToDelete}`);
   
   const currentAdminApp = initializeAdminSdk();
@@ -150,7 +154,7 @@ export async function DELETE(
     if (error.code === 'auth/user-not-found') {
       errorMessage = `Firebase Auth user with UID ${uidToDelete} not found. They may have already been deleted.`;
       statusCode = 404; 
-    } else if (error.message?.includes("UNAUTHENTICATED") || error.code === 'auth/insufficient-permission' || error.code === 16) { // gRPC code 16 is UNAUTHENTICATED
+    } else if (error.message?.includes("UNAUTHENTICATED") || error.code === 'auth/insufficient-permission' || error.code === 16) { 
         errorMessage = `Firebase service reported an UNAUTHENTICATED or INSUFFICIENT_PERMISSION error (Code: ${error.code}). This usually means the service account used by the Admin SDK lacks the necessary IAM permissions (e.g., 'Firebase Authentication Admin') to perform this action. Please check the service account's roles in the Google Cloud Console. Original error: ${error.message}`;
         statusCode = 403;
     } else if (error.message) {
