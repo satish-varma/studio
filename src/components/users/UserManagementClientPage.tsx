@@ -28,6 +28,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import PageHeader from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import CreateUserDialog from "@/components/users/CreateUserDialog";
+import { getAuth } from "firebase/auth"; // Import getAuth
 
 if (!getApps().length) {
   try {
@@ -37,6 +38,7 @@ if (!getApps().length) {
   }
 }
 const db = getFirestore();
+const auth = getAuth(getApp()); // Initialize Firebase Auth client
 
 export default function UserManagementClientPage() {
   const { user: currentUser, loading: authLoading } = useAuth();
@@ -150,7 +152,6 @@ export default function UserManagementClientPage() {
       };
 
       await setDoc(userDocRef, fullUserData);
-      // Toast for success is handled in CreateUserDialog after both Auth and Firestore steps.
       setShowCreateUserDialog(false); 
       return true;
     } catch (error: any) {
@@ -262,32 +263,48 @@ export default function UserManagementClientPage() {
   };
 
   const handleDeleteUser = async (userId: string, userName: string) => {
-     if (!currentUser || currentUser.role !== 'admin') {
-      toast({ title: "Permission Denied", description: "You cannot delete users.", variant: "destructive"});
+    if (!currentUser || currentUser.role !== 'admin' || !auth.currentUser) {
+      toast({ title: "Permission Denied", description: "You cannot delete users or admin not authenticated.", variant: "destructive" });
       return;
     }
     if (userId === currentUser.uid) {
-      toast({ title: "Action Not Allowed", description: "Admins cannot delete their own account via this interface.", variant: "destructive"});
+      toast({ title: "Action Not Allowed", description: "Admins cannot delete their own account via this interface.", variant: "destructive" });
       return;
     }
-     if (!db) {
-      toast({ title: "Database Error", description: "Firestore not initialized. Cannot delete user.", variant: "destructive"});
+    if (!db) {
+      toast({ title: "Database Error", description: "Firestore not initialized. Cannot delete user.", variant: "destructive" });
       return;
     }
     if (!userId || typeof userId !== 'string' || userId.trim() === "") {
       console.error("handleDeleteUser called with invalid userId:", userId);
-      toast({ title: "Internal Error", description: "User ID is invalid for deletion. Please refresh and try again.", variant: "destructive"});
+      toast({ title: "Internal Error", description: "User ID is invalid. Please refresh.", variant: "destructive" });
       return;
     }
-    
-    const userDocRef = doc(db, "users", userId);
+
     try {
+      const idToken = await auth.currentUser.getIdToken(true);
+      const response = await fetch(`/api/admin/delete-user/${userId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${idToken}`,
+        },
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        console.error(`Error deleting Auth user ${userId}:`, result);
+        toast({ title: "Auth Deletion Failed", description: result.error || `Failed to delete Auth user (Status: ${response.status})`, variant: "destructive" });
+        return; // Stop if Auth deletion fails
+      }
+      
+      console.log(`Auth user ${userId} deleted successfully. Proceeding to delete Firestore document.`);
+      const userDocRef = doc(db, "users", userId);
       await deleteDoc(userDocRef);
-      toast({ title: "User Document Deleted", description: `Firestore document for ${userName} has been deleted. The Firebase Authentication user must be deleted separately from the Firebase Console.` });
-      // Note: This does NOT delete the Firebase Authentication user. That must be done from Firebase Console.
+      
+      toast({ title: "User Account Deleted", description: `Account and data for ${userName} have been deleted.` });
     } catch (error: any) {
-      console.error("Error deleting user document:", error);
-      toast({ title: "Deletion Failed", description: error.message || "Could not delete user document.", variant: "destructive" });
+      console.error("Error during full user deletion process:", error);
+      toast({ title: "Deletion Failed", description: error.message || "Could not fully delete user account and data.", variant: "destructive" });
     }
   };
   
@@ -381,5 +398,4 @@ export default function UserManagementClientPage() {
     </div>
   );
 }
-
     

@@ -291,12 +291,12 @@ export function UserTable({
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                         <DropdownMenuItem
-                        onSelect={(e) => e.preventDefault()} // Prevent auto-close for dialog trigger
+                        onSelect={(e) => e.preventDefault()} 
                         className="text-destructive focus:text-destructive-foreground focus:bg-destructive"
                         disabled={isCurrentUserBeingManaged || isDeleting}
                         onClick={() => setUserToDelete(user)}
                         >
-                        <Trash2 className="mr-2 h-4 w-4" /> Delete User Document
+                        <Trash2 className="mr-2 h-4 w-4" /> Delete User Account
                         </DropdownMenuItem>
                     </DropdownMenuContent>
                     </DropdownMenu>
@@ -314,8 +314,8 @@ export function UserTable({
             <AlertDialogHeader>
                 <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
                 <AlertDialogDescription>
-                This action cannot be undone. This will permanently delete the user document for "{userToDelete.displayName || userToDelete.email}"
-                from Firestore. Deleting their Authentication account requires a separate process in the Firebase Console.
+                This action cannot be undone. This will permanently delete the user account for "{userToDelete.displayName || userToDelete.email}" 
+                (allowing their email to be reused) and their associated data document from Firestore.
                 </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -326,7 +326,7 @@ export function UserTable({
                 className="bg-destructive hover:bg-destructive/90"
                 >
                 {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Delete User Document
+                Delete User Account
                 </AlertDialogAction>
             </AlertDialogFooter>
             </AlertDialogContent>
@@ -386,3 +386,4 @@ export function UserTable({
     </>
   );
 }
+    
