@@ -13,10 +13,10 @@ import {
   LucideIcon,
   UserCircle,
   LifeBuoy,
-  Building, // Icon for Sites
-  BarChart3, // Icon for Reports
-  FileText, // Icon for Activity Log
-  UtensilsCrossed, // Icon for Food Stall Management
+  Building, 
+  BarChart3, 
+  FileText, 
+  UtensilsCrossed, 
 } from "lucide-react";
 import {
   SidebarMenu,
@@ -30,8 +30,8 @@ interface NavItem {
   href: string;
   label: string;
   icon: LucideIcon;
-  roles?: UserRole[]; // Roles that can see this item
-  exactMatch?: boolean; // For items like Dashboard that shouldn't highlight for sub-routes
+  roles?: UserRole[]; 
+  exactMatch?: boolean; 
 }
 
 const navItems: NavItem[] = [
@@ -40,7 +40,7 @@ const navItems: NavItem[] = [
   { href: "/sales/record", label: "Record Sale", icon: ShoppingCart, roles: ['staff', 'manager', 'admin'] },
   { href: "/sales/history", label: "Sales History", icon: History, roles: ['staff', 'manager', 'admin'] },
   { href: "/reports", label: "Reports", icon: BarChart3, roles: ['manager', 'admin'] },
-  { href: "/foodstall/dashboard", label: "Food Stall Management", icon: UtensilsCrossed, roles: ['staff', 'manager', 'admin'] }, // New Food Stall Link
+  { href: "/foodstall/dashboard", label: "Food Stall Management", icon: UtensilsCrossed, roles: ['staff', 'manager', 'admin'] },
   { href: "/users", label: "User Management", icon: Users, roles: ['admin'] },
   { href: "/admin/sites", label: "Manage Sites & Stalls", icon: Building, roles: ['admin'] },
   { href: "/admin/activity-log", label: "Activity Log", icon: FileText, roles: ['admin'] },
@@ -53,7 +53,7 @@ export function AppSidebarNav() {
   const pathname = usePathname();
   const { user } = useAuth();
 
-  const userRole = user?.role || 'staff'; // Default to staff if role is undefined
+  const userRole = user?.role || 'staff'; 
 
   const filteredNavItems = navItems.filter(item =>
     !item.roles || item.roles.includes(userRole)

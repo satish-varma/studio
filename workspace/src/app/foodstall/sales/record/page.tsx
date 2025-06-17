@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { foodMealTypes } from "@/types/food";
 import { ArrowLeft, PlusCircle, Trash2 } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useState } from "react"; // For managing multiple items
 
 interface SoldFoodItem {
   id: string; // unique ID for the row, e.g., timestamp or uuid
@@ -49,6 +49,7 @@ export default function RecordFoodSalePage() {
     return itemsSold.reduce((acc, item) => acc + item.quantity * item.pricePerUnit, 0);
   };
 
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -74,7 +75,7 @@ export default function RecordFoodSalePage() {
               <Input id="saleDate" type="datetime-local" defaultValue={new Date().toISOString().substring(0, 16)} />
             </div>
             <div>
-              <Label htmlFor="mealType">Meal Type</Label>
+              <Label htmlFor="mealType">Meal Type *</Label>
               <Select>
                 <SelectTrigger id="mealType">
                   <SelectValue placeholder="Select meal type" />

@@ -7,11 +7,11 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { DatePicker } from "@/components/ui/date-picker";
+import { DatePicker } from "@/components/ui/date-picker"; // Ensure this component exists
 import { foodExpenseCategories } from "@/types/food";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useState } from "react"; // For DatePicker state
 
 export default function RecordFoodExpensePage() {
   const [purchaseDate, setPurchaseDate] = useState<Date | undefined>(new Date());
@@ -77,7 +77,7 @@ export default function RecordFoodExpensePage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <Label htmlFor="purchaseDate">Purchase Date *</Label>
-              <DatePicker date={purchaseDate} onDateChange={setPurchaseDate} id="expensePurchaseDate"/>
+              <DatePicker date={purchaseDate} onDateChange={setPurchaseDate} />
             </div>
             <div>
               <Label htmlFor="vendor">Vendor (Optional)</Label>

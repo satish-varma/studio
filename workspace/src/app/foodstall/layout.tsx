@@ -1,4 +1,3 @@
-
 import AppLayout from '@/app/(app)/layout';
 import type { ReactNode } from 'react';
 

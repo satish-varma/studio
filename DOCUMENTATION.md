@@ -16,6 +16,7 @@
     *   [Dashboard](#dashboard)
     *   [Stock Item Management](#stock-item-management)
     *   [Sales Recording & History](#sales-recording--history)
+    *   [Food Stall Management](#food-stall-management)
     *   [User Management (Admin)](#user-management-admin)
     *   [Site & Stall Management (Admin)](#site--stall-management-admin)
     *   [Activity Log (Admin)](#activity-log-admin)
@@ -46,7 +47,7 @@
 
 ## 1. Introduction
 
-StallSync is a comprehensive stock and sales management application designed for businesses with multiple sites and stalls (e.g., retail counters, storage areas). It allows users to track inventory, record sales, manage staff, and gain insights into their operations. The application features role-based access control (Admin, Manager, Staff) and leverages AI for tasks like product description generation and sales trend summarization.
+StallSync is a comprehensive stock and sales management application designed for businesses with multiple sites and stalls (e.g., retail counters, storage areas). It allows users to track inventory, record sales, manage staff, and gain insights into their operations. It also includes a dedicated module for managing food stall specific expenses and sales. The application features role-based access control (Admin, Manager, Staff) and leverages AI for tasks like product description generation and sales trend summarization.
 
 ---
 
@@ -75,11 +76,16 @@ A brief overview of important directories:
     *   `flows/`: Defines specific AI-powered flows (e.g., item description, sales summary).
     *   `genkit.ts`: Genkit initialization and configuration.
 *   **`/src/app`**: Next.js App Router.
-    *   `(app)/`: Authenticated routes and layouts.
+    *   `(app)/`: Authenticated routes and layouts for the main retail/stock management.
         *   `admin/`: Admin-specific pages.
         *   `dashboard/`, `items/`, `profile/`, `reports/`, `sales/`, `settings/`, `support/`, `users/`: Feature-specific pages.
-        *   `layout.tsx`: Main authenticated layout with sidebar and header.
+        *   `layout.tsx`: Main authenticated layout with sidebar and header (reused by other sections).
     *   `(auth)/`: Authentication-related pages (login).
+    *   `foodstall/`: Authenticated routes for the Food Stall Management module.
+        *   `dashboard/`: Food stall dashboard.
+        *   `expenses/`: Food stall expense tracking pages.
+        *   `sales/`: Food stall sales tracking pages.
+        *   `layout.tsx`: Layout for the food stall section (currently reuses the main app layout).
     *   `api/`: Next.js API routes (server-side logic).
     *   `error.tsx`: Global error boundary.
     *   `globals.css`: Global styles and Tailwind CSS theme.
@@ -87,7 +93,7 @@ A brief overview of important directories:
     *   `loading.tsx`: Global loading UI.
     *   `page.tsx`: Root page, usually redirects based on auth state.
 *   **`/src/components`**: Reusable UI components.
-    *   `admin/`, `auth/`, `items/`, `layout/`, `reports/`, `sales/`, `shared/`, `users/`: Feature-specific components.
+    *   `admin/`, `auth/`, `items/`, `layout/`, `reports/`, `sales/`, `shared/`, `users/`, `dashboard/`, `foodstall/`: Feature-specific components.
     *   `ui/`: ShadCN UI primitive components (Accordion, Button, Card, etc.).
 *   **`/src/contexts`**: React Context providers.
     *   `AuthContext.tsx`: Manages user authentication state, active site/stall context.
@@ -286,6 +292,19 @@ GOOGLE_REDIRECT_URI=YOUR_CONFIGURED_GOOGLE_OAUTH_REDIRECT_URI
     *   Printable receipt format.
 *   **Delete Sale (Admin only):** Admins can mark a sale as "deleted" with a justification. This is a soft delete (`isDeleted: true`).
 
+### Food Stall Management
+
+*   **Path:** `/foodstall/...`
+*   **Food Stall Dashboard (`/foodstall/dashboard`):** Overview of food stall specific metrics (placeholder).
+*   **Expense Tracking:**
+    *   Record Food Stall Expenses (`/foodstall/expenses/record`): Form to input purchases of groceries, supplies, etc.
+    *   View Expenses (`/foodstall/expenses`): List and filter food stall expenses (placeholder).
+*   **Sales Tracking:**
+    *   Record Food Stall Sales (`/foodstall/sales/record`): Form to input sales of meals, beverages, etc.
+    *   View Sales (`/foodstall/sales`): List and filter food stall sales transactions (placeholder).
+*   **Dedicated Data Models:** Uses `FoodItemExpense` and `FoodSaleTransaction` types.
+*   **Future Enhancements:** Could include recipe management, cost-per-meal calculation, food-specific reporting.
+
 ### User Management (Admin)
 
 *   **Path:** `/users`
@@ -368,6 +387,8 @@ GOOGLE_REDIRECT_URI=YOUR_CONFIGURED_GOOGLE_OAUTH_REDIRECT_URI
 *   **`/src/components/admin`**: `ActivityLogClientPage`, `SiteForm`, `SitesTable`, `StallForm`, `StallsTable`.
 *   **`/src/components/auth`**: `LoginForm` (public sign-up form is deprecated).
 *   **`/src/components/context`**: `SiteStallSelector` (used in header for context switching).
+*   **`/src/components/dashboard`**: `DashboardSalesChart`.
+*   **`/src/components/foodstall`**: (Placeholder components for expense/sale forms and lists would go here)
 *   **`/src/components/items`**: `ItemControls`, `ItemForm`, `ItemTable`.
 *   **`/src/components/layout`**: `AppHeaderContent`, `AppSidebarNav`, `UserNav`.
 *   **`/src/components/reports`**: `ReportControls`, `SalesSummaryReportClientPage`.
@@ -416,6 +437,19 @@ Located in `/src/app/api/`:
     *   **Input (JSON):** `{ email, password, displayName }`
     *   **Output (JSON):** Success: `{ uid, email, displayName }`, Error: `{ error, details?, code? }`
     *   This route uses the Firebase Admin SDK server-side to create the auth user. The client-side `CreateUserDialog` calls this route.
+*   **`/admin/delete-user/[uid]/route.ts`:**
+    *   **Method:** `DELETE`
+    *   **Purpose:** Allows an authenticated admin to delete a Firebase Authentication user.
+    *   **Auth:** Requires a Bearer token (Firebase ID token of the calling admin).
+    *   **Input (URL Param):** `uid` of the user to delete.
+    *   **Output (JSON):** Success: `{ message }`, Error: `{ error, details?, code? }`
+    *   *Note: This API route currently only deletes the Firebase Auth user. Deleting the Firestore document for the user must be handled separately by client-side logic or another API if full cleanup is needed.*
+*   **`/admin/reset-data/route.ts`:**
+    *   **Method:** `POST`
+    *   **Purpose:** Allows an authenticated admin to reset application data (excluding user accounts).
+    *   **Auth:** Requires a Bearer token (Firebase ID token of the calling admin).
+    *   **Input (JSON):** `{ confirmation: "RESET DATA" }`
+    *   **Output (JSON):** Success: `{ message }`, Error: `{ error, details?, code? }`
 *   **`/auth/google/callback/route.ts`:**
     *   **Method:** `GET`
     *   **Purpose:** Handles the OAuth 2.0 callback from Google after a user authorizes access (e.g., for Google Sheets integration).
@@ -467,6 +501,7 @@ TypeScript interfaces and Zod schemas define the structure of data used througho
 *   `Stall` (`stall.ts`): Specific stall/counter details within a site.
 *   `StockMovementLog` (`log.ts`): Logs for tracking inventory changes.
 *   `UserGoogleOAuthTokens` (`user.ts`): For Google Sheets integration.
+*   `FoodItemExpense`, `FoodSaleTransaction` (`food.ts`): Data models for food stall management.
 
 ---
 
@@ -499,9 +534,10 @@ TypeScript interfaces and Zod schemas define the structure of data used througho
 7.  **Stock Allocation:** From the "Stock Items" (Master Stock view), allocates quantities of "Product X" and "Product Y" to "Retail Counter A" and "Back Storage".
 8.  **View Activity Log:** Checks the "Activity Log" to see records of item creation and allocation.
 9.  **View Reports:** Navigates to "Reports", selects "Main Warehouse" and a date range to see sales summaries (initially zero).
-10. **Settings:** Explores "Settings" to check data export options.
+10. **Settings:** Explores "Settings" to check data export options or reset application data.
 11. **Profile:** Updates their own display name or default viewing preferences.
 12. **Monitor Operations:** Periodically reviews dashboard, sales history for all staff/sites, and reports.
+13. **Food Stall Setup (Optional):** If managing a food stall, navigates to "Food Stall Management", records initial expenses for groceries.
 
 ### Manager User
 
@@ -517,6 +553,7 @@ TypeScript interfaces and Zod schemas define the structure of data used througho
 7.  **Reports:** Generates sales reports for "Main Warehouse". Uses AI summary.
 8.  **Settings:** Exports sales data for "Main Warehouse" to CSV.
 9.  **Profile:** Sets their default item filter preferences.
+10. **Food Stall Check (If applicable):** If their managed site includes a food stall, they might navigate to "Food Stall Management" to review recent expenses or sales for that stall.
 
 ### Staff User
 
@@ -530,6 +567,9 @@ TypeScript interfaces and Zod schemas define the structure of data used througho
 5.  **Sales History:** Views their own sales for "Retail Counter A".
 6.  **Profile:** Updates their display name.
 7.  **Request Stock (Implicit):** If "Product Y" runs out, they might verbally request more from a manager or from "Back Storage" (system doesn't have a formal request feature, this would be an operational flow leading to a manager/admin performing an allocation or transfer).
+8.  **Food Stall Operations (If assigned to a food stall):**
+    *   Records sales of food items via "/foodstall/sales/record".
+    *   Records expenses for grocery purchases via "/foodstall/expenses/record".
 
 ---
 
@@ -541,6 +581,7 @@ Making StallSync fully production-ready involves several key areas beyond core f
 
 *   **Current Status:** The `firestore.rules` file in the project root provides a detailed set of rules with helper functions for role checks and ownership.
 *   **Action Required:** **CRITICAL REVIEW AND TESTING.** Before deploying to production, these rules must be thoroughly audited, tested (using Firebase Emulator Suite or unit tests for rules), and refined to ensure they precisely match the application's access control requirements. Deny by default and only allow specific operations needed by each role for each collection/document. Pay close attention to write rules for `stockItems` to prevent unauthorized quantity or price changes.
+    *   Ensure rules for new collections like `foodItemExpenses` and `foodSaleTransactions` are added and appropriately secured.
 
 ### Testing Strategy
 
