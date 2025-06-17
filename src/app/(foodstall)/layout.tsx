@@ -1,15 +1,7 @@
 
-// This layout will wrap all pages within the (foodstall) group.
-// For now, it re-uses the main AppLayout.
-// You can customize this later if the food stall section needs a different overall structure
-// (e.g., a different sidebar, header, or specific context providers).
-
-import AppLayout from '@/app/(app)/layout'; // Reuse the main app layout
-
-export default function FoodStallLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return <AppLayout>{children}</AppLayout>;
+// This file is part of a conflicting route group (foodstall).
+// It has been intentionally overwritten to prevent routing errors.
+// Please delete the src/app/(foodstall) directory.
+export default function PlaceholderLayout({ children }: { children: React.ReactNode }) {
+  return <>{children}</>;
 }

@@ -1,4 +1,3 @@
-
 "use client";
 
 import PageHeader from "@/components/shared/PageHeader";
@@ -11,9 +10,6 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { foodExpenseCategories } from "@/types/food";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
-
-// Note: This is a very basic placeholder form.
-// You'll want to implement proper form handling with react-hook-form and Zod for validation.
 
 export default function RecordFoodExpensePage() {
   return (
@@ -77,9 +73,7 @@ export default function RecordFoodExpensePage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <Label htmlFor="purchaseDate">Purchase Date *</Label>
-              {/* Replace with actual DatePicker component */}
-              <Input id="purchaseDate" type="date" />
-               {/* <DatePicker date={new Date()} onDateChange={() => {}} /> */}
+              <DatePicker date={new Date()} onDateChange={() => {}} />
             </div>
             <div>
               <Label htmlFor="vendor">Vendor (Optional)</Label>

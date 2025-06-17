@@ -1,4 +1,3 @@
-
 "use client";
 
 import PageHeader from "@/components/shared/PageHeader";
@@ -10,10 +9,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { foodMealTypes } from "@/types/food";
 import { ArrowLeft, PlusCircle, Trash2 } from "lucide-react";
 import Link from "next/link";
-
-// Note: This is a very basic placeholder form.
-// You'll want to implement proper form handling (e.g., react-hook-form, Zod),
-// dynamic item rows, and calculation logic.
 
 export default function RecordFoodSalePage() {
   return (
@@ -38,7 +33,6 @@ export default function RecordFoodSalePage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <Label htmlFor="saleDate">Sale Date & Time *</Label>
-              {/* Replace with actual DateTimePicker component */}
               <Input id="saleDate" type="datetime-local" />
             </div>
             <div>
@@ -58,7 +52,6 @@ export default function RecordFoodSalePage() {
 
           <div className="space-y-4">
             <Label>Items Sold *</Label>
-            {/* Placeholder for dynamic item rows */}
             <div className="p-4 border rounded-md bg-muted/30 space-y-3">
               <div className="flex items-end gap-3">
                 <div className="flex-1">
