@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { DatePicker } from "@/components/ui/date-picker"; // Assuming you might create this or use a ShadCN one
+import { DatePicker } from "@/components/ui/date-picker";
 import { foodExpenseCategories } from "@/types/food";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
