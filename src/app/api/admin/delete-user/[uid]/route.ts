@@ -1,6 +1,5 @@
 
-import { NextResponse } from 'next/server';
-// Removed 'type { NextRequest } from 'next/server';' as we'll use standard Request
+import { NextRequest, NextResponse } from 'next/server'; // Ensure NextRequest is imported
 import admin from 'firebase-admin';
 import type { App as AdminApp } from 'firebase-admin/app';
 // DecodedIdToken is not explicitly used here as verifyIdToken returns it.
@@ -89,7 +88,7 @@ function initializeAdminSdk(): AdminApp | undefined {
 }
 
 export async function DELETE(
-  request: Request, // Using standard Web API Request
+  request: NextRequest,
   { params }: { params: { uid: string } }
 ) {
   const uidToDelete = params.uid; 
