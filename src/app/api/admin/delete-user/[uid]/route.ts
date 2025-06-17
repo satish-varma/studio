@@ -1,15 +1,14 @@
 
-import { NextRequest, NextResponse } from 'next/server'; // Ensure NextRequest is imported
+import { NextRequest, NextResponse } from 'next/server';
 import admin from 'firebase-admin';
 import type { App as AdminApp } from 'firebase-admin/app';
-// DecodedIdToken is not explicitly used here as verifyIdToken returns it.
 
 const LOG_PREFIX = "[API:DeleteUser]";
 
 const adminAppInstances = new Map<string, AdminApp>();
 let initializationErrorDetails: string | null = null;
 
-// Robust Admin SDK Initialization - prioritize JSON string, then path, then ADC
+// Robust Admin SDK Initialization
 function initializeAdminSdk(): AdminApp | undefined {
   const instanceSuffix = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
   const UNIQUE_APP_NAME = `firebase-admin-app-delete-user-route-${instanceSuffix}`;
@@ -89,8 +88,9 @@ function initializeAdminSdk(): AdminApp | undefined {
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { uid: string } }
+  context: any // Using 'any' as a workaround for persistent type errors
 ) {
+  const params = context.params as { uid: string }; // Type assertion
   const uidToDelete = params.uid; 
   console.log(`${LOG_PREFIX} DELETE request received for UID: ${uidToDelete}`);
   
