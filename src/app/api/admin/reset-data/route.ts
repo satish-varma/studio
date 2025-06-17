@@ -7,23 +7,20 @@ import { getFirestore as getAdminFirestore, CollectionReference, Query, WriteBat
 
 const LOG_PREFIX = "[API:ResetData]";
 
-// Firebase Admin SDK Initialization
-let adminAppInstance: AdminApp | undefined;
-let adminDbInstance: ReturnType<typeof getAdminFirestore> | undefined;
-let adminSdkInitializationError: string | null = null;
-
 const adminAppInstances = new Map<string, AdminApp>();
+let adminSdkInitializationError: string | null = null;
 
 function initializeAdminSdkForReset(): AdminApp | undefined {
   const instanceSuffix = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
   const UNIQUE_APP_NAME = `firebase-admin-app-reset-data-route-${instanceSuffix}`;
 
-  if (adminAppInstances.has(UNIQUE_APP_NAME)) {
+  if (adminAppInstances.has(UNIQUE_APP_NAME) && adminAppInstances.get(UNIQUE_APP_NAME)?.options) {
     const existingApp = adminAppInstances.get(UNIQUE_APP_NAME)!;
-    if (existingApp.options.projectId || existingApp.options.credential?.projectId) {
+    if (existingApp.options.projectId) { // Check only options.projectId
       console.log(`${LOG_PREFIX} Re-using existing valid Admin SDK instance for reset: ${UNIQUE_APP_NAME}`);
       return existingApp;
     }
+    console.warn(`${LOG_PREFIX} Existing Admin SDK instance ${UNIQUE_APP_NAME} was invalid (no projectId). Attempting re-initialization.`);
   }
   
   adminSdkInitializationError = null; 
@@ -54,9 +51,7 @@ function initializeAdminSdkForReset(): AdminApp | undefined {
     } else if (serviceAccountPathEnv) {
       methodUsed = "PATH_ENV";
       console.log(`${LOG_PREFIX} Found GOOGLE_APPLICATION_CREDENTIALS (path): ${serviceAccountPathEnv}. Initializing with file path.`);
-      // For path, initializeApp might infer project ID if service account file is correctly pointed to.
-      // If default initializeApp is used, it needs GOOGLE_APPLICATION_CREDENTIALS env var set globally for the process.
-      newAdminApp = initializeApp(undefined, UNIQUE_APP_NAME);
+      newAdminApp = initializeApp({ credential: admin.credential.applicationDefault() }, UNIQUE_APP_NAME); // Use admin.credential.applicationDefault() for path
     } else {
       methodUsed = "ADC";
       console.log(`${LOG_PREFIX} No specific service account JSON or path found. Attempting generic Application Default Credentials (ADC).`);
@@ -68,18 +63,19 @@ function initializeAdminSdkForReset(): AdminApp | undefined {
       throw new Error(adminSdkInitializationError);
     }
 
-    const finalProjectId = newAdminApp.options.projectId || newAdminApp.options.credential?.projectId;
-    if (!finalProjectId) {
-      adminSdkInitializationError = `Admin SDK initialized via ${methodUsed}, but the resulting app instance (name: ${newAdminApp.name}) is missing a projectId. Parsed SA project_id: '${parsedServiceAccountProjectId || 'N/A'}'. App options: ${JSON.stringify(newAdminApp.options)}.`;
+    if (!newAdminApp.options.projectId) {
+      adminSdkInitializationError = `Admin SDK initialized via ${methodUsed}, but the resulting app instance (name: ${newAdminApp.name}) is missing a projectId. Parsed SA project_id: '${parsedServiceAccountProjectId || 'N/A for PATH/ADC'}'. App options: ${JSON.stringify(newAdminApp.options)}.`;
       throw new Error(adminSdkInitializationError);
     }
     
-    console.log(`${LOG_PREFIX} Admin SDK initialized successfully via ${methodUsed} for reset. App name: ${newAdminApp.name}, Project ID: ${finalProjectId}`);
+    console.log(`${LOG_PREFIX} Admin SDK initialized successfully via ${methodUsed} for reset. App name: ${newAdminApp.name}, Project ID: ${newAdminApp.options.projectId}`);
     adminAppInstances.set(UNIQUE_APP_NAME, newAdminApp);
     return newAdminApp;
 
   } catch (error: any) {
-    adminSdkInitializationError = `Initialization attempt (${methodUsed}) for reset failed. Error: ${error.message}.`;
+    if (!adminSdkInitializationError) { // Ensure error detail is captured if not already set by specific checks
+        adminSdkInitializationError = `Initialization attempt (${methodUsed}) for reset failed. Error: ${error.message}.`;
+    }
     console.error(`${LOG_PREFIX} Firebase Admin SDK initialization CRITICAL error for reset: ${adminSdkInitializationError}`, error.stack);
     return undefined;
   }
@@ -148,13 +144,13 @@ async function deleteQueryBatch(
 export async function POST(request: NextRequest) {
   console.log(`${LOG_PREFIX} POST request received.`);
   
-  adminAppInstance = initializeAdminSdkForReset();
-  if (!adminAppInstance || (!adminAppInstance.options.projectId && !adminAppInstance.options.credential?.projectId)) {
+  const adminAppInstance = initializeAdminSdkForReset();
+  if (!adminAppInstance || !adminAppInstance.options.projectId) {
     const detailMessage = `Firebase Admin SDK not properly initialized or is in an invalid state for reset. ${adminSdkInitializationError || "An unknown initialization error occurred."}`;
     console.error(`${LOG_PREFIX} Critical Failure: ${detailMessage}`);
     return NextResponse.json({ error: 'Server Configuration Error.', details: detailMessage }, { status: 500 });
   }
-  adminDbInstance = getAdminFirestore(adminAppInstance);
+  const adminDbInstance = getAdminFirestore(adminAppInstance);
 
 
   let callingUserUid: string | undefined;
@@ -199,7 +195,7 @@ export async function POST(request: NextRequest) {
             message: `Data reset process completed with ${errorsEncountered} error(s). Some collections might not be fully cleared. Check server logs.`,
             errors: errorsEncountered,
             successes: collectionsSuccessfullyReset 
-        }, { status: 207 });
+        }, { status: 207 }); // 207 Multi-Status
     }
 
     return NextResponse.json({ message: 'Application data (excluding users) has been reset successfully.' }, { status: 200 });

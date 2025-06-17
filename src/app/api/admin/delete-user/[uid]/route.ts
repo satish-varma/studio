@@ -13,9 +13,9 @@ function initializeAdminSdk(): AdminApp | undefined {
   const instanceSuffix = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
   const UNIQUE_APP_NAME = `firebase-admin-app-delete-user-route-${instanceSuffix}`;
 
-  if (adminAppInstances.has(UNIQUE_APP_NAME)) {
+  if (adminAppInstances.has(UNIQUE_APP_NAME) && adminAppInstances.get(UNIQUE_APP_NAME)?.options) {
     const existingApp = adminAppInstances.get(UNIQUE_APP_NAME)!;
-    if (existingApp.options.projectId || existingApp.options.credential?.projectId) {
+    if (existingApp.options.projectId) { // Check only options.projectId
       console.log(`${LOG_PREFIX} Re-using existing valid Admin SDK instance: ${UNIQUE_APP_NAME}`);
       return existingApp;
     }
@@ -66,12 +66,11 @@ function initializeAdminSdk(): AdminApp | undefined {
       throw new Error(initializationErrorDetails);
     }
 
-    const finalProjectId = newAdminApp.options.projectId || newAdminApp.options.credential?.projectId;
-    if (!finalProjectId) {
-      initializationErrorDetails = `Admin SDK initialized via ${methodUsed}, but the resulting app instance (name: ${newAdminApp.name}) is missing a projectId (both options.projectId and options.credential.projectId). Service account's parsed project_id was: '${parsedServiceAccountProjectId || 'N/A for PATH/ADC'}'. App options: ${JSON.stringify(newAdminApp.options)}.`;
+    if (!newAdminApp.options.projectId) {
+      initializationErrorDetails = `Admin SDK initialized via ${methodUsed}, but the resulting app instance (name: ${newAdminApp.name}) is missing a projectId. Service account's parsed project_id was: '${parsedServiceAccountProjectId || 'N/A for PATH/ADC'}'. App options: ${JSON.stringify(newAdminApp.options)}.`;
       throw new Error(initializationErrorDetails);
     } else {
-      console.log(`${LOG_PREFIX} Admin SDK initialized successfully via ${methodUsed}. App name: ${newAdminApp.name}, Project ID: ${finalProjectId}`);
+      console.log(`${LOG_PREFIX} Admin SDK initialized successfully via ${methodUsed}. App name: ${newAdminApp.name}, Project ID: ${newAdminApp.options.projectId}`);
     }
     
     adminAppInstances.set(UNIQUE_APP_NAME, newAdminApp);
@@ -88,20 +87,20 @@ function initializeAdminSdk(): AdminApp | undefined {
 
 export async function DELETE(
   request: NextRequest,
-  context: any // Using 'any' as a workaround for persistent type errors
+  context: any // Using 'any' to bypass persistent type error for this specific context.
 ) {
   const params = context.params as { uid: string }; // Type assertion
   const uidToDelete = params.uid; 
   console.log(`${LOG_PREFIX} DELETE request received for UID: ${uidToDelete}`);
   
   const currentAdminApp = initializeAdminSdk();
-  if (!currentAdminApp || (!currentAdminApp.options.projectId && !currentAdminApp.options.credential?.projectId)) {
+  if (!currentAdminApp || !currentAdminApp.options.projectId) {
     let detailMessage = `Firebase Admin SDK not properly initialized or is in an invalid state for delete-user route. `;
     if (initializationErrorDetails) {
       detailMessage += `Specific error during init: ${initializationErrorDetails}.`;
     } else if (!currentAdminApp) {
       detailMessage += `initializeAdminSdk() returned undefined, and no specific error was captured during the last attempt.`;
-    } else if (currentAdminApp.options && !currentAdminApp.options.projectId && !currentAdminApp.options.credential?.projectId) {
+    } else if (currentAdminApp.options && !currentAdminApp.options.projectId) {
       detailMessage += `Admin SDK instance (name: ${currentAdminApp.name}) was created, but its projectId is missing. App options: ${JSON.stringify(currentAdminApp.options || {})}.`;
     } else {
       detailMessage += `An unknown initialization error occurred. App options: ${JSON.stringify(currentAdminApp?.options || {})}.`;
@@ -158,3 +157,4 @@ export async function DELETE(
   }
 }
     
+

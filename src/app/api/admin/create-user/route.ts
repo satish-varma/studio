@@ -16,11 +16,11 @@ function initializeAdminSdk(): AdminApp | undefined {
 
   if (adminAppInstances.has(UNIQUE_APP_NAME) && adminAppInstances.get(UNIQUE_APP_NAME)?.options) {
     const existingApp = adminAppInstances.get(UNIQUE_APP_NAME)!;
-    if (existingApp.options.projectId || existingApp.options.credential?.projectId) {
+    if (existingApp.options.projectId) { // Check only options.projectId
         console.log(`${LOG_PREFIX} Re-using existing valid Admin SDK instance: ${UNIQUE_APP_NAME}`);
         return existingApp;
     }
-    console.warn(`${LOG_PREFIX} Existing Admin SDK instance ${UNIQUE_APP_NAME} was invalid. Attempting re-initialization.`);
+    console.warn(`${LOG_PREFIX} Existing Admin SDK instance ${UNIQUE_APP_NAME} was invalid (no projectId). Attempting re-initialization.`);
   }
   
   initializationErrorDetails = null; 
@@ -72,14 +72,10 @@ function initializeAdminSdk(): AdminApp | undefined {
     }
 
     // Critical check after initialization
-    if (!newAdminApp.options.projectId && !newAdminApp.options.credential?.projectId) {
-        initializationErrorDetails = `Admin SDK initialized via ${methodUsed}, but the resulting app instance (name: ${newAdminApp.name}) is missing a projectId (both options.projectId and options.credential.projectId). Service account's parsed project_id was: '${parsedServiceAccountProjectId || 'N/A for PATH/ADC'}'. App options: ${JSON.stringify(newAdminApp.options)}.`;
+    if (!newAdminApp.options.projectId) { 
+        initializationErrorDetails = `Admin SDK initialized via ${methodUsed}, but the resulting app instance (name: ${newAdminApp.name}) is missing a projectId. Service account's parsed project_id was: '${parsedServiceAccountProjectId || 'N/A for PATH/ADC'}'. App options: ${JSON.stringify(newAdminApp.options)}.`;
         console.error(`${LOG_PREFIX} ${initializationErrorDetails}`);
         return undefined; 
-    } else if (!newAdminApp.options.projectId && newAdminApp.options.credential?.projectId) {
-        const credProjectId = newAdminApp.options.credential.projectId;
-        console.warn(`${LOG_PREFIX} Admin SDK initialized via ${methodUsed}. App name: ${newAdminApp.name}. Top-level options.projectId is MISSING, but options.credential.projectId ('${credProjectId}') IS present. Using credential.projectId. Service account's parsed project_id was: '${parsedServiceAccountProjectId || 'N/A for PATH/ADC'}'. App options: ${JSON.stringify(newAdminApp.options)}.`);
-        // This is acceptable; the SDK should still work.
     } else {
       console.log(`${LOG_PREFIX} Admin SDK initialized successfully via ${methodUsed}. App name: ${newAdminApp.name}, Project ID: ${newAdminApp.options.projectId}`);
     }
@@ -106,14 +102,14 @@ export async function POST(request: NextRequest) {
 
   const currentAdminApp = initializeAdminSdk();
 
-  if (!currentAdminApp || !currentAdminApp.options || (!currentAdminApp.options.projectId && !currentAdminApp.options.credential?.projectId)) {
+  if (!currentAdminApp || !currentAdminApp.options || !currentAdminApp.options.projectId) {
     let detailMessage = `Firebase Admin SDK not properly initialized or is in an invalid state. `;
     if (initializationErrorDetails) {
       detailMessage += `Specific error during init: ${initializationErrorDetails}.`;
     } else if (!currentAdminApp) {
       detailMessage += `initializeAdminSdk() returned undefined, and no specific error was captured during the last attempt.`;
-    } else if (currentAdminApp.options && !currentAdminApp.options.projectId && !currentAdminApp.options.credential?.projectId) {
-      detailMessage += `Admin SDK instance (name: ${currentAdminApp.name}) was created, but its projectId is missing from both options.projectId and options.credential.projectId. This is highly unusual. App options: ${JSON.stringify(currentAdminApp.options || {})}.`;
+    } else if (currentAdminApp.options && !currentAdminApp.options.projectId) {
+      detailMessage += `Admin SDK instance (name: ${currentAdminApp.name}) was created, but its projectId is missing. App options: ${JSON.stringify(currentAdminApp.options || {})}.`;
     } else {
       detailMessage += `An unknown initialization error occurred. App options: ${JSON.stringify(currentAdminApp?.options || {})}.`;
     }
