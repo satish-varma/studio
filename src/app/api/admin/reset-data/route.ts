@@ -1,7 +1,7 @@
 
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import admin, { initializeApp, getApps, getApp, App as AdminApp, cert } from 'firebase-admin/app';
+import admin, { initializeApp, getApps, getApp, App as AdminApp, cert, applicationDefault } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { getFirestore as getAdminFirestore, CollectionReference, Query, WriteBatch } from 'firebase-admin/firestore';
 
@@ -16,7 +16,7 @@ function initializeAdminSdkForReset(): AdminApp | undefined {
 
   if (adminAppInstances.has(UNIQUE_APP_NAME) && adminAppInstances.get(UNIQUE_APP_NAME)?.options) {
     const existingApp = adminAppInstances.get(UNIQUE_APP_NAME)!;
-    if (existingApp.options.projectId) { // Check only options.projectId
+    if (existingApp.options.projectId) {
       console.log(`${LOG_PREFIX} Re-using existing valid Admin SDK instance for reset: ${UNIQUE_APP_NAME}`);
       return existingApp;
     }
@@ -51,7 +51,7 @@ function initializeAdminSdkForReset(): AdminApp | undefined {
     } else if (serviceAccountPathEnv) {
       methodUsed = "PATH_ENV";
       console.log(`${LOG_PREFIX} Found GOOGLE_APPLICATION_CREDENTIALS (path): ${serviceAccountPathEnv}. Initializing with file path.`);
-      newAdminApp = initializeApp({ credential: admin.credential.applicationDefault() }, UNIQUE_APP_NAME); // Use admin.credential.applicationDefault() for path
+      newAdminApp = initializeApp({ credential: applicationDefault() }, UNIQUE_APP_NAME); // Use applicationDefault()
     } else {
       methodUsed = "ADC";
       console.log(`${LOG_PREFIX} No specific service account JSON or path found. Attempting generic Application Default Credentials (ADC).`);
@@ -73,7 +73,7 @@ function initializeAdminSdkForReset(): AdminApp | undefined {
     return newAdminApp;
 
   } catch (error: any) {
-    if (!adminSdkInitializationError) { // Ensure error detail is captured if not already set by specific checks
+    if (!adminSdkInitializationError) { 
         adminSdkInitializationError = `Initialization attempt (${methodUsed}) for reset failed. Error: ${error.message}.`;
     }
     console.error(`${LOG_PREFIX} Firebase Admin SDK initialization CRITICAL error for reset: ${adminSdkInitializationError}`, error.stack);

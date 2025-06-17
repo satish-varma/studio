@@ -1,7 +1,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
-import admin from 'firebase-admin';
-import type { App as AdminApp } from 'firebase-admin/app';
+import admin, { initializeApp, getApps, getApp, App as AdminApp, cert, applicationDefault } from 'firebase-admin/app'; // Added applicationDefault
+import { getAuth as getAdminAuth, DecodedIdToken } from 'firebase-admin/auth';
+import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
 
 const LOG_PREFIX = "[API:DeleteUser]";
 
@@ -15,7 +16,7 @@ function initializeAdminSdk(): AdminApp | undefined {
 
   if (adminAppInstances.has(UNIQUE_APP_NAME) && adminAppInstances.get(UNIQUE_APP_NAME)?.options) {
     const existingApp = adminAppInstances.get(UNIQUE_APP_NAME)!;
-    if (existingApp.options.projectId) { // Check only options.projectId
+    if (existingApp.options.projectId) { 
       console.log(`${LOG_PREFIX} Re-using existing valid Admin SDK instance: ${UNIQUE_APP_NAME}`);
       return existingApp;
     }
@@ -48,17 +49,17 @@ function initializeAdminSdk(): AdminApp | undefined {
         initializationErrorDetails = `GOOGLE_APPLICATION_CREDENTIALS_JSON was parsed, but 'project_id' is missing.`;
         throw new Error(initializationErrorDetails);
       }
-      newAdminApp = admin.initializeApp({ credential: admin.credential.cert(serviceAccount) }, UNIQUE_APP_NAME);
+      newAdminApp = initializeApp({ credential: cert(serviceAccount) }, UNIQUE_APP_NAME);
 
     } else if (serviceAccountPathEnv) {
       methodUsed = "PATH_ENV";
       console.log(`${LOG_PREFIX} Found GOOGLE_APPLICATION_CREDENTIALS (path): ${serviceAccountPathEnv}. Attempting initialization via file path.`);
-      newAdminApp = admin.initializeApp({ credential: admin.credential.applicationDefault() }, UNIQUE_APP_NAME);
+      newAdminApp = initializeApp({ credential: applicationDefault() }, UNIQUE_APP_NAME); // Use applicationDefault()
     
     } else {
       methodUsed = "ADC";
       console.log(`${LOG_PREFIX} No specific service account JSON or path found. Attempting generic Application Default Credentials (ADC).`);
-      newAdminApp = admin.initializeApp(undefined, UNIQUE_APP_NAME);
+      newAdminApp = initializeApp(undefined, UNIQUE_APP_NAME);
     }
     
     if (!newAdminApp) {
@@ -85,11 +86,8 @@ function initializeAdminSdk(): AdminApp | undefined {
   }
 }
 
-export async function DELETE(
-  request: NextRequest,
-  context: any // Using 'any' to bypass persistent type error for this specific context.
-) {
-  const params = context.params as { uid: string }; // Type assertion
+export async function DELETE(request: NextRequest, context: any) {
+  const params = context.params as { uid: string };
   const uidToDelete = params.uid; 
   console.log(`${LOG_PREFIX} DELETE request received for UID: ${uidToDelete}`);
   
@@ -108,6 +106,8 @@ export async function DELETE(
     console.error(`${LOG_PREFIX} Critical Failure: ${detailMessage}`);
     return NextResponse.json({ error: 'Server Configuration Error.', details: detailMessage }, { status: 500 });
   }
+  const currentAdminAuth = getAdminAuth(currentAdminApp);
+  const currentAdminFirestore = getAdminFirestore(currentAdminApp);
 
   if (!uidToDelete) {
     return NextResponse.json({ error: 'Missing UID parameter in request path.' }, { status: 400 });
@@ -120,10 +120,10 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized: Missing or invalid token format.' }, { status: 401 });
     }
     const idToken = authorization.split('Bearer ')[1];
-    const decodedToken = await admin.auth(currentAdminApp).verifyIdToken(idToken);
+    const decodedToken = await currentAdminAuth.verifyIdToken(idToken);
     callingAdminUid = decodedToken.uid;
 
-    const adminUserDoc = await admin.firestore(currentAdminApp).collection('users').doc(callingAdminUid).get();
+    const adminUserDoc = await currentAdminFirestore.collection('users').doc(callingAdminUid).get();
     if (!adminUserDoc.exists || adminUserDoc.data()?.role !== 'admin') {
       return NextResponse.json({ error: 'Forbidden: Caller is not an admin.' }, { status: 403 });
     }
@@ -132,8 +132,8 @@ export async function DELETE(
       return NextResponse.json({ error: 'Forbidden: Admins cannot delete their own account via this API.' }, { status: 403 });
     }
 
-    console.log(`${LOG_PREFIX} Attempting to delete Firebase Auth user: ${uidToDelete} by admin: ${callingAdminUid} using app: ${currentAdminApp.name}`);
-    await admin.auth(currentAdminApp).deleteUser(uidToDelete);
+    console.log(`${LOG_PREFIX} Attempting to delete Firebase Auth user: ${uidToDelete} by admin: ${callingAdminUid}`);
+    await currentAdminAuth.deleteUser(uidToDelete);
     console.log(`${LOG_PREFIX} Firebase Auth user ${uidToDelete} deleted successfully.`);
     
     return NextResponse.json({ message: `Firebase Auth user ${uidToDelete} deleted successfully.` }, { status: 200 });
@@ -157,4 +157,3 @@ export async function DELETE(
   }
 }
     
-
