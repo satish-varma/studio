@@ -15,9 +15,8 @@ import type { StockItem, SaleTransaction } from '@/types';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { subDays, startOfDay, endOfDay, isWithinInterval, format, eachDayOfInterval } from 'date-fns';
 import { ScrollArea } from "@/components/ui/scroll-area";
-
-import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartConfig } from "@/components/ui/chart";
-import { BarChart, Bar, CartesianGrid, XAxis, YAxis } from "recharts";
+import { Skeleton } from '@/components/ui/skeleton'; // Added Skeleton
+import dynamic from 'next/dynamic'; // Added dynamic
 
 const LOG_PREFIX = "[DashboardPage]";
 
@@ -42,12 +41,18 @@ interface SalesChartDataPoint {
   totalSales: number;
 }
 
-const chartConfig = {
-  totalSales: {
-    label: "Sales (₹)",
-    color: "hsl(var(--primary))",
-  },
-} satisfies ChartConfig;
+// Dynamically import the chart component
+const DashboardSalesChart = dynamic(
+  () => import('@/components/dashboard/DashboardSalesChart').then(mod => mod.DashboardSalesChart),
+  { 
+    ssr: false, // Charts are often client-side only
+    loading: () => (
+      <div className="min-h-[250px] w-full flex items-center justify-center">
+        <Skeleton className="h-[230px] w-[95%]" />
+      </div>
+    )
+  }
+);
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -348,39 +353,7 @@ export default function DashboardPage() {
         </CardHeader>
         <CardContent>
           {salesChartData.length > 0 ? (
-            <ChartContainer config={chartConfig} className="min-h-[250px] w-full">
-              <BarChart accessibilityLayer data={salesChartData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
-                <CartesianGrid vertical={false} strokeDasharray="3 3" />
-                <XAxis
-                  dataKey="date"
-                  tickLine={false}
-                  tickMargin={10}
-                  axisLine={false}
-                  tickFormatter={(value) => format(new Date(value), "MMM d")}
-                />
-                <YAxis
-                  tickFormatter={(value) => `₹${value >= 1000 ? `${(value/1000).toFixed(0)}k` : value.toFixed(0)}`}
-                  tickLine={false}
-                  axisLine={false}
-                  tickMargin={10}
-                  width={80}
-                />
-                <ChartTooltip
-                  cursor={false}
-                  content={<ChartTooltipContent
-                    indicator="dot"
-                    formatter={(value, name, props) => (
-                        <div className="flex flex-col gap-0.5">
-                            <span className="font-medium text-foreground">{format(new Date(props.payload.date), "MMM d, yyyy")}</span>
-                            <span className="text-muted-foreground">Sales: <span className="font-semibold text-foreground">₹{Number(value).toFixed(2)}</span></span>
-                        </div>
-                    )}
-                    hideLabel
-                  />}
-                />
-                <Bar dataKey="totalSales" fill="var(--color-totalSales)" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ChartContainer>
+             <DashboardSalesChart salesChartData={salesChartData} />
           ) : (
             <p className="text-sm text-center text-muted-foreground py-10" data-testid="no-sales-chart-data">No sales data available for the last 7 days in this context.</p>
           )}
@@ -499,6 +472,7 @@ export default function DashboardPage() {
     </div>
   );
 }
+    
 
     
 
