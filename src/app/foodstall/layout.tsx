@@ -1,4 +1,3 @@
-
 // This layout will wrap all pages within the /foodstall route segment.
 // For now, it re-uses the main AppLayout.
 // You can customize this later if the food stall section needs a different overall structure
