@@ -81,7 +81,7 @@ A brief overview of important directories:
         *   `dashboard/`, `items/`, `profile/`, `reports/`, `sales/`, `settings/`, `support/`, `users/`: Feature-specific pages.
         *   `layout.tsx`: Main authenticated layout with sidebar and header (reused by other sections).
     *   `(auth)/`: Authentication-related pages (login).
-    *   `foodstall/`: Authenticated routes for the Food Stall Management module.
+    *   `foodstall/`: Authenticated routes for the Food Stall Management module (e.g., `/foodstall/dashboard`).
         *   `dashboard/`: Food stall dashboard.
         *   `expenses/`: Food stall expense tracking pages.
         *   `sales/`: Food stall sales tracking pages.
@@ -295,15 +295,15 @@ GOOGLE_REDIRECT_URI=YOUR_CONFIGURED_GOOGLE_OAUTH_REDIRECT_URI
 ### Food Stall Management
 
 *   **Path:** `/foodstall/...`
-*   **Food Stall Dashboard (`/foodstall/dashboard`):** Overview of food stall specific metrics (placeholder).
+*   **Food Stall Dashboard (`/foodstall/dashboard`):** Overview of food stall specific metrics (currently placeholder).
 *   **Expense Tracking:**
-    *   Record Food Stall Expenses (`/foodstall/expenses/record`): Form to input purchases of groceries, supplies, etc.
-    *   View Expenses (`/foodstall/expenses`): List and filter food stall expenses (placeholder).
+    *   Record Food Stall Expenses (`/foodstall/expenses/record`): Form to input purchases of groceries, supplies, etc. (currently placeholder form).
+    *   View Expenses (`/foodstall/expenses`): List and filter food stall expenses (currently placeholder list).
 *   **Sales Tracking:**
-    *   Record Food Stall Sales (`/foodstall/sales/record`): Form to input sales of meals, beverages, etc.
-    *   View Sales (`/foodstall/sales`): List and filter food stall sales transactions (placeholder).
-*   **Dedicated Data Models:** Uses `FoodItemExpense` and `FoodSaleTransaction` types.
-*   **Future Enhancements:** Could include recipe management, cost-per-meal calculation, food-specific reporting.
+    *   Record Food Stall Sales (`/foodstall/sales/record`): Form to input sales of meals, beverages, etc. (currently placeholder form).
+    *   View Sales (`/foodstall/sales`): List and filter food stall sales transactions (currently placeholder list).
+*   **Dedicated Data Models:** Uses `FoodItemExpense` and `FoodSaleTransaction` types defined in `src/types/food.ts`.
+*   **Future Enhancements:** Could include recipe management, cost-per-meal calculation, food-specific reporting, and integration with main inventory for shared items if applicable.
 
 ### User Management (Admin)
 
@@ -388,7 +388,7 @@ GOOGLE_REDIRECT_URI=YOUR_CONFIGURED_GOOGLE_OAUTH_REDIRECT_URI
 *   **`/src/components/auth`**: `LoginForm` (public sign-up form is deprecated).
 *   **`/src/components/context`**: `SiteStallSelector` (used in header for context switching).
 *   **`/src/components/dashboard`**: `DashboardSalesChart`.
-*   **`/src/components/foodstall`**: (Placeholder components for expense/sale forms and lists would go here)
+*   **`/src/components/foodstall`**: (Placeholder components for expense/sale forms and lists would go here, e.g., `RecordFoodExpenseForm`, `FoodExpensesTable`)
 *   **`/src/components/items`**: `ItemControls`, `ItemForm`, `ItemTable`.
 *   **`/src/components/layout`**: `AppHeaderContent`, `AppSidebarNav`, `UserNav`.
 *   **`/src/components/reports`**: `ReportControls`, `SalesSummaryReportClientPage`.
@@ -537,7 +537,7 @@ TypeScript interfaces and Zod schemas define the structure of data used througho
 10. **Settings:** Explores "Settings" to check data export options or reset application data.
 11. **Profile:** Updates their own display name or default viewing preferences.
 12. **Monitor Operations:** Periodically reviews dashboard, sales history for all staff/sites, and reports.
-13. **Food Stall Setup (Optional):** If managing a food stall, navigates to "Food Stall Management", records initial expenses for groceries.
+13. **Food Stall Setup (Optional):** If managing a food stall, navigates to "Food Stall Management" (via `/foodstall/dashboard`), records initial expenses for groceries via `/foodstall/expenses/record`.
 
 ### Manager User
 
@@ -553,7 +553,7 @@ TypeScript interfaces and Zod schemas define the structure of data used througho
 7.  **Reports:** Generates sales reports for "Main Warehouse". Uses AI summary.
 8.  **Settings:** Exports sales data for "Main Warehouse" to CSV.
 9.  **Profile:** Sets their default item filter preferences.
-10. **Food Stall Check (If applicable):** If their managed site includes a food stall, they might navigate to "Food Stall Management" to review recent expenses or sales for that stall.
+10. **Food Stall Check (If applicable):** If their managed site includes a food stall, they might navigate to "Food Stall Management" (via `/foodstall/dashboard`) to review recent expenses or sales for that stall.
 
 ### Staff User
 
@@ -568,8 +568,8 @@ TypeScript interfaces and Zod schemas define the structure of data used througho
 6.  **Profile:** Updates their display name.
 7.  **Request Stock (Implicit):** If "Product Y" runs out, they might verbally request more from a manager or from "Back Storage" (system doesn't have a formal request feature, this would be an operational flow leading to a manager/admin performing an allocation or transfer).
 8.  **Food Stall Operations (If assigned to a food stall):**
-    *   Records sales of food items via "/foodstall/sales/record".
-    *   Records expenses for grocery purchases via "/foodstall/expenses/record".
+    *   Records sales of food items via `/foodstall/sales/record`.
+    *   Records expenses for grocery purchases via `/foodstall/expenses/record`.
 
 ---
 
