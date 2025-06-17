@@ -19,33 +19,35 @@ export const foodExpenseCategories = [
   "Marketing & Promotion",
   "Delivery Costs",
   "Licenses & Permits",
-  "Miscellaneous", // Renamed from "Other" for clarity
+  "Miscellaneous",
 ] as const;
 
 export type FoodExpenseCategory = (typeof foodExpenseCategories)[number];
 
-export const foodItemExpenseSchema = z.object({
+export const foodItemExpenseFormSchema = z.object({
   itemName: z.string().min(1, "Item name is required"),
-  category: z.enum(foodExpenseCategories),
-  quantity: z.coerce.number().positive("Quantity must be positive"),
-  unit: z.string().min(1, "Unit is required (e.g., kg, ltr, pcs, box, hour for labor)"),
+  category: z.enum(foodExpenseCategories, { required_error: "Category is required" }),
+  quantity: z.coerce.number().positive("Quantity must be a positive number"),
+  unit: z.string().min(1, "Unit is required (e.g., kg, ltr, pcs, box)"),
   pricePerUnit: z.coerce.number().min(0, "Price per unit must be non-negative"),
   totalCost: z.coerce.number().min(0, "Total cost must be non-negative"),
   purchaseDate: z.date({ required_error: "Purchase date is required." }),
-  vendor: z.string().optional(),
-  siteId: z.string().min(1, "Site ID is required"), // Assuming food stall is associated with a main site
-  stallId: z.string().min(1, "Stall ID is required"), // ID of the specific food stall
-  recordedByUid: z.string().min(1, "Recorder UID is required"),
-  notes: z.string().optional(),
+  vendor: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
 });
 
-export type FoodItemExpenseFormValues = z.infer<typeof foodItemExpenseSchema>;
+export type FoodItemExpenseFormValues = z.infer<typeof foodItemExpenseFormSchema>;
 
 export interface FoodItemExpense extends FoodItemExpenseFormValues {
-  id: string;
+  id: string; // Firestore document ID
+  siteId: string;
+  stallId: string;
+  recordedByUid: string;
+  recordedByName?: string; // Optional: store user's name for easier display
   createdAt: string; // ISO date string
   updatedAt: string; // ISO date string
 }
+
 
 // --------------- Food Sale Tracking ---------------
 export const foodMealTypes = [
@@ -63,31 +65,31 @@ export type FoodMealType = (typeof foodMealTypes)[number];
 
 export const foodSaleItemSchema = z.object({
   itemName: z.string().min(1, "Item name is required"),
-  category: z.string().optional(), // Optional category for sold food item
+  category: z.string().optional().nullable(), // Optional category for sold food item
   quantity: z.coerce.number().positive("Quantity must be positive"),
   pricePerUnit: z.coerce.number().min(0, "Price per unit must be non-negative"),
   totalPrice: z.coerce.number().min(0, "Total price must be non-negative"),
-  // Could add costPerUnit for profit calculation per item if granular tracking is needed
 });
 
 export type FoodSaleItem = z.infer<typeof foodSaleItemSchema>;
 
-export const foodSaleTransactionSchema = z.object({
-  mealType: z.enum(foodMealTypes).optional(), // Made optional, might not always apply
+export const foodSaleTransactionFormSchema = z.object({
+  mealType: z.enum(foodMealTypes).optional().nullable(),
   itemsSold: z.array(foodSaleItemSchema).min(1, "At least one item must be sold."),
   totalAmount: z.coerce.number().min(0, "Total amount must be non-negative"),
   saleDate: z.date({ required_error: "Sale date is required." }), // Should be datetime
-  siteId: z.string().min(1, "Site ID is required"),
-  stallId: z.string().min(1, "Stall ID is required"),
-  recordedByUid: z.string().min(1, "Recorder UID is required"),
-  notes: z.string().optional(),
-  paymentMethod: z.string().optional().default("Cash"), // e.g., Cash, Card, UPI
+  notes: z.string().optional().nullable(),
+  paymentMethod: z.string().optional().nullable().default("Cash"),
 });
 
-export type FoodSaleTransactionFormValues = z.infer<typeof foodSaleTransactionSchema>;
+export type FoodSaleTransactionFormValues = z.infer<typeof foodSaleTransactionFormSchema>;
 
 export interface FoodSaleTransaction extends FoodSaleTransactionFormValues {
-  id: string;
+  id: string; // Firestore document ID
+  siteId: string;
+  stallId: string;
+  recordedByUid: string;
+  recordedByName?: string; // Optional
   createdAt: string; // ISO date string
   updatedAt: string; // ISO date string
 }
