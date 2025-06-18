@@ -4,327 +4,293 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper Functions
-    function isAuthenticated() {
+    // Helper functions (ensure these are accurate based on your AppUser structure)
+    function isSignedIn() {
       return request.auth != null;
     }
-
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
-    }
-
-    function getUserRole() {
-      // It's safer to check for existence before accessing .data
-      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid));
-      return userDoc.data != null ? userDoc.data.role : null;
-    }
-
-    function isAdmin() {
-      return isAuthenticated() && getUserRole() == 'admin';
-    }
-
-    function isManager() {
-      return isAuthenticated() && getUserRole() == 'manager';
-    }
-
-    function isStaff() {
-      return isAuthenticated() && getUserRole() == 'staff';
-    }
-
     function getUserData(userId) {
-      // It's safer to check for existence before accessing .data
-      let userDoc = get(/databases/$(database)/documents/users/$(userId));
-      return userDoc.data != null ? userDoc.data : null;
+      return get(/databases/$(database)/documents/users/$(userId)).data;
+    }
+    function isUserRole(userId, role) {
+      return isSignedIn() && getUserData(userId).role == role;
+    }
+    function isAdmin(userId) { return isUserRole(userId, 'admin'); }
+    function isManager(userId) { return isUserRole(userId, 'manager'); }
+    function isStaff(userId) { return isUserRole(userId, 'staff'); }
+
+    // Ownership and Context Checks
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    function isSiteManager(siteId, userId) {
+      // Check if the siteId is in the manager's list of managedSiteIds
+      return isManager(userId) && getUserData(userId).managedSiteIds.hasAny([siteId]);
+    }
+    // Checks if the user is staff for the given stall, or manager/admin for the site of the stall
+    function isStallStaffOrManagerOrAdmin(stallId, siteId, userId) {
+      let userData = getUserData(userId);
+      return isAdmin(userId) ||
+             (isManager(userId) && siteId in userData.managedSiteIds) || // Manager of the site
+             (isStaff(userId) && userData.defaultSiteId == siteId && userData.defaultStallId == stallId); // Staff assigned to this specific stall
     }
 
-    function isManagerForSite(siteId) {
-      let userData = getUserData(request.auth.uid);
-      // Check if userData and managedSiteIds are not null before accessing them
-      return isManager() &&
-             userData != null &&
-             userData.managedSiteIds != null &&
-             userData.managedSiteIds.hasAny([siteId]); // Use hasAny for lists or ensure it's a map if using `in`
-                                                     // Assuming managedSiteIds is a list of site IDs
+
+    // Data Validation Helpers
+    function isValidSiteWrite(data, existingData) {
+      return data.name is string && data.name.size() >= 2 &&
+             (!('location' in data) || data.location is string) &&
+             data.updatedAt is string && 
+             (existingData == null || data.createdAt == existingData.createdAt); 
     }
 
-    function isStaffForDefaultSiteAndStall(siteId, stallId) {
-      let userData = getUserData(request.auth.uid);
-      return isStaff() &&
-             userData != null &&
-             userData.defaultSiteId == siteId &&
-             userData.defaultStallId == stallId;
+    function isValidStallWrite(data, existingData) {
+      let stallTypes = ["Retail Counter", "Storage Room", "Pop-up Booth", "Display Area", "Service Desk", "Food Stall", "Information Kiosk", "Warehouse Section", "Other"];
+      return data.name is string && data.name.size() >= 2 &&
+             data.siteId is string && get(/databases/$(database)/documents/sites/$(data.siteId)).data != null && 
+             data.stallType in stallTypes &&
+             data.updatedAt is string &&
+             (existingData == null || data.createdAt == existingData.createdAt);
+    }
+
+    function isValidStockItemWrite(data, existingData) {
+      return data.name is string && data.name.size() >= 2 &&
+             data.category is string && data.category.size() >= 2 &&
+             data.quantity is number && data.quantity >= 0 &&
+             data.unit is string && data.unit.size() >= 1 &&
+             data.price is number && data.price >= 0 &&
+             (!('costPrice' in data) || data.costPrice is number && data.costPrice >=0 || data.costPrice == null) && // Allow null for costPrice
+             data.lowStockThreshold is number && data.lowStockThreshold >= 0 &&
+             (!('imageUrl' in data) || data.imageUrl is string || data.imageUrl == null) && // Allow null for imageUrl
+             data.lastUpdated is string &&
+             data.siteId is string &&
+             (existingData == null || (
+                data.siteId == existingData.siteId &&
+                // stallId and originalMasterItemId can be complex to make truly immutable here if create/allocation logic handles them.
+                // For direct edits via form, they should typically be immutable.
+                data.stallId == existingData.stallId && 
+                data.originalMasterItemId == existingData.originalMasterItemId
+             ));
     }
     
-    function isStaffForDefaultSiteMasterStock(siteId) {
-      let userData = getUserData(request.auth.uid);
-      return isStaff() && 
-             userData != null &&
-             userData.defaultSiteId == siteId && 
-             userData.defaultStallId == null;
+    // Helper for staff/manager stock updates (quantity & lastUpdated only)
+    function canUpdateStockQuantityForSale(itemDataBeforeWrite, itemDataAfterWrite) {
+      let allowedWriteKeys = ['quantity', 'lastUpdated'];
+      // Ensure only allowed keys are being changed. Other fields must match existing or not be present in request.
+      let restrictedFields = ['name', 'category', 'description', 'unit', 'price', 'costPrice', 'lowStockThreshold', 'imageUrl', 'siteId', 'stallId', 'originalMasterItemId'];
+      
+      let onlyAllowedOrUnchangedKeys = itemDataAfterWrite.keys().hasOnly(allowedWriteKeys.concat(restrictedFields.filter(key => key in itemDataAfterWrite)));
+      
+      let restrictedFieldsUnchanged = restrictedFields.all(key => 
+        !(key in itemDataAfterWrite) || itemDataAfterWrite[key] == itemDataBeforeWrite[key]
+      );
+
+      return itemDataAfterWrite.keys().hasAny(allowedWriteKeys) && 
+             itemDataAfterWrite.quantity is number && itemDataAfterWrite.quantity >= 0 &&
+             itemDataAfterWrite.lastUpdated is string &&
+             onlyAllowedOrUnchangedKeys &&
+             restrictedFieldsUnchanged;
     }
 
-    // --- Stock Item Helper Functions ---
-    function isItemReadAllowed(itemData) {
-      // itemData is resource.data for get, or request.resource.data for list (though list rules are on collection)
-      if (isAdmin()) { return true; }
-      if (itemData == null || itemData.siteId == null) { return false; } // Item must have a siteId
-      
-      if (isManagerForSite(itemData.siteId)) { return true; }
-      
-      let requestUserData = getUserData(request.auth.uid);
-      if (isStaff() && requestUserData != null && requestUserData.defaultSiteId == itemData.siteId) {
-        return true; // Staff can read any item (master or stall) in their default site.
+    // Helper for checking if user context matches sale context
+    function isValidSaleContext(saleData, authUid) {
+      let authUser = getUserData(authUid);
+      if (isAdmin(authUid)) {
+        // Admin can record for any valid site/stall
+        return get(/databases/$(database)/documents/sites/$(saleData.siteId)).data != null &&
+               (saleData.stallId == null || (get(/databases/$(database)/documents/stalls/$(saleData.stallId)).data != null && get(/databases/$(database)/documents/stalls/$(saleData.stallId)).data.siteId == saleData.siteId));
+      }
+      if (isManager(authUid)) {
+        return saleData.siteId in authUser.managedSiteIds &&
+               (saleData.stallId == null || (get(/databases/$(database)/documents/stalls/$(saleData.stallId)).data != null && get(/databases/$(database)/documents/stalls/$(saleData.stallId)).data.siteId == saleData.siteId));
+      }
+      if (isStaff(authUid)) {
+        return saleData.siteId == authUser.defaultSiteId &&
+               saleData.stallId == authUser.defaultStallId; // Staff must record for their specific assigned stall
       }
       return false;
     }
 
-    function isUpdatingQuantityOnly(request, resource) {
-      // Check if only 'quantity' and 'lastUpdated' fields are being changed.
-      // All other fields must remain the same.
-      let newFields = request.resource.data.keys().removeAll(['quantity', 'lastUpdated']);
-      let oldFields = resource.data.keys().removeAll(['quantity', 'lastUpdated']);
-      
-      if (newFields.size() != oldFields.size()) { return false; }
-      
-      let allSame = true;
-      newFields.forEach(key => {
-        if (request.resource.data[key] != resource.data[key]) {
-          allSame = false;
-        }
-      });
-      return allSame && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['quantity', 'lastUpdated']);
-    }
-
-    function isItemDeletionAllowed(itemId, resource) {
-      if (isAdmin()) { return true; }
-      if (resource.data.stallId == null) { // Master item
-        // Deletion allowed if no linked stall items have quantity > 0
-        // This query will check items collection for documents where originalMasterItemId == itemId
-        // and quantity > 0. If size is 0, then deletion is allowed.
-        // Note: Firestore rules queries are limited. `getAfter` is not for general querying.
-        // This kind of cross-document validation for delete is better handled by Cloud Functions or client-side logic.
-        // For rules, we often simplify or restrict master item deletion more broadly if complex checks are needed.
-        // A simpler rule: Master item cannot be deleted if any stall item links to it (regardless of quantity),
-        // or rely on client/function logic to ensure stall items are dealt with first.
-        // For this iteration, we'll assume this check might be simplified or handled externally.
-        // A basic rule could be: only allow deletion if no linked stall items exist at all.
-        // This is hard to enforce perfectly in rules alone without impacting performance.
-        // For testability, we'll assume for now that if it's master, the manager can delete if other checks pass.
-        // The more robust check (querying linked items) is better in application logic before attempting deletion.
-        // This helper could be made more complex if needed, but let's keep it focused for now.
-        // The tests will verify if a manager can delete a master with 0-qty linked items.
-        return true; // Simplified: if it's a master, the manager (of that site) can delete. Robust check is hard in rules.
-      }
-      return true; // Stall items can be deleted by authorized users.
-    }
-    
-    function isAllocationAllowed(request, resource) {
-      // resource.data is the master item before update (source of stock)
-      // request.resource.data is the master item after update
-      let masterItemBefore = resource.data;
-      let masterItemAfter = request.resource.data;
-      let writeOps = request.writeBatch != null ? request.writeBatch : [request];
-
-      if (!(masterItemAfter.quantity < masterItemBefore.quantity)) return false; // Master qty must decrease
-      let quantityAllocated = masterItemBefore.quantity - masterItemAfter.quantity;
-
-      return writeOps.exists(op =>
-        op.path[1] == 'stockItems' &&
-        op.path[op.path.size()-1] != masterItemBefore.id && // Ensure it's not the master item itself
-        op.resource.data.originalMasterItemId == masterItemBefore.id &&
-        op.resource.data.siteId == masterItemBefore.siteId &&
-        op.resource.data.stallId != null && // Must be a stall item
-        (
-          (op.method == 'create' && op.resource.data.quantity == quantityAllocated) ||
-          (op.method == 'update' && op.resource.data.quantity == getAfter(/databases/$(database)/documents/$(op.path)).data.quantity + quantityAllocated)
-        ) &&
-        op.resource.data.name == masterItemBefore.name && // Basic details match
-        op.resource.data.price == masterItemBefore.price &&
-        op.resource.data.lastUpdated == masterItemAfter.lastUpdated // Timestamps align in transaction
-      );
-    }
-
-    function isReturnToMasterAllowed(request, resource) {
-      // resource.data is the stall item before update
-      // request.resource.data is the stall item after update
-      let stallItemBefore = resource.data;
-      let stallItemAfter = request.resource.data;
-      let writeOps = request.writeBatch != null ? request.writeBatch : [request];
-
-      if (!(stallItemAfter.quantity < stallItemBefore.quantity)) return false; // Stall qty must decrease
-      if (stallItemBefore.originalMasterItemId == null) return false; // Must be linked to a master
-
-      let quantityReturned = stallItemBefore.quantity - stallItemAfter.quantity;
-
-      return writeOps.exists(op =>
-        op.method == 'update' &&
-        op.path[1] == 'stockItems' &&
-        op.path[op.path.size()-1] == stallItemBefore.originalMasterItemId && // Operation is on the master item
-        op.resource.data.quantity == getAfter(/databases/$(database)/documents/$(op.path)).data.quantity + quantityReturned &&
-        op.resource.data.lastUpdated == stallItemAfter.lastUpdated // Timestamps align
-      );
-    }
-
-    function isTransferAllowed(request, resource) {
-      // resource.data is the source stall item before update
-      // request.resource.data is the source stall item after update
-      let sourceStallItemBefore = resource.data;
-      let sourceStallItemAfter = request.resource.data;
-      let writeOps = request.writeBatch != null ? request.writeBatch : [request];
-
-      if (!(sourceStallItemAfter.quantity < sourceStallItemBefore.quantity)) return false; // Source qty must decrease
-      if (sourceStallItemBefore.stallId == null) return false; // Source must be a stall item
-
-      let quantityTransferred = sourceStallItemBefore.quantity - sourceStallItemAfter.quantity;
-
-      // Find the destination operation (create or update)
-      let destinationOpValid = writeOps.exists(op =>
-        op.path[1] == 'stockItems' &&
-        op.path[op.path.size()-1] != sourceStallItemBefore.id && // Not the source item
-        op.resource.data.stallId != null && // Destination is a stall item
-        op.resource.data.stallId != sourceStallItemBefore.stallId && // Destination is different stall
-        op.resource.data.siteId == sourceStallItemBefore.siteId && // Same site
-        op.resource.data.originalMasterItemId == sourceStallItemBefore.originalMasterItemId && // Same master link (or both null)
-        (
-          (op.method == 'create' && op.resource.data.quantity == quantityTransferred) ||
-          (op.method == 'update' && op.resource.data.quantity == getAfter(/databases/$(database)/documents/$(op.path)).data.quantity + quantityTransferred)
-        ) &&
-        op.resource.data.name == sourceStallItemBefore.name && // Core details match
-        op.resource.data.price == sourceStallItemBefore.price &&
-        op.resource.data.lastUpdated == sourceStallItemAfter.lastUpdated // Timestamps align
-      );
-
-      if (!destinationOpValid) return false;
-
-      // If linked to a master, ensure master's quantity is not part of this specific batch change OR if it is, it's unchanged.
-      if (sourceStallItemBefore.originalMasterItemId != null) {
-        let masterItemOp = writeOps.find(op =>
-          op.path[1] == 'stockItems' &&
-          op.path[op.path.size()-1] == sourceStallItemBefore.originalMasterItemId &&
-          op.method == 'update'
-        );
-        // If master item is being updated in the same batch, its quantity must not change.
-        // If master item is NOT in the batch, that's also fine (quantity isn't changing).
-        return masterItemOp == null || masterItemOp.resource.data.quantity == getAfter(/databases/$(database)/documents/$(masterItemOp.path)).data.quantity;
-      }
-      return true; // Not linked to master, destinationOpValid is enough
+    // Helper for validating common fields in a sale transaction write (create)
+    function isValidSaleWriteCommon(data) {
+      return data.staffId == request.auth.uid &&
+             data.totalAmount is number && data.totalAmount >= 0 &&
+             data.items is list && data.items.size() > 0 && data.items.size() <= 25 && // Max 25 items per sale
+             data.items.all(item =>
+               item.itemId is string && item.itemId.size() > 0 &&
+               item.name is string && item.name.size() > 0 &&
+               item.quantity is number && item.quantity > 0 &&
+               item.pricePerUnit is number && item.pricePerUnit >= 0 &&
+               item.totalPrice is number && item.totalPrice >= 0
+             ) &&
+             !('isDeleted' in data && data.isDeleted == true) && // isDeleted cannot be true on create
+             data.transactionDate is timestamp;
     }
 
 
-    // --- Collection Rules ---
-
+    // User documents
     match /users/{userId} {
-      allow read: if isAuthenticated() && (isOwner(userId) || isAdmin());
-      allow create: if isAuthenticated() && isAdmin(); // Only admin can create user docs via backend/callable
-      allow update: if isAuthenticated() &&
-                     (
-                       (isOwner(userId) && request.resource.data.role == resource.data.role && request.resource.data.uid == resource.data.uid && request.resource.data.email == resource.data.email) || // Owner can update their own non-critical fields
-                       isAdmin() // Admin can update anything
-                     );
-      allow delete: if isAuthenticated() && isAdmin() && request.auth.uid != userId; // Admin can delete other users, not themselves
-    }
-
-    match /sites/{siteId} {
-      allow read: if isAuthenticated();
-      allow create, update, delete: if isAdmin();
-    }
-
-    match /stalls/{stallId} {
-      allow read: if isAuthenticated();
-      allow create, update, delete: if isAdmin();
-    }
-
-    match /stockItems/{itemId} {
-      allow read: if isAuthenticated() && isItemReadAllowed(resource.data);
-      allow create: if isAuthenticated() &&
+      allow read: if isSignedIn() && (isOwner(userId) || isAdmin(request.auth.uid));
+      allow list: if isAdmin(request.auth.uid);
+      allow create: if isAdmin(request.auth.uid); 
+      allow update: if isSignedIn() &&
                        (
-                         (isAdmin()) ||
-                         (isManager() && isManagerForSite(request.resource.data.siteId)) ||
-                         (isStaff() && 
-                            (
-                              (request.resource.data.stallId != null && isStaffForDefaultSiteAndStall(request.resource.data.siteId, request.resource.data.stallId)) || // Staff creates item in their stall
-                              (request.resource.data.stallId == null && isStaffForDefaultSiteMasterStock(request.resource.data.siteId)) // Staff creates item in their site's master stock
-                            ) &&
-                            request.resource.data.originalMasterItemId == null // Staff cannot create items linked to master during initial creation
-                         )
+                         (isOwner(userId) && request.resource.data.role == resource.data.role && request.resource.data.uid == userId && request.resource.data.email == resource.data.email) || 
+                         isAdmin(request.auth.uid) 
+                       );
+      allow delete: if isAdmin(request.auth.uid) && !isOwner(userId);
+    }
+
+    // Site documents
+    match /sites/{siteId} {
+      allow read: if isSignedIn(); 
+      allow list: if isSignedIn();
+      allow create, update, delete: if isAdmin(request.auth.uid) && isValidSiteWrite(request.resource.data, resource.data);
+    }
+
+    // Stall documents
+    match /stalls/{stallId} {
+      allow read: if isSignedIn(); 
+      allow list: if isSignedIn(); 
+      allow create, update, delete: if isAdmin(request.auth.uid) && isValidStallWrite(request.resource.data, resource.data);
+    }
+
+    // Stock Item documents
+    match /stockItems/{itemId} {
+      allow read: if isSignedIn(); 
+      allow list: if isSignedIn(); 
+
+      allow create: if (isAdmin(request.auth.uid) && isValidStockItemWrite(request.resource.data, null)) ||
+                       (isManager(request.auth.uid) &&
+                           request.resource.data.siteId in getUserData(request.auth.uid).managedSiteIds &&
+                           isValidStockItemWrite(request.resource.data, null)
+                       ) ||
+                       (isStaff(request.auth.uid) && 
+                           request.resource.data.siteId == getUserData(request.auth.uid).defaultSiteId &&
+                           (request.resource.data.stallId == getUserData(request.auth.uid).defaultStallId || request.resource.data.stallId == null) &&
+                           isValidStockItemWrite(request.resource.data, null)
                        );
       
-      allow update: if isAuthenticated() &&
-                       request.resource.data.id == resource.data.id && // ID must not change
-                       request.resource.data.siteId == resource.data.siteId && // Site must not change
-                       (request.resource.data.originalMasterItemId == resource.data.originalMasterItemId || resource.data.originalMasterItemId == null) && // Original master link cannot be changed once set, unless it was null
-                       (request.resource.data.lastUpdated != resource.data.lastUpdated || request.resource.data.lastUpdated == null) && // lastUpdated must change, or be set if previously null
-                       (
-                         (isAdmin()) || // Admin can do anything
-                         (isManager() && isManagerForSite(resource.data.siteId) && (
-                           // A: Manager is directly updating fields (can be qty, or other fields, or both)
-                           // If only qty & lastUpdated -> direct stock adjustment
-                           // If other fields changing, qty could be same or part of special op
-                           isUpdatingQuantityOnly(request, resource) || // Direct quantity adjustment
-                           (request.resource.data.quantity == resource.data.quantity && !isUpdatingQuantityOnly(request, resource)) || // Other fields changing, qty same
-                           
-                           // B: Manager is performing a special operation (master item perspective)
-                           (resource.data.stallId == null && // This is a master item
-                             request.resource.data.quantity < resource.data.quantity && // Its quantity is decreasing
-                             isAllocationAllowed(request, resource) // Must be a valid allocation
-                           ) ||
-                           // C: Manager is performing a special operation (stall item perspective)
-                           (resource.data.stallId != null && // This is a stall item
-                             request.resource.data.quantity < resource.data.quantity && // Its quantity is decreasing
-                             (isReturnToMasterAllowed(request, resource) || isTransferAllowed(request, resource)) // Must be valid return or transfer
-                           )
-                           // Note: Increasing a stall item's quantity by manager (if not direct update) is validated
-                           // when the source item (master for allocation, other stall for transfer) is updated.
-                         )) ||
-                         (isStaff() && // Staff can only update existing items in their assigned stall
-                           resource.data.stallId != null &&
-                           isStaffForDefaultSiteAndStall(resource.data.siteId, resource.data.stallId) &&
-                           isUpdatingQuantityOnly(request, resource) // And can only update quantity & lastUpdated
-                         )
-                       );
+      allow update: if 
+        // Admin can fully update
+        (isAdmin(request.auth.uid) && isValidStockItemWrite(request.resource.data, resource.data)) ||
+        // Manager can fully update items in their managed sites OR just update quantity/lastUpdated
+        (isManager(request.auth.uid) &&
+            resource.data.siteId in getUserData(request.auth.uid).managedSiteIds &&
+            (isValidStockItemWrite(request.resource.data, resource.data) || canUpdateStockQuantityForSale(resource.data, request.resource.data))
+        ) ||
+        // Staff can update quantity/lastUpdated for:
+        // 1. Item in their defaultStallId & defaultSiteId
+        // 2. Master stock item (stallId == null) in their defaultSiteId (this allows linked master stock to be updated during a sale)
+        (isStaff(request.auth.uid) &&
+            (
+              (resource.data.stallId == getUserData(request.auth.uid).defaultStallId && resource.data.siteId == getUserData(request.auth.uid).defaultSiteId) ||
+              (resource.data.stallId == null && resource.data.siteId == getUserData(request.auth.uid).defaultSiteId)
+            ) &&
+            canUpdateStockQuantityForSale(resource.data, request.resource.data)
+        );
 
-      allow delete: if isAuthenticated() &&
-                       (
-                         (isAdmin()) ||
-                         (isManager() && isManagerForSite(resource.data.siteId) && isItemDeletionAllowed(itemId, resource))
-                         // Staff cannot delete items directly through this rule. Deletion might be via specific action/function.
+      function hasActiveLinkedStallItems(itemId) {
+        return firestore.get(/databases/$(database)/documents/stockItems?where("originalMasterItemId", "==", itemId).where("quantity", ">", 0)).size() > 0;
+      }
+      allow delete: if isAdmin(request.auth.uid) ||
+                       (isManager(request.auth.uid) && resource.data.siteId in getUserData(request.auth.uid).managedSiteIds &&
+                           (resource.data.stallId != null || (resource.data.stallId == null && !hasActiveLinkedStallItems(itemId)))
                        );
     }
 
+    // Sales Transaction documents
     match /salesTransactions/{saleId} {
-      allow read: if isAuthenticated() &&
+      allow read: if isSignedIn() &&
                      (
-                       isAdmin() ||
-                       (resource.data.siteId != null && isManagerForSite(resource.data.siteId)) ||
-                       (isStaff() && resource.data.staffId == request.auth.uid && getUserData(request.auth.uid).defaultSiteId == resource.data.siteId)
+                       isAdmin(request.auth.uid) ||
+                       (isManager(request.auth.uid) && resource.data.siteId in getUserData(request.auth.uid).managedSiteIds) ||
+                       (isStaff(request.auth.uid) && resource.data.staffId == request.auth.uid) 
                      );
-      allow create: if isAuthenticated() &&
-                       request.resource.data.staffId == request.auth.uid && // User can only record sales for themselves
-                       (
-                         (isAdmin()) || // Admin can record for any context (if they set staffId to themselves)
-                         (isManager() && isManagerForSite(request.resource.data.siteId)) ||
-                         (isStaff() && isStaffForDefaultSiteAndStall(request.resource.data.siteId, request.resource.data.stallId))
-                       ) &&
-                       request.resource.data.isDeleted == false; // Cannot create already deleted sales
-                       
-      allow update: if isAuthenticated() && isAdmin() && // Only admin can "update" (which is soft delete)
+      allow list: if isSignedIn();
+
+      allow create: if isSignedIn() &&
+                       isValidSaleWriteCommon(request.resource.data) &&
+                       isValidSaleContext(request.resource.data, request.auth.uid);
+
+      allow update: if isAdmin(request.auth.uid) &&
                        request.resource.data.isDeleted == true &&
-                       resource.data.isDeleted == false && // Can only mark as deleted, not un-delete or change other fields
-                       request.resource.data.keys().hasAll(['isDeleted', 'deletedAt', 'deletedBy', 'deletionJustification']) &&
-                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isDeleted', 'deletedAt', 'deletedBy', 'deletionJustification']) &&
-                       request.resource.data.deletedBy == request.auth.uid;
-                       
-      allow delete: if false; // No one can hard delete sales transactions
+                       request.resource.data.deletedBy == request.auth.uid &&
+                       request.resource.data.deletionJustification is string && request.resource.data.deletionJustification.size() > 0 &&
+                       request.resource.data.deletedAt is string &&
+                       // Ensure other critical fields are not changed during soft delete
+                       request.resource.data.items == resource.data.items &&
+                       request.resource.data.totalAmount == resource.data.totalAmount &&
+                       request.resource.data.transactionDate == resource.data.transactionDate &&
+                       request.resource.data.staffId == resource.data.staffId &&
+                       request.resource.data.siteId == resource.data.siteId &&
+                       request.resource.data.stallId == resource.data.stallId;
+
+      allow delete: if false; 
     }
 
+    // Stock Movement Logs
     match /stockMovementLogs/{logId} {
-      allow read: if isAuthenticated() && isAdmin(); // Only admins can read logs directly
-      allow create: if isAuthenticated(); // Any authenticated user can create logs (triggered by app logic)
-      allow update, delete: if false; // Logs are immutable
+      allow read: if isAdmin(request.auth.uid) || isManager(request.auth.uid);
+      allow list: if isAdmin(request.auth.uid) || isManager(request.auth.uid);
+      // Create typically via trusted client logic (validated by other rules) or Cloud Functions
+      allow create: if isSignedIn(); 
+      allow update, delete: if false; 
     }
     
+    // User Google OAuth Tokens
     match /userGoogleOAuthTokens/{userId} {
-      allow read, create, update, delete: if isAuthenticated() && isOwner(userId); // Only owner can manage their tokens
+        allow read, write, delete: if isOwner(userId);
+    }
+
+    // Food Item Expenses
+    match /foodItemExpenses/{expenseId} {
+      allow read, list: if isSignedIn() && isStallStaffOrManagerOrAdmin(resource.data.stallId, resource.data.siteId, request.auth.uid);
+      allow create: if isSignedIn() &&
+                       request.resource.data.recordedByUid == request.auth.uid &&
+                       isStallStaffOrManagerOrAdmin(request.resource.data.stallId, request.resource.data.siteId, request.auth.uid) &&
+                       request.resource.data.itemName is string && request.resource.data.itemName.size() > 0 &&
+                       request.resource.data.category is string &&
+                       request.resource.data.quantity is number && request.resource.data.quantity > 0 &&
+                       request.resource.data.unit is string && request.resource.data.unit.size() > 0 &&
+                       request.resource.data.totalCost is number && request.resource.data.totalCost >= 0 &&
+                       request.resource.data.purchaseDate is timestamp &&
+                       request.resource.data.siteId is string &&
+                       request.resource.data.stallId is string;
+      allow update: if isSignedIn() &&
+                       ( (resource.data.recordedByUid == request.auth.uid && isStallStaffOrManagerOrAdmin(resource.data.stallId, resource.data.siteId, request.auth.uid)) ||
+                         isAdmin(request.auth.uid) ||
+                         isSiteManager(resource.data.siteId, request.auth.uid)
+                       ) &&
+                       request.resource.data.itemName is string && request.resource.data.itemName.size() > 0; 
+      allow delete: if isSignedIn() &&
+                       ( (resource.data.recordedByUid == request.auth.uid && isStallStaffOrManagerOrAdmin(resource.data.stallId, resource.data.siteId, request.auth.uid)) ||
+                         isAdmin(request.auth.uid) ||
+                         isSiteManager(resource.data.siteId, request.auth.uid)
+                       );
+    }
+
+    // Food Sale Transactions
+    match /foodSaleTransactions/{foodSaleId} {
+      allow read, list: if isSignedIn() && isStallStaffOrManagerOrAdmin(resource.data.stallId, resource.data.siteId, request.auth.uid);
+      allow create: if isSignedIn() &&
+                       request.resource.data.recordedByUid == request.auth.uid &&
+                       isStallStaffOrManagerOrAdmin(request.resource.data.stallId, request.resource.data.siteId, request.auth.uid) &&
+                       request.resource.data.itemsSold is list && request.resource.data.itemsSold.size() > 0 &&
+                       request.resource.data.totalAmount is number && request.resource.data.totalAmount >= 0 &&
+                       request.resource.data.saleDate is timestamp &&
+                       request.resource.data.siteId is string &&
+                       request.resource.data.stallId is string;
+      allow update: if isSignedIn() &&
+                       ( (resource.data.recordedByUid == request.auth.uid && isStallStaffOrManagerOrAdmin(resource.data.stallId, resource.data.siteId, request.auth.uid)) ||
+                         isAdmin(request.auth.uid) ||
+                         isSiteManager(resource.data.siteId, request.auth.uid)
+                       ) &&
+                       request.resource.data.itemsSold is list && request.resource.data.itemsSold.size() > 0;
+      allow delete: if isSignedIn() &&
+                       ( (resource.data.recordedByUid == request.auth.uid && isStallStaffOrManagerOrAdmin(resource.data.stallId, resource.data.siteId, request.auth.uid)) ||
+                         isAdmin(request.auth.uid) ||
+                         isSiteManager(resource.data.siteId, request.auth.uid)
+                       );
     }
   }
 }
