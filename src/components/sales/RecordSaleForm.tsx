@@ -162,38 +162,71 @@ export default function RecordSaleForm() {
     try {
       await runTransaction(db, async (transaction) => {
         console.log(`${LOG_PREFIX} Starting Firestore transaction for sale ${saleTransactionId}.`);
-        const stockItemReads: Promise<DocumentSnapshot>[] = [];
-        values.items.forEach(formItem => {
-          const stockItemRef = doc(db, "stockItems", formItem.itemId);
-          stockItemReads.push(transaction.get(stockItemRef));
-        });
-        const stockItemSnapshots = await Promise.all(stockItemReads);
 
+        // Phase 1: All Reads
+        const itemReads: {
+          formItem: typeof values.items[0];
+          stallItemRef: DocumentReference;
+          masterItemRef?: DocumentReference;
+        }[] = [];
+
+        for (const formItem of values.items) {
+          const stallItemRef = doc(db, "stockItems", formItem.itemId);
+          itemReads.push({ formItem, stallItemRef });
+        }
+
+        const stallItemSnapshots = await Promise.all(itemReads.map(ir => transaction.get(ir.stallItemRef)));
+        const masterItemRefsToRead: DocumentReference[] = [];
+        const stallItemDataMap = new Map<string, StockItem>();
+
+        for (let i = 0; i < stallItemSnapshots.length; i++) {
+          const stallItemSnap = stallItemSnapshots[i];
+          if (!stallItemSnap.exists()) {
+            console.error(`${LOG_PREFIX} Item ${itemReads[i].formItem.name} (ID: ${itemReads[i].formItem.itemId}) not found in stock during transaction read phase.`);
+            throw new Error(`Item ${itemReads[i].formItem.name} (ID: ${itemReads[i].formItem.itemId}) not found in stock.`);
+          }
+          const stallData = { id: stallItemSnap.id, ...stallItemSnap.data() } as StockItem;
+          stallItemDataMap.set(stallData.id, stallData);
+          if (stallData.originalMasterItemId) {
+            const masterItemRef = doc(db, "stockItems", stallData.originalMasterItemId);
+            itemReads[i].masterItemRef = masterItemRef; // Store for later use
+            masterItemRefsToRead.push(masterItemRef);
+          }
+        }
+        
+        const uniqueMasterItemRefsToRead = [...new Set(masterItemRefsToRead)]; // Ensure unique master reads
+        const masterItemSnapshots = await Promise.all(uniqueMasterItemRefsToRead.map(ref => transaction.get(ref)));
+        const masterItemDataMap = new Map<string, StockItem>();
+        masterItemSnapshots.forEach(snap => {
+          if (snap.exists()) {
+            masterItemDataMap.set(snap.id, { id: snap.id, ...snap.data() } as StockItem);
+          }
+        });
+        console.log(`${LOG_PREFIX} All reads completed. Stall items read: ${stallItemSnapshots.length}, Master items read: ${masterItemSnapshots.length}`);
+
+        // Phase 2: Validations & Calculations
         const soldItemsForTransaction: SoldItem[] = [];
         let calculatedTotalAmount = 0;
+        const stockUpdates: { ref: DocumentReference; newQuantity: number; oldQuantity: number; originalMasterItemId?: string | null }[] = [];
+        const masterStockUpdates: { ref: DocumentReference; newQuantity: number; oldQuantity: number }[] = [];
 
-        for (let i = 0; i < values.items.length; i++) {
-          const formItem = values.items[i];
-          const stockItemSnap = stockItemSnapshots[i];
-
-          if (!stockItemSnap.exists()) {
-            console.error(`${LOG_PREFIX} Item ${formItem.name} (ID: ${formItem.itemId}) not found in stock during transaction.`);
-            throw new Error(`Item ${formItem.name} (ID: ${formItem.itemId}) not found in stock.`);
+        for (const formItem of values.items) {
+          const currentStockData = stallItemDataMap.get(formItem.itemId);
+          if (!currentStockData) { // Should have been caught by initial read, but as a safeguard
+            throw new Error(`Data for item ${formItem.name} (ID: ${formItem.itemId}) missing after reads.`);
           }
-          const currentStockData = { id: stockItemSnap.id, ...stockItemSnap.data() } as StockItem;
           console.log(`${LOG_PREFIX} Processing item ${currentStockData.name} (ID: ${currentStockData.id}) - Current Qty: ${currentStockData.quantity}, Requested: ${formItem.quantity}`);
-
-
+          
           if (currentStockData.siteId !== activeSiteId || currentStockData.stallId !== activeStallId) {
-             console.error(`${LOG_PREFIX} Item ${formItem.name} (ID: ${formItem.itemId}) does not belong to active stall ${activeStallId}. Item Site: ${currentStockData.siteId}, Item Stall: ${currentStockData.stallId}`);
-             throw new Error(`Item ${formItem.name} does not belong to the currently active stall. Please refresh or re-select items.`);
+            console.error(`${LOG_PREFIX} Item ${formItem.name} (ID: ${formItem.itemId}) does not belong to active stall ${activeStallId}. Item Site: ${currentStockData.siteId}, Item Stall: ${currentStockData.stallId}`);
+            throw new Error(`Item ${formItem.name} does not belong to the currently active stall. Please refresh or re-select items.`);
           }
           if (currentStockData.quantity < formItem.quantity) {
             console.error(`${LOG_PREFIX} Insufficient stock for ${formItem.name}. Available: ${currentStockData.quantity}, Requested: ${formItem.quantity}`);
             throw new Error(`Not enough stock for ${formItem.name}. Available: ${currentStockData.quantity}, Requested: ${formItem.quantity}.`);
           }
 
-          const pricePerUnit = currentStockData.price; 
+          const pricePerUnit = currentStockData.price;
           soldItemsForTransaction.push({
             itemId: formItem.itemId,
             name: formItem.name,
@@ -203,24 +236,21 @@ export default function RecordSaleForm() {
           });
           calculatedTotalAmount += formItem.quantity * pricePerUnit;
 
-          transaction.update(stockItemSnap.ref, {
-            quantity: currentStockData.quantity - formItem.quantity,
-            lastUpdated: Timestamp.now().toDate().toISOString()
+          stockUpdates.push({ 
+            ref: doc(db, "stockItems", currentStockData.id), 
+            newQuantity: currentStockData.quantity - formItem.quantity,
+            oldQuantity: currentStockData.quantity,
+            originalMasterItemId: currentStockData.originalMasterItemId
           });
-          console.log(`${LOG_PREFIX} Updated stock for item ${currentStockData.id} from ${currentStockData.quantity} to ${currentStockData.quantity - formItem.quantity}.`);
 
           if (currentStockData.originalMasterItemId) {
-            const masterStockRef = doc(db, "stockItems", currentStockData.originalMasterItemId);
-            console.log(`${LOG_PREFIX} Item ${currentStockData.id} linked to master ${currentStockData.originalMasterItemId}. Fetching master...`);
-            const masterStockSnap = await transaction.get(masterStockRef);
-            if (masterStockSnap.exists()) {
-              const masterItemData = { id: masterStockSnap.id, ...masterStockSnap.data() } as StockItem;
-              const newMasterQuantity = Math.max(0, masterItemData.quantity - formItem.quantity);
-              transaction.update(masterStockRef, {
-                quantity: newMasterQuantity,
-                lastUpdated: Timestamp.now().toDate().toISOString()
+            const masterStockData = masterItemDataMap.get(currentStockData.originalMasterItemId);
+            if (masterStockData) {
+              masterStockUpdates.push({
+                ref: doc(db, "stockItems", masterStockData.id),
+                newQuantity: Math.max(0, masterStockData.quantity - formItem.quantity),
+                oldQuantity: masterStockData.quantity
               });
-              console.log(`${LOG_PREFIX} Updated master stock ${masterItemData.id} from ${masterItemData.quantity} to ${newMasterQuantity}.`);
             } else {
               console.warn(`${LOG_PREFIX} Master stock item ${currentStockData.originalMasterItemId} not found for sale of stall item ${currentStockData.id}. Master stock not adjusted.`);
             }
@@ -228,9 +258,26 @@ export default function RecordSaleForm() {
         }
 
         if (Math.abs(calculatedTotalAmount - totalSaleAmount) > 0.001) {
-             console.warn(`${LOG_PREFIX} Frontend total (₹${totalSaleAmount.toFixed(2)}) differs from backend calculated total (₹${calculatedTotalAmount.toFixed(2)}). Using backend total for transaction.`);
+          console.warn(`${LOG_PREFIX} Frontend total (₹${totalSaleAmount.toFixed(2)}) differs from backend calculated total (₹${calculatedTotalAmount.toFixed(2)}). Using backend total for transaction.`);
         }
+        
+        // Phase 3: All Writes
+        stockUpdates.forEach(update => {
+          transaction.update(update.ref, {
+            quantity: update.newQuantity,
+            lastUpdated: Timestamp.now().toDate().toISOString()
+          });
+           console.log(`${LOG_PREFIX} Queued update for stall item ${update.ref.id} from ${update.oldQuantity} to ${update.newQuantity}.`);
+        });
 
+        masterStockUpdates.forEach(update => {
+          transaction.update(update.ref, {
+            quantity: update.newQuantity,
+            lastUpdated: Timestamp.now().toDate().toISOString()
+          });
+          console.log(`${LOG_PREFIX} Queued update for master item ${update.ref.id} from ${update.oldQuantity} to ${update.newQuantity}.`);
+        });
+        
         const salesDocRef = doc(db, "salesTransactions", saleTransactionId);
         transaction.set(salesDocRef, {
           items: soldItemsForTransaction,
@@ -247,11 +294,10 @@ export default function RecordSaleForm() {
       console.log(`${LOG_PREFIX} Firestore transaction for sale ${saleTransactionId} committed successfully.`);
 
       for (const formItem of values.items) {
-          // Re-fetch the sold stall item to get its state *after* the transaction for correct `quantityBefore` logging.
           const soldStallItemSnap = await getDoc(doc(db, "stockItems", formItem.itemId));
           if (soldStallItemSnap.exists()) {
               const soldStallItem = { id: soldStallItemSnap.id, ...soldStallItemSnap.data() } as StockItem;
-              const originalStallQuantity = soldStallItem.quantity + formItem.quantity; // Calculate quantity before sale
+              const originalStallQuantity = soldStallItem.quantity + formItem.quantity; 
 
               await logStockMovement(user, {
                   stockItemId: soldStallItem.id,
