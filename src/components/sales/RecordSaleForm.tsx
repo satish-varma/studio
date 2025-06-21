@@ -22,8 +22,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import type { StockItem, SoldItem } from "@/types";
-import { PlusCircle, Trash2, IndianRupee, Loader2, Info } from "lucide-react";
+import type { StockItem, SoldItem, Stall } from "@/types";
+import { PlusCircle, Trash2, IndianRupee, Loader2, Info, Store } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -39,7 +39,8 @@ import {
   DocumentSnapshot,
   query,
   where,
-  getDoc
+  getDoc,
+  getDocs,
 } from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
@@ -76,9 +77,11 @@ export default function RecordSaleForm() {
   const { toast } = useToast();
   const { user, activeSiteId, activeStallId } = useAuth();
   const [availableItems, setAvailableItems] = useState<StockItem[]>([]);
-  const [loadingItems, setLoadingItems] = useState(true);
+  const [loadingItems, setLoadingItems] = useState(false); // Default to false
   const [totalSaleAmount, setTotalSaleAmount] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [stallsForManager, setStallsForManager] = useState<Stall[]>([]);
+  const [managerSelectedStallId, setManagerSelectedStallId] = useState<string>('');
 
   const form = useForm<RecordSaleFormValues>({
     resolver: zodResolver(recordSaleFormSchema),
@@ -91,10 +94,32 @@ export default function RecordSaleForm() {
     control: form.control,
     name: "items",
   });
+  
+  const effectiveStallId = user?.role === 'manager' ? managerSelectedStallId : activeStallId;
 
+  // Fetch stalls for manager's dropdown
   useEffect(() => {
-    console.log(`${LOG_PREFIX} useEffect for available items. ActiveSiteId: ${activeSiteId}, ActiveStallId: ${activeStallId}`);
-    if (!activeSiteId || !activeStallId) {
+    if (user?.role === 'manager' && activeSiteId) {
+      console.log(`${LOG_PREFIX} Manager detected. Fetching stalls for site: ${activeSiteId}`);
+      const stallsQuery = query(collection(db, "stalls"), where("siteId", "==", activeSiteId));
+      const unsubscribe = onSnapshot(stallsQuery, (snapshot) => {
+        const fetchedStalls = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Stall));
+        setStallsForManager(fetchedStalls.sort((a,b) => a.name.localeCompare(b.name)));
+      }, (error) => {
+        console.error(`${LOG_PREFIX} Error fetching stalls for manager:`, error);
+        toast({ title: "Error", description: "Could not load stalls for this site.", variant: "destructive" });
+      });
+      return () => unsubscribe();
+    } else {
+      setStallsForManager([]);
+    }
+  }, [user?.role, activeSiteId, toast]);
+
+
+  // Fetch available items based on effective stall ID
+  useEffect(() => {
+    console.log(`${LOG_PREFIX} useEffect for available items. ActiveSiteId: ${activeSiteId}, EffectiveStallId: ${effectiveStallId}`);
+    if (!activeSiteId || !effectiveStallId) {
       setAvailableItems([]);
       setLoadingItems(false);
       console.log(`${LOG_PREFIX} No active site/stall. Available items cleared.`);
@@ -105,7 +130,7 @@ export default function RecordSaleForm() {
     const q = query(
       itemsCollectionRef,
       where("siteId", "==", activeSiteId),
-      where("stallId", "==", activeStallId)
+      where("stallId", "==", effectiveStallId)
     );
 
     const unsubscribe = onSnapshot(q,
@@ -116,18 +141,18 @@ export default function RecordSaleForm() {
         } as StockItem));
         const inStockItems = fetchedItems.filter(item => item.quantity > 0);
         setAvailableItems(inStockItems.sort((a, b) => a.name.localeCompare(b.name))); // Sort items alphabetically
-        console.log(`${LOG_PREFIX} Fetched ${inStockItems.length} available items for stall ${activeStallId}.`);
+        console.log(`${LOG_PREFIX} Fetched ${inStockItems.length} available items for stall ${effectiveStallId}.`);
         setLoadingItems(false);
       },
       (error) => {
-        console.error(`${LOG_PREFIX} Error fetching stock items for stall ${activeStallId}:`, error);
+        console.error(`${LOG_PREFIX} Error fetching stock items for stall ${effectiveStallId}:`, error);
         toast({ title: "Error Loading Items", description: "Could not load items for the current stall. Please try again.", variant: "destructive"});
         setAvailableItems([]);
         setLoadingItems(false);
       }
     );
     return () => unsubscribe();
-  }, [activeSiteId, activeStallId, toast]);
+  }, [activeSiteId, effectiveStallId, toast]);
 
   const watchedItems = form.watch("items");
 
@@ -142,6 +167,7 @@ export default function RecordSaleForm() {
   }, [watchedItems]);
 
   async function onSubmit(values: RecordSaleFormValues) {
+    const stallIdForSale = user?.role === 'manager' ? managerSelectedStallId : activeStallId;
     console.log(`${LOG_PREFIX} onSubmit called. Values:`, values);
     if (!user) {
       console.warn(`${LOG_PREFIX} User not authenticated. Sale recording aborted.`);
@@ -149,8 +175,8 @@ export default function RecordSaleForm() {
       setIsSubmitting(false);
       return;
     }
-    if (!activeSiteId || !activeStallId) {
-      console.warn(`${LOG_PREFIX} Site or stall context missing. Sale recording aborted. Site: ${activeSiteId}, Stall: ${activeStallId}`);
+    if (!activeSiteId || !stallIdForSale) {
+      console.warn(`${LOG_PREFIX} Site or stall context missing. Sale recording aborted. Site: ${activeSiteId}, Stall: ${stallIdForSale}`);
       toast({ title: "Context Error", description: "Cannot record sale without an active site and specific stall context.", variant: "destructive"});
       setIsSubmitting(false);
       return;
@@ -217,8 +243,8 @@ export default function RecordSaleForm() {
           }
           console.log(`${LOG_PREFIX} Processing item ${currentStockData.name} (ID: ${currentStockData.id}) - Current Qty: ${currentStockData.quantity}, Requested: ${formItem.quantity}`);
           
-          if (currentStockData.siteId !== activeSiteId || currentStockData.stallId !== activeStallId) {
-            console.error(`${LOG_PREFIX} Item ${formItem.name} (ID: ${formItem.itemId}) does not belong to active stall ${activeStallId}. Item Site: ${currentStockData.siteId}, Item Stall: ${currentStockData.stallId}`);
+          if (currentStockData.siteId !== activeSiteId || currentStockData.stallId !== stallIdForSale) {
+            console.error(`${LOG_PREFIX} Item ${formItem.name} (ID: ${formItem.itemId}) does not belong to active stall ${stallIdForSale}. Item Site: ${currentStockData.siteId}, Item Stall: ${currentStockData.stallId}`);
             throw new Error(`Item ${formItem.name} does not belong to the currently active stall. Please refresh or re-select items.`);
           }
           if (currentStockData.quantity < formItem.quantity) {
@@ -286,7 +312,7 @@ export default function RecordSaleForm() {
           staffId: user.uid,
           staffName: user.displayName || user.email,
           siteId: activeSiteId,
-          stallId: activeStallId,
+          stallId: stallIdForSale,
           isDeleted: false,
         });
         console.log(`${LOG_PREFIX} Sale document ${saleTransactionId} created in transaction.`);
@@ -343,6 +369,9 @@ export default function RecordSaleForm() {
         description: `Total: ₹${totalSaleAmount.toFixed(2)}. Stock levels updated. Sale ID: ${saleTransactionId.substring(0,8)}...`,
       });
       form.reset({ items: [{ itemId: "", quantity: 1, pricePerUnit: 0, name: "" }] });
+      if (user?.role === 'manager') {
+        setManagerSelectedStallId('');
+      }
 
     } catch (error: any) {
       console.error(`${LOG_PREFIX} Error recording sale transaction (ID: ${saleTransactionId}):`, error.message, error.stack);
@@ -395,7 +424,6 @@ export default function RecordSaleForm() {
       return val;
   };
 
-
   if (!user) {
     return (
         <div className="flex justify-center items-center py-10">
@@ -405,31 +433,27 @@ export default function RecordSaleForm() {
     );
   }
 
-  if (!activeSiteId || !activeStallId) {
-    const message = user.role === 'admin'
-      ? "Admin: Please select an active Site AND a specific Stall from the dropdowns in the header bar to record a sale. Sales cannot be made from \"Master Stock\" or \"All Stalls\" views directly."
-      : "To record a sale, you need a default site and stall assigned to your profile and selected. Please go to your Profile Page to set your default operational context. If defaults are set, ensure they are valid and that stock items exist for that stall.";
-    const linkMessage = user.role !== 'admin' ? <Link href="/profile" className="text-primary hover:underline font-medium">Profile Page</Link> : null;
-
+  if (!activeSiteId) {
     return (
       <Alert variant="default" className="max-w-2xl mx-auto shadow-lg border-primary/50">
         <Info className="h-4 w-4" />
-        <AlertTitle>Site & Stall Context Required</AlertTitle>
+        <AlertTitle>Site Context Required</AlertTitle>
         <AlertDescription>
-          {message.split("Profile Page")[0]}
-          {linkMessage}
-          {message.split("Profile Page")[1] || ""}
+          Please select an active site from the header bar to begin recording a sale.
         </AlertDescription>
       </Alert>
     );
   }
 
-  if (loadingItems) {
+  if (user.role === 'staff' && !activeStallId) {
     return (
-      <div className="flex justify-center items-center py-10" data-testid="loading-items-indicator">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <p className="ml-2">Loading items for sale at the current stall...</p>
-      </div>
+      <Alert variant="default" className="max-w-2xl mx-auto shadow-lg border-primary/50">
+        <Info className="h-4 w-4" />
+        <AlertTitle>Stall Context Required for Staff</AlertTitle>
+        <AlertDescription>
+          As a staff member, your account needs a default stall assigned to record sales. Please contact your administrator.
+        </AlertDescription>
+      </Alert>
     );
   }
 
@@ -444,7 +468,43 @@ export default function RecordSaleForm() {
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} data-testid="record-sale-form">
           <CardContent className="space-y-6">
-            {availableItems.length === 0 && !loadingItems && (
+            {user.role === 'manager' && (
+              <FormItem>
+                <FormLabel>Stall for Sale</FormLabel>
+                <Select
+                  onValueChange={(value) => {
+                    setManagerSelectedStallId(value);
+                    form.reset({ items: [{ itemId: "", quantity: 1, pricePerUnit: 0, name: "" }] });
+                  }}
+                  value={managerSelectedStallId}
+                  disabled={isSubmitting || stallsForManager.length === 0}
+                >
+                  <FormControl>
+                    <SelectTrigger className="bg-input">
+                       <Store className="mr-2 h-4 w-4 text-muted-foreground" />
+                      <SelectValue placeholder="Select the stall for this sale..." />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    {stallsForManager.map((stall) => (
+                      <SelectItem key={stall.id} value={stall.id}>
+                        {stall.name} ({stall.stallType})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            )}
+
+            {loadingItems && (
+              <div className="flex justify-center items-center py-6" data-testid="loading-items-indicator">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                <p className="ml-2 text-muted-foreground">Loading available items...</p>
+              </div>
+            )}
+
+            {!loadingItems && availableItems.length === 0 && effectiveStallId && (
                <Alert variant="default" data-testid="no-items-alert">
                 <Info className="h-4 w-4" />
                 <AlertTitle>No Items Available at this Stall</AlertTitle>
@@ -453,6 +513,7 @@ export default function RecordSaleForm() {
                 </AlertDescription>
               </Alert>
             )}
+
             {fields.map((field, index) => (
               <div key={field.id} className="flex items-end gap-4 p-4 border rounded-md bg-muted/30" data-testid={`sale-item-row-${index}`}>
                 <FormField
@@ -467,7 +528,7 @@ export default function RecordSaleForm() {
                           handleItemChange(value, index);
                         }}
                         value={formField.value} // Ensure value prop is used for controlled component
-                        disabled={isSubmitting || availableItems.length === 0}
+                        disabled={isSubmitting || loadingItems || availableItems.length === 0}
                         data-testid={`item-select-${index}`}
                       >
                         <FormControl>
@@ -557,7 +618,7 @@ export default function RecordSaleForm() {
               variant="outline"
               onClick={() => append({ itemId: "", quantity: 1, pricePerUnit: 0, name: "" })}
               className="w-full border-dashed"
-              disabled={isSubmitting || availableItems.length === 0}
+              disabled={isSubmitting || loadingItems || availableItems.length === 0}
               data-testid="add-another-item-button"
             >
               <PlusCircle className="mr-2 h-4 w-4" /> Add Another Item
@@ -574,7 +635,7 @@ export default function RecordSaleForm() {
               type="submit"
               className="w-full"
               size="lg"
-              disabled={isSubmitting || loadingItems || fields.some(f => !f.itemId || !f.quantity || f.quantity <=0 || f.pricePerUnit < 0 ) || availableItems.length === 0 || !user || !activeSiteId || !activeStallId}
+              disabled={isSubmitting || loadingItems || fields.some(f => !f.itemId || !f.quantity || f.quantity <=0 || f.pricePerUnit < 0 ) || availableItems.length === 0 || !user || !activeSiteId || !effectiveStallId}
               data-testid="record-sale-submit-button"
             >
               {isSubmitting ? <Loader2 className="animate-spin mr-2" data-testid="submit-loader"/> : null}
@@ -586,4 +647,6 @@ export default function RecordSaleForm() {
     </Card>
   );
 }
+    
+
     
