@@ -10,7 +10,7 @@ export const foodExpenseCategories = [
   "Dairy Products",
   "Meat & Poultry",
   "Bakery",
-  "Beverages (Raw Material)", // e.g., coffee beans, tea leaves, syrups
+  "Beverages (Raw Material)",
   "Spices & Condiments",
   "Packaging Supplies",
   "Cleaning Supplies",
@@ -25,22 +25,32 @@ export const foodExpenseCategories = [
 
 export type FoodExpenseCategory = (typeof foodExpenseCategories)[number];
 
-export const foodItemExpenseFormSchema = z.object({
-  itemName: z.string().min(1, "Item name is required"),
+export const paymentMethods = ["Cash", "Card", "UPI", "Other"] as const;
+export type PaymentMethod = (typeof paymentMethods)[number];
+
+// New, simplified schema
+export const foodExpenseFormSchema = z.object({
   category: z.enum(foodExpenseCategories, { required_error: "Category is required" }),
-  quantity: z.coerce.number().positive("Quantity must be a positive number"),
-  unit: z.string().min(1, "Unit is required (e.g., kg, ltr, pcs, box)"),
-  pricePerUnit: z.coerce.number().min(0, "Price per unit must be non-negative"),
-  totalCost: z.coerce.number().min(0, "Total cost must be non-negative"),
+  totalCost: z.coerce.number().positive("Total cost must be a positive number"),
+  paymentMethod: z.enum(paymentMethods, { required_error: "Payment method is required." }),
   purchaseDate: z.date({ required_error: "Purchase date is required." }),
   vendor: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
+  billImageUrl: z.string().url({ message: "Please enter a valid URL." }).optional().or(z.literal("")),
 });
 
-export type FoodItemExpenseFormValues = z.infer<typeof foodItemExpenseFormSchema>;
+export type FoodItemExpenseFormValues = z.infer<typeof foodExpenseFormSchema>;
 
-export interface FoodItemExpense extends FoodItemExpenseFormValues {
+// This interface is now simplified and doesn't contain the item-specific fields.
+export interface FoodItemExpense {
   id: string; // Firestore document ID
+  category: FoodExpenseCategory;
+  totalCost: number;
+  paymentMethod: PaymentMethod;
+  purchaseDate: Date | Timestamp;
+  vendor?: string | null;
+  notes?: string | null;
+  billImageUrl?: string | null;
   siteId: string;
   stallId: string;
   recordedByUid: string;
@@ -49,6 +59,7 @@ export interface FoodItemExpense extends FoodItemExpenseFormValues {
   updatedAt: string; // ISO date string
 }
 
+// Admin type for Firestore admin operations (if needed)
 export interface FoodItemExpenseAdmin extends Omit<FoodItemExpense, 'purchaseDate' | 'createdAt' | 'updatedAt'> {
   purchaseDate: Timestamp;
   createdAt: Timestamp;

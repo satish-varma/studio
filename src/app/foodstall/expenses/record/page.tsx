@@ -3,26 +3,54 @@
 
 import PageHeader from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { DatePicker } from "@/components/ui/date-picker";
-import { foodExpenseCategories, foodItemExpenseFormSchema, type FoodItemExpenseFormValues } from "@/types/food";
+import {
+  foodExpenseFormSchema,
+  type FoodItemExpenseFormValues,
+  foodExpenseCategories,
+  paymentMethods,
+} from "@/types/food";
 import { ArrowLeft, Loader2, Info } from "lucide-react";
 import Link from "next/link";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { getFirestore, collection, addDoc, Timestamp } from "firebase/firestore";
-import { firebaseConfig } from '@/lib/firebaseConfig';
-import { getApps, initializeApp, getApp } from 'firebase/app';
+import {
+  getFirestore,
+  collection,
+  addDoc,
+  Timestamp,
+} from "firebase/firestore";
+import { firebaseConfig } from "@/lib/firebaseConfig";
+import { getApps, initializeApp, getApp } from "firebase/app";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Textarea } from "@/components/ui/textarea";
-
 
 let db: ReturnType<typeof getFirestore> | undefined;
 if (!getApps().length) {
@@ -36,41 +64,30 @@ if (!getApps().length) {
   db = getFirestore(getApp());
 }
 
-
 export default function RecordFoodExpensePage() {
   const { user, activeSiteId, activeStallId } = useAuth();
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const form = useForm<FoodItemExpenseFormValues>({
-    resolver: zodResolver(foodItemExpenseFormSchema),
+    resolver: zodResolver(foodExpenseFormSchema),
     defaultValues: {
-      itemName: "",
       category: undefined,
-      quantity: 1,
-      unit: "pcs",
-      pricePerUnit: 0,
-      totalCost: 0,
+      totalCost: undefined, // Let placeholder show
+      paymentMethod: undefined,
       purchaseDate: new Date(),
       vendor: "",
       notes: "",
+      billImageUrl: "",
     },
   });
-
-  const watchedQuantity = form.watch("quantity");
-  const watchedPricePerUnit = form.watch("pricePerUnit");
-
-  useEffect(() => {
-    const qty = Number(watchedQuantity) || 0;
-    const price = Number(watchedPricePerUnit) || 0;
-    form.setValue("totalCost", qty * price, { shouldValidate: true });
-  }, [watchedQuantity, watchedPricePerUnit, form]);
 
   async function onSubmit(values: FoodItemExpenseFormValues) {
     if (!user || !activeSiteId || !activeStallId || !db) {
       toast({
         title: "Error",
-        description: "Cannot record expense. User, site, or stall context is missing, or DB not initialized.",
+        description:
+          "Cannot record expense. User, site, or stall context is missing, or DB not initialized.",
         variant: "destructive",
       });
       return;
@@ -91,40 +108,48 @@ export default function RecordFoodExpensePage() {
       await addDoc(collection(db, "foodItemExpenses"), expenseData);
       toast({
         title: "Expense Recorded",
-        description: `${values.itemName} has been successfully recorded.`,
+        description: `A ${
+          values.category
+        } expense of ₹${values.totalCost.toFixed(2)} has been recorded.`,
       });
       form.reset();
     } catch (error: any) {
       console.error("Error recording food expense:", error);
       toast({
         title: "Recording Failed",
-        description: error.message || "Could not record the expense. Please try again.",
+        description:
+          error.message || "Could not record the expense. Please try again.",
         variant: "destructive",
       });
     } finally {
       setIsSubmitting(false);
     }
   }
-  
+
   if (!user) {
-    return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Authenticating...</p></div>;
+    return (
+      <div className="flex justify-center items-center py-10">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="ml-2">Authenticating...</p>
+      </div>
+    );
   }
 
   if (!activeSiteId || !activeStallId) {
     return (
-        <div className="max-w-2xl mx-auto mt-10">
-            <Alert variant="default" className="border-primary/50">
-                <Info className="h-4 w-4" />
-                <AlertTitle>Site & Stall Context Required</AlertTitle>
-                <AlertDescription>
-                To record a food stall expense, please ensure you have an active Site and a specific Stall selected in the header.
-                This context is necessary to correctly associate the expense.
-                </AlertDescription>
-            </Alert>
-        </div>
+      <div className="max-w-2xl mx-auto mt-10">
+        <Alert variant="default" className="border-primary/50">
+          <Info className="h-4 w-4" />
+          <AlertTitle>Site & Stall Context Required</AlertTitle>
+          <AlertDescription>
+            To record a food stall expense, please ensure you have an active
+            Site and a specific Stall selected in the header. This context is
+            necessary to correctly associate the expense.
+          </AlertDescription>
+        </Alert>
+      </div>
     );
   }
-
 
   return (
     <div className="space-y-6">
@@ -144,28 +169,179 @@ export default function RecordFoodExpensePage() {
           <Card className="max-w-2xl mx-auto shadow-lg">
             <CardHeader>
               <CardTitle>Expense Details</CardTitle>
-              <CardDescription>All fields marked with * are required.</CardDescription>
+              <CardDescription>
+                All fields marked with * are required.
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <FormField control={form.control} name="itemName" render={({ field }) => ( <FormItem><FormLabel>Item Name *</FormLabel><FormControl><Input placeholder="e.g., Tomatoes, Milk, Rent" {...field} disabled={isSubmitting} className="bg-input" /></FormControl><FormMessage /></FormItem> )} />
-                <FormField control={form.control} name="category" render={({ field }) => ( <FormItem><FormLabel>Category *</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value} disabled={isSubmitting}><FormControl><SelectTrigger id="category" className="bg-input"><SelectValue placeholder="Select category" /></SelectTrigger></FormControl><SelectContent>{foodExpenseCategories.map(cat => ( <SelectItem key={cat} value={cat}>{cat}</SelectItem> ))}</SelectContent></Select><FormMessage /></FormItem> )} />
+                <FormField
+                  control={form.control}
+                  name="category"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Category *</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                        disabled={isSubmitting}
+                      >
+                        <FormControl>
+                          <SelectTrigger id="category" className="bg-input">
+                            <SelectValue placeholder="Select expense category" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {foodExpenseCategories.map((cat) => (
+                            <SelectItem key={cat} value={cat}>
+                              {cat}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="totalCost"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Total Cost * (₹)</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          placeholder="0.00"
+                          {...field}
+                          disabled={isSubmitting}
+                          className="bg-input"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <FormField control={form.control} name="quantity" render={({ field }) => ( <FormItem><FormLabel>Quantity *</FormLabel><FormControl><Input type="number" placeholder="0" {...field} disabled={isSubmitting} className="bg-input"/></FormControl><FormMessage /></FormItem> )} />
-                <FormField control={form.control} name="unit" render={({ field }) => ( <FormItem><FormLabel>Unit *</FormLabel><FormControl><Input placeholder="e.g., kg, ltr, pcs, month" {...field} disabled={isSubmitting} className="bg-input"/></FormControl><FormMessage /></FormItem> )} />
-                <FormField control={form.control} name="pricePerUnit" render={({ field }) => ( <FormItem><FormLabel>Price/Unit * (₹)</FormLabel><FormControl><Input type="number" step="0.01" placeholder="0.00" {...field} disabled={isSubmitting} className="bg-input"/></FormControl><FormMessage /></FormItem> )} />
-              </div>
-              <FormField control={form.control} name="totalCost" render={({ field }) => ( <FormItem><FormLabel>Total Cost * (₹)</FormLabel><FormControl><Input type="number" step="0.01" placeholder="0.00" {...field} disabled className="bg-muted/70" /></FormControl><FormMessage /></FormItem> )} />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <FormField control={form.control} name="purchaseDate" render={({ field }) => ( <FormItem><FormLabel>Purchase Date *</FormLabel><DatePicker date={field.value} onDateChange={field.onChange} id="expensePurchaseDate" disabled={isSubmitting} className="bg-input" /><FormMessage /></FormItem> )} />
-                <FormField control={form.control} name="vendor" render={({ field }) => ( <FormItem><FormLabel>Vendor (Optional)</FormLabel><FormControl><Input placeholder="e.g., Local Market, Dairy Farm" {...field} value={field.value ?? ""} disabled={isSubmitting} className="bg-input"/></FormControl><FormMessage /></FormItem> )} />
+                <FormField
+                  control={form.control}
+                  name="paymentMethod"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Payment Method *</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                        disabled={isSubmitting}
+                      >
+                        <FormControl>
+                          <SelectTrigger
+                            id="paymentMethod"
+                            className="bg-input"
+                          >
+                            <SelectValue placeholder="Select payment method" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {paymentMethods.map((method) => (
+                            <SelectItem key={method} value={method}>
+                              {method}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="purchaseDate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Purchase Date *</FormLabel>
+                      <DatePicker
+                        date={field.value}
+                        onDateChange={field.onChange}
+                        id="expensePurchaseDate"
+                        disabled={isSubmitting}
+                        className="bg-input"
+                      />
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
-              <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Notes (Optional)</FormLabel><FormControl><Textarea placeholder="e.g., Paid in cash, specific brand" {...field} value={field.value ?? ""} disabled={isSubmitting} className="bg-input min-h-[70px]" /></FormControl><FormMessage /></FormItem> )} />
+              <FormField
+                control={form.control}
+                name="vendor"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Vendor (Optional)</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="e.g., Local Market, Dairy Farm"
+                        {...field}
+                        value={field.value ?? ""}
+                        disabled={isSubmitting}
+                        className="bg-input"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="billImageUrl"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Bill Image URL (Optional)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="url"
+                        placeholder="https://example.com/your-bill.jpg"
+                        {...field}
+                        value={field.value ?? ""}
+                        disabled={isSubmitting}
+                        className="bg-input"
+                      />
+                    </FormControl>
+                    <FormDescription className="text-xs flex items-center gap-1">
+                      <Info size={12} />
+                      Direct file upload is not supported yet. Please upload your bill somewhere public and paste the link here.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="notes"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Notes (Optional)</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder="e.g., Paid in cash, specific brand for an item"
+                        {...field}
+                        value={field.value ?? ""}
+                        disabled={isSubmitting}
+                        className="bg-input min-h-[70px]"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
             </CardContent>
             <CardFooter>
               <Button type="submit" className="w-full" disabled={isSubmitting}>
-                {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {isSubmitting && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
                 Save Expense
               </Button>
             </CardFooter>
