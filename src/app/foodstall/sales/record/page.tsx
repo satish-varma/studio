@@ -53,14 +53,21 @@ export default function RecordFoodSalePage() {
     },
   });
 
-  const watchedSales = form.watch(["breakfastSales", "lunchSales", "dinnerSales", "snacksSales"]);
+  const breakfastSales = form.watch("breakfastSales");
+  const lunchSales = form.watch("lunchSales");
+  const dinnerSales = form.watch("dinnerSales");
+  const snacksSales = form.watch("snacksSales");
 
   useEffect(() => {
-    const [breakfast, lunch, dinner, snacks] = watchedSales;
-    const total = (Number(breakfast) || 0) + (Number(lunch) || 0) + (Number(dinner) || 0) + (Number(snacks) || 0);
+    const total =
+      (Number(breakfastSales) || 0) +
+      (Number(lunchSales) || 0) +
+      (Number(dinnerSales) || 0) +
+      (Number(snacksSales) || 0);
     setTotalSaleAmount(total);
+    // Set the value in the form state for validation purposes
     form.setValue("totalAmount", total, { shouldValidate: true });
-  }, [watchedSales, form]);
+  }, [breakfastSales, lunchSales, dinnerSales, snacksSales, form]);
 
   async function onSubmit(values: FoodSaleTransactionFormValues) {
     if (!user || !activeSiteId || !activeStallId || !db) {
