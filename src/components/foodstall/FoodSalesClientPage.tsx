@@ -122,8 +122,9 @@ export default function FoodSalesClientPage() {
             if(fetchedSales.length > 0) setCurrentPage(prev => prev + 1);
         } else if (direction === 'prev') {
             setIsLastPage(false);
-            setCurrentPage(prev => Math.max(1, prev - 1));
-            setIsFirstPageReached(fetchedSales.length < SALES_PER_PAGE || currentPage === 1);
+            const newCurrentPage = Math.max(1, currentPage - 1);
+            setCurrentPage(newCurrentPage);
+            setIsFirstPageReached(fetchedSales.length < SALES_PER_PAGE || newCurrentPage === 1);
         }
       } else {
         if (direction === 'initial') {
@@ -142,7 +143,7 @@ export default function FoodSalesClientPage() {
     } finally {
       setLoadingSales(false);
     }
-  }, [authLoading, user, activeSiteId, activeStallId, lastVisibleDoc, firstVisibleDoc, db, currentPage]);
+  }, [authLoading, user, activeSiteId, activeStallId, lastVisibleDoc, firstVisibleDoc, db]);
 
   useEffect(() => {
     document.title = "Food Stall Sales - StallSync";
