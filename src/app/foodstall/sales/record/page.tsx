@@ -6,11 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { foodMealTypes, foodSaleTransactionFormSchema, type FoodSaleTransactionFormValues, paymentMethods } from "@/types/food";
-import { ArrowLeft, PlusCircle, Trash2, Loader2, Info } from "lucide-react";
+import { foodSaleTransactionFormSchema, type FoodSaleTransactionFormValues, paymentMethods } from "@/types/food";
+import { ArrowLeft, Loader2, Info, IndianRupee, Utensils, Pizza, Soup } from "lucide-react";
 import Link from "next/link";
 import { useState, useEffect } from "react";
-import { useForm, useFieldArray } from "react-hook-form";
+import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useAuth } from "@/contexts/AuthContext";
@@ -42,44 +42,26 @@ export default function RecordFoodSalePage() {
   const form = useForm<FoodSaleTransactionFormValues>({
     resolver: zodResolver(foodSaleTransactionFormSchema),
     defaultValues: {
-      itemsSold: [{ itemName: "", quantity: 1, pricePerUnit: 0, totalPrice: 0 }],
+      breakfastSales: 0,
+      lunchSales: 0,
+      dinnerSales: 0,
+      snacksSales: 0,
+      totalAmount: 0,
       paymentMethod: "Cash",
       saleDate: new Date(),
+      notes: "",
     },
   });
 
-  const { fields, append, remove } = useFieldArray({
-    control: form.control,
-    name: "itemsSold",
-  });
-
-  const watchedItems = form.watch("itemsSold");
+  const watchedSales = form.watch(["breakfastSales", "lunchSales", "dinnerSales", "snacksSales"]);
 
   useEffect(() => {
-    const total = watchedItems.reduce((acc, item) => {
-      const quantity = Number(item.quantity) || 0;
-      const price = Number(item.pricePerUnit) || 0;
-      return acc + (quantity * price);
-    }, 0);
+    const [breakfast, lunch, dinner, snacks] = watchedSales;
+    const total = (Number(breakfast) || 0) + (Number(lunch) || 0) + (Number(dinner) || 0) + (Number(snacks) || 0);
     setTotalSaleAmount(total);
-    form.setValue("totalAmount", total);
-  }, [watchedItems, form]);
+    form.setValue("totalAmount", total, { shouldValidate: true });
+  }, [watchedSales, form]);
 
-  const handleItemChange = (index: number, field: keyof FoodSaleTransactionFormValues['itemsSold'][number], value: string | number) => {
-    const currentItem = { ...watchedItems[index] };
-    (currentItem as any)[field] = value;
-
-    if (field === 'quantity' || field === 'pricePerUnit') {
-      const quantity = Number(currentItem.quantity) || 0;
-      const price = Number(currentItem.pricePerUnit) || 0;
-      currentItem.totalPrice = quantity * price;
-    }
-    
-    const newItems = [...watchedItems];
-    newItems[index] = currentItem;
-    form.setValue("itemsSold", newItems, { shouldValidate: true });
-  };
-  
   async function onSubmit(values: FoodSaleTransactionFormValues) {
     if (!user || !activeSiteId || !activeStallId || !db) {
       toast({
@@ -92,12 +74,18 @@ export default function RecordFoodSalePage() {
     setIsSubmitting(true);
     try {
       const saleData = {
-        ...values,
+        breakfastSales: values.breakfastSales || 0,
+        lunchSales: values.lunchSales || 0,
+        dinnerSales: values.dinnerSales || 0,
+        snacksSales: values.snacksSales || 0,
+        totalAmount: values.totalAmount,
+        paymentMethod: values.paymentMethod,
+        notes: values.notes,
         siteId: activeSiteId,
         stallId: activeStallId,
         recordedByUid: user.uid,
         recordedByName: user.displayName || user.email,
-        saleDate: Timestamp.fromDate(values.saleDate), // Convert to Firestore Timestamp
+        saleDate: Timestamp.fromDate(values.saleDate),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -108,11 +96,14 @@ export default function RecordFoodSalePage() {
         description: `Sale of ₹${values.totalAmount.toFixed(2)} has been successfully recorded.`,
       });
       form.reset({
-        itemsSold: [{ itemName: "", quantity: 1, pricePerUnit: 0, totalPrice: 0 }],
+        breakfastSales: 0,
+        lunchSales: 0,
+        dinnerSales: 0,
+        snacksSales: 0,
+        totalAmount: 0,
         paymentMethod: "Cash",
         saleDate: new Date(),
         notes: "",
-        mealType: undefined
       });
     } catch (error: any) {
       console.error("Error recording food sale:", error);
@@ -148,7 +139,7 @@ export default function RecordFoodSalePage() {
     <div className="space-y-6">
       <PageHeader
         title="Record New Food Sale"
-        description="Enter the details of the food items sold."
+        description="Enter the total sales amount for each meal category."
         actions={
           <Link href="/foodstall/sales">
             <Button variant="outline" disabled={isSubmitting}>
@@ -161,41 +152,29 @@ export default function RecordFoodSalePage() {
         <form onSubmit={form.handleSubmit(onSubmit)}>
           <Card className="max-w-3xl mx-auto shadow-lg">
             <CardHeader>
-              <CardTitle>Sale Details</CardTitle>
-              <CardDescription>All fields marked with * are required.</CardDescription>
+              <CardTitle>Daily Sales Entry</CardTitle>
+              <CardDescription>Enter the total revenue collected for each category. At least one must be greater than zero.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                 <FormField control={form.control} name="saleDate" render={({ field }) => ( <FormItem><FormLabel>Sale Date & Time *</FormLabel><FormControl><Input id="saleDate" type="datetime-local" value={field.value ? new Date(field.value.getTime() - field.value.getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ''} onChange={e => field.onChange(new Date(e.target.value))} disabled={isSubmitting} className="bg-input" /></FormControl><FormMessage /></FormItem> )} />
-                 <FormField control={form.control} name="mealType" render={({ field }) => ( <FormItem><FormLabel>Meal Type</FormLabel><Select onValueChange={field.onChange} value={field.value || ""} disabled={isSubmitting}><FormControl><SelectTrigger id="mealType" className="bg-input"><SelectValue placeholder="Select meal type" /></SelectTrigger></FormControl><SelectContent>{foodMealTypes.map(type => ( <SelectItem key={type} value={type}>{type}</SelectItem> ))}</SelectContent></Select><FormMessage /></FormItem> )} />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+                 <FormField control={form.control} name="breakfastSales" render={({ field }) => (<FormItem><FormLabel className="flex items-center"><Utensils className="h-4 w-4 mr-2 text-muted-foreground"/>Breakfast Sales (₹)</FormLabel><FormControl><Input type="number" min="0" step="0.01" placeholder="0.00" {...field} disabled={isSubmitting} className="bg-input text-lg"/></FormControl><FormMessage /></FormItem>)} />
+                 <FormField control={form.control} name="lunchSales" render={({ field }) => (<FormItem><FormLabel className="flex items-center"><Soup className="h-4 w-4 mr-2 text-muted-foreground"/>Lunch Sales (₹)</FormLabel><FormControl><Input type="number" min="0" step="0.01" placeholder="0.00" {...field} disabled={isSubmitting} className="bg-input text-lg"/></FormControl><FormMessage /></FormItem>)} />
+                 <FormField control={form.control} name="dinnerSales" render={({ field }) => (<FormItem><FormLabel className="flex items-center"><Utensils className="h-4 w-4 mr-2 text-muted-foreground"/>Dinner Sales (₹)</FormLabel><FormControl><Input type="number" min="0" step="0.01" placeholder="0.00" {...field} disabled={isSubmitting} className="bg-input text-lg"/></FormControl><FormMessage /></FormItem>)} />
+                 <FormField control={form.control} name="snacksSales" render={({ field }) => (<FormItem><FormLabel className="flex items-center"><Pizza className="h-4 w-4 mr-2 text-muted-foreground"/>Snacks & Appetizers Sales (₹)</FormLabel><FormControl><Input type="number" min="0" step="0.01" placeholder="0.00" {...field} disabled={isSubmitting} className="bg-input text-lg"/></FormControl><FormMessage /></FormItem>)} />
               </div>
-
-              <div className="space-y-4">
-                <FormLabel>Items Sold *</FormLabel>
-                <div className="p-4 border rounded-md bg-muted/30 space-y-3">
-                  {fields.map((field, index) => (
-                    <div key={field.id} className="grid grid-cols-1 sm:grid-cols-[1fr,80px,110px,auto] items-end gap-3">
-                      <FormField control={form.control} name={`itemsSold.${index}.itemName`} render={({ field: itemField }) => (<FormItem><FormLabel className="text-xs">Item Name</FormLabel><FormControl><Input placeholder="e.g., Dosa, Coffee" {...itemField} onChange={e => handleItemChange(index, 'itemName', e.target.value)} disabled={isSubmitting} className="bg-input"/></FormControl><FormMessage /></FormItem>)} />
-                      <FormField control={form.control} name={`itemsSold.${index}.quantity`} render={({ field: itemField }) => (<FormItem><FormLabel className="text-xs">Qty</FormLabel><FormControl><Input type="number" min="1" placeholder="1" {...itemField} onChange={e => handleItemChange(index, 'quantity', e.target.value)} disabled={isSubmitting} className="bg-input"/></FormControl><FormMessage /></FormItem>)} />
-                      <FormField control={form.control} name={`itemsSold.${index}.pricePerUnit`} render={({ field: itemField }) => (<FormItem><FormLabel className="text-xs">Price/Unit (₹)</FormLabel><FormControl><Input type="number" min="0" step="0.01" placeholder="0.00" {...itemField} onChange={e => handleItemChange(index, 'pricePerUnit', e.target.value)} disabled={isSubmitting} className="bg-input"/></FormControl><FormMessage /></FormItem>)} />
-                      <Button type="button" variant="ghost" size="icon" className="text-destructive hover:bg-destructive/10" onClick={() => remove(index)} disabled={fields.length <= 1 || isSubmitting} aria-label={`Remove item ${index + 1}`}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  ))}
-                  <Button type="button" variant="outline" size="sm" className="w-full border-dashed" onClick={() => append({ itemName: "", quantity: 1, pricePerUnit: 0, totalPrice: 0 })} disabled={isSubmitting}>
-                    <PlusCircle className="mr-2 h-4 w-4" /> Add Item
-                  </Button>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <FormField control={form.control} name="paymentMethod" render={({ field }) => (<FormItem><FormLabel>Payment Method</FormLabel><Select onValueChange={field.onChange} value={field.value || "Cash"} disabled={isSubmitting}><FormControl><SelectTrigger id="paymentMethod" className="bg-input"><SelectValue placeholder="Select payment method" /></SelectTrigger></FormControl><SelectContent>{paymentMethods.map(method => ( <SelectItem key={method} value={method}>{method}</SelectItem> ))}</SelectContent></Select><FormMessage /></FormItem>)} />
-                  <FormField control={form.control} name="notes" render={({ field }) => (<FormItem><FormLabel>Notes (Optional)</FormLabel><FormControl><Textarea placeholder="e.g., Customer preference, discount applied" {...field} value={field.value ?? ""} disabled={isSubmitting} className="bg-input min-h-[40px]"/></FormControl><FormMessage /></FormItem>)} />
-              </div>
-
+              <FormField control={form.control} name="totalAmount" render={({ field }) => (<FormItem><FormMessage /></FormItem>)} />
               <div className="pt-4 text-right">
-                <p className="text-2xl font-bold">Total Sale: ₹{totalSaleAmount.toFixed(2)}</p>
+                <p className="text-sm text-muted-foreground">Total Sale Amount</p>
+                <p className="text-3xl font-bold text-foreground" data-testid="total-sale-amount">
+                  ₹{totalSaleAmount.toFixed(2)}
+                </p>
               </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-4 border-t">
+                 <FormField control={form.control} name="saleDate" render={({ field }) => ( <FormItem><FormLabel>Sale Date & Time *</FormLabel><FormControl><Input id="saleDate" type="datetime-local" value={field.value ? new Date(field.value.getTime() - field.value.getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ''} onChange={e => field.onChange(new Date(e.target.value))} disabled={isSubmitting} className="bg-input" /></FormControl><FormMessage /></FormItem> )} />
+                 <FormField control={form.control} name="paymentMethod" render={({ field }) => (<FormItem><FormLabel>Primary Payment Method</FormLabel><Select onValueChange={field.onChange} value={field.value || "Cash"} disabled={isSubmitting}><FormControl><SelectTrigger id="paymentMethod" className="bg-input"><SelectValue placeholder="Select payment method" /></SelectTrigger></FormControl><SelectContent>{paymentMethods.map(method => ( <SelectItem key={method} value={method}>{method}</SelectItem> ))}</SelectContent></Select><FormMessage /></FormItem>)} />
+              </div>
+              <FormField control={form.control} name="notes" render={({ field }) => (<FormItem><FormLabel>Notes (Optional)</FormLabel><FormControl><Textarea placeholder="e.g., Evening rush, special event" {...field} value={field.value ?? ""} disabled={isSubmitting} className="bg-input min-h-[70px]"/></FormControl><FormMessage /></FormItem>)} />
             </CardContent>
             <CardFooter>
               <Button type="submit" className="w-full" size="lg" disabled={isSubmitting}>

@@ -57,19 +57,6 @@ export interface FoodItemExpenseAdmin extends Omit<FoodItemExpense, 'purchaseDat
 
 
 // --------------- Food Sale Tracking ---------------
-export const foodMealTypes = [
-  "Breakfast",
-  "Lunch",
-  "Dinner",
-  "Snacks & Appetizers",
-  "Desserts",
-  "Beverages (Prepared)", // e.g., coffee, tea, juice sold
-  "Combos & Platters",
-  "Other",
-] as const;
-
-export type FoodMealType = (typeof foodMealTypes)[number];
-
 export const paymentMethods = [
     "Cash",
     "Card",
@@ -78,24 +65,29 @@ export const paymentMethods = [
     "Other",
 ] as const;
 
-export const foodSaleItemSchema = z.object({
-  itemName: z.string().min(1, { message: "Item name cannot be empty."}),
-  category: z.string().optional().nullable(), // Optional category for sold food item
-  quantity: z.coerce.number().positive({ message: "Quantity must be > 0."}),
-  pricePerUnit: z.coerce.number().min(0, { message: "Price cannot be negative."}),
-  totalPrice: z.coerce.number().min(0),
-});
-
-export type FoodSaleItem = z.infer<typeof foodSaleItemSchema>;
+// The concept of individual items is removed in favor of lump sums.
+// foodSaleItemSchema, FoodSaleItem, and foodMealTypes are no longer needed.
 
 export const foodSaleTransactionFormSchema = z.object({
-  mealType: z.enum(foodMealTypes).optional().nullable(),
-  itemsSold: z.array(foodSaleItemSchema).min(1, "At least one item must be sold."),
+  breakfastSales: z.coerce.number().min(0, "Sales must be non-negative").optional(),
+  lunchSales: z.coerce.number().min(0, "Sales must be non-negative").optional(),
+  dinnerSales: z.coerce.number().min(0, "Sales must be non-negative").optional(),
+  snacksSales: z.coerce.number().min(0, "Sales must be non-negative").optional(),
+  
   totalAmount: z.coerce.number().min(0, "Total amount must be non-negative"),
   saleDate: z.date({ required_error: "Sale date is required." }),
   notes: z.string().optional().nullable(),
   paymentMethod: z.enum(paymentMethods).optional().nullable().default("Cash"),
-});
+}).refine(data => 
+  (data.breakfastSales || 0) + 
+  (data.lunchSales || 0) + 
+  (data.dinnerSales || 0) + 
+  (data.snacksSales || 0) > 0, 
+  {
+    message: "At least one sales category must have a value greater than zero.",
+    path: ["totalAmount"], // Attach error to a field that is always visible
+  }
+);
 
 export type FoodSaleTransactionFormValues = z.infer<typeof foodSaleTransactionFormSchema>;
 

@@ -11,7 +11,6 @@ import {
   orderBy, 
   limit, 
   startAfter, 
-  endBefore, 
   getDocs,
   Timestamp,
   QueryConstraint,
@@ -22,14 +21,12 @@ import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Info, ListFilter, CalendarIcon } from "lucide-react";
+import { Loader2, Info, CalendarIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { FoodSalesTable } from "./FoodSalesTable";
-import { foodMealTypes } from "@/types/food";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { format, subDays, startOfDay, endOfDay } from "date-fns";
 import type { DateRange } from "react-day-picker";
@@ -58,7 +55,6 @@ export default function FoodSalesClientPage() {
     from: startOfDay(subDays(new Date(), 29)),
     to: endOfDay(new Date()),
   });
-  const [mealTypeFilter, setMealTypeFilter] = useState<string>("all");
 
   const [firstVisibleDoc, setFirstVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
   const [lastVisibleDoc, setLastVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
@@ -84,7 +80,7 @@ export default function FoodSalesClientPage() {
 
     setLoadingSales(true);
     setErrorSales(null);
-    console.log(`${LOG_PREFIX} Fetching sales. Direction: ${direction}, Site: ${activeSiteId}, Stall: ${activeStallId}, MealType: ${mealTypeFilter}`);
+    console.log(`${LOG_PREFIX} Fetching sales. Direction: ${direction}, Site: ${activeSiteId}, Stall: ${activeStallId}`);
 
     const salesCollectionRef = collection(db, "foodSaleTransactions");
     let qConstraints: QueryConstraint[] = [
@@ -93,10 +89,6 @@ export default function FoodSalesClientPage() {
       where("saleDate", ">=", Timestamp.fromDate(startOfDay(dateRange.from))),
       where("saleDate", "<=", Timestamp.fromDate(endOfDay(dateRange.to))),
     ];
-
-    if (mealTypeFilter !== "all") {
-      qConstraints.push(where("mealType", "==", mealTypeFilter));
-    }
     
     qConstraints.push(orderBy("saleDate", "desc"));
 
@@ -163,19 +155,20 @@ export default function FoodSalesClientPage() {
     } finally {
       setLoadingSales(false);
     }
-  }, [authLoading, user, activeSiteId, activeStallId, dateRange, mealTypeFilter, lastVisibleDoc, firstVisibleDoc, db, currentPage]);
-
-  useEffect(() => {
-    document.title = "Food Stall Sales - StallSync";
-    fetchSales('initial');
-     return () => { document.title = "StallSync - Stock Management"; }
-  }, [fetchSales]);
+  }, [authLoading, user, activeSiteId, activeStallId, dateRange, lastVisibleDoc, firstVisibleDoc, db, currentPage]);
 
   const handleFilterChange = () => {
     setFirstVisibleDoc(null);
     setLastVisibleDoc(null);
     setCurrentPage(1);
+    fetchSales('initial');
   };
+
+  useEffect(() => {
+    document.title = "Food Stall Sales - StallSync";
+    handleFilterChange(); // Initial fetch
+  }, [dateRange]); // Refetch when dateRange changes
+
   
   if (authLoading) {
     return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading user context...</p></div>;
@@ -203,20 +196,9 @@ export default function FoodSalesClientPage() {
             </Button>
           </PopoverTrigger>
           <PopoverContent className="w-auto p-0" align="start">
-            <Calendar initialFocus mode="range" defaultMonth={dateRange?.from} selected={dateRange} onSelect={(range) => { setDateRange(range); handleFilterChange(); }} numberOfMonths={2} disabled={(date) => date > new Date() || date < new Date("2020-01-01")}/>
+            <Calendar initialFocus mode="range" defaultMonth={dateRange?.from} selected={dateRange} onSelect={setDateRange} numberOfMonths={2} disabled={(date) => date > new Date() || date < new Date("2020-01-01")}/>
           </PopoverContent>
         </Popover>
-
-        <Select value={mealTypeFilter} onValueChange={(value) => { setMealTypeFilter(value); handleFilterChange(); }}>
-          <SelectTrigger className="w-full sm:w-[220px] bg-input">
-            <ListFilter className="mr-2 h-4 w-4 text-muted-foreground" />
-            <SelectValue placeholder="Filter by meal type" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Meal Types</SelectItem>
-            {foodMealTypes.map(type => (<SelectItem key={type} value={type}>{type}</SelectItem>))}
-          </SelectContent>
-        </Select>
       </div>
 
       {loadingSales && sales.length === 0 && (
