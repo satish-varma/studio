@@ -18,6 +18,7 @@ import {
   FileText, 
   UtensilsCrossed, 
   ChevronDown,
+  ShieldAlert, // Added for Admin section
 } from "lucide-react";
 import {
   SidebarMenu,
@@ -35,6 +36,7 @@ import { cn } from "@/lib/utils";
 interface NavSubItem {
   href: string;
   label: string;
+  roles?: UserRole[];
 }
 
 interface NavItem {
@@ -48,46 +50,63 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ['staff', 'manager', 'admin'], exactMatch: true },
-  { href: "/items", label: "Stock Items", icon: Package, roles: ['staff', 'manager', 'admin'] },
-  { href: "/sales/record", label: "Record Sale", icon: ShoppingCart, roles: ['staff', 'manager', 'admin'] },
-  { href: "/sales/history", label: "Sales History", icon: History, roles: ['staff', 'manager', 'admin'] },
-  { href: "/reports", label: "Reports", icon: BarChart3, roles: ['manager', 'admin'] },
+  
   { 
-    href: "/foodstall", 
-    label: "Food Stall Management", 
+    href: "/items", 
+    label: "Stock & Sales", 
+    icon: ShoppingCart, 
+    roles: ['staff', 'manager', 'admin'],
+    subItems: [
+      { href: "/items", label: "Stock Items", roles: ['staff', 'manager', 'admin'] },
+      { href: "/sales/record", label: "Record Sale", roles: ['staff', 'manager', 'admin'] },
+      { href: "/sales/history", label: "Sales History", roles: ['staff', 'manager', 'admin'] },
+      { href: "/reports", label: "Sales Reports", roles: ['manager', 'admin'] },
+      { href: "/admin/activity-log", label: "Stock Activity Log", roles: ['admin'] },
+    ]
+  },
+  
+  { 
+    href: "/foodstall/dashboard",
+    label: "Food Stall", 
     icon: UtensilsCrossed, 
     roles: ['staff', 'manager', 'admin'],
     subItems: [
-      { href: "/foodstall/dashboard", label: "Dashboard" },
-      { href: "/foodstall/sales", label: "Sales History" },
-      { href: "/foodstall/sales/record", label: "Record Sale" },
-      { href: "/foodstall/expenses", label: "Expenses List" },
-      { href: "/foodstall/expenses/record", label: "Record Expense" },
-      { href: "/foodstall/reports", label: "Financial Reports" },
-      { href: "/foodstall/activity-log", label: "Activity Log" },
+      { href: "/foodstall/dashboard", label: "Dashboard", roles: ['staff', 'manager', 'admin'] },
+      { href: "/foodstall/sales", label: "Sales", roles: ['staff', 'manager', 'admin'] },
+      { href: "/foodstall/expenses", label: "Expenses", roles: ['staff', 'manager', 'admin'] },
+      { href: "/foodstall/reports", label: "Reports", roles: ['manager', 'admin'] },
+      { href: "/foodstall/activity-log", label: "Activity Log", roles: ['manager', 'admin'] },
     ]
   },
-  { href: "/users", label: "User Management", icon: Users, roles: ['admin'] },
-  { href: "/admin/sites", label: "Manage Sites & Stalls", icon: Building, roles: ['admin'] },
-  { href: "/admin/activity-log", label: "Activity Log", icon: FileText, roles: ['admin'] },
+
+  {
+    href: "/users",
+    label: "Administration",
+    icon: ShieldAlert,
+    roles: ['admin'],
+    subItems: [
+        { href: "/users", label: "User Management", roles: ['admin'] },
+        { href: "/admin/sites", label: "Manage Sites & Stalls", roles: ['admin'] },
+    ]
+  },
+
   { href: "/profile", label: "My Profile", icon: UserCircle, roles: ['staff', 'manager', 'admin'] },
   { href: "/settings", label: "Settings", icon: Settings, roles: ['manager', 'admin'] },
   { href: "/support", label: "Support", icon: LifeBuoy, roles: ['staff', 'manager', 'admin'] },
 ];
 
+
 export function AppSidebarNav() {
   const pathname = usePathname();
   const { user } = useAuth();
   
-  // State to track which menus are open. Key is the item.href
   const [openMenus, setOpenMenus] = useState<Set<string>>(new Set());
 
-  // Automatically open the parent menu if the current path is inside it.
   useEffect(() => {
-    const activeParent = navItems.find(item => item.subItems && pathname.startsWith(item.href));
+    const activeParent = navItems.find(item => item.subItems && pathname.startsWith(item.href) && !item.exactMatch);
     if (activeParent) {
       setOpenMenus(prev => {
-        if (prev.has(activeParent.href)) return prev; // Avoid unnecessary re-renders
+        if (prev.has(activeParent.href)) return prev;
         const newSet = new Set(prev);
         newSet.add(activeParent.href);
         return newSet;
@@ -121,13 +140,20 @@ export function AppSidebarNav() {
         const isMenuOpen = hasSubItems && openMenus.has(item.href);
 
         if (hasSubItems) {
-          // This button only toggles, it doesn't navigate.
+          const filteredSubItems = item.subItems!.filter(subItem => 
+            !subItem.roles || subItem.roles.includes(userRole)
+          );
+
+          if (filteredSubItems.length === 0) {
+            return null; // Don't render the parent if no sub-items are visible
+          }
+          
           return (
             <SidebarMenuItem key={item.href}>
               <SidebarMenuButton
-                isActive={isActive} // The section is active if path is inside it
+                isActive={isActive && !isMenuOpen} 
                 tooltip={{ children: item.label, className: "bg-primary text-primary-foreground" }}
-                className="justify-between" // To push chevron to the end
+                className="justify-between"
                 onClick={() => toggleMenu(item.href)}
                 aria-expanded={isMenuOpen}
               >
@@ -140,7 +166,7 @@ export function AppSidebarNav() {
 
               {isMenuOpen && (
                 <SidebarMenuSub>
-                  {item.subItems!.map((subItem) => {
+                  {filteredSubItems.map((subItem) => {
                     const isSubActive = pathname.startsWith(subItem.href);
                     return (
                       <SidebarMenuSubItem key={subItem.href}>
@@ -158,7 +184,6 @@ export function AppSidebarNav() {
           );
         }
 
-        // Render regular non-collapsible menu items
         return (
           <SidebarMenuItem key={item.href}>
             <Link href={item.href} passHref legacyBehavior>
