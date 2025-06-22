@@ -15,7 +15,8 @@ import {
   Timestamp,
   QueryConstraint,
   DocumentSnapshot,
-  DocumentData
+  DocumentData,
+  endBefore
 } from "firebase/firestore";
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
@@ -32,7 +33,7 @@ import { format, subDays, startOfDay, endOfDay } from "date-fns";
 import type { DateRange } from "react-day-picker";
 
 const LOG_PREFIX = "[FoodSalesClientPage]";
-const SALES_PER_PAGE = 15;
+const SALES_PER_PAGE = 30; // Show a month at a time
 
 if (!getApps().length) {
   try {
@@ -51,11 +52,6 @@ export default function FoodSalesClientPage() {
   const [loadingSales, setLoadingSales] = useState(true);
   const [errorSales, setErrorSales] = useState<string | null>(null);
   
-  const [dateRange, setDateRange] = useState<DateRange | undefined>({
-    from: startOfDay(subDays(new Date(), 29)),
-    to: endOfDay(new Date()),
-  });
-
   const [firstVisibleDoc, setFirstVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
   const [lastVisibleDoc, setLastVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
   const [isLastPage, setIsLastPage] = useState(false);
@@ -71,13 +67,7 @@ export default function FoodSalesClientPage() {
       setSales([]);
       return;
     }
-     if (!dateRange?.from || !dateRange?.to) {
-      setErrorSales("Please select a valid date range.");
-      setLoadingSales(false);
-      setSales([]);
-      return;
-    }
-
+    
     setLoadingSales(true);
     setErrorSales(null);
     console.log(`${LOG_PREFIX} Fetching sales. Direction: ${direction}, Site: ${activeSiteId}, Stall: ${activeStallId}`);
@@ -86,12 +76,9 @@ export default function FoodSalesClientPage() {
     let qConstraints: QueryConstraint[] = [
       where("siteId", "==", activeSiteId),
       where("stallId", "==", activeStallId),
-      where("saleDate", ">=", Timestamp.fromDate(startOfDay(dateRange.from))),
-      where("saleDate", "<=", Timestamp.fromDate(endOfDay(dateRange.to))),
+      orderBy("saleDate", "desc"),
     ];
     
-    qConstraints.push(orderBy("saleDate", "desc"));
-
     if (direction === 'next' && lastVisibleDoc) {
       qConstraints.push(startAfter(lastVisibleDoc));
     } else if (direction === 'prev' && firstVisibleDoc) {
@@ -108,7 +95,7 @@ export default function FoodSalesClientPage() {
       let fetchedSales: FoodSaleTransaction[] = querySnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
-        saleDate: (doc.data().saleDate as Timestamp).toDate().toISOString(),
+        saleDate: (doc.data().saleDate as Timestamp).toDate(),
       } as FoodSaleTransaction));
 
       if (direction === 'prev') {
@@ -155,19 +142,12 @@ export default function FoodSalesClientPage() {
     } finally {
       setLoadingSales(false);
     }
-  }, [authLoading, user, activeSiteId, activeStallId, dateRange, lastVisibleDoc, firstVisibleDoc, db, currentPage]);
-
-  const handleFilterChange = () => {
-    setFirstVisibleDoc(null);
-    setLastVisibleDoc(null);
-    setCurrentPage(1);
-    fetchSales('initial');
-  };
+  }, [authLoading, user, activeSiteId, activeStallId, lastVisibleDoc, firstVisibleDoc, db, currentPage]);
 
   useEffect(() => {
     document.title = "Food Stall Sales - StallSync";
-    handleFilterChange(); // Initial fetch
-  }, [dateRange]); // Refetch when dateRange changes
+    fetchSales('initial');
+  }, [fetchSales]);
 
   
   if (authLoading) {
@@ -187,20 +167,6 @@ export default function FoodSalesClientPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row gap-4 p-4 border rounded-lg bg-card shadow-sm">
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button variant={"outline"} className={cn("w-full sm:w-[260px] justify-start text-left font-normal bg-input", !dateRange && "text-muted-foreground")}>
-              <CalendarIcon className="mr-2 h-4 w-4" />
-              {dateRange?.from ? (dateRange.to ? (`${format(dateRange.from, "LLL dd, y")} - ${format(dateRange.to, "LLL dd, y")}`) : format(dateRange.from, "LLL dd, y")) : (<span>Pick a date range</span>)}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-0" align="start">
-            <Calendar initialFocus mode="range" defaultMonth={dateRange?.from} selected={dateRange} onSelect={setDateRange} numberOfMonths={2} disabled={(date) => date > new Date() || date < new Date("2020-01-01")}/>
-          </PopoverContent>
-        </Popover>
-      </div>
-
       {loadingSales && sales.length === 0 && (
         <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading sales...</p></div>
       )}

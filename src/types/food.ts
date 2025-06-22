@@ -65,8 +65,12 @@ export const paymentMethods = [
     "Other",
 ] as const;
 
-// The concept of individual items is removed in favor of lump sums.
-// foodSaleItemSchema, FoodSaleItem, and foodMealTypes are no longer needed.
+export const paymentEntrySchema = z.object({
+    method: z.enum(paymentMethods, { required_error: "Payment method is required."}),
+    amount: z.coerce.number().min(0, "Amount must be a non-negative number.")
+});
+
+export type PaymentEntry = z.infer<typeof paymentEntrySchema>;
 
 export const foodSaleTransactionFormSchema = z.object({
   breakfastSales: z.coerce.number().min(0, "Sales must be non-negative").optional(),
@@ -77,7 +81,7 @@ export const foodSaleTransactionFormSchema = z.object({
   totalAmount: z.coerce.number().min(0, "Total amount must be non-negative"),
   saleDate: z.date({ required_error: "Sale date is required." }),
   notes: z.string().optional().nullable(),
-  paymentMethod: z.enum(paymentMethods).optional().nullable().default("Cash"),
+  paymentMethods: z.array(paymentEntrySchema).min(1, "At least one payment method is required."),
 }).refine(data => 
   (data.breakfastSales || 0) + 
   (data.lunchSales || 0) + 
@@ -85,14 +89,23 @@ export const foodSaleTransactionFormSchema = z.object({
   (data.snacksSales || 0) > 0, 
   {
     message: "At least one sales category must have a value greater than zero.",
-    path: ["totalAmount"], // Attach error to a field that is always visible
+    path: ["totalAmount"], 
   }
-);
+).refine(data => {
+    const salesTotal = (data.breakfastSales || 0) + (data.lunchSales || 0) + (data.dinnerSales || 0) + (data.snacksSales || 0);
+    const paymentsTotal = data.paymentMethods.reduce((sum, p) => sum + p.amount, 0);
+    return Math.abs(salesTotal - paymentsTotal) < 0.01; // Allow for floating point inaccuracies
+}, {
+    message: "Total of all payment methods must equal the total sales amount.",
+    path: ["paymentMethods"],
+});
+
 
 export type FoodSaleTransactionFormValues = z.infer<typeof foodSaleTransactionFormSchema>;
 
-export interface FoodSaleTransaction extends FoodSaleTransactionFormValues {
-  id: string; // Firestore document ID
+export interface FoodSaleTransaction extends Omit<FoodSaleTransactionFormValues, 'paymentMethods'> {
+  id: string; // Firestore document ID (YYYY-MM-DD_stallId)
+  paymentMethods: PaymentEntry[];
   siteId: string;
   stallId: string;
   recordedByUid: string;
@@ -100,7 +113,6 @@ export interface FoodSaleTransaction extends FoodSaleTransactionFormValues {
   createdAt: string; // ISO date string
   updatedAt: string; // ISO date string
 }
-
 
 export interface FoodSaleTransactionAdmin extends Omit<FoodSaleTransaction, 'saleDate' | 'createdAt' | 'updatedAt'> {
   saleDate: Timestamp;
