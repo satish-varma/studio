@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
@@ -71,10 +72,13 @@ export default function FoodExpensesClientPage() {
   const [currentPage, setCurrentPage] = useState(1);
 
   const fetchExpenses = useCallback(async (direction: 'initial' | 'next' | 'prev' = 'initial') => {
-    if (authLoading || !db || !user || !activeSiteId || !activeStallId) {
-      // Guard clauses at the top of the component render handle user feedback, this just prevents fetching
+    if (authLoading || !db || !user || !activeSiteId) {
       if (!authLoading) setLoadingExpenses(false);
       return;
+    }
+    if (!activeStallId && user.role !== 'admin') {
+        if (!authLoading) setLoadingExpenses(false);
+        return;
     }
     
     setLoadingExpenses(true);
@@ -87,8 +91,10 @@ export default function FoodExpensesClientPage() {
     const expensesCollectionRef = collection(db, "foodItemExpenses");
     let qConstraints: QueryConstraint[] = [
       where("siteId", "==", activeSiteId),
-      where("stallId", "==", activeStallId),
     ];
+    if (activeStallId) {
+        qConstraints.push(where("stallId", "==", activeStallId));
+    }
     
     const now = new Date();
     let startDate: Date | null = null;
@@ -235,13 +241,13 @@ export default function FoodExpensesClientPage() {
     );
   }
 
-  if (!activeStallId) {
+  if (!activeStallId && user.role !== 'admin') {
     return (
       <Alert variant="default" className="border-primary/50">
         <Info className="h-4 w-4" />
         <AlertTitle>Stall Selection Required</AlertTitle>
         <AlertDescription>
-          Food stall data is specific to each stall. Please select a specific stall from the header menu to view its expenses.
+          Food stall data is specific to each stall. Please select a specific stall from the header menu to view its expenses. Admins may view all stalls by not selecting one.
         </AlertDescription>
       </Alert>
     );
@@ -265,7 +271,10 @@ export default function FoodExpensesClientPage() {
                 <div className="text-2xl font-bold">
                     {loadingExpenses && totalExpensesAmount === 0 ? <Loader2 className="h-6 w-6 animate-spin"/> : `₹${totalExpensesAmount.toFixed(2)}`}
                 </div>
-                <p className="text-xs text-muted-foreground">Total expenses for the selected period and category.</p>
+                <p className="text-xs text-muted-foreground">
+                    {user.role === 'admin' && !activeStallId ? 'Total for all stalls in this site. ' : ''}
+                    Total expenses for the selected period and category.
+                </p>
             </CardContent>
         </Card>
 

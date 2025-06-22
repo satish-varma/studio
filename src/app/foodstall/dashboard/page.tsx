@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect } from "react";
@@ -7,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { DollarSign, ShoppingBag, Utensils, ArrowRight, LineChart, ClipboardList, Loader2, Info } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
-import { getFirestore, collection, query, where, onSnapshot, Timestamp } from "firebase/firestore";
+import { getFirestore, collection, query, where, onSnapshot, Timestamp, QueryConstraint } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { startOfDay, endOfDay } from "date-fns";
@@ -42,9 +43,7 @@ export default function FoodStallDashboardPage() {
         return;
     }
     
-    // If no specific stall is selected, we reset stats but don't start listeners.
-    // The UI will prompt the user to select a stall.
-    if (!activeStallId) {
+    if (!activeStallId && user?.role !== 'admin') {
         setTodaysSales(0);
         setTodaysExpenses(0);
         setLoading(false);
@@ -55,15 +54,17 @@ export default function FoodStallDashboardPage() {
 
     const todayStart = Timestamp.fromDate(startOfDay(new Date()));
     const todayEnd = Timestamp.fromDate(endOfDay(new Date()));
-
-    // Listener for today's sales
-    const salesQuery = query(
-        collection(db, "foodSaleTransactions"),
+    
+    const baseSalesQueryConstraints: QueryConstraint[] = [
         where("siteId", "==", activeSiteId),
-        where("stallId", "==", activeStallId),
         where("saleDate", ">=", todayStart),
         where("saleDate", "<=", todayEnd)
-    );
+    ];
+    if (activeStallId) {
+      baseSalesQueryConstraints.push(where("stallId", "==", activeStallId));
+    }
+    const salesQuery = query(collection(db, "foodSaleTransactions"), ...baseSalesQueryConstraints);
+
     const unsubscribeSales = onSnapshot(salesQuery, (snapshot) => {
         let total = 0;
         snapshot.forEach(doc => {
@@ -71,20 +72,22 @@ export default function FoodStallDashboardPage() {
             total += sale.totalAmount;
         });
         setTodaysSales(total);
-        setLoading(false); // Set loading to false once sales data is fetched
+        setLoading(false);
     }, (error) => {
         console.error("Error fetching today's food sales:", error);
         setLoading(false);
     });
 
-    // Listener for today's expenses
-    const expensesQuery = query(
-        collection(db, "foodItemExpenses"),
+    const baseExpensesQueryConstraints: QueryConstraint[] = [
         where("siteId", "==", activeSiteId),
-        where("stallId", "==", activeStallId),
         where("purchaseDate", ">=", todayStart),
         where("purchaseDate", "<=", todayEnd)
-    );
+    ];
+     if (activeStallId) {
+      baseExpensesQueryConstraints.push(where("stallId", "==", activeStallId));
+    }
+    const expensesQuery = query(collection(db, "foodItemExpenses"), ...baseExpensesQueryConstraints);
+
     const unsubscribeExpenses = onSnapshot(expensesQuery, (snapshot) => {
         let total = 0;
         snapshot.forEach(doc => {
@@ -92,7 +95,7 @@ export default function FoodStallDashboardPage() {
             total += expense.totalCost;
         });
         setTodaysExpenses(total);
-        setLoading(false); // Set loading to false once expenses data is fetched
+        setLoading(false);
     }, (error) => {
         console.error("Error fetching today's food expenses:", error);
         setLoading(false);
@@ -102,7 +105,7 @@ export default function FoodStallDashboardPage() {
         unsubscribeSales();
         unsubscribeExpenses();
     };
-  }, [activeSiteId, activeStallId, authLoading]);
+  }, [activeSiteId, activeStallId, authLoading, user?.role]);
 
   const netProfit = todaysSales - todaysExpenses;
 
@@ -140,7 +143,6 @@ export default function FoodStallDashboardPage() {
     );
   }
 
-  // Changed this check to only require activeSiteId to render the main page
   if (!activeSiteId) {
     return (
         <div className="space-y-6">
@@ -166,12 +168,21 @@ export default function FoodStallDashboardPage() {
         description="Overview of your food stall's financial health and operations."
       />
 
-      {!activeStallId && (
+      {!activeStallId && user?.role !== 'admin' && (
         <Alert variant="default" className="border-primary/50">
             <Info className="h-4 w-4" />
             <AlertTitle>Select a Stall</AlertTitle>
             <AlertDescription>
-                Please select a specific stall from the header to see its live sales and expense data.
+                Please select a specific stall from the header to see its live sales and expense data. Admins can view aggregated data for all stalls by not selecting a specific stall.
+            </AlertDescription>
+        </Alert>
+      )}
+       {!activeStallId && user?.role === 'admin' && (
+        <Alert variant="default" className="border-primary/50">
+            <Info className="h-4 w-4" />
+            <AlertTitle>Viewing All Stalls</AlertTitle>
+            <AlertDescription>
+                You are currently viewing aggregated sales and expense data for all stalls within this site.
             </AlertDescription>
         </Alert>
       )}
@@ -242,7 +253,7 @@ export default function FoodStallDashboardPage() {
                     <p className="text-sm text-muted-foreground">{item.description}</p>
                 </CardContent>
                 <CardFooter>
-                    <Button asChild className="w-full" disabled={item.disabled}>
+                    <Button asChild className="w-full" disabled={item.disabled || (!activeStallId && user?.role !== 'admin')}>
                         <Link href={item.href}>
                             {item.cta} <ArrowRight className="ml-2 h-4 w-4" />
                         </Link>

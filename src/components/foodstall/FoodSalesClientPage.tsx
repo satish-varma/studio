@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -60,9 +61,13 @@ export default function FoodSalesClientPage() {
   const [currentPage, setCurrentPage] = useState(1);
 
   const fetchSales = useCallback(async (direction: 'initial' | 'next' | 'prev' = 'initial') => {
-    if (authLoading || !db || !user || !activeSiteId || !activeStallId) {
+    if (authLoading || !db || !user || !activeSiteId) {
       if (!authLoading) setLoadingSales(false);
       return;
+    }
+     if (!activeStallId && user.role !== 'admin') {
+        if (!authLoading) setLoadingSales(false);
+        return;
     }
     
     setLoadingSales(true);
@@ -72,8 +77,10 @@ export default function FoodSalesClientPage() {
     const salesCollectionRef = collection(db, "foodSaleTransactions");
     let qConstraints: QueryConstraint[] = [
       where("siteId", "==", activeSiteId),
-      where("stallId", "==", activeStallId),
     ];
+    if (activeStallId) {
+      qConstraints.push(where("stallId", "==", activeStallId));
+    }
     
     if (direction === 'next' && pageCursors.current.last) {
         qConstraints.push(orderBy("saleDate", "desc"));
@@ -140,6 +147,7 @@ export default function FoodSalesClientPage() {
     document.title = "Food Stall Sales - StallSync";
     pageCursors.current = { first: null, last: null }; // Reset cursors on context change
     fetchSales('initial');
+    return () => { document.title = "StallSync - Stock Management"; }
   }, [user, activeSiteId, activeStallId, fetchSales]);
 
   const handleNextPage = () => {
@@ -182,13 +190,13 @@ export default function FoodSalesClientPage() {
     );
   }
 
-  if (!activeStallId) {
+  if (!activeStallId && user.role !== 'admin') {
     return (
       <Alert variant="default" className="border-primary/50">
         <Info className="h-4 w-4" />
         <AlertTitle>Stall Selection Required</AlertTitle>
         <AlertDescription>
-          Food stall data is specific to each stall. Please select a specific stall from the header menu to view its sales history.
+          Food stall data is specific to each stall. Please select a specific stall from the header menu to view its sales history. Admins may view all stalls by not selecting one.
         </AlertDescription>
       </Alert>
     );
@@ -196,6 +204,15 @@ export default function FoodSalesClientPage() {
 
   return (
     <div className="space-y-4">
+      {user.role === 'admin' && !activeStallId && (
+          <Alert variant="default" className="border-primary/50">
+            <Info className="h-4 w-4" />
+            <AlertTitle>Viewing All Stalls</AlertTitle>
+            <AlertDescription>
+                You are currently viewing aggregated sales data for all stalls within this site.
+            </AlertDescription>
+        </Alert>
+      )}
       {loadingSales && sales.length === 0 && (
         <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading sales...</p></div>
       )}
