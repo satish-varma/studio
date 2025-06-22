@@ -68,17 +68,24 @@ export default function RecordFoodSalePage() {
     name: "paymentMethods",
   });
   
-  const watchedSales = form.watch(["breakfastSales", "lunchSales", "dinnerSales", "snacksSales"]);
+  // FIX: Watch individual primitive values to prevent re-render loops.
+  const breakfastSales = form.watch("breakfastSales");
+  const lunchSales = form.watch("lunchSales");
+  const dinnerSales = form.watch("dinnerSales");
+  const snacksSales = form.watch("snacksSales");
 
   useEffect(() => {
     const total =
-      (Number(watchedSales[0]) || 0) +
-      (Number(watchedSales[1]) || 0) +
-      (Number(watchedSales[2]) || 0) +
-      (Number(watchedSales[3]) || 0);
+      (Number(breakfastSales) || 0) +
+      (Number(lunchSales) || 0) +
+      (Number(dinnerSales) || 0) +
+      (Number(snacksSales) || 0);
     setTotalSaleAmount(total);
-    form.setValue("totalAmount", total, { shouldValidate: true });
-  }, [watchedSales, form]);
+    // Only call setValue if the value has actually changed to prevent potential loops.
+    if (form.getValues("totalAmount") !== total) {
+      form.setValue("totalAmount", total, { shouldValidate: true });
+    }
+  }, [breakfastSales, lunchSales, dinnerSales, snacksSales, form]);
   
   const fetchAndSetDataForDate = useCallback(async (date: Date) => {
     if (!db || !activeStallId) {
