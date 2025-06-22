@@ -1,4 +1,3 @@
-
 "use client";
 
 import PageHeader from "@/components/shared/PageHeader";
@@ -68,7 +67,6 @@ export default function RecordFoodSalePage() {
     name: "paymentMethods",
   });
   
-  // FIX: Watch individual primitive values to prevent re-render loops.
   const breakfastSales = form.watch("breakfastSales");
   const lunchSales = form.watch("lunchSales");
   const dinnerSales = form.watch("dinnerSales");
@@ -81,7 +79,6 @@ export default function RecordFoodSalePage() {
       (Number(dinnerSales) || 0) +
       (Number(snacksSales) || 0);
     setTotalSaleAmount(total);
-    // Only call setValue if the value has actually changed to prevent potential loops.
     if (form.getValues("totalAmount") !== total) {
       form.setValue("totalAmount", total, { shouldValidate: true });
     }
@@ -213,6 +210,11 @@ export default function RecordFoodSalePage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-6 border-t">
                 <div className="space-y-4">
                     <FormLabel>Payment Methods</FormLabel>
+                    <FormField
+                      control={form.control}
+                      name="paymentMethods"
+                      render={() => <FormMessage className="text-center pb-2" />}
+                    />
                      {fields.map((field, index) => (
                         <div key={field.id} className="flex items-end gap-2">
                             <FormField control={form.control} name={`paymentMethods.${index}.method`} render={({ field }) => (
@@ -225,13 +227,20 @@ export default function RecordFoodSalePage() {
                         </div>
                      ))}
                      <Button type="button" variant="outline" size="sm" className="w-full" onClick={() => append({ method: 'Cash', amount: 0})}><PlusCircle className="h-4 w-4 mr-2"/>Add Payment Method</Button>
-                     <FormField control={form.control} name="paymentMethods" render={() => <FormMessage />} />
                 </div>
                  <div className="space-y-4">
                     <div className="pt-4 text-right">
                         <p className="text-sm text-muted-foreground">Total Sale Amount</p>
                         <p className="text-3xl font-bold text-foreground" data-testid="total-sale-amount">₹{totalSaleAmount.toFixed(2)}</p>
-                        <FormField control={form.control} name="totalAmount" render={({ field }) => (<FormItem className="h-0"><FormMessage /></FormItem>)} />
+                        <FormField
+                          control={form.control}
+                          name="totalAmount"
+                          render={({ field }) => (
+                            <FormItem className="h-auto mt-1">
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
                     </div>
                     <FormField control={form.control} name="notes" render={({ field }) => (<FormItem><FormLabel>Notes (Optional)</FormLabel><FormControl><Textarea placeholder="e.g., Evening rush, special event" {...field} value={field.value ?? ""} disabled={isSubmitting} className="bg-input min-h-[70px]"/></FormControl><FormMessage /></FormItem>)} />
                  </div>
