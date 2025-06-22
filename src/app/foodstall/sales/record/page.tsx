@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { foodSaleTransactionFormSchema, type FoodSaleTransactionFormValues } from "@/types/food";
-import { ArrowLeft, Loader2, Info, IndianRupee } from "lucide-react";
+import { ArrowLeft, Loader2, Info, IndianRupee, PlusCircle } from "lucide-react";
 import Link from "next/link";
 import { useState, useEffect, useCallback } from "react";
 import { useForm } from "react-hook-form";
@@ -52,6 +52,13 @@ export default function RecordFoodSalePage() {
   
   const [selectedDate, setSelectedDate] = useState<Date>(initialDate);
   const [subtotals, setSubtotals] = useState<Record<MealCategory, number>>({ breakfast: 0, lunch: 0, dinner: 0, snacks: 0 });
+  const [paymentTotals, setPaymentTotals] = useState({ hungerbox: 0, upi: 0, other: 0 });
+  const [showOther, setShowOther] = useState<Record<MealCategory, boolean>>({
+    breakfast: false,
+    lunch: false,
+    dinner: false,
+    snacks: false,
+  });
 
   const form = useForm<FoodSaleTransactionFormValues>({
     resolver: zodResolver(foodSaleTransactionFormSchema),
@@ -67,27 +74,43 @@ export default function RecordFoodSalePage() {
   });
 
   const { watch, setValue } = form;
-  const watchedFields = watch();
+  const watchedBreakfast = watch("breakfast");
+  const watchedLunch = watch("lunch");
+  const watchedDinner = watch("dinner");
+  const watchedSnacks = watch("snacks");
 
   useEffect(() => {
     const calculateTotals = () => {
-        const newSubtotals: Record<MealCategory, number> = { breakfast: 0, lunch: 0, dinner: 0, snacks: 0 };
-        let grandTotal = 0;
-        
-        mealCategories.forEach(meal => {
-            const mealData = watchedFields[meal];
-            const subtotal = (mealData?.hungerbox || 0) + (mealData?.upi || 0) + (mealData?.other || 0);
-            newSubtotals[meal] = subtotal;
-            grandTotal += subtotal;
-        });
-        
-        setSubtotals(newSubtotals);
-        if (form.getValues("totalAmount") !== grandTotal) {
-            setValue('totalAmount', grandTotal, { shouldValidate: true });
-        }
+      const watchedFields = {
+          breakfast: watchedBreakfast,
+          lunch: watchedLunch,
+          dinner: watchedDinner,
+          snacks: watchedSnacks,
+      };
+      const newSubtotals: Record<MealCategory, number> = { breakfast: 0, lunch: 0, dinner: 0, snacks: 0 };
+      const newPaymentTotals = { hungerbox: 0, upi: 0, other: 0 };
+      let grandTotal = 0;
+      
+      mealCategories.forEach(meal => {
+          const mealData = watchedFields[meal];
+          const subtotal = (mealData?.hungerbox || 0) + (mealData?.upi || 0) + (mealData?.other || 0);
+          newSubtotals[meal] = subtotal;
+          grandTotal += subtotal;
+          
+          newPaymentTotals.hungerbox += (mealData?.hungerbox || 0);
+          newPaymentTotals.upi += (mealData?.upi || 0);
+          newPaymentTotals.other += (mealData?.other || 0);
+      });
+      
+      setSubtotals(newSubtotals);
+      setPaymentTotals(newPaymentTotals);
+      
+      if (form.getValues("totalAmount") !== grandTotal) {
+          setValue('totalAmount', grandTotal, { shouldValidate: true });
+      }
     }
     calculateTotals();
-  }, [watchedFields.breakfast, watchedFields.lunch, watchedFields.dinner, watchedFields.snacks, setValue, form]);
+  }, [watchedBreakfast, watchedLunch, watchedDinner, watchedSnacks, setValue, form]);
 
   
   const fetchAndSetDataForDate = useCallback(async (date: Date) => {
@@ -111,6 +134,13 @@ export default function RecordFoodSalePage() {
           dinner: data.dinner || defaultMealValues,
           snacks: data.snacks || defaultMealValues,
         });
+        const newShowOtherState: Record<MealCategory, boolean> = { breakfast: false, lunch: false, dinner: false, snacks: false };
+        mealCategories.forEach(meal => {
+            if (data[meal]?.other > 0) {
+                newShowOtherState[meal] = true;
+            }
+        });
+        setShowOther(newShowOtherState);
       } else {
         form.reset({
           saleDate: date,
@@ -118,6 +148,7 @@ export default function RecordFoodSalePage() {
           dinner: defaultMealValues, snacks: defaultMealValues,
           totalAmount: 0, notes: "",
         });
+        setShowOther({ breakfast: false, lunch: false, dinner: false, snacks: false });
       }
     } catch (error) {
         console.error("Error fetching daily sales doc:", error);
@@ -173,14 +204,30 @@ export default function RecordFoodSalePage() {
   
   const renderMealCard = (meal: MealCategory, title: string) => (
     <Card>
-      <CardHeader className="pb-4">
-        <CardTitle className="text-lg">{title}</CardTitle>
-        <CardDescription>Subtotal: ₹{subtotals[meal].toFixed(2)}</CardDescription>
+      <CardHeader className="pb-4 flex flex-row items-center justify-between">
+        <div>
+            <CardTitle className="text-lg">{title}</CardTitle>
+            <CardDescription>Subtotal: ₹{subtotals[meal].toFixed(2)}</CardDescription>
+        </div>
+        {!showOther[meal] && (
+            <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowOther(prev => ({...prev, [meal]: true}))}
+                className="text-muted-foreground hover:text-primary"
+                aria-label={`Add other payment for ${title}`}
+            >
+                <PlusCircle className="h-4 w-4 mr-1" /> Add Other
+            </Button>
+        )}
       </CardHeader>
       <CardContent className="space-y-3">
         <FormField control={form.control} name={`${meal}.hungerbox`} render={({ field }) => (<FormItem><FormLabel className="text-xs font-normal">HungerBox</FormLabel><FormControl><Input type="number" min="0" step="0.01" {...field} className="bg-input" disabled={isSubmitting || isLoadingData}/></FormControl><FormMessage/></FormItem>)}/>
         <FormField control={form.control} name={`${meal}.upi`} render={({ field }) => (<FormItem><FormLabel className="text-xs font-normal">UPI</FormLabel><FormControl><Input type="number" min="0" step="0.01" {...field} className="bg-input" disabled={isSubmitting || isLoadingData}/></FormControl><FormMessage/></FormItem>)}/>
-        <FormField control={form.control} name={`${meal}.other`} render={({ field }) => (<FormItem><FormLabel className="text-xs font-normal">Other (Cash/Card)</FormLabel><FormControl><Input type="number" min="0" step="0.01" {...field} className="bg-input" disabled={isSubmitting || isLoadingData}/></FormControl><FormMessage/></FormItem>)}/>
+        {showOther[meal] && (
+            <FormField control={form.control} name={`${meal}.other`} render={({ field }) => (<FormItem><FormLabel className="text-xs font-normal">Other (Cash/Card)</FormLabel><FormControl><Input type="number" min="0" step="0.01" {...field} className="bg-input" disabled={isSubmitting || isLoadingData}/></FormControl><FormMessage/></FormItem>)}/>
+        )}
       </CardContent>
     </Card>
   );
@@ -220,17 +267,35 @@ export default function RecordFoodSalePage() {
                     {renderMealCard("dinner", "Dinner Sales")}
                     {renderMealCard("snacks", "Snacks / Other Sales")}
                 </div>
+                
+                 <div className="pt-6 border-t">
+                    <CardTitle className="text-lg mb-2">Payment-wise Totals</CardTitle>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                        <div className="p-3 rounded-md bg-muted/50">
+                            <p className="text-xs text-muted-foreground">HungerBox</p>
+                            <p className="font-semibold text-lg">₹{paymentTotals.hungerbox.toFixed(2)}</p>
+                        </div>
+                        <div className="p-3 rounded-md bg-muted/50">
+                            <p className="text-xs text-muted-foreground">UPI</p>
+                            <p className="font-semibold text-lg">₹{paymentTotals.upi.toFixed(2)}</p>
+                        </div>
+                        <div className="p-3 rounded-md bg-muted/50">
+                            <p className="text-xs text-muted-foreground">Other (Cash/Card)</p>
+                            <p className="font-semibold text-lg">₹{paymentTotals.other.toFixed(2)}</p>
+                        </div>
+                        <div className="p-3 rounded-md bg-primary/10 border border-primary/20">
+                            <p className="text-xs text-primary/80">Grand Total</p>
+                            <p className="font-bold text-lg text-primary">₹{form.getValues('totalAmount').toFixed(2)}</p>
+                        </div>
+                    </div>
+                </div>
+
                 <div className="pt-6 border-t">
                     <FormField control={form.control} name="notes" render={({ field }) => (<FormItem><FormLabel>Notes (Optional)</FormLabel><FormControl><Textarea placeholder="e.g., Heavy rain in evening, special event discount" {...field} value={field.value ?? ""} disabled={isSubmitting} className="bg-input min-h-[70px]"/></FormControl><FormMessage /></FormItem>)} />
                 </div>
             </CardContent>
             )}
-            <CardFooter className="flex flex-col sm:flex-row items-center justify-between pt-6 border-t">
-                <div className="text-left">
-                    <p className="text-sm text-muted-foreground">Grand Total for {format(selectedDate, "PPP")}</p>
-                    <p className="text-3xl font-bold text-foreground" data-testid="total-sale-amount">₹{form.getValues('totalAmount').toFixed(2)}</p>
-                    <FormField control={form.control} name="totalAmount" render={() => <FormMessage />} />
-                </div>
+            <CardFooter className="flex flex-col sm:flex-row items-center justify-end pt-6 border-t">
               <Button type="submit" size="lg" disabled={isSubmitting || isLoadingData}>
                 {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                 Save Daily Sales
