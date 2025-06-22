@@ -18,7 +18,8 @@ import {
   FileText, 
   UtensilsCrossed, 
   ChevronDown,
-  ShieldAlert, // Added for Admin section
+  ShieldAlert,
+  PlusCircle, // Added icon
 } from "lucide-react";
 import {
   SidebarMenu,
@@ -37,6 +38,7 @@ interface NavSubItem {
   href: string;
   label: string;
   roles?: UserRole[];
+  icon?: LucideIcon; // Added icon property
 }
 
 interface NavItem {
@@ -72,10 +74,10 @@ const navItems: NavItem[] = [
     roles: ['staff', 'manager', 'admin'],
     subItems: [
       { href: "/foodstall/dashboard", label: "Dashboard", roles: ['staff', 'manager', 'admin'] },
+      { href: "/foodstall/expenses/record", label: "Add Expense", roles: ['staff', 'manager', 'admin'], icon: PlusCircle },
+      { href: "/foodstall/sales/record", label: "Add Sales", roles: ['staff', 'manager', 'admin'], icon: PlusCircle },
       { href: "/foodstall/sales", label: "Sales Summaries", roles: ['staff', 'manager', 'admin'] },
-      { href: "/foodstall/sales/record", label: "Manage Daily Sales", roles: ['staff', 'manager', 'admin'] },
       { href: "/foodstall/expenses", label: "Expense History", roles: ['staff', 'manager', 'admin'] },
-      { href: "/foodstall/expenses/record", label: "Record Expense", roles: ['staff', 'manager', 'admin'] },
       { href: "/foodstall/reports", label: "Reports", roles: ['manager', 'admin'] },
       { href: "/foodstall/activity-log", label: "Activity Log", roles: ['manager', 'admin'] },
     ]
@@ -174,6 +176,7 @@ export function AppSidebarNav() {
                       <SidebarMenuSubItem key={subItem.href}>
                         <Link href={subItem.href} passHref legacyBehavior>
                           <SidebarMenuSubButton isActive={isSubActive}>
+                            {subItem.icon && <subItem.icon className="mr-2 h-4 w-4 shrink-0" />}
                             <span>{subItem.label}</span>
                           </SidebarMenuSubButton>
                         </Link>
