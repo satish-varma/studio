@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { FoodSaleTransaction } from "@/types/food";
 import { 
   getFirestore, 
@@ -52,10 +52,12 @@ export default function FoodSalesClientPage() {
   const [loadingSales, setLoadingSales] = useState(true);
   const [errorSales, setErrorSales] = useState<string | null>(null);
   
-  const [firstVisibleDoc, setFirstVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
-  const [lastVisibleDoc, setLastVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
+  const pageCursors = useRef<{
+    first: DocumentSnapshot<DocumentData> | null;
+    last: DocumentSnapshot<DocumentData> | null;
+  }>({ first: null, last: null });
+
   const [isLastPage, setIsLastPage] = useState(false);
-  const [isFirstPageReached, setIsFirstPageReached] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
 
   const fetchSales = useCallback(async (direction: 'initial' | 'next' | 'prev' = 'initial') => {
@@ -76,18 +78,21 @@ export default function FoodSalesClientPage() {
     let qConstraints: QueryConstraint[] = [
       where("siteId", "==", activeSiteId),
       where("stallId", "==", activeStallId),
-      orderBy("saleDate", "desc"),
     ];
     
-    if (direction === 'next' && lastVisibleDoc) {
-      qConstraints.push(startAfter(lastVisibleDoc));
-    } else if (direction === 'prev' && firstVisibleDoc) {
-      qConstraints.pop(); // remove orderBy desc
-      qConstraints.push(orderBy("saleDate", "asc"));
-      qConstraints.push(startAfter(firstVisibleDoc));
+    if (direction === 'next' && pageCursors.current.last) {
+        qConstraints.push(orderBy("saleDate", "desc"));
+        qConstraints.push(startAfter(pageCursors.current.last));
+        qConstraints.push(limit(SALES_PER_PAGE + 1));
+    } else if (direction === 'prev' && pageCursors.current.first) {
+        qConstraints.push(orderBy("saleDate", "desc"));
+        qConstraints.push(endBefore(pageCursors.current.first));
+        qConstraints.push(limit(SALES_PER_PAGE));
+    } else { // Initial fetch
+        qConstraints.push(orderBy("saleDate", "desc"));
+        qConstraints.push(limit(SALES_PER_PAGE + 1));
     }
-    
-    qConstraints.push(limit(SALES_PER_PAGE + (direction !== 'prev' ? 1 : 0) ));
+
 
     try {
       const q = query(salesCollectionRef, ...qConstraints);
@@ -98,43 +103,34 @@ export default function FoodSalesClientPage() {
         saleDate: (doc.data().saleDate as Timestamp).toDate(),
       } as FoodSaleTransaction));
 
-      if (direction === 'prev') {
-        fetchedSales.reverse();
-      }
-      
-      const hasMore = fetchedSales.length > SALES_PER_PAGE && direction !== 'prev';
+      const hasMore = fetchedSales.length > SALES_PER_PAGE;
       if (hasMore) {
         fetchedSales.pop();
       }
-
+      
       setSales(fetchedSales);
       
       if (querySnapshot.docs.length > 0) {
-        setFirstVisibleDoc(querySnapshot.docs[0]);
-        setLastVisibleDoc(querySnapshot.docs[fetchedSales.length - 1]);
-        if(direction === 'initial') {
-            setIsFirstPageReached(true);
+        pageCursors.current.first = querySnapshot.docs[0];
+        pageCursors.current.last = querySnapshot.docs[fetchedSales.length - 1];
+
+        if (direction === 'initial') {
             setIsLastPage(!hasMore);
             setCurrentPage(1);
         } else if (direction === 'next') {
-            setIsFirstPageReached(false);
             setIsLastPage(!hasMore);
             if(fetchedSales.length > 0) setCurrentPage(prev => prev + 1);
         } else if (direction === 'prev') {
             setIsLastPage(false);
-            const newCurrentPage = Math.max(1, currentPage - 1);
-            setCurrentPage(newCurrentPage);
-            setIsFirstPageReached(fetchedSales.length < SALES_PER_PAGE || newCurrentPage === 1);
+            setCurrentPage(prev => Math.max(1, prev - 1));
         }
       } else {
+        if (direction === 'next') setIsLastPage(true);
+        if (direction === 'prev') setCurrentPage(1); 
         if (direction === 'initial') {
-             setIsFirstPageReached(true);
-             setIsLastPage(true);
-             setCurrentPage(1);
-        } else if (direction === 'next') setIsLastPage(true);
-        else if (direction === 'prev') setIsFirstPageReached(true);
-        setFirstVisibleDoc(null);
-        setLastVisibleDoc(null);
+            setIsLastPage(true);
+            setCurrentPage(1);
+        }
       }
       console.log(`${LOG_PREFIX} Fetched ${fetchedSales.length} sales. HasMore: ${hasMore}`);
     } catch (error: any) {
@@ -143,13 +139,25 @@ export default function FoodSalesClientPage() {
     } finally {
       setLoadingSales(false);
     }
-  }, [authLoading, user, activeSiteId, activeStallId, lastVisibleDoc, firstVisibleDoc, db]);
+  }, [authLoading, user, activeSiteId, activeStallId, db]);
 
   useEffect(() => {
     document.title = "Food Stall Sales - StallSync";
+    pageCursors.current = { first: null, last: null }; // Reset cursors on context change
     fetchSales('initial');
-  }, [fetchSales]);
+  }, [user, activeSiteId, activeStallId]);
 
+  const handleNextPage = () => {
+    if (!isLastPage) {
+      fetchSales('next');
+    }
+  };
+
+  const handlePrevPage = () => {
+    if (currentPage > 1) {
+      fetchSales('prev');
+    }
+  };
   
   if (authLoading) {
     return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading user context...</p></div>;
@@ -175,10 +183,10 @@ export default function FoodSalesClientPage() {
       {!loadingSales && !errorSales && (
         <FoodSalesTable 
           sales={sales} 
-          onNextPage={() => fetchSales('next')}
-          onPrevPage={() => fetchSales('prev')}
+          onNextPage={handleNextPage}
+          onPrevPage={handlePrevPage}
           isLastPage={isLastPage}
-          isFirstPage={isFirstPageReached}
+          isFirstPage={currentPage === 1}
           currentPage={currentPage}
           isLoading={loadingSales}
         />
