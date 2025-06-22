@@ -16,7 +16,8 @@ import {
   Timestamp,
   QueryConstraint,
   DocumentSnapshot,
-  DocumentData
+  DocumentData,
+  limitToLast
 } from "firebase/firestore";
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
@@ -29,7 +30,6 @@ import { foodExpenseCategories } from "@/types/food";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { format, subDays, startOfDay, endOfDay } from "date-fns";
 import type { DateRange } from "react-day-picker";
@@ -63,8 +63,7 @@ export default function FoodExpensesClientPage() {
   const [firstVisibleDoc, setFirstVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
   const [lastVisibleDoc, setLastVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
   const [isLastPage, setIsLastPage] = useState(false);
-  const [isFirstPageReached, setIsFirstPageReached] = useState(true);
-  const [currentPage, setCurrentPage] = useState(1); // For display logic, not directly for query
+  const [currentPage, setCurrentPage] = useState(1);
 
   const fetchExpenses = useCallback(async (direction: 'initial' | 'next' | 'prev' = 'initial') => {
     if (authLoading || !db) return;
@@ -104,72 +103,42 @@ export default function FoodExpensesClientPage() {
       qConstraints.push(where("category", "==", categoryFilter));
     }
     
-    // Order by purchaseDate descending for all query types
-    qConstraints.push(orderBy("purchaseDate", "desc"));
-
-    if (direction === 'next' && lastVisibleDoc) {
-      qConstraints.push(startAfter(lastVisibleDoc));
-    } else if (direction === 'prev' && firstVisibleDoc) {
-      qConstraints.reverse(); // Reverse all constraints to get to orderBy
-      const orderByDescIndex = qConstraints.findIndex(c => c.type === 'orderBy' && (c as any)._field.segments.join('/') === 'purchaseDate' && (c as any)._direction === 'desc');
-      if (orderByDescIndex !== -1) {
-        qConstraints[orderByDescIndex] = orderBy("purchaseDate", "asc");
-      }
-      qConstraints.push(startAfter(firstVisibleDoc)); // Firestore's 'endBefore' logic with reversed order
+    if (direction === 'prev' && firstVisibleDoc) {
+        qConstraints.push(orderBy("purchaseDate", "desc"));
+        qConstraints.push(endBefore(firstVisibleDoc));
+        qConstraints.push(limitToLast(EXPENSES_PER_PAGE));
+    } else { // initial or next
+        qConstraints.push(orderBy("purchaseDate", "desc"));
+        if (direction === 'next' && lastVisibleDoc) {
+            qConstraints.push(startAfter(lastVisibleDoc));
+        }
+        qConstraints.push(limit(EXPENSES_PER_PAGE + 1));
     }
     
-    qConstraints.push(limit(EXPENSES_PER_PAGE + (direction !== 'prev' ? 1 : 0) )); // +1 for hasMore check, except for prev
-
     try {
       const q = query(expensesCollectionRef, ...qConstraints);
       const querySnapshot = await getDocs(q);
       let fetchedExpenses: FoodItemExpense[] = querySnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
-        purchaseDate: (doc.data().purchaseDate as Timestamp).toDate(), // Convert Firestore Timestamp to Date
+        purchaseDate: (doc.data().purchaseDate as Timestamp).toDate(),
       } as FoodItemExpense));
-
-      if (direction === 'prev') {
-        fetchedExpenses.reverse(); // Reverse back to desc for display
-      }
       
-      const hasMore = fetchedExpenses.length > EXPENSES_PER_PAGE && direction !== 'prev';
+      const hasMore = direction !== 'prev' && fetchedExpenses.length > EXPENSES_PER_PAGE;
       if (hasMore) {
-        fetchedExpenses.pop(); // Remove the extra item
+        fetchedExpenses.pop();
       }
 
       setExpenses(fetchedExpenses);
       
       if (querySnapshot.docs.length > 0) {
         setFirstVisibleDoc(querySnapshot.docs[0]);
-        setLastVisibleDoc(querySnapshot.docs[fetchedExpenses.length - 1]);
-        if(direction === 'initial') {
-            setIsFirstPageReached(true);
-            setIsLastPage(!hasMore);
-            setCurrentPage(1);
-        } else if (direction === 'next') {
-            setIsFirstPageReached(false);
-            setIsLastPage(!hasMore);
-            if(fetchedExpenses.length > 0) setCurrentPage(prev => prev + 1);
-        } else if (direction === 'prev') {
-            setIsLastPage(false);
-            setCurrentPage(prev => Math.max(1, prev - 1));
-            // A more accurate check for isFirstPageReached when going prev:
-            // If this prev fetch brought less than EXPENSES_PER_PAGE, or if current page is 1
-             setIsFirstPageReached(fetchedExpenses.length < EXPENSES_PER_PAGE || currentPage === 1);
-        }
-      } else { // No data for this page
-        if (direction === 'initial') {
-             setIsFirstPageReached(true);
-             setIsLastPage(true);
-             setCurrentPage(1);
-        } else if (direction === 'next') {
-            setIsLastPage(true); // No more items
-        } else if (direction === 'prev') {
-            setIsFirstPageReached(true);
-        }
-        setFirstVisibleDoc(null);
-        setLastVisibleDoc(null);
+        setLastVisibleDoc(querySnapshot.docs[querySnapshot.docs.length - (hasMore ? 2 : 1)]);
+        if (direction === 'next') setCurrentPage(prev => prev + 1);
+        if (direction === 'prev') setCurrentPage(prev => Math.max(1, prev - 1));
+        setIsLastPage(!hasMore);
+      } else {
+        if (direction === 'next') setIsLastPage(true);
       }
       console.log(`${LOG_PREFIX} Fetched ${fetchedExpenses.length} expenses. HasMore: ${hasMore}`);
 
@@ -179,27 +148,35 @@ export default function FoodExpensesClientPage() {
     } finally {
       setLoadingExpenses(false);
     }
-  }, [authLoading, user, activeSiteId, activeStallId, dateRange, categoryFilter, lastVisibleDoc, firstVisibleDoc, db, currentPage]);
+  }, [authLoading, user, activeSiteId, activeStallId, dateRange, categoryFilter, db, firstVisibleDoc, lastVisibleDoc]);
 
+  // Effect for initial fetch and filter changes
   useEffect(() => {
     document.title = "Food Stall Expenses - StallSync";
-    fetchExpenses('initial');
-     return () => { document.title = "StallSync - Stock Management"; }
-  }, [fetchExpenses]); // fetchExpenses is memoized with its deps
-
-  const handleDateRangeChange = (newRange: DateRange | undefined) => {
-    setDateRange(newRange);
-    // Reset pagination for new filter
+    // Reset pagination state when filters change, then fetch
     setFirstVisibleDoc(null);
     setLastVisibleDoc(null);
     setCurrentPage(1);
+    fetchExpenses('initial');
+    return () => { document.title = "StallSync - Stock Management"; }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateRange, categoryFilter, user, activeSiteId, activeStallId]);
+
+
+  const handleDateRangeChange = (newRange: DateRange | undefined) => {
+    setDateRange(newRange);
   };
 
   const handleCategoryChange = (newCategory: string) => {
     setCategoryFilter(newCategory);
-     setFirstVisibleDoc(null);
-    setLastVisibleDoc(null);
-    setCurrentPage(1);
+  };
+
+  const handleNextPage = () => {
+    fetchExpenses('next');
+  };
+
+  const handlePrevPage = () => {
+    fetchExpenses('prev');
   };
   
   if (authLoading) {
@@ -284,13 +261,13 @@ export default function FoodExpensesClientPage() {
       {!loadingExpenses && !errorExpenses && (
         <FoodExpensesTable 
           expenses={expenses} 
-          onNextPage={() => fetchExpenses('next')}
-          onPrevPage={() => fetchExpenses('prev')}
+          onNextPage={handleNextPage}
+          onPrevPage={handlePrevPage}
           isLastPage={isLastPage}
-          isFirstPage={isFirstPageReached}
+          isFirstPage={currentPage === 1}
           currentPage={currentPage}
           itemsPerPage={EXPENSES_PER_PAGE}
-          isLoading={loadingExpenses} // Pass overall loading state for table skeleton
+          isLoading={loadingExpenses}
         />
       )}
     </div>
