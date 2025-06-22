@@ -70,12 +70,20 @@ export const foodMealTypes = [
 
 export type FoodMealType = (typeof foodMealTypes)[number];
 
+export const paymentMethods = [
+    "Cash",
+    "Card",
+    "UPI",
+    "HungerBox",
+    "Other",
+] as const;
+
 export const foodSaleItemSchema = z.object({
-  itemName: z.string().min(1, "Item name is required"),
+  itemName: z.string().min(1, { message: "Item name cannot be empty."}),
   category: z.string().optional().nullable(), // Optional category for sold food item
-  quantity: z.coerce.number().positive("Quantity must be positive"),
-  pricePerUnit: z.coerce.number().min(0, "Price per unit must be non-negative"),
-  totalPrice: z.coerce.number().min(0, "Total price must be non-negative"),
+  quantity: z.coerce.number().positive({ message: "Quantity must be > 0."}),
+  pricePerUnit: z.coerce.number().min(0, { message: "Price cannot be negative."}),
+  totalPrice: z.coerce.number().min(0),
 });
 
 export type FoodSaleItem = z.infer<typeof foodSaleItemSchema>;
@@ -84,9 +92,9 @@ export const foodSaleTransactionFormSchema = z.object({
   mealType: z.enum(foodMealTypes).optional().nullable(),
   itemsSold: z.array(foodSaleItemSchema).min(1, "At least one item must be sold."),
   totalAmount: z.coerce.number().min(0, "Total amount must be non-negative"),
-  saleDate: z.date({ required_error: "Sale date is required." }), // Should be datetime
+  saleDate: z.date({ required_error: "Sale date is required." }),
   notes: z.string().optional().nullable(),
-  paymentMethod: z.string().optional().nullable().default("Cash"),
+  paymentMethod: z.enum(paymentMethods).optional().nullable().default("Cash"),
 });
 
 export type FoodSaleTransactionFormValues = z.infer<typeof foodSaleTransactionFormSchema>;
@@ -107,4 +115,3 @@ export interface FoodSaleTransactionAdmin extends Omit<FoodSaleTransaction, 'sal
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
-      
