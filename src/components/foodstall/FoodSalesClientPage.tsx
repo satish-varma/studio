@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -61,12 +60,8 @@ export default function FoodSalesClientPage() {
   const [currentPage, setCurrentPage] = useState(1);
 
   const fetchSales = useCallback(async (direction: 'initial' | 'next' | 'prev' = 'initial') => {
-    if (authLoading || !db) return;
-
-    if (!user || !activeSiteId || !activeStallId) {
-      setErrorSales("Please select an active site and stall to view sales.");
-      setLoadingSales(false);
-      setSales([]);
+    if (authLoading || !db || !user || !activeSiteId || !activeStallId) {
+      if (!authLoading) setLoadingSales(false);
       return;
     }
     
@@ -145,7 +140,7 @@ export default function FoodSalesClientPage() {
     document.title = "Food Stall Sales - StallSync";
     pageCursors.current = { first: null, last: null }; // Reset cursors on context change
     fetchSales('initial');
-  }, [user, activeSiteId, activeStallId]);
+  }, [user, activeSiteId, activeStallId, fetchSales]);
 
   const handleNextPage = () => {
     if (!isLastPage) {
@@ -162,13 +157,38 @@ export default function FoodSalesClientPage() {
   if (authLoading) {
     return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading user context...</p></div>;
   }
-  if (!user || !activeSiteId || !activeStallId) {
+  
+  if (!user) {
+    return (
+      <Alert variant="destructive">
+        <Info className="h-4 w-4" />
+        <AlertTitle>Authentication Error</AlertTitle>
+        <AlertDescription>
+          Could not verify user. Please try logging in again.
+        </AlertDescription>
+      </Alert>
+    )
+  }
+
+  if (!activeSiteId) {
     return (
       <Alert variant="default" className="border-primary/50">
         <Info className="h-4 w-4" />
-        <AlertTitle>Context Required</AlertTitle>
+        <AlertTitle>Site Selection Required</AlertTitle>
         <AlertDescription>
-          Please select an active site and stall from the header to view or manage food stall sales.
+          Please select an active site from the header to view food stall sales.
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
+  if (!activeStallId) {
+    return (
+      <Alert variant="default" className="border-primary/50">
+        <Info className="h-4 w-4" />
+        <AlertTitle>Stall Selection Required</AlertTitle>
+        <AlertDescription>
+          Food stall data is specific to each stall. Please select a specific stall from the header menu to view its sales history.
         </AlertDescription>
       </Alert>
     );

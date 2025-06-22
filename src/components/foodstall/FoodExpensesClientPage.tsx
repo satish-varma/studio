@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
@@ -72,20 +71,9 @@ export default function FoodExpensesClientPage() {
   const [currentPage, setCurrentPage] = useState(1);
 
   const fetchExpenses = useCallback(async (direction: 'initial' | 'next' | 'prev' = 'initial') => {
-    if (authLoading || !db) return;
-
-    if (!user) {
-      setErrorExpenses("User not authenticated. Please log in.");
-      setLoadingExpenses(false);
-      setExpenses([]);
-      setTotalExpensesAmount(0);
-      return;
-    }
-    if (!activeSiteId || !activeStallId) {
-      setErrorExpenses("Please select an active site and stall to view expenses.");
-      setLoadingExpenses(false);
-      setExpenses([]);
-      setTotalExpensesAmount(0);
+    if (authLoading || !db || !user || !activeSiteId || !activeStallId) {
+      // Guard clauses at the top of the component render handle user feedback, this just prevents fetching
+      if (!authLoading) setLoadingExpenses(false);
       return;
     }
     
@@ -222,13 +210,38 @@ export default function FoodExpensesClientPage() {
   if (authLoading) {
     return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading user context...</p></div>;
   }
-  if (!user || !activeSiteId || !activeStallId) {
+  
+  if (!user) {
+    return (
+      <Alert variant="destructive">
+        <Info className="h-4 w-4" />
+        <AlertTitle>Authentication Error</AlertTitle>
+        <AlertDescription>
+          Could not verify user. Please try logging in again.
+        </AlertDescription>
+      </Alert>
+    )
+  }
+
+  if (!activeSiteId) {
     return (
       <Alert variant="default" className="border-primary/50">
         <Info className="h-4 w-4" />
-        <AlertTitle>Context Required</AlertTitle>
+        <AlertTitle>Site Selection Required</AlertTitle>
         <AlertDescription>
-          Please select an active site and stall from the header to view or manage food stall expenses.
+          Please select an active site from the header to view food stall expenses.
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
+  if (!activeStallId) {
+    return (
+      <Alert variant="default" className="border-primary/50">
+        <Info className="h-4 w-4" />
+        <AlertTitle>Stall Selection Required</AlertTitle>
+        <AlertDescription>
+          Food stall data is specific to each stall. Please select a specific stall from the header menu to view its expenses.
         </AlertDescription>
       </Alert>
     );
