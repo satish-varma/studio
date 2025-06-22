@@ -17,6 +17,7 @@ import {
   BarChart3, 
   FileText, 
   UtensilsCrossed, 
+  ClipboardList, // New Icon
 } from "lucide-react";
 import {
   SidebarMenu,
@@ -58,6 +59,7 @@ const navItems: NavItem[] = [
       { href: "/foodstall/sales/record", label: "Record Sale" },
       { href: "/foodstall/expenses/record", label: "Record Expense" },
       { href: "/foodstall/reports", label: "View Reports" },
+      { href: "/foodstall/activity-log", label: "Activity Log" },
     ]
   },
   { href: "/users", label: "User Management", icon: Users, roles: ['admin'] },

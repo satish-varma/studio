@@ -22,6 +22,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { DatePicker } from "@/components/ui/date-picker";
 import { useSearchParams } from 'next/navigation';
 import { format, isValid, parseISO } from "date-fns";
+import { logFoodStallActivity } from "@/lib/foodStallLogger";
 
 let db: ReturnType<typeof getFirestore> | undefined;
 if (!getApps().length) {
@@ -184,6 +185,18 @@ export default function RecordFoodSalePage() {
       };
 
       await setDoc(docRef, saleData, { merge: true });
+
+      await logFoodStallActivity(user, {
+        siteId: activeSiteId,
+        stallId: activeStallId,
+        type: 'SALE_RECORDED_OR_UPDATED',
+        relatedDocumentId: docId,
+        details: {
+            totalAmount: values.totalAmount,
+            notes: values.notes,
+        },
+      });
+
       toast({
         title: "Sales Saved",
         description: `Sales data for ${format(values.saleDate, 'PPP')} has been saved.`,

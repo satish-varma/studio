@@ -52,6 +52,7 @@ import { firebaseConfig } from "@/lib/firebaseConfig";
 import { getApps, initializeApp, getApp } from "firebase/app";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Textarea } from "@/components/ui/textarea";
+import { logFoodStallActivity } from "@/lib/foodStallLogger";
 
 let db: ReturnType<typeof getFirestore> | undefined;
 if (!getApps().length) {
@@ -106,14 +107,35 @@ export default function RecordFoodExpensePage() {
         updatedAt: new Date().toISOString(),
       };
 
-      await addDoc(collection(db, "foodItemExpenses"), expenseData);
+      const docRef = await addDoc(collection(db, "foodItemExpenses"), expenseData);
+
+      await logFoodStallActivity(user, {
+        siteId: activeSiteId,
+        stallId: activeStallId,
+        type: 'EXPENSE_RECORDED',
+        relatedDocumentId: docRef.id,
+        details: {
+            expenseCategory: values.category,
+            totalCost: values.totalCost,
+            notes: `Vendor: ${values.vendor || 'N/A'}`
+        }
+      });
+      
       toast({
         title: "Expense Recorded",
         description: `A ${
           values.category
         } expense of ₹${values.totalCost.toFixed(2)} has been recorded.`,
       });
-      form.reset();
+      form.reset({
+        category: undefined,
+        totalCost: undefined,
+        paymentMethod: undefined,
+        purchaseDate: new Date(),
+        vendor: "",
+        notes: "",
+        billImageUrl: "",
+      });
     } catch (error: any) {
       console.error("Error recording food expense:", error);
       toast({
