@@ -11,8 +11,8 @@ export default function FoodStallSalesPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Food Stall Daily Sales"
-        description="View and edit daily sales summaries for your food stall."
+        title="Food Stall Daily Sales Summaries"
+        description="View and edit daily sales totals for your food stall, broken down by payment type."
         actions={
           <div className="flex gap-2">
             <Link href="/foodstall/sales/record">

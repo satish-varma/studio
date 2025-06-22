@@ -6,10 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { foodSaleTransactionFormSchema, type FoodSaleTransactionFormValues } from "@/types/food";
-import { ArrowLeft, Loader2, Info, IndianRupee, Utensils, Pizza, Soup, CreditCard, Smartphone } from "lucide-react";
+import { ArrowLeft, Loader2, Info, IndianRupee, PlusCircle, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useState, useEffect, useCallback } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useAuth } from "@/contexts/AuthContext";
@@ -35,13 +35,17 @@ if (!getApps().length) {
   db = getFirestore(getApp());
 }
 
+const defaultSalesFields = [
+  { type: 'HungerBox', amount: 0 },
+  { type: 'UPI', amount: 0 }
+];
+
 export default function RecordFoodSalePage() {
   const { user, activeSiteId, activeStallId } = useAuth();
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [totalSaleAmount, setTotalSaleAmount] = useState(0);
-  const [totalPayments, setTotalPayments] = useState(0);
 
   const searchParams = useSearchParams();
   const dateParam = searchParams.get('date');
@@ -52,41 +56,28 @@ export default function RecordFoodSalePage() {
   const form = useForm<FoodSaleTransactionFormValues>({
     resolver: zodResolver(foodSaleTransactionFormSchema),
     defaultValues: {
-      breakfastSales: 0,
-      lunchSales: 0,
-      dinnerSales: 0,
-      snacksSales: 0,
-      totalAmount: 0,
       saleDate: selectedDate,
+      salesByPaymentType: defaultSalesFields,
+      totalAmount: 0,
       notes: "",
-      payments: { cash: 0, card: 0, upi: 0, hungerbox: 0, other: 0 },
     },
   });
+
+  const { fields, append, remove } = useFieldArray({
+    control: form.control,
+    name: "salesByPaymentType",
+  });
   
-  const breakfastSales = form.watch("breakfastSales");
-  const lunchSales = form.watch("lunchSales");
-  const dinnerSales = form.watch("dinnerSales");
-  const snacksSales = form.watch("snacksSales");
-  const watchedPayments = form.watch("payments");
+  const watchedSales = form.watch("salesByPaymentType");
 
   useEffect(() => {
-    const total =
-      (Number(breakfastSales) || 0) +
-      (Number(lunchSales) || 0) +
-      (Number(dinnerSales) || 0) +
-      (Number(snacksSales) || 0);
+    const total = watchedSales.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
     setTotalSaleAmount(total);
     if (form.getValues("totalAmount") !== total) {
       form.setValue("totalAmount", total, { shouldValidate: true });
     }
-  }, [breakfastSales, lunchSales, dinnerSales, snacksSales, form]);
+  }, [watchedSales, form]);
 
-  useEffect(() => {
-    if (watchedPayments) {
-        const total = (watchedPayments.cash || 0) + (watchedPayments.card || 0) + (watchedPayments.upi || 0) + (watchedPayments.hungerbox || 0) + (watchedPayments.other || 0);
-        setTotalPayments(total);
-    }
-  }, [watchedPayments]);
   
   const fetchAndSetDataForDate = useCallback(async (date: Date) => {
     if (!db || !activeStallId) {
@@ -104,14 +95,15 @@ export default function RecordFoodSalePage() {
         form.reset({
           ...data,
           saleDate: (data.saleDate as Timestamp).toDate(),
-          payments: data.payments || { cash: 0, card: 0, upi: 0, hungerbox: 0, other: 0 },
+          salesByPaymentType: data.salesByPaymentType || defaultSalesFields,
         });
       } else {
         // Reset to default for the new date
         form.reset({
-          breakfastSales: 0, lunchSales: 0, dinnerSales: 0, snacksSales: 0,
-          totalAmount: 0, saleDate: date, notes: "",
-          payments: { cash: 0, card: 0, upi: 0, hungerbox: 0, other: 0 },
+          saleDate: date,
+          salesByPaymentType: defaultSalesFields,
+          totalAmount: 0,
+          notes: "",
         });
       }
     } catch (error) {
@@ -142,6 +134,7 @@ export default function RecordFoodSalePage() {
       
       const saleData = {
         ...values,
+        salesByPaymentType: values.salesByPaymentType.filter(s => s.amount > 0), // Filter out zero-amount entries
         siteId: activeSiteId,
         stallId: activeStallId,
         recordedByUid: user.uid,
@@ -171,8 +164,6 @@ export default function RecordFoodSalePage() {
     return <div className="max-w-2xl mx-auto mt-10"><Alert variant="default" className="border-primary/50"><Info className="h-4 w-4" /><AlertTitle>Site & Stall Context Required</AlertTitle><AlertDescription>To manage daily sales, please ensure you have an active Site and Stall selected in the header.</AlertDescription></Alert></div>;
   }
   
-  const paymentTotalMismatch = Math.abs(totalSaleAmount - totalPayments) > 0.01 && totalSaleAmount > 0;
-
   return (
     <div className="space-y-6">
       <PageHeader
@@ -188,12 +179,12 @@ export default function RecordFoodSalePage() {
       />
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)}>
-          <Card className="max-w-4xl mx-auto shadow-lg">
+          <Card className="max-w-2xl mx-auto shadow-lg">
             <CardHeader>
               <div className="flex justify-between items-center">
                   <div>
                     <CardTitle>Daily Sales Entry</CardTitle>
-                    <CardDescription>Enter total revenue for each category. At least one must be greater than zero.</CardDescription>
+                    <CardDescription>Enter total sales received for each payment type.</CardDescription>
                   </div>
                   <DatePicker date={selectedDate} onDateChange={(date) => setSelectedDate(date || new Date())} disabled={isSubmitting || isLoadingData} />
               </div>
@@ -202,41 +193,73 @@ export default function RecordFoodSalePage() {
                 <div className="h-96 flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /></div>
             ) : (
             <CardContent className="space-y-6">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-4">
-                 <FormField control={form.control} name="breakfastSales" render={({ field }) => (<FormItem><FormLabel className="flex items-center"><Utensils className="h-4 w-4 mr-2 text-muted-foreground"/>Breakfast Sales (₹)</FormLabel><FormControl><Input type="number" min="0" step="0.01" placeholder="0.00" {...field} disabled={isSubmitting} className="bg-input text-lg"/></FormControl><FormMessage /></FormItem>)} />
-                 <FormField control={form.control} name="lunchSales" render={({ field }) => (<FormItem><FormLabel className="flex items-center"><Soup className="h-4 w-4 mr-2 text-muted-foreground"/>Lunch Sales (₹)</FormLabel><FormControl><Input type="number" min="0" step="0.01" placeholder="0.00" {...field} disabled={isSubmitting} className="bg-input text-lg"/></FormControl><FormMessage /></FormItem>)} />
-                 <FormField control={form.control} name="dinnerSales" render={({ field }) => (<FormItem><FormLabel className="flex items-center"><Utensils className="h-4 w-4 mr-2 text-muted-foreground"/>Dinner Sales (₹)</FormLabel><FormControl><Input type="number" min="0" step="0.01" placeholder="0.00" {...field} disabled={isSubmitting} className="bg-input text-lg"/></FormControl><FormMessage /></FormItem>)} />
-                 <FormField control={form.control} name="snacksSales" render={({ field }) => (<FormItem><FormLabel className="flex items-center"><Pizza className="h-4 w-4 mr-2 text-muted-foreground"/>Snacks Sales (₹)</FormLabel><FormControl><Input type="number" min="0" step="0.01" placeholder="0.00" {...field} disabled={isSubmitting} className="bg-input text-lg"/></FormControl><FormMessage /></FormItem>)} />
+              <div className="space-y-4 p-4 border rounded-md bg-muted/30">
+                <FormLabel>Sales by Payment Type</FormLabel>
+                {fields.map((field, index) => {
+                    const isDefaultField = index < defaultSalesFields.length;
+                    return (
+                        <div key={field.id} className="flex items-end gap-3">
+                             <FormField
+                                control={form.control}
+                                name={`salesByPaymentType.${index}.type`}
+                                render={({ field }) => (
+                                    <FormItem className="flex-1">
+                                        {index === 0 && <FormLabel className="text-xs">Payment Type</FormLabel>}
+                                        <FormControl>
+                                            <Input placeholder="e.g., Cash" {...field} disabled={isSubmitting || isDefaultField} className="bg-input"/>
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                            <FormField
+                                control={form.control}
+                                name={`salesByPaymentType.${index}.amount`}
+                                render={({ field }) => (
+                                    <FormItem className="w-40">
+                                       {index === 0 && <FormLabel className="text-xs">Amount (₹)</FormLabel>}
+                                        <FormControl>
+                                            <Input type="number" min="0" step="0.01" placeholder="0.00" {...field} disabled={isSubmitting} className="bg-input"/>
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                             <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => remove(index)}
+                                disabled={isDefaultField || isSubmitting}
+                                className="text-destructive hover:bg-destructive/10"
+                                aria-label={`Remove payment type ${index + 1}`}
+                            >
+                                <Trash2 className="h-4 w-4" />
+                            </Button>
+                        </div>
+                    );
+                })}
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => append({ type: "", amount: 0})}
+                    className="w-full border-dashed"
+                    disabled={isSubmitting}
+                >
+                    <PlusCircle className="mr-2 h-4 w-4"/> Add Payment Type
+                </Button>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-6 border-t">
-                <FormItem>
-                  <FormLabel>Payment Methods</FormLabel>
-                  <div className="p-4 border rounded-md grid grid-cols-1 sm:grid-cols-2 gap-4 bg-muted/30">
-                    <FormField control={form.control} name="payments.cash" render={({ field }) => (<FormItem><FormLabel className="flex items-center text-sm"><IndianRupee className="h-4 w-4 mr-2"/>Cash</FormLabel><FormControl><Input type="number" placeholder="0.00" {...field} disabled={isSubmitting} className="bg-input"/></FormControl><FormMessage /></FormItem>)} />
-                    <FormField control={form.control} name="payments.card" render={({ field }) => (<FormItem><FormLabel className="flex items-center text-sm"><CreditCard className="h-4 w-4 mr-2"/>Card</FormLabel><FormControl><Input type="number" placeholder="0.00" {...field} disabled={isSubmitting} className="bg-input"/></FormControl><FormMessage /></FormItem>)} />
-                    <FormField control={form.control} name="payments.upi" render={({ field }) => (<FormItem><FormLabel className="flex items-center text-sm"><Smartphone className="h-4 w-4 mr-2"/>UPI</FormLabel><FormControl><Input type="number" placeholder="0.00" {...field} disabled={isSubmitting} className="bg-input"/></FormControl><FormMessage /></FormItem>)} />
-                    <FormField control={form.control} name="payments.hungerbox" render={({ field }) => (<FormItem><FormLabel className="flex items-center text-sm"><Info className="h-4 w-4 mr-2"/>HungerBox</FormLabel><FormControl><Input type="number" placeholder="0.00" {...field} disabled={isSubmitting} className="bg-input"/></FormControl><FormMessage /></FormItem>)} />
-                    <FormField control={form.control} name="payments.other" render={({ field }) => (<FormItem className="sm:col-span-2"><FormLabel className="flex items-center text-sm"><Info className="h-4 w-4 mr-2"/>Other</FormLabel><FormControl><Input type="number" placeholder="0.00" {...field} disabled={isSubmitting} className="bg-input"/></FormControl><FormMessage /></FormItem>)} />
-                  </div>
-                  {form.formState.errors.payments && (
-                    <p className="text-sm font-medium text-destructive">{form.formState.errors.payments.root?.message}</p>
-                  )}
-                </FormItem>
-                 <div className="space-y-4">
-                    <div className="pt-4 text-right space-y-2">
-                        <div>
-                            <p className="text-sm text-muted-foreground">Total Sale Amount</p>
-                            <p className="text-3xl font-bold text-foreground" data-testid="total-sale-amount">₹{totalSaleAmount.toFixed(2)}</p>
-                            <FormField control={form.control} name="totalAmount" render={() => <FormMessage />} />
-                        </div>
-                         <div>
-                            <p className="text-sm text-muted-foreground">Total Payments Received</p>
-                            <p className={`text-2xl font-bold ${paymentTotalMismatch ? 'text-destructive' : 'text-green-600'}`} data-testid="total-payments-amount">₹{totalPayments.toFixed(2)}</p>
-                        </div>
+                 <FormField control={form.control} name="notes" render={({ field }) => (<FormItem><FormLabel>Notes (Optional)</FormLabel><FormControl><Textarea placeholder="e.g., Evening rush, special event" {...field} value={field.value ?? ""} disabled={isSubmitting} className="bg-input min-h-[70px]"/></FormControl><FormMessage /></FormItem>)} />
+                 <div className="pt-4 text-right space-y-2">
+                    <div>
+                        <p className="text-sm text-muted-foreground">Total Sale Amount</p>
+                        <p className="text-3xl font-bold text-foreground" data-testid="total-sale-amount">₹{totalSaleAmount.toFixed(2)}</p>
+                        <FormField control={form.control} name="totalAmount" render={() => <FormMessage />} />
                     </div>
-                    <FormField control={form.control} name="notes" render={({ field }) => (<FormItem><FormLabel>Notes (Optional)</FormLabel><FormControl><Textarea placeholder="e.g., Evening rush, special event" {...field} value={field.value ?? ""} disabled={isSubmitting} className="bg-input min-h-[70px]"/></FormControl><FormMessage /></FormItem>)} />
-                 </div>
+                </div>
               </div>
             </CardContent>
             )}

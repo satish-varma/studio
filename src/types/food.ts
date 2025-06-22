@@ -56,59 +56,28 @@ export interface FoodItemExpenseAdmin extends Omit<FoodItemExpense, 'purchaseDat
 }
 
 
-// --------------- Food Sale Tracking ---------------
-export const paymentMethods = [
-    "Cash",
-    "Card",
-    "UPI",
-    "HungerBox",
-    "Other",
-] as const;
+// --------------- Food Sale Tracking (Payment Type Based) ---------------
 
-export const salePaymentsSchema = z.object({
-    cash: z.coerce.number().min(0, "Amount must be non-negative").default(0),
-    card: z.coerce.number().min(0, "Amount must be non-negative").default(0),
-    upi: z.coerce.number().min(0, "Amount must be non-negative").default(0),
-    hungerbox: z.coerce.number().min(0, "Amount must be non-negative").default(0),
-    other: z.coerce.number().min(0, "Amount must be non-negative").default(0),
+const saleByPaymentTypeSchema = z.object({
+  type: z.string().min(1, "Payment type name is required."),
+  amount: z.coerce.number().min(0, "Amount must be a non-negative number.").default(0),
 });
 
-export type SalePayments = z.infer<typeof salePaymentsSchema>;
+export type SaleByPaymentType = z.infer<typeof saleByPaymentTypeSchema>;
 
 export const foodSaleTransactionFormSchema = z.object({
-  breakfastSales: z.coerce.number().min(0, "Sales must be non-negative").optional(),
-  lunchSales: z.coerce.number().min(0, "Sales must be non-negative").optional(),
-  dinnerSales: z.coerce.number().min(0, "Sales must be non-negative").optional(),
-  snacksSales: z.coerce.number().min(0, "Sales must be non-negative").optional(),
-  
-  totalAmount: z.coerce.number().min(0, "Total amount must be non-negative"),
   saleDate: z.date({ required_error: "Sale date is required." }),
+  salesByPaymentType: z.array(saleByPaymentTypeSchema).min(1, "At least one payment type must have a value greater than zero."),
+  totalAmount: z.coerce.number().min(0.01, "Total amount must be greater than zero."),
   notes: z.string().optional().nullable(),
-  payments: salePaymentsSchema,
-}).refine(data => 
-  (data.breakfastSales || 0) + 
-  (data.lunchSales || 0) + 
-  (data.dinnerSales || 0) + 
-  (data.snacksSales || 0) > 0, 
-  {
-    message: "At least one sales category must have a value greater than zero.",
-    path: ["totalAmount"], 
-  }
-).refine(data => {
-    const salesTotal = (data.breakfastSales || 0) + (data.lunchSales || 0) + (data.dinnerSales || 0) + (data.snacksSales || 0);
-    const paymentsTotal = (data.payments.cash || 0) + (data.payments.card || 0) + (data.payments.upi || 0) + (data.payments.hungerbox || 0) + (data.payments.other || 0);
-    return Math.abs(salesTotal - paymentsTotal) < 0.01; // Allow for floating point inaccuracies
-}, {
-    message: "Total of all payment methods must equal the total sales amount.",
-    path: ["payments"],
 });
 
 
 export type FoodSaleTransactionFormValues = z.infer<typeof foodSaleTransactionFormSchema>;
 
-export interface FoodSaleTransaction extends Omit<FoodSaleTransactionFormValues, 'payments'> {
+export interface FoodSaleTransaction extends Omit<FoodSaleTransactionFormValues, 'salesByPaymentType'> {
   id: string; // Firestore document ID (YYYY-MM-DD_stallId)
-  payments: SalePayments;
+  salesByPaymentType: SaleByPaymentType[];
   siteId: string;
   stallId: string;
   recordedByUid: string;
