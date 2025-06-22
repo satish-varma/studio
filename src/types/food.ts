@@ -56,28 +56,35 @@ export interface FoodItemExpenseAdmin extends Omit<FoodItemExpense, 'purchaseDat
 }
 
 
-// --------------- Food Sale Tracking (Payment Type Based) ---------------
+// --------------- Food Sale Tracking (Meal Time & Payment Type Based) ---------------
 
-const saleByPaymentTypeSchema = z.object({
-  type: z.string().min(1, "Payment type name is required."),
-  amount: z.coerce.number().min(0, "Amount must be a non-negative number.").default(0),
+const paymentBreakdownSchema = z.object({
+  hungerbox: z.coerce.number().min(0).default(0),
+  upi: z.coerce.number().min(0).default(0),
+  other: z.coerce.number().min(0).default(0),
 });
 
-export type SaleByPaymentType = z.infer<typeof saleByPaymentTypeSchema>;
+export type PaymentBreakdown = z.infer<typeof paymentBreakdownSchema>;
 
 export const foodSaleTransactionFormSchema = z.object({
   saleDate: z.date({ required_error: "Sale date is required." }),
-  salesByPaymentType: z.array(saleByPaymentTypeSchema).min(1, "At least one payment type must have a value greater than zero."),
-  totalAmount: z.coerce.number().min(0.01, "Total amount must be greater than zero."),
+  breakfast: paymentBreakdownSchema.optional().default({ hungerbox: 0, upi: 0, other: 0 }),
+  lunch: paymentBreakdownSchema.optional().default({ hungerbox: 0, upi: 0, other: 0 }),
+  dinner: paymentBreakdownSchema.optional().default({ hungerbox: 0, upi: 0, other: 0 }),
+  snacks: paymentBreakdownSchema.optional().default({ hungerbox: 0, upi: 0, other: 0 }),
+  totalAmount: z.coerce.number().min(0),
   notes: z.string().optional().nullable(),
 });
 
 
 export type FoodSaleTransactionFormValues = z.infer<typeof foodSaleTransactionFormSchema>;
 
-export interface FoodSaleTransaction extends Omit<FoodSaleTransactionFormValues, 'salesByPaymentType'> {
+export interface FoodSaleTransaction extends Omit<FoodSaleTransactionFormValues, 'breakfast' | 'lunch' | 'dinner' | 'snacks'> {
   id: string; // Firestore document ID (YYYY-MM-DD_stallId)
-  salesByPaymentType: SaleByPaymentType[];
+  breakfast: PaymentBreakdown;
+  lunch: PaymentBreakdown;
+  dinner: PaymentBreakdown;
+  snacks: PaymentBreakdown;
   siteId: string;
   stallId: string;
   recordedByUid: string;

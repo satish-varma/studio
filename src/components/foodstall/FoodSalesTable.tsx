@@ -10,7 +10,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import type { FoodSaleTransaction } from "@/types/food";
+import type { FoodSaleTransaction, PaymentBreakdown } from "@/types/food";
 import { format } from "date-fns";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -35,10 +35,29 @@ const TableRowSkeleton = () => (
     <TableCell className="text-right"><Skeleton className="h-4 w-20 inline-block" /></TableCell>
     <TableCell><Skeleton className="h-4 w-full" /></TableCell>
     <TableCell><Skeleton className="h-4 w-24" /></TableCell>
-    <TableCell><Skeleton className="h-4 w-32" /></TableCell>
     <TableCell><Skeleton className="h-8 w-8" /></TableCell>
   </TableRow>
 );
+
+const formatCurrency = (amount: number | null | undefined) => `₹${(amount || 0).toFixed(2)}`;
+
+const renderBreakdownTooltip = (meal: string, breakdown?: PaymentBreakdown) => {
+  if (!breakdown) return null;
+  const total = (breakdown.hungerbox || 0) + (breakdown.upi || 0) + (breakdown.other || 0);
+  if (total === 0) return null;
+
+  return (
+    <div key={meal}>
+      <p className="text-sm font-medium">{meal}: {formatCurrency(total)}</p>
+      <div className="pl-4 text-xs text-muted-foreground">
+        {breakdown.hungerbox > 0 && <p>HB: {formatCurrency(breakdown.hungerbox)}</p>}
+        {breakdown.upi > 0 && <p>UPI: {formatCurrency(breakdown.upi)}</p>}
+        {breakdown.other > 0 && <p>Other: {formatCurrency(breakdown.other)}</p>}
+      </div>
+    </div>
+  );
+};
+
 
 export function FoodSalesTable({
   sales,
@@ -65,12 +84,19 @@ export function FoodSalesTable({
     router.push(`/foodstall/sales/record?date=${dateString}`);
   };
 
-  const formatCurrency = (amount: number | null | undefined) => `₹${(amount || 0).toFixed(2)}`;
-
   if (isLoading && sales.length === 0) {
      return (
       <div className="rounded-lg border shadow-sm overflow-hidden bg-card">
-        <Table><TableHeader><TableRow><TableHead>Date</TableHead><TableHead className="text-right">Total Amount</TableHead><TableHead>Payment Breakdown</TableHead><TableHead>Recorded By</TableHead><TableHead>Notes</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Date</TableHead>
+              <TableHead className="text-right">Total Amount</TableHead>
+              <TableHead>Recorded By</TableHead>
+              <TableHead>Notes</TableHead>
+              <TableHead>Actions</TableHead>
+            </TableRow>
+          </TableHeader>
            <TableBody>{[...Array(10)].map((_, i) => <TableRowSkeleton key={`skeleton-${i}`} />)}</TableBody>
         </Table>
       </div>
@@ -98,9 +124,8 @@ export function FoodSalesTable({
             <TableRow>
               <TableHead className="w-[120px]">Date</TableHead>
               <TableHead className="w-[150px] text-right font-semibold">Total Amount</TableHead>
-              <TableHead className="min-w-[200px]">Payment Breakdown</TableHead>
               <TableHead className="w-[150px]">Recorded By</TableHead>
-              <TableHead className="min-w-[180px]">Notes</TableHead>
+              <TableHead className="min-w-[200px]">Notes</TableHead>
               <TableHead className="w-[80px]">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -108,18 +133,28 @@ export function FoodSalesTable({
             {sales.map((sale) => (
               <TableRow key={sale.id}>
                 <TableCell className="font-medium text-foreground">{formatDateForDisplay(sale.saleDate)}</TableCell>
-                <TableCell className="text-right font-semibold text-accent">{formatCurrency(sale.totalAmount)}</TableCell>
-                <TableCell>
-                  <div className="flex flex-wrap gap-1">
-                    {sale.salesByPaymentType.map(p => (
-                       <Badge key={p.type} variant="secondary" className="font-normal">{p.type}: {formatCurrency(p.amount)}</Badge>
-                    ))}
-                  </div>
+                <TableCell className="text-right">
+                   <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                           <span className="font-semibold text-accent cursor-help underline decoration-dotted">{formatCurrency(sale.totalAmount)}</span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <div className="p-2 space-y-2">
+                            <p className="font-bold border-b pb-1 mb-1">Sales Breakdown:</p>
+                            {renderBreakdownTooltip('Breakfast', sale.breakfast)}
+                            {renderBreakdownTooltip('Lunch', sale.lunch)}
+                            {renderBreakdownTooltip('Dinner', sale.dinner)}
+                            {renderBreakdownTooltip('Snacks', sale.snacks)}
+                          </div>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                 </TableCell>
                 <TableCell className="text-muted-foreground text-xs">{sale.recordedByName || sale.recordedByUid.substring(0, 8)}</TableCell>
-                <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate">
+                <TableCell className="text-xs text-muted-foreground max-w-[250px] truncate">
                   {sale.notes ? (
-                    <Tooltip><TooltipTrigger asChild><span className="cursor-help underline decoration-dotted">{sale.notes.substring(0, 25)}{sale.notes.length > 25 ? "..." : ""}</span></TooltipTrigger><TooltipContent className="max-w-xs"><p>{sale.notes}</p></TooltipContent></Tooltip>
+                    <Tooltip><TooltipTrigger asChild><span className="cursor-help underline decoration-dotted">{sale.notes.substring(0, 35)}{sale.notes.length > 35 ? "..." : ""}</span></TooltipTrigger><TooltipContent className="max-w-xs"><p>{sale.notes}</p></TooltipContent></Tooltip>
                   ) : "N/A"}
                 </TableCell>
                 <TableCell>

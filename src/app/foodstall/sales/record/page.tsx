@@ -6,10 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { foodSaleTransactionFormSchema, type FoodSaleTransactionFormValues } from "@/types/food";
-import { ArrowLeft, Loader2, Info, IndianRupee, PlusCircle, Trash2 } from "lucide-react";
+import { ArrowLeft, Loader2, Info, IndianRupee } from "lucide-react";
 import Link from "next/link";
 import { useState, useEffect, useCallback } from "react";
-import { useForm, useFieldArray } from "react-hook-form";
+import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useAuth } from "@/contexts/AuthContext";
@@ -35,48 +35,59 @@ if (!getApps().length) {
   db = getFirestore(getApp());
 }
 
-const defaultSalesFields = [
-  { type: 'HungerBox', amount: 0 },
-  { type: 'UPI', amount: 0 }
-];
+const defaultMealValues = { hungerbox: 0, upi: 0, other: 0 };
+
+const mealCategories = ["breakfast", "lunch", "dinner", "snacks"] as const;
+type MealCategory = typeof mealCategories[number];
 
 export default function RecordFoodSalePage() {
   const { user, activeSiteId, activeStallId } = useAuth();
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(true);
-  const [totalSaleAmount, setTotalSaleAmount] = useState(0);
-
+  
   const searchParams = useSearchParams();
   const dateParam = searchParams.get('date');
   const initialDate = dateParam && isValid(parseISO(dateParam)) ? parseISO(dateParam) : new Date();
   
   const [selectedDate, setSelectedDate] = useState<Date>(initialDate);
+  const [subtotals, setSubtotals] = useState<Record<MealCategory, number>>({ breakfast: 0, lunch: 0, dinner: 0, snacks: 0 });
 
   const form = useForm<FoodSaleTransactionFormValues>({
     resolver: zodResolver(foodSaleTransactionFormSchema),
     defaultValues: {
       saleDate: selectedDate,
-      salesByPaymentType: defaultSalesFields,
+      breakfast: defaultMealValues,
+      lunch: defaultMealValues,
+      dinner: defaultMealValues,
+      snacks: defaultMealValues,
       totalAmount: 0,
       notes: "",
     },
   });
 
-  const { fields, append, remove } = useFieldArray({
-    control: form.control,
-    name: "salesByPaymentType",
-  });
-  
-  const watchedSales = form.watch("salesByPaymentType");
+  const { watch, setValue } = form;
+  const watchedFields = watch();
 
   useEffect(() => {
-    const total = watchedSales.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-    setTotalSaleAmount(total);
-    if (form.getValues("totalAmount") !== total) {
-      form.setValue("totalAmount", total, { shouldValidate: true });
+    const calculateTotals = () => {
+        const newSubtotals: Record<MealCategory, number> = { breakfast: 0, lunch: 0, dinner: 0, snacks: 0 };
+        let grandTotal = 0;
+        
+        mealCategories.forEach(meal => {
+            const mealData = watchedFields[meal];
+            const subtotal = (mealData?.hungerbox || 0) + (mealData?.upi || 0) + (mealData?.other || 0);
+            newSubtotals[meal] = subtotal;
+            grandTotal += subtotal;
+        });
+        
+        setSubtotals(newSubtotals);
+        if (form.getValues("totalAmount") !== grandTotal) {
+            setValue('totalAmount', grandTotal, { shouldValidate: true });
+        }
     }
-  }, [watchedSales, form]);
+    calculateTotals();
+  }, [watchedFields.breakfast, watchedFields.lunch, watchedFields.dinner, watchedFields.snacks, setValue, form]);
 
   
   const fetchAndSetDataForDate = useCallback(async (date: Date) => {
@@ -95,15 +106,17 @@ export default function RecordFoodSalePage() {
         form.reset({
           ...data,
           saleDate: (data.saleDate as Timestamp).toDate(),
-          salesByPaymentType: data.salesByPaymentType || defaultSalesFields,
+          breakfast: data.breakfast || defaultMealValues,
+          lunch: data.lunch || defaultMealValues,
+          dinner: data.dinner || defaultMealValues,
+          snacks: data.snacks || defaultMealValues,
         });
       } else {
-        // Reset to default for the new date
         form.reset({
           saleDate: date,
-          salesByPaymentType: defaultSalesFields,
-          totalAmount: 0,
-          notes: "",
+          breakfast: defaultMealValues, lunch: defaultMealValues,
+          dinner: defaultMealValues, snacks: defaultMealValues,
+          totalAmount: 0, notes: "",
         });
       }
     } catch (error) {
@@ -118,7 +131,6 @@ export default function RecordFoodSalePage() {
     fetchAndSetDataForDate(selectedDate);
   }, [selectedDate, fetchAndSetDataForDate]);
 
-
   async function onSubmit(values: FoodSaleTransactionFormValues) {
     if (!user || !activeSiteId || !activeStallId || !db) {
       toast({ title: "Error", description: "Cannot save sale. Context is missing.", variant: "destructive" });
@@ -131,14 +143,10 @@ export default function RecordFoodSalePage() {
     
     try {
       const isNewDoc = !(await getDoc(docRef)).exists();
-      
       const saleData = {
         ...values,
-        salesByPaymentType: values.salesByPaymentType.filter(s => s.amount > 0), // Filter out zero-amount entries
-        siteId: activeSiteId,
-        stallId: activeStallId,
-        recordedByUid: user.uid,
-        recordedByName: user.displayName || user.email,
+        siteId: activeSiteId, stallId: activeStallId,
+        recordedByUid: user.uid, recordedByName: user.displayName || user.email,
         saleDate: Timestamp.fromDate(values.saleDate),
         updatedAt: new Date().toISOString(),
         ...(isNewDoc && { createdAt: new Date().toISOString() }),
@@ -149,7 +157,6 @@ export default function RecordFoodSalePage() {
         title: "Sales Saved",
         description: `Sales data for ${format(values.saleDate, 'PPP')} has been saved.`,
       });
-
     } catch (error: any) {
       console.error("Error saving food sale:", error);
       toast({ title: "Save Failed", description: error.message || "Could not save sales data.", variant: "destructive" });
@@ -164,11 +171,25 @@ export default function RecordFoodSalePage() {
     return <div className="max-w-2xl mx-auto mt-10"><Alert variant="default" className="border-primary/50"><Info className="h-4 w-4" /><AlertTitle>Site & Stall Context Required</AlertTitle><AlertDescription>To manage daily sales, please ensure you have an active Site and Stall selected in the header.</AlertDescription></Alert></div>;
   }
   
+  const renderMealCard = (meal: MealCategory, title: string) => (
+    <Card>
+      <CardHeader className="pb-4">
+        <CardTitle className="text-lg">{title}</CardTitle>
+        <CardDescription>Subtotal: ₹{subtotals[meal].toFixed(2)}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <FormField control={form.control} name={`${meal}.hungerbox`} render={({ field }) => (<FormItem><FormLabel className="text-xs font-normal">HungerBox</FormLabel><FormControl><Input type="number" min="0" step="0.01" {...field} className="bg-input" disabled={isSubmitting || isLoadingData}/></FormControl><FormMessage/></FormItem>)}/>
+        <FormField control={form.control} name={`${meal}.upi`} render={({ field }) => (<FormItem><FormLabel className="text-xs font-normal">UPI</FormLabel><FormControl><Input type="number" min="0" step="0.01" {...field} className="bg-input" disabled={isSubmitting || isLoadingData}/></FormControl><FormMessage/></FormItem>)}/>
+        <FormField control={form.control} name={`${meal}.other`} render={({ field }) => (<FormItem><FormLabel className="text-xs font-normal">Other (Cash/Card)</FormLabel><FormControl><Input type="number" min="0" step="0.01" {...field} className="bg-input" disabled={isSubmitting || isLoadingData}/></FormControl><FormMessage/></FormItem>)}/>
+      </CardContent>
+    </Card>
+  );
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Manage Daily Sales"
-        description="Select a date to view, edit, or create a sales entry for that day."
+        description="Select a date to view or edit the sales summary for that day, broken down by meal times."
         actions={
           <Link href="/foodstall/sales">
             <Button variant="outline" disabled={isSubmitting}>
@@ -179,12 +200,12 @@ export default function RecordFoodSalePage() {
       />
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)}>
-          <Card className="max-w-2xl mx-auto shadow-lg">
+          <Card className="max-w-4xl mx-auto shadow-lg">
             <CardHeader>
               <div className="flex justify-between items-center">
                   <div>
                     <CardTitle>Daily Sales Entry</CardTitle>
-                    <CardDescription>Enter total sales received for each payment type.</CardDescription>
+                    <CardDescription>Enter total sales received for each meal type and payment method.</CardDescription>
                   </div>
                   <DatePicker date={selectedDate} onDateChange={(date) => setSelectedDate(date || new Date())} disabled={isSubmitting || isLoadingData} />
               </div>
@@ -193,78 +214,24 @@ export default function RecordFoodSalePage() {
                 <div className="h-96 flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /></div>
             ) : (
             <CardContent className="space-y-6">
-              <div className="space-y-4 p-4 border rounded-md bg-muted/30">
-                <FormLabel>Sales by Payment Type</FormLabel>
-                {fields.map((field, index) => {
-                    const isDefaultField = index < defaultSalesFields.length;
-                    return (
-                        <div key={field.id} className="flex items-end gap-3">
-                             <FormField
-                                control={form.control}
-                                name={`salesByPaymentType.${index}.type`}
-                                render={({ field }) => (
-                                    <FormItem className="flex-1">
-                                        {index === 0 && <FormLabel className="text-xs">Payment Type</FormLabel>}
-                                        <FormControl>
-                                            <Input placeholder="e.g., Cash" {...field} disabled={isSubmitting || isDefaultField} className="bg-input"/>
-                                        </FormControl>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-                            <FormField
-                                control={form.control}
-                                name={`salesByPaymentType.${index}.amount`}
-                                render={({ field }) => (
-                                    <FormItem className="w-40">
-                                       {index === 0 && <FormLabel className="text-xs">Amount (₹)</FormLabel>}
-                                        <FormControl>
-                                            <Input type="number" min="0" step="0.01" placeholder="0.00" {...field} disabled={isSubmitting} className="bg-input"/>
-                                        </FormControl>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-                             <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => remove(index)}
-                                disabled={isDefaultField || isSubmitting}
-                                className="text-destructive hover:bg-destructive/10"
-                                aria-label={`Remove payment type ${index + 1}`}
-                            >
-                                <Trash2 className="h-4 w-4" />
-                            </Button>
-                        </div>
-                    );
-                })}
-                <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => append({ type: "", amount: 0})}
-                    className="w-full border-dashed"
-                    disabled={isSubmitting}
-                >
-                    <PlusCircle className="mr-2 h-4 w-4"/> Add Payment Type
-                </Button>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-6 border-t">
-                 <FormField control={form.control} name="notes" render={({ field }) => (<FormItem><FormLabel>Notes (Optional)</FormLabel><FormControl><Textarea placeholder="e.g., Evening rush, special event" {...field} value={field.value ?? ""} disabled={isSubmitting} className="bg-input min-h-[70px]"/></FormControl><FormMessage /></FormItem>)} />
-                 <div className="pt-4 text-right space-y-2">
-                    <div>
-                        <p className="text-sm text-muted-foreground">Total Sale Amount</p>
-                        <p className="text-3xl font-bold text-foreground" data-testid="total-sale-amount">₹{totalSaleAmount.toFixed(2)}</p>
-                        <FormField control={form.control} name="totalAmount" render={() => <FormMessage />} />
-                    </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {renderMealCard("breakfast", "Breakfast Sales")}
+                    {renderMealCard("lunch", "Lunch Sales")}
+                    {renderMealCard("dinner", "Dinner Sales")}
+                    {renderMealCard("snacks", "Snacks / Other Sales")}
                 </div>
-              </div>
+                <div className="pt-6 border-t">
+                    <FormField control={form.control} name="notes" render={({ field }) => (<FormItem><FormLabel>Notes (Optional)</FormLabel><FormControl><Textarea placeholder="e.g., Heavy rain in evening, special event discount" {...field} value={field.value ?? ""} disabled={isSubmitting} className="bg-input min-h-[70px]"/></FormControl><FormMessage /></FormItem>)} />
+                </div>
             </CardContent>
             )}
-            <CardFooter>
-              <Button type="submit" className="w-full" size="lg" disabled={isSubmitting || isLoadingData}>
+            <CardFooter className="flex flex-col sm:flex-row items-center justify-between pt-6 border-t">
+                <div className="text-left">
+                    <p className="text-sm text-muted-foreground">Grand Total for {format(selectedDate, "PPP")}</p>
+                    <p className="text-3xl font-bold text-foreground" data-testid="total-sale-amount">₹{form.getValues('totalAmount').toFixed(2)}</p>
+                    <FormField control={form.control} name="totalAmount" render={() => <FormMessage />} />
+                </div>
+              <Button type="submit" size="lg" disabled={isSubmitting || isLoadingData}>
                 {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                 Save Daily Sales
               </Button>
