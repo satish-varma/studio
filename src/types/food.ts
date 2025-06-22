@@ -65,12 +65,15 @@ export const paymentMethods = [
     "Other",
 ] as const;
 
-export const paymentEntrySchema = z.object({
-    method: z.enum(paymentMethods, { required_error: "Payment method is required."}),
-    amount: z.coerce.number().min(0, "Amount must be a non-negative number.")
+export const salePaymentsSchema = z.object({
+    cash: z.coerce.number().min(0, "Amount must be non-negative").default(0),
+    card: z.coerce.number().min(0, "Amount must be non-negative").default(0),
+    upi: z.coerce.number().min(0, "Amount must be non-negative").default(0),
+    hungerbox: z.coerce.number().min(0, "Amount must be non-negative").default(0),
+    other: z.coerce.number().min(0, "Amount must be non-negative").default(0),
 });
 
-export type PaymentEntry = z.infer<typeof paymentEntrySchema>;
+export type SalePayments = z.infer<typeof salePaymentsSchema>;
 
 export const foodSaleTransactionFormSchema = z.object({
   breakfastSales: z.coerce.number().min(0, "Sales must be non-negative").optional(),
@@ -81,7 +84,7 @@ export const foodSaleTransactionFormSchema = z.object({
   totalAmount: z.coerce.number().min(0, "Total amount must be non-negative"),
   saleDate: z.date({ required_error: "Sale date is required." }),
   notes: z.string().optional().nullable(),
-  paymentMethods: z.array(paymentEntrySchema).min(1, "At least one payment method is required."),
+  payments: salePaymentsSchema,
 }).refine(data => 
   (data.breakfastSales || 0) + 
   (data.lunchSales || 0) + 
@@ -93,19 +96,19 @@ export const foodSaleTransactionFormSchema = z.object({
   }
 ).refine(data => {
     const salesTotal = (data.breakfastSales || 0) + (data.lunchSales || 0) + (data.dinnerSales || 0) + (data.snacksSales || 0);
-    const paymentsTotal = data.paymentMethods.reduce((sum, p) => sum + p.amount, 0);
+    const paymentsTotal = (data.payments.cash || 0) + (data.payments.card || 0) + (data.payments.upi || 0) + (data.payments.hungerbox || 0) + (data.payments.other || 0);
     return Math.abs(salesTotal - paymentsTotal) < 0.01; // Allow for floating point inaccuracies
 }, {
     message: "Total of all payment methods must equal the total sales amount.",
-    path: ["paymentMethods"],
+    path: ["payments"],
 });
 
 
 export type FoodSaleTransactionFormValues = z.infer<typeof foodSaleTransactionFormSchema>;
 
-export interface FoodSaleTransaction extends Omit<FoodSaleTransactionFormValues, 'paymentMethods'> {
+export interface FoodSaleTransaction extends Omit<FoodSaleTransactionFormValues, 'payments'> {
   id: string; // Firestore document ID (YYYY-MM-DD_stallId)
-  paymentMethods: PaymentEntry[];
+  payments: SalePayments;
   siteId: string;
   stallId: string;
   recordedByUid: string;

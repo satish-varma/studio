@@ -15,7 +15,6 @@ import { format } from "date-fns";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ChevronLeft, ChevronRight, Loader2, ShoppingCart, Edit } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRouter } from 'next/navigation';
 
@@ -36,7 +35,7 @@ const TableRowSkeleton = () => (
     <TableCell className="text-right"><Skeleton className="h-4 w-16 inline-block" /></TableCell>
     <TableCell className="text-right"><Skeleton className="h-4 w-16 inline-block" /></TableCell>
     <TableCell className="text-right"><Skeleton className="h-4 w-16 inline-block" /></TableCell>
-    <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+    <TableCell className="text-right"><Skeleton className="h-4 w-20 inline-block" /></TableCell>
     <TableCell><Skeleton className="h-4 w-24" /></TableCell>
     <TableCell><Skeleton className="h-4 w-32" /></TableCell>
     <TableCell><Skeleton className="h-8 w-8" /></TableCell>
@@ -118,7 +117,23 @@ export function FoodSalesTable({
                 <TableCell className="text-right text-muted-foreground">{formatCurrency(sale.lunchSales)}</TableCell>
                 <TableCell className="text-right text-muted-foreground">{formatCurrency(sale.dinnerSales)}</TableCell>
                 <TableCell className="text-right text-muted-foreground">{formatCurrency(sale.snacksSales)}</TableCell>
-                <TableCell className="text-right font-semibold text-accent">{formatCurrency(sale.totalAmount)}</TableCell>
+                <TableCell className="text-right font-semibold text-accent">
+                   <Tooltip>
+                        <TooltipTrigger asChild>
+                            <span className="underline decoration-dotted cursor-help">{formatCurrency(sale.totalAmount)}</span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                            <div className="text-sm p-1">
+                                <p className="font-bold mb-1">Payment Breakdown</p>
+                                {sale.payments?.cash > 0 && <p>Cash: {formatCurrency(sale.payments.cash)}</p>}
+                                {sale.payments?.card > 0 && <p>Card: {formatCurrency(sale.payments.card)}</p>}
+                                {sale.payments?.upi > 0 && <p>UPI: {formatCurrency(sale.payments.upi)}</p>}
+                                {sale.payments?.hungerbox > 0 && <p>HungerBox: {formatCurrency(sale.payments.hungerbox)}</p>}
+                                {sale.payments?.other > 0 && <p>Other: {formatCurrency(sale.payments.other)}</p>}
+                            </div>
+                        </TooltipContent>
+                    </Tooltip>
+                </TableCell>
                 <TableCell className="text-muted-foreground text-xs">{sale.recordedByName || sale.recordedByUid.substring(0, 8)}</TableCell>
                 <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate">
                   {sale.notes ? (
