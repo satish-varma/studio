@@ -56,7 +56,8 @@ const navItems: NavItem[] = [
     roles: ['staff', 'manager', 'admin'],
     subItems: [
       { href: "/foodstall/sales/record", label: "Record Sale" },
-      { href: "/foodstall/expenses/record", label: "Record Expense" }
+      { href: "/foodstall/expenses/record", label: "Record Expense" },
+      { href: "/foodstall/reports", label: "View Reports" },
     ]
   },
   { href: "/users", label: "User Management", icon: Users, roles: ['admin'] },

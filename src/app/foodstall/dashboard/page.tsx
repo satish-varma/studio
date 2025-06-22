@@ -115,22 +115,24 @@ export default function FoodStallDashboardPage() {
       description: "Track all your purchases and operational costs for the food stall.",
       href: "/foodstall/expenses",
       icon: ShoppingBag,
-      cta: "View Expenses"
+      cta: "View Expenses",
+      disabled: false,
     },
     {
       title: "Manage Sales",
       description: "Record and view all sales transactions for your food stall.",
       href: "/foodstall/sales",
       icon: DollarSign,
-      cta: "View Sales"
+      cta: "View Sales",
+      disabled: false,
     },
     {
-      title: "View Reports (Coming Soon)",
-      description: "Analyze financial performance, popular items, and trends.",
-      href: "#", // Placeholder
+      title: "View Financial Reports",
+      description: "Analyze financial performance with sales and expense reports.",
+      href: "/foodstall/reports",
       icon: LineChart,
       cta: "View Reports",
-      disabled: true
+      disabled: false, // Enabled this
     },
   ];
 
