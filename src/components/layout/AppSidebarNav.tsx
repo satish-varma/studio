@@ -22,16 +22,25 @@ import {
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
+  SidebarMenuSub,
+  SidebarMenuSubItem,
+  SidebarMenuSubButton,
 } from "@/components/ui/sidebar";
 import { useAuth } from "@/contexts/AuthContext";
 import type { UserRole } from "@/types";
+
+interface NavSubItem {
+  href: string;
+  label: string;
+}
 
 interface NavItem {
   href: string;
   label: string;
   icon: LucideIcon;
   roles?: UserRole[]; 
-  exactMatch?: boolean; 
+  exactMatch?: boolean;
+  subItems?: NavSubItem[];
 }
 
 const navItems: NavItem[] = [
@@ -40,7 +49,16 @@ const navItems: NavItem[] = [
   { href: "/sales/record", label: "Record Sale", icon: ShoppingCart, roles: ['staff', 'manager', 'admin'] },
   { href: "/sales/history", label: "Sales History", icon: History, roles: ['staff', 'manager', 'admin'] },
   { href: "/reports", label: "Reports", icon: BarChart3, roles: ['manager', 'admin'] },
-  { href: "/foodstall/dashboard", label: "Food Stall Management", icon: UtensilsCrossed, roles: ['staff', 'manager', 'admin'] },
+  { 
+    href: "/foodstall/dashboard", 
+    label: "Food Stall Management", 
+    icon: UtensilsCrossed, 
+    roles: ['staff', 'manager', 'admin'],
+    subItems: [
+      { href: "/foodstall/sales/record", label: "Record Sale" },
+      { href: "/foodstall/expenses/record", label: "Record Expense" }
+    ]
+  },
   { href: "/users", label: "User Management", icon: Users, roles: ['admin'] },
   { href: "/admin/sites", label: "Manage Sites & Stalls", icon: Building, roles: ['admin'] },
   { href: "/admin/activity-log", label: "Activity Log", icon: FileText, roles: ['admin'] },
@@ -62,7 +80,9 @@ export function AppSidebarNav() {
   return (
     <SidebarMenu>
       {filteredNavItems.map((item) => {
-        const isActive = item.exactMatch ? pathname === item.href : pathname.startsWith(item.href);
+        const isSubItemActive = item.subItems?.some(sub => pathname.startsWith(sub.href)) ?? false;
+        const isActive = item.exactMatch ? pathname === item.href : (pathname.startsWith(item.href) || isSubItemActive);
+        
         return (
           <SidebarMenuItem key={item.href}>
             <Link href={item.href} passHref legacyBehavior>
@@ -75,6 +95,22 @@ export function AppSidebarNav() {
                 <span>{item.label}</span>
               </SidebarMenuButton>
             </Link>
+            {item.subItems && isActive && (
+              <SidebarMenuSub>
+                {item.subItems.map((subItem) => {
+                  const isSubActive = pathname.startsWith(subItem.href);
+                  return (
+                    <SidebarMenuSubItem key={subItem.href}>
+                      <Link href={subItem.href} passHref legacyBehavior>
+                        <SidebarMenuSubButton isActive={isSubActive}>
+                          <span>{subItem.label}</span>
+                        </SidebarMenuSubButton>
+                      </Link>
+                    </SidebarMenuSubItem>
+                  )
+                })}
+              </SidebarMenuSub>
+            )}
           </SidebarMenuItem>
         );
       })}
