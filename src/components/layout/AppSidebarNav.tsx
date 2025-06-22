@@ -72,8 +72,10 @@ const navItems: NavItem[] = [
     roles: ['staff', 'manager', 'admin'],
     subItems: [
       { href: "/foodstall/dashboard", label: "Dashboard", roles: ['staff', 'manager', 'admin'] },
-      { href: "/foodstall/sales", label: "Sales", roles: ['staff', 'manager', 'admin'] },
-      { href: "/foodstall/expenses", label: "Expenses", roles: ['staff', 'manager', 'admin'] },
+      { href: "/foodstall/sales", label: "Sales Summaries", roles: ['staff', 'manager', 'admin'] },
+      { href: "/foodstall/sales/record", label: "Manage Daily Sales", roles: ['staff', 'manager', 'admin'] },
+      { href: "/foodstall/expenses", label: "Expense History", roles: ['staff', 'manager', 'admin'] },
+      { href: "/foodstall/expenses/record", label: "Record Expense", roles: ['staff', 'manager', 'admin'] },
       { href: "/foodstall/reports", label: "Reports", roles: ['manager', 'admin'] },
       { href: "/foodstall/activity-log", label: "Activity Log", roles: ['manager', 'admin'] },
     ]
