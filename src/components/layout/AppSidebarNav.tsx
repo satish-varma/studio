@@ -51,14 +51,15 @@ const navItems: NavItem[] = [
   { href: "/sales/history", label: "Sales History", icon: History, roles: ['staff', 'manager', 'admin'] },
   { href: "/reports", label: "Reports", icon: BarChart3, roles: ['manager', 'admin'] },
   { 
-    href: "/foodstall/dashboard", 
+    href: "/foodstall", // Changed href to be a prefix for the whole section
     label: "Food Stall Management", 
     icon: UtensilsCrossed, 
     roles: ['staff', 'manager', 'admin'],
     subItems: [
-      { href: "/foodstall/sales/record", label: "Record Sale" },
-      { href: "/foodstall/expenses/record", label: "Record Expense" },
-      { href: "/foodstall/reports", label: "View Reports" },
+      { href: "/foodstall/dashboard", label: "Dashboard" },
+      { href: "/foodstall/sales", label: "Sales History" },
+      { href: "/foodstall/expenses", label: "Expenses List" },
+      { href: "/foodstall/reports", label: "Financial Reports" },
       { href: "/foodstall/activity-log", label: "Activity Log" },
     ]
   },
@@ -83,12 +84,15 @@ export function AppSidebarNav() {
   return (
     <SidebarMenu>
       {filteredNavItems.map((item) => {
-        const isSubItemActive = item.subItems?.some(sub => pathname.startsWith(sub.href)) ?? false;
-        const isActive = item.exactMatch ? pathname === item.href : (pathname.startsWith(item.href) || isSubItemActive);
+        // With prefix-based hrefs, this logic is simpler and more robust.
+        const isActive = item.exactMatch ? pathname === item.href : pathname.startsWith(item.href);
         
+        // The main link for a section should go to its dashboard.
+        const mainLinkHref = item.href === "/foodstall" ? "/foodstall/dashboard" : item.href;
+
         return (
           <SidebarMenuItem key={item.href}>
-            <Link href={item.href} passHref legacyBehavior>
+            <Link href={mainLinkHref} passHref legacyBehavior>
               <SidebarMenuButton
                 isActive={isActive}
                 tooltip={{ children: item.label, className: "bg-primary text-primary-foreground" }}
