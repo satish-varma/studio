@@ -216,6 +216,7 @@ export default function RecordFoodExpensePage() {
                           step="0.01"
                           placeholder="0.00"
                           {...field}
+                          value={field.value ?? ""}
                           disabled={isSubmitting}
                           className="bg-input"
                         />
