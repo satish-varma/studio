@@ -23,12 +23,11 @@ import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Info, ListFilter, CalendarIcon } from "lucide-react";
+import { Loader2, Info, ListFilter, DollarSign } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { FoodExpensesTable } from "./FoodExpensesTable";
 import { foodExpenseCategories } from "@/types/food";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -36,10 +35,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Calendar } from "@/components/ui/calendar";
 import { cn } from "@/lib/utils";
-import { format, subDays, startOfDay, endOfDay } from "date-fns";
-import type { DateRange } from "react-day-picker";
+import { format, subDays, startOfDay, endOfDay, startOfMonth, startOfWeek } from "date-fns";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+
 
 const LOG_PREFIX = "[FoodExpensesClientPage]";
 const EXPENSES_PER_PAGE = 15;
@@ -53,6 +52,8 @@ if (!getApps().length) {
 }
 const db = getFirestore(getApp());
 
+type DateFilterOption = 'today' | 'last_7_days' | 'this_month' | 'all_time';
+
 export default function FoodExpensesClientPage() {
   const { user, activeSiteId, activeStallId, loading: authLoading } = useAuth();
   const { toast } = useToast();
@@ -61,11 +62,9 @@ export default function FoodExpensesClientPage() {
   const [loadingExpenses, setLoadingExpenses] = useState(true);
   const [errorExpenses, setErrorExpenses] = useState<string | null>(null);
   
-  const [dateRange, setDateRange] = useState<DateRange | undefined>({
-    from: startOfDay(subDays(new Date(), 29)), // Default to last 30 days
-    to: endOfDay(new Date()),
-  });
+  const [dateFilter, setDateFilter] = useState<DateFilterOption>('today');
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [totalExpensesAmount, setTotalExpensesAmount] = useState(0);
 
   const [firstVisibleDoc, setFirstVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
   const [lastVisibleDoc, setLastVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
@@ -79,32 +78,53 @@ export default function FoodExpensesClientPage() {
       setErrorExpenses("User not authenticated. Please log in.");
       setLoadingExpenses(false);
       setExpenses([]);
+      setTotalExpensesAmount(0);
       return;
     }
     if (!activeSiteId || !activeStallId) {
       setErrorExpenses("Please select an active site and stall to view expenses.");
       setLoadingExpenses(false);
       setExpenses([]);
+      setTotalExpensesAmount(0);
       return;
     }
-     if (!dateRange?.from || !dateRange?.to) {
-      setErrorExpenses("Please select a valid date range.");
-      setLoadingExpenses(false);
-      setExpenses([]);
-      return;
-    }
-
+    
     setLoadingExpenses(true);
+    if(direction === 'initial') {
+        setTotalExpensesAmount(0); // Reset total on new filter fetch
+    }
     setErrorExpenses(null);
-    console.log(`${LOG_PREFIX} Fetching expenses. Direction: ${direction}, Site: ${activeSiteId}, Stall: ${activeStallId}, Category: ${categoryFilter}`);
+    console.log(`${LOG_PREFIX} Fetching expenses. Direction: ${direction}, Site: ${activeSiteId}, Stall: ${activeStallId}, Category: ${categoryFilter}, DateFilter: ${dateFilter}`);
 
     const expensesCollectionRef = collection(db, "foodItemExpenses");
     let qConstraints: QueryConstraint[] = [
       where("siteId", "==", activeSiteId),
       where("stallId", "==", activeStallId),
-      where("purchaseDate", ">=", Timestamp.fromDate(startOfDay(dateRange.from))),
-      where("purchaseDate", "<=", Timestamp.fromDate(endOfDay(dateRange.to))),
     ];
+    
+    const now = new Date();
+    let startDate: Date | null = null;
+    let endDate: Date | null = endOfDay(now);
+
+    switch (dateFilter) {
+        case 'today':
+            startDate = startOfDay(now);
+            break;
+        case 'last_7_days':
+            startDate = startOfDay(subDays(now, 6));
+            break;
+        case 'this_month':
+            startDate = startOfMonth(now);
+            break;
+        case 'all_time':
+            startDate = null; // No start date filter
+            endDate = null;   // No end date filter
+            break;
+    }
+
+    if(startDate) qConstraints.push(where("purchaseDate", ">=", Timestamp.fromDate(startDate)));
+    if(endDate) qConstraints.push(where("purchaseDate", "<=", Timestamp.fromDate(endDate)));
+
 
     if (categoryFilter !== "all") {
       qConstraints.push(where("category", "==", categoryFilter));
@@ -137,6 +157,15 @@ export default function FoodExpensesClientPage() {
       }
 
       setExpenses(fetchedExpenses);
+
+      // Recalculate total only on initial load for a filter set
+      if(direction === 'initial') {
+        const totalQueryConstraints = qConstraints.filter(c => c.type !== 'limit' && c.type !== 'startAfter' && c.type !== 'endBefore' && c.type !== 'limitToLast');
+        const totalQuery = query(expensesCollectionRef, ...totalQueryConstraints);
+        const totalSnapshot = await getDocs(totalQuery);
+        const total = totalSnapshot.docs.reduce((sum, doc) => sum + (doc.data().totalCost || 0), 0);
+        setTotalExpensesAmount(total);
+      }
       
       if (querySnapshot.docs.length > 0) {
         setFirstVisibleDoc(querySnapshot.docs[0]);
@@ -146,6 +175,10 @@ export default function FoodExpensesClientPage() {
         setIsLastPage(!hasMore);
       } else {
         if (direction === 'next') setIsLastPage(true);
+        if (direction === 'initial') {
+            setTotalExpensesAmount(0);
+            setIsLastPage(true);
+        }
       }
       console.log(`${LOG_PREFIX} Fetched ${fetchedExpenses.length} expenses. HasMore: ${hasMore}`);
 
@@ -155,7 +188,7 @@ export default function FoodExpensesClientPage() {
     } finally {
       setLoadingExpenses(false);
     }
-  }, [authLoading, user, activeSiteId, activeStallId, dateRange, categoryFilter, db, firstVisibleDoc, lastVisibleDoc]);
+  }, [authLoading, user, activeSiteId, activeStallId, dateFilter, categoryFilter, db, firstVisibleDoc, lastVisibleDoc]);
 
   // Effect for initial fetch and filter changes
   useEffect(() => {
@@ -167,13 +200,13 @@ export default function FoodExpensesClientPage() {
     fetchExpenses('initial');
     return () => { document.title = "StallSync - Stock Management"; }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateRange, categoryFilter, user, activeSiteId, activeStallId]);
+  }, [dateFilter, categoryFilter, user, activeSiteId, activeStallId]);
 
 
-  const handleDateRangeChange = (newRange: DateRange | undefined) => {
-    setDateRange(newRange);
+  const handleDateFilterChange = (filter: DateFilterOption) => {
+    setDateFilter(filter);
   };
-
+  
   const handleCategoryChange = (newCategory: string) => {
     setCategoryFilter(newCategory);
   };
@@ -204,39 +237,32 @@ export default function FoodExpensesClientPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row gap-4 p-4 border rounded-lg bg-card shadow-sm">
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button
-              variant={"outline"}
-              className={cn("w-full sm:w-[260px] justify-start text-left font-normal bg-input", !dateRange && "text-muted-foreground")}
-            >
-              <CalendarIcon className="mr-2 h-4 w-4" />
-              {dateRange?.from ? (
-                dateRange.to ? (
-                  <>
-                    {format(dateRange.from, "LLL dd, y")} - {format(dateRange.to, "LLL dd, y")}
-                  </>
-                ) : (
-                  format(dateRange.from, "LLL dd, y")
-                )
-              ) : (
-                <span>Pick a date range</span>
-              )}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-0" align="start">
-            <Calendar
-              initialFocus
-              mode="range"
-              defaultMonth={dateRange?.from}
-              selected={dateRange}
-              onSelect={handleDateRangeChange}
-              numberOfMonths={2}
-              disabled={(date) => date > new Date() || date < new Date("2020-01-01")}
-            />
-          </PopoverContent>
-        </Popover>
+        <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">
+                    Total Expenses ({
+                        dateFilter === 'today' ? 'Today' :
+                        dateFilter === 'last_7_days' ? 'Last 7 Days' :
+                        dateFilter === 'this_month' ? 'This Month' : 'All Time'
+                    })
+                </CardTitle>
+                 <DollarSign className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+                <div className="text-2xl font-bold">
+                    {loadingExpenses && totalExpensesAmount === 0 ? <Loader2 className="h-6 w-6 animate-spin"/> : `₹${totalExpensesAmount.toFixed(2)}`}
+                </div>
+                <p className="text-xs text-muted-foreground">Total expenses for the selected period and category.</p>
+            </CardContent>
+        </Card>
+
+      <div className="flex flex-col sm:flex-row items-stretch gap-2 p-4 border rounded-lg bg-card shadow-sm">
+        <div className="flex-1 flex flex-wrap gap-2">
+           <Button variant={dateFilter === 'today' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('today')}>Today</Button>
+           <Button variant={dateFilter === 'last_7_days' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('last_7_days')}>Last 7 Days</Button>
+           <Button variant={dateFilter === 'this_month' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('this_month')}>This Month</Button>
+           <Button variant={dateFilter === 'all_time' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('all_time')}>All Time</Button>
+        </div>
 
         <Select value={categoryFilter} onValueChange={handleCategoryChange}>
           <SelectTrigger className="w-full sm:w-[220px] bg-input">
