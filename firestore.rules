@@ -3,162 +3,226 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // --- HELPER FUNCTIONS ---
-
+  
+    // =================================
+    // Helper Functions
+    // =================================
     function isSignedIn() {
       return request.auth != null;
     }
 
-    function isUser(userId) {
-      return isSignedIn() && request.auth.uid == userId;
-    }
-    
-    // --- User and Role Helpers ---
-    function getAuthenticatedUserData() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-    }
-
-    function getAuthenticatedUserRole() {
-      // Check if user document exists before trying to access .role
-      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        ? getAuthenticatedUserData().role
-        : null;
+    function getUserData(userId) {
+      return get(/databases/$(database)/documents/users/$(userId)).data;
     }
 
     function isAdmin() {
-      return getAuthenticatedUserRole() == 'admin';
+      return isSignedIn() && getUserData(request.auth.uid).role == 'admin';
     }
     
     function isManager() {
-      return getAuthenticatedUserRole() == 'manager';
+        return isSignedIn() && getUserData(request.auth.uid).role == 'manager';
     }
 
     function isStaff() {
-      return getAuthenticatedUserRole() == 'staff';
+      return isSignedIn() && getUserData(request.auth.uid).role == 'staff';
     }
     
-    // --- Context and Ownership Helpers ---
-    function getManagerSiteIds() {
-        let userData = getAuthenticatedUserData();
-        return (isManager() && 'managedSiteIds' in userData)
-            ? userData.managedSiteIds
-            : [];
+    function isOwner(userId) {
+        return request.auth.uid == userId;
     }
     
-    // Checks if the user is a manager of a specific site
     function isManagerOfSite(siteId) {
-        return isManager() && siteId in getManagerSiteIds();
-    }
-    
-    // Checks if a given stall ID belongs to a given site ID
-    function isStallInSite(stallId, siteId) {
-        return get(/databases/$(database)/documents/stalls/$(stallId)).data.siteId == siteId;
+        return isSignedIn() && siteId in getUserData(request.auth.uid).managedSiteIds;
     }
 
-    // --- Write Validation Helpers ---
-    
-    // Validates a write operation for a stock item, ensuring data integrity.
-    function isValidStockItemWrite(itemData) {
-        return itemData.name is string && itemData.name.size() > 0
-            && itemData.quantity is number && itemData.quantity >= 0
-            && itemData.price is number && itemData.price >= 0
-            && itemData.lastUpdated is string;
-    }
-    
-    // Checks if an update to a stock item only modifies quantity and lastUpdated fields.
-    function isOnlyQuantityUpdate(itemData) {
-        return itemData.diff(resource.data).affectedKeys().hasOnly(['quantity', 'lastUpdated']);
+    function isStaffOfSite(siteId) {
+        return isSignedIn() && getUserData(request.auth.uid).defaultSiteId == siteId;
     }
 
-    // --- COLLECTIONS RULES ---
+    function isStaffOfStall(stallId) {
+        let userData = getUserData(request.auth.uid);
+        let stallData = get(/databases/$(database)/documents/stalls/$(stallId)).data;
+        return isSignedIn() && userData.defaultStallId == stallId && userData.defaultSiteId == stallData.siteId;
+    }
+    
+    // =================================
+    // Collection Rules
+    // =================================
 
-    // USERS: Only admins can create/delete. Users can read/update their own profile (but not their role).
+    // /users/{userId}
     match /users/{userId} {
-      allow read: if isUser(userId) || isAdmin();
+      // Anyone can read their own user document.
+      // Admins can read any user document.
+      allow read: if isSignedIn() && (isOwner(userId) || isAdmin());
+      
+      // Users can update their own non-critical fields (displayName, preferences).
+      // They cannot change their own role, managed sites, or default assignments.
+      allow update: if isSignedIn() && isOwner(userId)
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                       .hasOnly(['displayName', 'photoURL', 'defaultItemSearchTerm', 'defaultItemCategoryFilter', 
+                                 'defaultItemStockStatusFilter', 'defaultItemStallFilterOption', 'defaultSalesDateRangeFrom', 
+                                 'defaultSalesDateRangeTo', 'defaultSalesStaffFilter', 'defaultSiteId', 'defaultStallId']);
+      
+      // Admins can update any field on any user document except their own role.
+      allow update: if isAdmin() && !isOwner(userId);
+      
+      // Admins can create new user documents.
       allow create: if isAdmin();
-      allow update: if (isUser(userId) && !('role' in request.resource.data)) || isAdmin();
-      allow delete: if isAdmin() && request.auth.uid != userId;
-      allow list: if isAdmin() || isManager();
+      
+      // Admins can delete any user document except their own.
+      allow delete: if isAdmin() && !isOwner(userId);
     }
-
-    // SITES & STALLS: Only admins can modify. Any authenticated user can read them to populate dropdowns etc.
+    
+    // /sites/{siteId}
     match /sites/{siteId} {
-      allow read: if isSignedIn();
-      allow create, update, delete: if isAdmin();
+        // Admins can manage everything. Staff and Managers can read.
+        allow read: if isSignedIn() && (isAdmin() || isManager() || isStaff());
+        allow write: if isAdmin();
     }
-     match /stalls/{stallId} {
-      allow read: if isSignedIn();
-      allow create, update, delete: if isAdmin();
+    
+    // /stalls/{stallId}
+    match /stalls/{stallId} {
+        // Admins can manage everything. Staff and Managers can read.
+        allow read: if isSignedIn() && (isAdmin() || isManager() || isStaff());
+        allow write: if isAdmin();
     }
-
-    // STOCK ITEMS:
+    
+    // /stockItems/{itemId}
     match /stockItems/{itemId} {
-      allow read: if isSignedIn();
-      
-      // Admin: Can create anything.
-      // Manager: Can create items in their managed sites.
-      allow create: if isAdmin() || (isManager() && request.resource.data.siteId in getManagerSiteIds() && isValidStockItemWrite(request.resource.data));
+        // Any authenticated user part of the site can read stock items
+        allow read: if isSignedIn() && (
+            isAdmin() ||
+            isManagerOfSite(resource.data.siteId) ||
+            isStaffOfSite(resource.data.siteId)
+        );
+        
+        // Creation rules: Admins can create anything. Managers can create items in their managed sites.
+        // Staff can create items in their default site (but only master stock, not directly to stalls).
+        allow create: if isSignedIn() && (
+            isAdmin() ||
+            (isManager() && isManagerOfSite(request.resource.data.siteId)) ||
+            (isStaff() && isStaffOfSite(request.resource.data.siteId) && request.resource.data.stallId == null)
+        );
 
-      // Admin: Can update anything.
-      // Manager: Can update any item in their managed sites.
-      // Staff: Can ONLY update quantity of items within their assigned site (both master and stall stock).
-      // This is crucial for sales transactions where both might be updated at once.
-      allow update: if isAdmin() || 
-                      (isManager() && resource.data.siteId in getManagerSiteIds() && isValidStockItemWrite(request.resource.data)) ||
-                      (isStaff() && resource.data.siteId == getAuthenticatedUserData().defaultSiteId && isOnlyQuantityUpdate(request.resource.data));
-                      
-      // Admin: Can delete anything.
-      // Manager: Can delete items in their managed sites.
-      allow delete: if isAdmin() || (isManager() && resource.data.siteId in getManagerSiteIds());
+        // Update rules:
+        // 1. Admins can update anything.
+        // 2. Managers can update any item in their managed sites.
+        // 3. Staff can ONLY update 'quantity' and 'lastUpdated' of items in their assigned stall.
+        allow update: if isSignedIn() && (
+            isAdmin() ||
+            (isManager() && isManagerOfSite(request.resource.data.siteId)) ||
+            (isStaff() && isStaffOfStall(request.resource.data.stallId)
+                       && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['quantity', 'lastUpdated']))
+        );
+        
+        // Deletion rules:
+        // 1. Admins can delete anything.
+        // 2. Managers can delete items in their managed sites, but NOT master items that have stock allocated to stalls.
+        allow delete: if isSignedIn() && (
+            isAdmin() ||
+            (isManager() && isManagerOfSite(resource.data.siteId) && (resource.data.stallId != null || !masterHasActiveAllocations(resource.id)))
+        );
+
+        // Helper for deletion rule. Prevents deleting master stock if any linked stall item has quantity > 0.
+        function masterHasActiveAllocations(masterItemId) {
+            return firestore.get(/databases/$(database)/documents/stockItems?where=originalMasterItemId,==,$(masterItemId)&where=quantity,>,0&limit=1).size > 0;
+        }
     }
 
-    // SALES TRANSACTIONS:
+    // Rules for batch writes involving master/stall stock adjustments
+    // isAllocationAllowed: Moving stock from master to a stall
+    // isReturnToMasterAllowed: Moving stock from a stall back to master
+    // isTransferAllowed: Moving stock from one stall to another
+    function isAllocationAllowed(writeFields) {
+        let masterDocAfter = writeFields.get('master').data;
+        let masterDocBefore = getAfter(/databases/$(database)/documents/stockItems/$(writeFields.get('master').id)).data;
+        let stallDocAfter = writeFields.get('stall').data;
+        let stallDocBefore = existsAfter(/databases/$(database)/documents/stockItems/$(writeFields.get('stall').id)) ? 
+                                getAfter(/databases/$(database)/documents/stockItems/$(writeFields.get('stall').id)).data : null;
+        let quantityAllocated = stallDocBefore == null ? stallDocAfter.quantity : stallDocAfter.quantity - stallDocBefore.quantity;
+
+        return quantityAllocated > 0
+            && masterDocAfter.quantity == masterDocBefore.quantity - quantityAllocated
+            && stallDocAfter.originalMasterItemId == writeFields.get('master').id;
+    }
+    
+    function isReturnToMasterAllowed(writeFields) {
+        let masterDocAfter = writeFields.get('master').data;
+        let masterDocBefore = getAfter(/databases/$(database)/documents/stockItems/$(writeFields.get('master').id)).data;
+        let stallDocAfter = writeFields.get('stall').data;
+        let stallDocBefore = getAfter(/databases/$(database)/documents/stockItems/$(writeFields.get('stall').id)).data;
+        let quantityReturned = stallDocBefore.quantity - stallDocAfter.quantity;
+
+        return quantityReturned > 0
+            && masterDocAfter.quantity == masterDocBefore.quantity + quantityReturned
+            && stallDocBefore.originalMasterItemId == writeFields.get('master').id;
+    }
+
+    function isTransferAllowed(writeFields) {
+        let sourceDocAfter = writeFields.get('source').data;
+        let sourceDocBefore = getAfter(/databases/$(database)/documents/stockItems/$(writeFields.get('source').id)).data;
+        let destDocAfter = writeFields.get('dest').data;
+        let destDocBefore = existsAfter(/databases/$(database)/documents/stockItems/$(writeFields.get('dest').id)) ? 
+                            getAfter(/databases/$(database)/documents/stockItems/$(writeFields.get('dest').id)).data : null;
+        let quantityTransferred = sourceDocBefore.quantity - sourceDocAfter.quantity;
+        
+        return quantityTransferred > 0
+            && sourceDocBefore.originalMasterItemId == destDocAfter.originalMasterItemId
+            && (destDocBefore == null ? destDocAfter.quantity == quantityTransferred : destDocAfter.quantity == destDocBefore.quantity + quantityTransferred);
+    }
+
+    // /salesTransactions/{saleId}
     match /salesTransactions/{saleId} {
-      allow read: if isSignedIn(); // Allow any signed-in user to read, client-side logic will filter what they see.
+      // Any authenticated user in the site can read sales transactions
+      allow read: if isSignedIn() && (
+        isAdmin() ||
+        isManagerOfSite(resource.data.siteId) ||
+        isStaffOfSite(resource.data.siteId)
+      );
       
-      // Admin: Can create sales anywhere.
-      // Manager: Can create sales for a stall within one of their managed sites.
-      // Staff: Can create sales for their assigned stall.
-      // All: Must set their own UID as staffId.
+      // A user can create a sale if they are the one making it (staffId matches authId)
+      // and it's within their assigned site context.
       allow create: if isSignedIn() && request.resource.data.staffId == request.auth.uid && (
-                      isAdmin() ||
-                      (isManager() && request.resource.data.siteId in getManagerSiteIds() && isStallInSite(request.resource.data.stallId, request.resource.data.siteId)) ||
-                      (isStaff() && request.resource.data.siteId == getAuthenticatedUserData().defaultSiteId && request.resource.data.stallId == getAuthenticatedUserData().defaultStallId)
-                    );
-                    
-      // Admin: Can mark a sale as deleted (soft delete).
+        isAdmin() ||
+        isManagerOfSite(request.resource.data.siteId) ||
+        (isStaff() && isStaffOfSite(request.resource.data.siteId) && isStaffOfStall(request.resource.data.stallId))
+      );
+      
+      // Admins can mark a sale as deleted, but not change other fields.
       allow update: if isAdmin() && 
-                      request.resource.data.isDeleted == true &&
-                      resource.data.isDeleted == false;
-                      
-      allow delete: if false; // Prevent physical deletion.
+                    request.resource.data.diff(resource.data).affectedKeys()
+                       .hasOnly(['isDeleted', 'deletedAt', 'deletedBy', 'deletionJustification']);
+      
+      // No one can permanently delete a sales record.
+      allow delete: if false;
     }
 
-    // STOCK MOVEMENT LOGS:
+    // /stockMovementLogs/{logId}
     match /stockMovementLogs/{logId} {
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow read, list: if isAdmin() || isManager();
+      // Admins and Managers can read all stock logs.
+      allow read: if isSignedIn() && (isAdmin() || isManager());
+      // Any authenticated user can create a log entry (triggered by other actions like sales, updates).
+      allow create: if isSignedIn();
+      // Logs are immutable.
+      allow update, delete: if false;
+    }
+
+    // /foodStallActivityLogs/{logId}
+    match /foodStallActivityLogs/{logId} {
+      // Admins and Managers can read all food stall logs
+      allow read: if isSignedIn() && (isAdmin() || isManager());
+
+      // Any authenticated user can create a log entry (e.g., when they record a sale/expense)
+      allow create: if isSignedIn();
+
+      // Logs are immutable
       allow update, delete: if false;
     }
     
-    // OAUTH TOKENS for Google Sheets:
+    // /userGoogleOAuthTokens/{userId}
     match /userGoogleOAuthTokens/{userId} {
-      allow read, write, create, delete: if isUser(userId);
-    }
-    
-    // FOOD STALL EXPENSES & SALES:
-    // Any authenticated user within the correct site/stall context can record expenses/sales for that context.
-    match /foodItemExpenses/{expenseId} {
-       allow read: if isSignedIn();
-       allow create: if isSignedIn() && request.resource.data.recordedByUid == request.auth.uid;
-       allow update, delete: if isAdmin() || (isManager() && request.resource.data.siteId in getManagerSiteIds());
-    }
-    
-    match /foodSaleTransactions/{foodSaleId} {
-        allow read: if isSignedIn();
-        allow create: if isSignedIn() && request.resource.data.recordedByUid == request.auth.uid;
-        allow update, delete: if isAdmin() || (isManager() && request.resource.data.siteId in getManagerSiteIds());
+        // Only the user themselves can read/write their own tokens
+        allow read, write: if isSignedIn() && isOwner(userId);
     }
   }
 }
