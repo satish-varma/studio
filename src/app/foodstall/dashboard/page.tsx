@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect } from "react";
@@ -35,8 +34,20 @@ export default function FoodStallDashboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (authLoading || !db || !activeSiteId || !activeStallId) {
+    // If auth is loading or we don't have a site, we can't fetch data.
+    if (authLoading || !db || !activeSiteId) {
         if (!authLoading) setLoading(false);
+        setTodaysSales(0);
+        setTodaysExpenses(0);
+        return;
+    }
+    
+    // If no specific stall is selected, we reset stats but don't start listeners.
+    // The UI will prompt the user to select a stall.
+    if (!activeStallId) {
+        setTodaysSales(0);
+        setTodaysExpenses(0);
+        setLoading(false);
         return;
     }
     
@@ -60,7 +71,7 @@ export default function FoodStallDashboardPage() {
             total += sale.totalAmount;
         });
         setTodaysSales(total);
-        setLoading(false);
+        setLoading(false); // Set loading to false once sales data is fetched
     }, (error) => {
         console.error("Error fetching today's food sales:", error);
         setLoading(false);
@@ -81,7 +92,7 @@ export default function FoodStallDashboardPage() {
             total += expense.totalCost;
         });
         setTodaysExpenses(total);
-        setLoading(false);
+        setLoading(false); // Set loading to false once expenses data is fetched
     }, (error) => {
         console.error("Error fetching today's food expenses:", error);
         setLoading(false);
@@ -129,7 +140,8 @@ export default function FoodStallDashboardPage() {
     );
   }
 
-  if (!activeSiteId || !activeStallId) {
+  // Changed this check to only require activeSiteId to render the main page
+  if (!activeSiteId) {
     return (
         <div className="space-y-6">
             <PageHeader
@@ -138,9 +150,9 @@ export default function FoodStallDashboardPage() {
             />
             <Alert variant="default" className="border-primary/50">
                 <Info className="h-4 w-4" />
-                <AlertTitle>Context Required</AlertTitle>
+                <AlertTitle>Site Context Required</AlertTitle>
                 <AlertDescription>
-                    Please select an active site and a specific stall from the header to view the Food Stall Dashboard.
+                    Please select an active site from the header to view the Food Stall Dashboard.
                 </AlertDescription>
             </Alert>
         </div>
@@ -153,6 +165,17 @@ export default function FoodStallDashboardPage() {
         title="Food Stall Dashboard"
         description="Overview of your food stall's financial health and operations."
       />
+
+      {!activeStallId && (
+        <Alert variant="default" className="border-primary/50">
+            <Info className="h-4 w-4" />
+            <AlertTitle>Select a Stall</AlertTitle>
+            <AlertDescription>
+                Please select a specific stall from the header to see its live sales and expense data.
+            </AlertDescription>
+        </Alert>
+      )}
+
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <Card className="shadow-md">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -233,4 +256,3 @@ export default function FoodStallDashboardPage() {
     </div>
   );
 }
-    
