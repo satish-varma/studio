@@ -1,13 +1,100 @@
 
 "use client";
 
+import { useState, useEffect } from "react";
 import PageHeader from "@/components/shared/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { DollarSign, ShoppingBag, Utensils, ArrowRight, LineChart, ClipboardList } from "lucide-react";
+import { DollarSign, ShoppingBag, Utensils, ArrowRight, LineChart, ClipboardList, Loader2, Info } from "lucide-react";
 import Link from "next/link";
+import { useAuth } from "@/contexts/AuthContext";
+import { getFirestore, collection, query, where, onSnapshot, Timestamp } from "firebase/firestore";
+import { getApps, initializeApp, getApp } from 'firebase/app';
+import { firebaseConfig } from '@/lib/firebaseConfig';
+import { startOfDay, endOfDay } from "date-fns";
+import type { FoodItemExpense, FoodSaleTransaction, FoodSaleTransactionAdmin } from "@/types";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Skeleton } from "@/components/ui/skeleton";
+
+let db: ReturnType<typeof getFirestore> | undefined;
+if (!getApps().length) {
+  try {
+    initializeApp(firebaseConfig);
+    db = getFirestore();
+  } catch (error) {
+    console.error("Firebase initialization error in FoodStallDashboardPage:", error);
+  }
+} else {
+  db = getFirestore(getApp());
+}
 
 export default function FoodStallDashboardPage() {
+  const { user, activeSiteId, activeStallId, loading: authLoading } = useAuth();
+  const [todaysSales, setTodaysSales] = useState(0);
+  const [todaysExpenses, setTodaysExpenses] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (authLoading || !db || !activeSiteId || !activeStallId) {
+        if (!authLoading) setLoading(false);
+        return;
+    }
+    
+    setLoading(true);
+
+    const todayStart = Timestamp.fromDate(startOfDay(new Date()));
+    const todayEnd = Timestamp.fromDate(endOfDay(new Date()));
+
+    // Listener for today's sales
+    const salesQuery = query(
+        collection(db, "foodSaleTransactions"),
+        where("siteId", "==", activeSiteId),
+        where("stallId", "==", activeStallId),
+        where("saleDate", ">=", todayStart),
+        where("saleDate", "<=", todayEnd)
+    );
+    const unsubscribeSales = onSnapshot(salesQuery, (snapshot) => {
+        let total = 0;
+        snapshot.forEach(doc => {
+            const sale = doc.data() as FoodSaleTransaction;
+            total += sale.totalAmount;
+        });
+        setTodaysSales(total);
+        setLoading(false);
+    }, (error) => {
+        console.error("Error fetching today's food sales:", error);
+        setLoading(false);
+    });
+
+    // Listener for today's expenses
+    const expensesQuery = query(
+        collection(db, "foodItemExpenses"),
+        where("siteId", "==", activeSiteId),
+        where("stallId", "==", activeStallId),
+        where("purchaseDate", ">=", todayStart),
+        where("purchaseDate", "<=", todayEnd)
+    );
+    const unsubscribeExpenses = onSnapshot(expensesQuery, (snapshot) => {
+        let total = 0;
+        snapshot.forEach(doc => {
+            const expense = doc.data() as FoodItemExpense;
+            total += expense.totalCost;
+        });
+        setTodaysExpenses(total);
+        setLoading(false);
+    }, (error) => {
+        console.error("Error fetching today's food expenses:", error);
+        setLoading(false);
+    });
+
+    return () => {
+        unsubscribeSales();
+        unsubscribeExpenses();
+    };
+  }, [activeSiteId, activeStallId, authLoading]);
+
+  const netProfit = todaysSales - todaysExpenses;
+
   const quickNavItems = [
     {
       title: "Manage Expenses",
@@ -33,6 +120,32 @@ export default function FoodStallDashboardPage() {
     },
   ];
 
+  if (authLoading) {
+    return (
+        <div className="flex justify-center items-center py-10">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <p className="ml-2">Loading user context...</p>
+        </div>
+    );
+  }
+
+  if (!activeSiteId || !activeStallId) {
+    return (
+        <div className="space-y-6">
+            <PageHeader
+                title="Food Stall Dashboard"
+                description="Overview of your food stall's financial health and operations."
+            />
+            <Alert variant="default" className="border-primary/50">
+                <Info className="h-4 w-4" />
+                <AlertTitle>Context Required</AlertTitle>
+                <AlertDescription>
+                    Please select an active site and a specific stall from the header to view the Food Stall Dashboard.
+                </AlertDescription>
+            </Alert>
+        </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -47,9 +160,9 @@ export default function FoodStallDashboardPage() {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">₹0.00</div>
+            {loading ? <Skeleton className="h-8 w-32 mt-1" /> : <div className="text-2xl font-bold">₹{todaysSales.toFixed(2)}</div>}
             <p className="text-xs text-muted-foreground">
-              (Feature coming soon)
+              Total revenue from sales today.
             </p>
           </CardContent>
         </Card>
@@ -59,9 +172,9 @@ export default function FoodStallDashboardPage() {
             <ShoppingBag className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">₹0.00</div>
+            {loading ? <Skeleton className="h-8 w-32 mt-1" /> : <div className="text-2xl font-bold">₹{todaysExpenses.toFixed(2)}</div>}
             <p className="text-xs text-muted-foreground">
-             (Feature coming soon)
+             Total cost of purchases today.
             </p>
           </CardContent>
         </Card>
@@ -71,9 +184,13 @@ export default function FoodStallDashboardPage() {
             <Utensils className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">₹0.00</div>
+             {loading ? <Skeleton className="h-8 w-32 mt-1" /> : 
+                <div className={`text-2xl font-bold ${netProfit >= 0 ? 'text-green-600' : 'text-destructive'}`}>
+                    ₹{netProfit.toFixed(2)}
+                </div>
+            }
             <p className="text-xs text-muted-foreground">
-              (Feature coming soon)
+              Sales minus expenses for today.
             </p>
           </CardContent>
         </Card>
@@ -116,4 +233,4 @@ export default function FoodStallDashboardPage() {
     </div>
   );
 }
-
+    

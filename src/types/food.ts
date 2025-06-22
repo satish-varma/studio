@@ -1,5 +1,6 @@
 
 import * as z from "zod";
+import type { Timestamp } from "firebase/firestore";
 
 // --------------- Food Expense Tracking ---------------
 export const foodExpenseCategories = [
@@ -48,6 +49,12 @@ export interface FoodItemExpense extends FoodItemExpenseFormValues {
   updatedAt: string; // ISO date string
 }
 
+export interface FoodItemExpenseAdmin extends Omit<FoodItemExpense, 'purchaseDate' | 'createdAt' | 'updatedAt'> {
+  purchaseDate: Timestamp;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
 
 // --------------- Food Sale Tracking ---------------
 export const foodMealTypes = [
@@ -93,3 +100,11 @@ export interface FoodSaleTransaction extends FoodSaleTransactionFormValues {
   createdAt: string; // ISO date string
   updatedAt: string; // ISO date string
 }
+
+
+export interface FoodSaleTransactionAdmin extends Omit<FoodSaleTransaction, 'saleDate' | 'createdAt' | 'updatedAt'> {
+  saleDate: Timestamp;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+      
