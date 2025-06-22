@@ -16,21 +16,19 @@ import {
   QueryConstraint,
   DocumentSnapshot,
   DocumentData,
-  endBefore
+  endBefore,
+  limitToLast
 } from "firebase/firestore";
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Info, CalendarIcon } from "lucide-react";
+import { Loader2, Info, DollarSign } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { FoodSalesTable } from "./FoodSalesTable";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Calendar } from "@/components/ui/calendar";
-import { cn } from "@/lib/utils";
-import { format, subDays, startOfDay, endOfDay } from "date-fns";
-import type { DateRange } from "react-day-picker";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { format, subDays, startOfDay, endOfDay, startOfMonth } from "date-fns";
 
 const LOG_PREFIX = "[FoodSalesClientPage]";
 const SALES_PER_PAGE = 30; // Show a month at a time
@@ -44,6 +42,8 @@ if (!getApps().length) {
 }
 const db = getFirestore(getApp());
 
+type DateFilterOption = 'today' | 'last_7_days' | 'this_month' | 'all_time';
+
 export default function FoodSalesClientPage() {
   const { user, activeSiteId, activeStallId, loading: authLoading } = useAuth();
   const { toast } = useToast();
@@ -51,12 +51,12 @@ export default function FoodSalesClientPage() {
   const [sales, setSales] = useState<FoodSaleTransaction[]>([]);
   const [loadingSales, setLoadingSales] = useState(true);
   const [errorSales, setErrorSales] = useState<string | null>(null);
-  
-  const pageCursors = useRef<{
-    first: DocumentSnapshot<DocumentData> | null;
-    last: DocumentSnapshot<DocumentData> | null;
-  }>({ first: null, last: null });
 
+  const [dateFilter, setDateFilter] = useState<DateFilterOption>('this_month');
+  const [totalSalesAmount, setTotalSalesAmount] = useState(0);
+  
+  const [firstVisibleDoc, setFirstVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
+  const [lastVisibleDoc, setLastVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
   const [isLastPage, setIsLastPage] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -71,8 +71,11 @@ export default function FoodSalesClientPage() {
     }
     
     setLoadingSales(true);
+    if(direction === 'initial') {
+        setTotalSalesAmount(0); // Reset total on new filter fetch
+    }
     setErrorSales(null);
-    console.log(`${LOG_PREFIX} Fetching sales. Direction: ${direction}, Site: ${activeSiteId}, Stall: ${activeStallId}`);
+    console.log(`${LOG_PREFIX} Fetching sales. Direction: ${direction}, Site: ${activeSiteId}, Stall: ${activeStallId}, DateFilter: ${dateFilter}`);
 
     const salesCollectionRef = collection(db, "foodSaleTransactions");
     let qConstraints: QueryConstraint[] = [
@@ -82,16 +85,38 @@ export default function FoodSalesClientPage() {
       qConstraints.push(where("stallId", "==", activeStallId));
     }
     
-    if (direction === 'next' && pageCursors.current.last) {
+    const now = new Date();
+    let startDate: Date | null = null;
+    let endDate: Date | null = endOfDay(now);
+
+    switch (dateFilter) {
+        case 'today':
+            startDate = startOfDay(now);
+            break;
+        case 'last_7_days':
+            startDate = startOfDay(subDays(now, 6));
+            break;
+        case 'this_month':
+            startDate = startOfMonth(now);
+            break;
+        case 'all_time':
+            startDate = null; // No start date filter
+            endDate = null;   // No end date filter
+            break;
+    }
+
+    if(startDate) qConstraints.push(where("saleDate", ">=", Timestamp.fromDate(startDate)));
+    if(endDate) qConstraints.push(where("saleDate", "<=", Timestamp.fromDate(endDate)));
+    
+    if (direction === 'prev' && firstVisibleDoc) {
         qConstraints.push(orderBy("saleDate", "desc"));
-        qConstraints.push(startAfter(pageCursors.current.last));
-        qConstraints.push(limit(SALES_PER_PAGE + 1));
-    } else if (direction === 'prev' && pageCursors.current.first) {
+        qConstraints.push(endBefore(firstVisibleDoc));
+        qConstraints.push(limitToLast(SALES_PER_PAGE));
+    } else { // initial or next
         qConstraints.push(orderBy("saleDate", "desc"));
-        qConstraints.push(endBefore(pageCursors.current.first));
-        qConstraints.push(limit(SALES_PER_PAGE));
-    } else { // Initial fetch
-        qConstraints.push(orderBy("saleDate", "desc"));
+        if (direction === 'next' && lastVisibleDoc) {
+            qConstraints.push(startAfter(lastVisibleDoc));
+        }
         qConstraints.push(limit(SALES_PER_PAGE + 1));
     }
 
@@ -105,33 +130,33 @@ export default function FoodSalesClientPage() {
         saleDate: (doc.data().saleDate as Timestamp).toDate(),
       } as FoodSaleTransaction));
 
-      const hasMore = fetchedSales.length > SALES_PER_PAGE;
+      const hasMore = direction !== 'prev' && fetchedSales.length > SALES_PER_PAGE;
       if (hasMore) {
         fetchedSales.pop();
       }
       
       setSales(fetchedSales);
       
+      // Recalculate total only on initial load for a filter set
+      if(direction === 'initial') {
+        const totalQueryConstraints = qConstraints.filter(c => c.type !== 'limit' && c.type !== 'startAfter' && c.type !== 'endBefore' && c.type !== 'limitToLast');
+        const totalQuery = query(salesCollectionRef, ...totalQueryConstraints);
+        const totalSnapshot = await getDocs(totalQuery);
+        const total = totalSnapshot.docs.reduce((sum, doc) => sum + (doc.data().totalAmount || 0), 0);
+        setTotalSalesAmount(total);
+      }
+      
       if (querySnapshot.docs.length > 0) {
-        pageCursors.current.first = querySnapshot.docs[0];
-        pageCursors.current.last = querySnapshot.docs[fetchedSales.length - 1];
-
-        if (direction === 'initial') {
-            setIsLastPage(!hasMore);
-            setCurrentPage(1);
-        } else if (direction === 'next') {
-            setIsLastPage(!hasMore);
-            if(fetchedSales.length > 0) setCurrentPage(prev => prev + 1);
-        } else if (direction === 'prev') {
-            setIsLastPage(false);
-            setCurrentPage(prev => Math.max(1, prev - 1));
-        }
+        setFirstVisibleDoc(querySnapshot.docs[0]);
+        setLastVisibleDoc(querySnapshot.docs[querySnapshot.docs.length - (hasMore ? 2 : 1)]);
+        if (direction === 'next') setCurrentPage(prev => prev + 1);
+        if (direction === 'prev') setCurrentPage(prev => Math.max(1, prev - 1));
+        setIsLastPage(!hasMore);
       } else {
         if (direction === 'next') setIsLastPage(true);
-        if (direction === 'prev') setCurrentPage(1); 
         if (direction === 'initial') {
+            setTotalSalesAmount(0);
             setIsLastPage(true);
-            setCurrentPage(1);
         }
       }
       console.log(`${LOG_PREFIX} Fetched ${fetchedSales.length} sales. HasMore: ${hasMore}`);
@@ -141,25 +166,31 @@ export default function FoodSalesClientPage() {
     } finally {
       setLoadingSales(false);
     }
-  }, [authLoading, user, activeSiteId, activeStallId, db]);
+  }, [authLoading, user, activeSiteId, activeStallId, db, dateFilter, firstVisibleDoc, lastVisibleDoc]);
 
+  // Effect for initial fetch and filter changes
   useEffect(() => {
     document.title = "Food Stall Sales - StallSync";
-    pageCursors.current = { first: null, last: null }; // Reset cursors on context change
+    // Reset pagination state when filters change, then fetch
+    setFirstVisibleDoc(null);
+    setLastVisibleDoc(null);
+    setCurrentPage(1);
     fetchSales('initial');
     return () => { document.title = "StallSync - Stock Management"; }
-  }, [user, activeSiteId, activeStallId, fetchSales]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateFilter, user, activeSiteId, activeStallId]);
+
+
+  const handleDateFilterChange = (filter: DateFilterOption) => {
+    setDateFilter(filter);
+  };
 
   const handleNextPage = () => {
-    if (!isLastPage) {
-      fetchSales('next');
-    }
+    fetchSales('next');
   };
 
   const handlePrevPage = () => {
-    if (currentPage > 1) {
-      fetchSales('prev');
-    }
+    fetchSales('prev');
   };
   
   if (authLoading) {
@@ -213,6 +244,38 @@ export default function FoodSalesClientPage() {
             </AlertDescription>
         </Alert>
       )}
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+                Total Sales ({
+                    dateFilter === 'today' ? 'Today' :
+                    dateFilter === 'last_7_days' ? 'Last 7 Days' :
+                    dateFilter === 'this_month' ? 'This Month' : 'All Time'
+                })
+            </CardTitle>
+             <DollarSign className="h-4 w-4 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+            <div className="text-2xl font-bold">
+                {loadingSales && totalSalesAmount === 0 ? <Loader2 className="h-6 w-6 animate-spin"/> : `₹${totalSalesAmount.toFixed(2)}`}
+            </div>
+            <p className="text-xs text-muted-foreground">
+                {user?.role === 'admin' && !activeStallId ? 'Total for all stalls in this site. ' : ''}
+                Total sales for the selected period.
+            </p>
+        </CardContent>
+      </Card>
+
+      <div className="flex flex-col sm:flex-row items-stretch gap-2 p-4 border rounded-lg bg-card shadow-sm">
+        <div className="flex-1 flex flex-wrap gap-2">
+           <Button variant={dateFilter === 'today' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('today')}>Today</Button>
+           <Button variant={dateFilter === 'last_7_days' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('last_7_days')}>Last 7 Days</Button>
+           <Button variant={dateFilter === 'this_month' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('this_month')}>This Month</Button>
+           <Button variant={dateFilter === 'all_time' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('all_time')}>All Time</Button>
+        </div>
+      </div>
+
       {loadingSales && sales.length === 0 && (
         <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading sales...</p></div>
       )}
