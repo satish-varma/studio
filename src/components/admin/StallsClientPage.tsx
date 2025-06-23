@@ -49,6 +49,18 @@ export default function StallsClientPage() {
   const [errorData, setErrorData] = useState<string | null>(null);
 
   useEffect(() => {
+    if (site?.name) {
+      document.title = `Manage Stalls at ${site.name} - StallSync`;
+    } else {
+      document.title = "Manage Stalls - StallSync";
+    }
+    // Cleanup function to reset title when component unmounts
+    return () => {
+      document.title = "StallSync - Stock Management";
+    };
+  }, [site?.name]);
+
+  useEffect(() => {
     console.log(`${LOG_PREFIX} Mounted. AuthLoading: ${authLoading}, SiteID: ${siteId}`);
     if (authLoading) return;
 
