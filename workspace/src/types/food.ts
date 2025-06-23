@@ -1,5 +1,6 @@
 
 import * as z from "zod";
+import type { Timestamp } from "firebase/firestore";
 
 // --------------- Food Expense Tracking ---------------
 export const foodExpenseCategories = [
@@ -9,7 +10,7 @@ export const foodExpenseCategories = [
   "Dairy Products",
   "Meat & Poultry",
   "Bakery",
-  "Beverages (Raw Material)", // e.g., coffee beans, tea leaves, syrups
+  "Beverages (Raw Material)",
   "Spices & Condiments",
   "Packaging Supplies",
   "Cleaning Supplies",
@@ -19,75 +20,92 @@ export const foodExpenseCategories = [
   "Marketing & Promotion",
   "Delivery Costs",
   "Licenses & Permits",
-  "Miscellaneous", // Renamed from "Other" for clarity
+  "Miscellaneous",
 ] as const;
 
 export type FoodExpenseCategory = (typeof foodExpenseCategories)[number];
 
-export const foodItemExpenseSchema = z.object({
-  itemName: z.string().min(1, "Item name is required"),
-  category: z.enum(foodExpenseCategories),
-  quantity: z.coerce.number().positive("Quantity must be positive"),
-  unit: z.string().min(1, "Unit is required (e.g., kg, ltr, pcs, box, hour for labor)"),
-  pricePerUnit: z.coerce.number().min(0, "Price per unit must be non-negative"),
-  totalCost: z.coerce.number().min(0, "Total cost must be non-negative"),
+export const paymentMethods = ["Cash", "Card", "UPI", "Other"] as const;
+export type PaymentMethod = (typeof paymentMethods)[number];
+
+// New, simplified schema
+export const foodExpenseFormSchema = z.object({
+  category: z.enum(foodExpenseCategories, { required_error: "Category is required" }),
+  totalCost: z.coerce.number().positive("Total cost must be a positive number"),
+  paymentMethod: z.enum(paymentMethods, { required_error: "Payment method is required." }),
   purchaseDate: z.date({ required_error: "Purchase date is required." }),
-  vendor: z.string().optional(),
-  siteId: z.string().min(1, "Site ID is required"), // Assuming food stall is associated with a main site
-  stallId: z.string().min(1, "Stall ID is required"), // ID of the specific food stall
-  recordedByUid: z.string().min(1, "Recorder UID is required"),
-  notes: z.string().optional(),
+  vendor: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
+  billImageUrl: z.string().url({ message: "Please enter a valid URL." }).optional().or(z.literal("")),
 });
 
-export type FoodItemExpenseFormValues = z.infer<typeof foodItemExpenseSchema>;
+export type FoodItemExpenseFormValues = z.infer<typeof foodExpenseFormSchema>;
 
-export interface FoodItemExpense extends FoodItemExpenseFormValues {
-  id: string;
+// This interface is now simplified and doesn't contain the item-specific fields.
+export interface FoodItemExpense {
+  id: string; // Firestore document ID
+  category: FoodExpenseCategory;
+  totalCost: number;
+  paymentMethod: PaymentMethod;
+  purchaseDate: Date | Timestamp;
+  vendor?: string | null;
+  notes?: string | null;
+  billImageUrl?: string | null;
+  siteId: string;
+  stallId: string;
+  recordedByUid: string;
+  recordedByName?: string; // Optional: store user's name for easier display
   createdAt: string; // ISO date string
   updatedAt: string; // ISO date string
 }
 
-// --------------- Food Sale Tracking ---------------
-export const foodMealTypes = [
-  "Breakfast",
-  "Lunch",
-  "Dinner",
-  "Snacks & Appetizers",
-  "Desserts",
-  "Beverages (Prepared)", // e.g., coffee, tea, juice sold
-  "Combos & Platters",
-  "Other",
-] as const;
+// Admin type for Firestore admin operations (if needed)
+export interface FoodItemExpenseAdmin extends Omit<FoodItemExpense, 'purchaseDate' | 'createdAt' | 'updatedAt'> {
+  purchaseDate: Timestamp;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
 
-export type FoodMealType = (typeof foodMealTypes)[number];
 
-export const foodSaleItemSchema = z.object({
-  itemName: z.string().min(1, "Item name is required"),
-  category: z.string().optional(), // Optional category for sold food item
-  quantity: z.coerce.number().positive("Quantity must be positive"),
-  pricePerUnit: z.coerce.number().min(0, "Price per unit must be non-negative"),
-  totalPrice: z.coerce.number().min(0, "Total price must be non-negative"),
-  // Could add costPerUnit for profit calculation per item if granular tracking is needed
+// --------------- Food Sale Tracking (Meal Time & Payment Type Based) ---------------
+
+const paymentBreakdownSchema = z.object({
+  hungerbox: z.coerce.number().min(0).default(0),
+  upi: z.coerce.number().min(0).default(0),
+  other: z.coerce.number().min(0).default(0),
 });
 
-export type FoodSaleItem = z.infer<typeof foodSaleItemSchema>;
+export type PaymentBreakdown = z.infer<typeof paymentBreakdownSchema>;
 
-export const foodSaleTransactionSchema = z.object({
-  mealType: z.enum(foodMealTypes).optional(), // Made optional, might not always apply
-  itemsSold: z.array(foodSaleItemSchema).min(1, "At least one item must be sold."),
-  totalAmount: z.coerce.number().min(0, "Total amount must be non-negative"),
-  saleDate: z.date({ required_error: "Sale date is required." }), // Should be datetime
-  siteId: z.string().min(1, "Site ID is required"),
-  stallId: z.string().min(1, "Stall ID is required"),
-  recordedByUid: z.string().min(1, "Recorder UID is required"),
-  notes: z.string().optional(),
-  paymentMethod: z.string().optional().default("Cash"), // e.g., Cash, Card, UPI
+export const foodSaleTransactionFormSchema = z.object({
+  saleDate: z.date({ required_error: "Sale date is required." }),
+  breakfast: paymentBreakdownSchema.optional().default({ hungerbox: 0, upi: 0, other: 0 }),
+  lunch: paymentBreakdownSchema.optional().default({ hungerbox: 0, upi: 0, other: 0 }),
+  dinner: paymentBreakdownSchema.optional().default({ hungerbox: 0, upi: 0, other: 0 }),
+  snacks: paymentBreakdownSchema.optional().default({ hungerbox: 0, upi: 0, other: 0 }),
+  totalAmount: z.coerce.number().min(0),
+  notes: z.string().optional().nullable(),
 });
 
-export type FoodSaleTransactionFormValues = z.infer<typeof foodSaleTransactionSchema>;
 
-export interface FoodSaleTransaction extends FoodSaleTransactionFormValues {
-  id: string;
+export type FoodSaleTransactionFormValues = z.infer<typeof foodSaleTransactionFormSchema>;
+
+export interface FoodSaleTransaction extends Omit<FoodSaleTransactionFormValues, 'breakfast' | 'lunch' | 'dinner' | 'snacks'> {
+  id: string; // Firestore document ID (YYYY-MM-DD_stallId)
+  breakfast: PaymentBreakdown;
+  lunch: PaymentBreakdown;
+  dinner: PaymentBreakdown;
+  snacks: PaymentBreakdown;
+  siteId: string;
+  stallId: string;
+  recordedByUid: string;
+  recordedByName?: string; // Optional
   createdAt: string; // ISO date string
   updatedAt: string; // ISO date string
+}
+
+export interface FoodSaleTransactionAdmin extends Omit<FoodSaleTransaction, 'saleDate' | 'createdAt' | 'updatedAt'> {
+  saleDate: Timestamp;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
 }
