@@ -216,7 +216,7 @@ export default function SiteStallSelector() {
         disabled={loadingSites || (user.role !== 'admin' && sitesForSelector.length === 0)}
         data-testid="site-select"
       >
-        <SelectTrigger className="w-[180px] h-9 text-xs bg-input" data-testid="site-select-trigger">
+        <SelectTrigger className="w-[140px] sm:w-[180px] h-9 text-xs bg-input" data-testid="site-select-trigger">
           <SelectValue placeholder={getSitePlaceholder()} />
         </SelectTrigger>
         <SelectContent>
@@ -234,7 +234,7 @@ export default function SiteStallSelector() {
             disabled={!activeSiteId || loadingStalls || (stallsForSelector.length === 0 && !!activeSiteId)}
             data-testid="stall-select"
         >
-            <SelectTrigger className="w-[180px] h-9 text-xs bg-input" data-testid="stall-select-trigger">
+            <SelectTrigger className="w-[140px] sm:w-[180px] h-9 text-xs bg-input" data-testid="stall-select-trigger">
             <SelectValue placeholder={
                 !activeSiteId ? "Select site first" :
                 loadingStalls ? "Loading stalls..." :
@@ -256,4 +256,3 @@ export default function SiteStallSelector() {
     </div>
   );
 }
-
