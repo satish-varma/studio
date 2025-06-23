@@ -548,7 +548,7 @@ export default function RecordSaleForm() {
                     </FormItem>
                   )}
                 />
-                <div className="flex gap-2 w-full sm:w-auto">
+                <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
                     <FormField
                     control={form.control}
                     name={`items.${index}.quantity`}
