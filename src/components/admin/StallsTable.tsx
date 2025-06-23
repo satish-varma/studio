@@ -123,8 +123,8 @@ export function StallsTable({ stalls }: StallsTableProps) {
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>Type</TableHead>
-              <TableHead>Created At</TableHead>
-              <TableHead>Last Updated</TableHead>
+              <TableHead className="hidden md:table-cell">Created At</TableHead>
+              <TableHead className="hidden lg:table-cell">Last Updated</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -133,8 +133,8 @@ export function StallsTable({ stalls }: StallsTableProps) {
               <TableRow key={stall.id}>
                 <TableCell className="font-medium text-foreground">{stall.name}</TableCell>
                 <TableCell className="text-muted-foreground">{stall.stallType}</TableCell>
-                <TableCell className="text-muted-foreground">{formatDate(stall.createdAt)}</TableCell>
-                <TableCell className="text-muted-foreground">{formatDate(stall.updatedAt)}</TableCell>
+                <TableCell className="text-muted-foreground hidden md:table-cell">{formatDate(stall.createdAt)}</TableCell>
+                <TableCell className="text-muted-foreground hidden lg:table-cell">{formatDate(stall.updatedAt)}</TableCell>
                 <TableCell className="text-right">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>

@@ -99,13 +99,13 @@ const TableRowSkeleton = () => (
     <TableCell><Skeleton className="h-10 w-10 rounded-md" /></TableCell>
     <TableCell><Skeleton className="h-4 w-32" /></TableCell>
     <TableCell><Skeleton className="h-4 w-24" /></TableCell>
-    <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+    <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-20" /></TableCell>
     <TableCell className="text-right"><Skeleton className="h-4 w-10 inline-block" /></TableCell>
     <TableCell><Skeleton className="h-4 w-12" /></TableCell>
-    <TableCell className="text-right"><Skeleton className="h-4 w-16 inline-block" /></TableCell>
+    <TableCell className="text-right hidden md:table-cell"><Skeleton className="h-4 w-16 inline-block" /></TableCell>
     <TableCell className="text-right"><Skeleton className="h-4 w-16 inline-block" /></TableCell>
     <TableCell><Skeleton className="h-6 w-20 rounded-full" /></TableCell>
-    <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+    <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-20" /></TableCell>
     <TableCell className="text-right"><Skeleton className="h-8 w-8 rounded-full" /></TableCell>
   </TableRow>
 );
@@ -1334,17 +1334,17 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                 </Button>
               </TableHead>
               <TableHead><Skeleton className="h-4 w-20" /></TableHead>
-              <TableHead><Skeleton className="h-4 w-20" /></TableHead>
+              <TableHead className="hidden md:table-cell"><Skeleton className="h-4 w-20" /></TableHead>
               <TableHead className="text-right">
                 <Button variant="ghost" size="sm" className="p-1 h-auto opacity-50 cursor-default">
                   Quantity <ArrowUpDown className="ml-2 h-3 w-3 text-muted-foreground/70" />
                 </Button>
               </TableHead>
               <TableHead><Skeleton className="h-4 w-10" /></TableHead>
-              <TableHead className="text-right"><Skeleton className="h-4 w-16 inline-block" /></TableHead>
+              <TableHead className="text-right hidden md:table-cell"><Skeleton className="h-4 w-16 inline-block" /></TableHead>
               <TableHead className="text-right"><Skeleton className="h-4 w-16 inline-block" /></TableHead>
               <TableHead><Skeleton className="h-4 w-16" /></TableHead>
-              <TableHead><Skeleton className="h-4 w-20" /></TableHead>
+              <TableHead className="hidden md:table-cell"><Skeleton className="h-4 w-20" /></TableHead>
               <TableHead className="text-right"><Skeleton className="h-4 w-10 inline-block" /></TableHead>
             </TableRow>
           </TableHeader>
@@ -1383,13 +1383,13 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
   return (
     <TooltipProvider>
       {selectedItems.length > 0 && (
-        <div className="mb-4 p-3 bg-accent/10 border border-accent/30 rounded-md flex items-center justify-between">
+        <div className="mb-4 p-3 bg-accent/10 border border-accent/30 rounded-md flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-accent-foreground">
             {selectedItems.length} stall item(s) selected.
           </p>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="border-accent text-accent hover:bg-accent hover:text-accent-foreground">
+              <Button variant="outline" size="sm" className="border-accent text-accent hover:bg-accent hover:text-accent-foreground w-full sm:w-auto">
                 Batch Actions <MoreHorizontal className="ml-2 h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
@@ -1451,17 +1451,17 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                 </Button>
               </TableHead>
               <TableHead>Location</TableHead>
-              <TableHead>Category</TableHead>
+              <TableHead className="hidden md:table-cell">Category</TableHead>
               <TableHead className="text-right">
                 <Button variant="ghost" size="sm" className="p-1 h-auto" onClick={() => requestSort('quantity')}>
                   Quantity {getSortIcon('quantity')}
                 </Button>
               </TableHead>
               <TableHead>Unit</TableHead>
-              <TableHead className="text-right">Cost Price</TableHead>
+              <TableHead className="text-right hidden md:table-cell">Cost Price</TableHead>
               <TableHead className="text-right">Sell Price</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead>Last Updated</TableHead>
+              <TableHead className="hidden md:table-cell">Last Updated</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -1551,10 +1551,10 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                   <TableCell className="text-sm">
                     {locationDisplayElement}
                   </TableCell>
-                  <TableCell className="text-muted-foreground">{item.category}</TableCell>
+                  <TableCell className="text-muted-foreground hidden md:table-cell">{item.category}</TableCell>
                   <TableCell className="text-right text-foreground">{item.quantity}</TableCell>
                   <TableCell className="text-muted-foreground">{item.unit}</TableCell>
-                  <TableCell className="text-right text-muted-foreground">₹{(item.costPrice ?? 0).toFixed(2)}</TableCell>
+                  <TableCell className="text-right text-muted-foreground hidden md:table-cell">₹{(item.costPrice ?? 0).toFixed(2)}</TableCell>
                   <TableCell className="text-right text-foreground">₹{item.price.toFixed(2)}</TableCell>
                   <TableCell>
                     <Badge
@@ -1569,7 +1569,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                       {isOutOfStock ? "Out of Stock" : isLowStock ? "Low Stock" : "In Stock"}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-muted-foreground text-xs">{formatDate(item.lastUpdated)}</TableCell>
+                  <TableCell className="text-muted-foreground text-xs hidden md:table-cell">{formatDate(item.lastUpdated)}</TableCell>
                   <TableCell className="text-right">
                     <Dialog open={stockUpdateItem?.id === item.id} onOpenChange={(open) => !open && setStockUpdateItem(null)}>
                       <DropdownMenu>
@@ -2015,4 +2015,5 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     </TooltipProvider>
   );
 }
+
 

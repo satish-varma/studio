@@ -124,9 +124,9 @@ export function SitesTable({ sites }: SitesTableProps) {
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
-              <TableHead>Location</TableHead>
-              <TableHead>Created At</TableHead>
-              <TableHead>Last Updated</TableHead>
+              <TableHead className="hidden md:table-cell">Location</TableHead>
+              <TableHead className="hidden md:table-cell">Created At</TableHead>
+              <TableHead className="hidden lg:table-cell">Last Updated</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -134,9 +134,9 @@ export function SitesTable({ sites }: SitesTableProps) {
             {sites.map((site) => (
               <TableRow key={site.id}>
                 <TableCell className="font-medium text-foreground">{site.name}</TableCell>
-                <TableCell className="text-muted-foreground">{site.location || "N/A"}</TableCell>
-                <TableCell className="text-muted-foreground">{formatDate(site.createdAt)}</TableCell>
-                <TableCell className="text-muted-foreground">{formatDate(site.updatedAt)}</TableCell>
+                <TableCell className="text-muted-foreground hidden md:table-cell">{site.location || "N/A"}</TableCell>
+                <TableCell className="text-muted-foreground hidden md:table-cell">{formatDate(site.createdAt)}</TableCell>
+                <TableCell className="text-muted-foreground hidden lg:table-cell">{formatDate(site.updatedAt)}</TableCell>
                 <TableCell className="text-right">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>

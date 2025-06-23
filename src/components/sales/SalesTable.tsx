@@ -155,7 +155,7 @@ export function SalesTable({
               <TableHead>Date</TableHead>
               <TableHead>Items Sold</TableHead>
               <TableHead className="text-right">Total Amount</TableHead>
-              <TableHead>Staff</TableHead>
+              <TableHead className="hidden md:table-cell">Staff</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -174,7 +174,7 @@ export function SalesTable({
                   <TableCell className="text-muted-foreground">{formatDate(sale.transactionDate)}</TableCell>
                   <TableCell className="text-muted-foreground">{totalItemsSold}</TableCell>
                   <TableCell className="text-right font-semibold text-accent">₹{sale.totalAmount.toFixed(2)}</TableCell>
-                  <TableCell className="text-muted-foreground">{sale.staffName || sale.staffId.substring(0,8)}</TableCell>
+                  <TableCell className="text-muted-foreground hidden md:table-cell">{sale.staffName || sale.staffId.substring(0,8)}</TableCell>
                   <TableCell className="text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>

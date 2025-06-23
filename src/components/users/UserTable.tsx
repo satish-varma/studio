@@ -160,11 +160,11 @@ export function UserTable({
           <TableHeader>
             <TableRow>
               <TableHead>Display Name</TableHead>
-              <TableHead>Email</TableHead>
+              <TableHead className="hidden md:table-cell">Email</TableHead>
               <TableHead>Role</TableHead>
               <TableHead>Site Assignment(s)</TableHead>
               <TableHead>Default Stall (Staff)</TableHead>
-              <TableHead>Joined On</TableHead>
+              <TableHead className="hidden lg:table-cell">Joined On</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -229,7 +229,7 @@ export function UserTable({
               return (
                 <TableRow key={user.uid}>
                   <TableCell className="font-medium text-foreground">{user.displayName || "N/A"}</TableCell>
-                  <TableCell className="text-muted-foreground">{user.email}</TableCell>
+                  <TableCell className="text-muted-foreground hidden md:table-cell">{user.email}</TableCell>
                   <TableCell>
                     {isUpdatingRole === user.uid ? (
                        <Loader2 className="h-5 w-5 animate-spin text-primary" />
@@ -280,7 +280,7 @@ export function UserTable({
                       <Badge variant="outline" className="text-xs">N/A</Badge>
                     )}
                   </TableCell>
-                  <TableCell className="text-muted-foreground text-xs">{formatDate(user.createdAt as string | undefined)}</TableCell>
+                  <TableCell className="text-muted-foreground text-xs hidden lg:table-cell">{formatDate(user.createdAt as string | undefined)}</TableCell>
                   <TableCell className="text-right">
                     <DropdownMenu>
                     <DropdownMenuTrigger asChild>
