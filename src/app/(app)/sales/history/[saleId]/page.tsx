@@ -174,7 +174,7 @@ export default function SaleDetailsPage() {
           </div>
         }
         actions={
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+          <div className="flex flex-col sm:flex-row items-stretch gap-2">
             <Button variant="outline" onClick={() => router.back()}>
               <ArrowLeft className="mr-2 h-4 w-4" /> Back
             </Button>

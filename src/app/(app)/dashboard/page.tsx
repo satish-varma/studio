@@ -360,40 +360,6 @@ export default function DashboardPage() {
         </CardContent>
       </Card>
 
-      <Card className="shadow-lg" data-testid="low-stock-items-card">
-        <CardHeader>
-          <CardTitle className="flex items-center">
-            <PackageSearch className="h-5 w-5 mr-2 text-destructive"/>
-            Items Low on Stock
-          </CardTitle>
-          <CardDescription>Top items that have reached or fallen below their low stock threshold.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {lowStockItemsData.length > 0 ? (
-            <ScrollArea className="h-[200px] pr-3"> 
-              <div className="space-y-3">
-                {lowStockItemsData.map((item) => (
-                  <div key={item.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-md hover:bg-muted/75 transition-colors" data-testid={`low-stock-item-${item.id}`}>
-                    <div>
-                      <p className="font-medium text-foreground">{item.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        Qty: <span className="font-semibold text-destructive">{item.quantity}</span> {item.unit} (Threshold: {item.lowStockThreshold})
-                      </p>
-                    </div>
-                    <Button variant="outline" size="sm" onClick={() => router.push(`/items/${item.id}/edit`)}>
-                      View/Edit
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </ScrollArea>
-          ) : (
-            <p className="text-sm text-center text-muted-foreground py-10" data-testid="no-low-stock-data">No items are currently low on stock in this context.</p>
-          )}
-        </CardContent>
-      </Card>
-
-
       <div className="grid gap-6 md:grid-cols-2">
         <Card className="shadow-lg" data-testid="recent-sales-card">
           <CardHeader>
@@ -422,12 +388,46 @@ export default function DashboardPage() {
             )}
           </CardContent>
         </Card>
-        <Card className="shadow-lg">
+        <Card className="shadow-lg" data-testid="low-stock-items-card">
+          <CardHeader>
+            <CardTitle className="flex items-center">
+              <PackageSearch className="h-5 w-5 mr-2 text-destructive"/>
+              Items Low on Stock
+            </CardTitle>
+            <CardDescription>Top items that have reached or fallen below their low stock threshold.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {lowStockItemsData.length > 0 ? (
+              <ScrollArea className="h-[200px] pr-3"> 
+                <div className="space-y-3">
+                  {lowStockItemsData.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-md hover:bg-muted/75 transition-colors" data-testid={`low-stock-item-${item.id}`}>
+                      <div>
+                        <p className="font-medium text-foreground">{item.name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          Qty: <span className="font-semibold text-destructive">{item.quantity}</span> {item.unit} (Threshold: {item.lowStockThreshold})
+                        </p>
+                      </div>
+                      <Button variant="outline" size="sm" onClick={() => router.push(`/items/${item.id}/edit`)}>
+                        View/Edit
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            ) : (
+              <p className="text-sm text-center text-muted-foreground py-10" data-testid="no-low-stock-data">No items are currently low on stock in this context.</p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+       <Card className="shadow-lg">
           <CardHeader>
             <CardTitle>Quick Actions</CardTitle>
             <CardDescription>Common tasks at your fingertips.</CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-col space-y-3 sm:flex-row sm:space-y-0 sm:space-x-3">
+          <CardContent className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3">
             <Button
               data-testid="record-sale-button"
               className="flex-1"
@@ -468,12 +468,7 @@ export default function DashboardPage() {
             </CardFooter>
           )}
         </Card>
-      </div>
     </div>
   );
 }
-    
-
-    
-
     
