@@ -118,9 +118,6 @@ export function LoginForm() {
             </>
           )}
         </Button>
-        <p className="text-center text-sm text-muted-foreground">
-          Hint: Try staff@example.com, manager@example.com, or admin@example.com with password 'password'.
-        </p>
       </form>
     </Form>
   );

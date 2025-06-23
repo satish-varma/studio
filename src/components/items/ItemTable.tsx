@@ -1459,7 +1459,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
               </TableHead>
               <TableHead>Unit</TableHead>
               <TableHead className="text-right hidden md:table-cell">Cost Price</TableHead>
-              <TableHead className="text-right">Sell Price</TableHead>
+              <TableHead className="text-right hidden md:table-cell">Sell Price</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="hidden md:table-cell">Last Updated</TableHead>
               <TableHead className="text-right">Actions</TableHead>
@@ -1555,7 +1555,7 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                   <TableCell className="text-right text-foreground">{item.quantity}</TableCell>
                   <TableCell className="text-muted-foreground">{item.unit}</TableCell>
                   <TableCell className="text-right text-muted-foreground hidden md:table-cell">₹{(item.costPrice ?? 0).toFixed(2)}</TableCell>
-                  <TableCell className="text-right text-foreground">₹{item.price.toFixed(2)}</TableCell>
+                  <TableCell className="text-right text-foreground hidden md:table-cell">₹{item.price.toFixed(2)}</TableCell>
                   <TableCell>
                     <Badge
                       variant={
@@ -1571,90 +1571,106 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
                   </TableCell>
                   <TableCell className="text-muted-foreground text-xs hidden md:table-cell">{formatDate(item.lastUpdated)}</TableCell>
                   <TableCell className="text-right">
-                    <Dialog open={stockUpdateItem?.id === item.id} onOpenChange={(open) => !open && setStockUpdateItem(null)}>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8" data-testid={`actions-button-${item.id}`}>
-                            <MoreHorizontal className="h-4 w-4" />
-                            <span className="sr-only">Actions</span>
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => handleOpenUpdateStockDialog(item)}>
-                              <PackageOpen className="mr-2 h-4 w-4" /> Update Stock
-                            </DropdownMenuItem>
-                           {isMasterStock && (
-                            <DropdownMenuItem
-                                data-testid={`allocate-action-${item.id}`}
-                                onClick={() => handleOpenAllocateDialog(item)}
-                                disabled={availableStallsForAllocation.filter(s => s.siteId === item.siteId).length === 0}>
-                              <MoveRight className="mr-2 h-4 w-4" /> Allocate to Stall
-                            </DropdownMenuItem>
-                          )}
-                          {!isMasterStock && (
-                            <DropdownMenuItem
-                                data-testid={`transfer-action-${item.id}`}
-                                onClick={() => handleOpenTransferDialog(item)}
-                                disabled={!item.siteId || availableStallsForAllocation.filter(s => s.siteId === item.siteId && s.id !== item.stallId).length === 0}>
-                                <Shuffle className="mr-2 h-4 w-4" /> Transfer to Stall
-                            </DropdownMenuItem>
-                          )}
-                          {!isMasterStock && item.originalMasterItemId && (
-                             <DropdownMenuItem data-testid={`return-action-${item.id}`} onClick={() => handleOpenReturnDialog(item)}>
-                              <Undo2 className="mr-2 h-4 w-4" /> Return to Master
-                            </DropdownMenuItem>
-                          )}
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem onClick={() => handleEdit(item.id)}>
-                            <Edit className="mr-2 h-4 w-4" /> Edit Item
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => handleOpenSingleDeleteDialog(item)}
-                            className="text-destructive focus:text-destructive-foreground focus:bg-destructive"
-                            data-testid={`delete-action-${item.id}`}
-                          >
-                            <Trash2 className="mr-2 h-4 w-4" /> Delete Item
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                      <DialogContent className="sm:max-w-[425px]">
-                        <DialogHeader>
-                          <DialogTitle>Update Stock for {stockUpdateItem?.name}</DialogTitle>
-                          <DialogDescription>
-                            Current quantity: {stockUpdateItem?.quantity} {stockUpdateItem?.unit} (
-                              { stockUpdateItem?.stallId
-                                ? stallsMap[stockUpdateItem.stallId] || `Stall ID: ${stockUpdateItem.stallId.substring(0,6)}...`
-                                : stockUpdateItem?.siteId ? "Master Stock" : "Unassigned"
-                              }
-                              {stockUpdateItem?.siteId && ` at ${sitesMap[stockUpdateItem.siteId] || `Site ID: ${stockUpdateItem.siteId.substring(0,6)}...`}`}
-                            ).
-                          </DialogDescription>
-                        </DialogHeader>
-                        <div className="grid gap-4 py-4">
-                          <div className="grid grid-cols-4 items-center gap-4">
-                            <Label htmlFor="quantity" className="text-right">
-                              New Quantity
-                            </Label>
-                            <Input
-                              id="quantity"
-                              data-testid="update-stock-quantity-input"
-                              type="number"
-                              value={newQuantity}
-                              onChange={(e) => setNewQuantity(parseAndCapInput(e.target.value))}
-                              className="col-span-3 bg-input"
-                              min="0"
-                            />
-                          </div>
-                        </div>
-                        <DialogFooter>
-                          <Button type="button" variant="outline" onClick={() => setStockUpdateItem(null)} disabled={isUpdatingStock}>Cancel</Button>
-                          <Button type="button" data-testid="update-stock-confirm-button" onClick={handleStockQuantityChange} disabled={isUpdatingStock || newQuantity === "" || Number(newQuantity) < 0}>
-                            {isUpdatingStock && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Save changes
-                          </Button>
-                        </DialogFooter>
-                      </DialogContent>
-                    </Dialog>
+                    <div className="flex items-center justify-end gap-1">
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-8 w-8 hidden md:inline-flex"
+                                    onClick={() => handleOpenUpdateStockDialog(item)}
+                                    aria-label="Update Stock"
+                                >
+                                    <PackageOpen className="h-4 w-4" />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent><p>Update Stock Quantity</p></TooltipContent>
+                        </Tooltip>
+                        <Dialog open={stockUpdateItem?.id === item.id} onOpenChange={(open) => !open && setStockUpdateItem(null)}>
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-8 w-8" data-testid={`actions-button-${item.id}`}>
+                                    <MoreHorizontal className="h-4 w-4" />
+                                    <span className="sr-only">Actions</span>
+                                </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                    <DropdownMenuItem onClick={() => handleOpenUpdateStockDialog(item)} className="md:hidden">
+                                        <PackageOpen className="mr-2 h-4 w-4" /> Update Stock
+                                    </DropdownMenuItem>
+                                    {isMasterStock && (
+                                    <DropdownMenuItem
+                                        data-testid={`allocate-action-${item.id}`}
+                                        onClick={() => handleOpenAllocateDialog(item)}
+                                        disabled={availableStallsForAllocation.filter(s => s.siteId === item.siteId).length === 0}>
+                                        <MoveRight className="mr-2 h-4 w-4" /> Allocate to Stall
+                                    </DropdownMenuItem>
+                                    )}
+                                    {!isMasterStock && (
+                                    <DropdownMenuItem
+                                        data-testid={`transfer-action-${item.id}`}
+                                        onClick={() => handleOpenTransferDialog(item)}
+                                        disabled={!item.siteId || availableStallsForAllocation.filter(s => s.siteId === item.siteId && s.id !== item.stallId).length === 0}>
+                                        <Shuffle className="mr-2 h-4 w-4" /> Transfer to Stall
+                                    </DropdownMenuItem>
+                                    )}
+                                    {!isMasterStock && item.originalMasterItemId && (
+                                    <DropdownMenuItem data-testid={`return-action-${item.id}`} onClick={() => handleOpenReturnDialog(item)}>
+                                        <Undo2 className="mr-2 h-4 w-4" /> Return to Master
+                                    </DropdownMenuItem>
+                                    )}
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem onClick={() => handleEdit(item.id)}>
+                                    <Edit className="mr-2 h-4 w-4" /> Edit Item
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                    onClick={() => handleOpenSingleDeleteDialog(item)}
+                                    className="text-destructive focus:text-destructive-foreground focus:bg-destructive"
+                                    data-testid={`delete-action-${item.id}`}
+                                    >
+                                    <Trash2 className="mr-2 h-4 w-4" /> Delete Item
+                                    </DropdownMenuItem>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                            <DialogContent className="sm:max-w-[425px]">
+                                <DialogHeader>
+                                <DialogTitle>Update Stock for {stockUpdateItem?.name}</DialogTitle>
+                                <DialogDescription>
+                                    Current quantity: {stockUpdateItem?.quantity} {stockUpdateItem?.unit} (
+                                    { stockUpdateItem?.stallId
+                                        ? stallsMap[stockUpdateItem.stallId] || `Stall ID: ${stockUpdateItem.stallId.substring(0,6)}...`
+                                        : stockUpdateItem?.siteId ? "Master Stock" : "Unassigned"
+                                    }
+                                    {stockUpdateItem?.siteId && ` at ${sitesMap[stockUpdateItem.siteId] || `Site ID: ${stockUpdateItem.siteId.substring(0,6)}...`}`}
+                                    ).
+                                </DialogDescription>
+                                </DialogHeader>
+                                <div className="grid gap-4 py-4">
+                                <div className="grid grid-cols-4 items-center gap-4">
+                                    <Label htmlFor="quantity" className="text-right">
+                                    New Quantity
+                                    </Label>
+                                    <Input
+                                    id="quantity"
+                                    data-testid="update-stock-quantity-input"
+                                    type="number"
+                                    value={newQuantity}
+                                    onChange={(e) => setNewQuantity(parseAndCapInput(e.target.value))}
+                                    className="col-span-3 bg-input"
+                                    min="0"
+                                    />
+                                </div>
+                                </div>
+                                <DialogFooter>
+                                <Button type="button" variant="outline" onClick={() => setStockUpdateItem(null)} disabled={isUpdatingStock}>Cancel</Button>
+                                <Button type="button" data-testid="update-stock-confirm-button" onClick={handleStockQuantityChange} disabled={isUpdatingStock || newQuantity === "" || Number(newQuantity) < 0}>
+                                    {isUpdatingStock && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                    Save changes
+                                </Button>
+                                </DialogFooter>
+                            </DialogContent>
+                        </Dialog>
+                    </div>
                   </TableCell>
                 </TableRow>
               );
@@ -2015,5 +2031,6 @@ export function ItemTable({ items, sitesMap, stallsMap, availableStallsForAlloca
     </TooltipProvider>
   );
 }
+
 
 
