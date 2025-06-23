@@ -27,7 +27,7 @@ import { Loader2, Info, DollarSign } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { FoodSalesTable } from "./FoodSalesTable";
 import { Button } from "@/components/ui/button";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { format, subDays, startOfDay, endOfDay, startOfMonth } from "date-fns";
 
 const LOG_PREFIX = "[FoodSalesClientPage]";
@@ -246,35 +246,30 @@ export default function FoodSalesClientPage() {
       )}
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-                Total Sales ({
-                    dateFilter === 'today' ? 'Today' :
-                    dateFilter === 'last_7_days' ? 'Last 7 Days' :
-                    dateFilter === 'this_month' ? 'This Month' : 'All Time'
-                })
-            </CardTitle>
-             <DollarSign className="h-4 w-4 text-muted-foreground" />
-        </CardHeader>
-        <CardContent>
-            <div className="text-2xl font-bold">
-                {loadingSales && totalSalesAmount === 0 ? <Loader2 className="h-6 w-6 animate-spin"/> : `₹${totalSalesAmount.toFixed(2)}`}
-            </div>
-            <p className="text-xs text-muted-foreground">
-                {user?.role === 'admin' && !activeStallId ? 'Total for all stalls in this site. ' : ''}
+        <CardHeader>
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+            <div>
+              <CardTitle>Filter & Summary</CardTitle>
+              <CardDescription className="mt-1">
                 Total sales for the selected period.
-            </p>
+                {user?.role === 'admin' && !activeStallId ? ' (Aggregated for all stalls in site)' : ''}
+              </CardDescription>
+            </div>
+            <div className="text-left sm:text-right">
+              <p className="text-sm text-muted-foreground">Total Sales</p>
+              <p className="text-2xl font-bold">
+                {loadingSales && totalSalesAmount === 0 ? <Loader2 className="h-6 w-6 animate-spin"/> : `₹${totalSalesAmount.toFixed(2)}`}
+              </p>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-2 border-t pt-4">
+          <Button variant={dateFilter === 'today' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('today')}>Today</Button>
+          <Button variant={dateFilter === 'last_7_days' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('last_7_days')}>Last 7 Days</Button>
+          <Button variant={dateFilter === 'this_month' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('this_month')}>This Month</Button>
+          <Button variant={dateFilter === 'all_time' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('all_time')}>All Time</Button>
         </CardContent>
       </Card>
-
-      <div className="flex flex-col sm:flex-row items-stretch gap-2 p-4 border rounded-lg bg-card shadow-sm">
-        <div className="flex-1 flex flex-wrap gap-2">
-           <Button variant={dateFilter === 'today' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('today')}>Today</Button>
-           <Button variant={dateFilter === 'last_7_days' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('last_7_days')}>Last 7 Days</Button>
-           <Button variant={dateFilter === 'this_month' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('this_month')}>This Month</Button>
-           <Button variant={dateFilter === 'all_time' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('all_time')}>All Time</Button>
-        </div>
-      </div>
 
       {loadingSales && sales.length === 0 && (
         <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading sales...</p></div>

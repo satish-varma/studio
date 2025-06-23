@@ -37,7 +37,7 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { format, subDays, startOfDay, endOfDay, startOfMonth, startOfWeek } from "date-fns";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card";
 
 
 const LOG_PREFIX = "[FoodExpensesClientPage]";
@@ -256,49 +256,45 @@ export default function FoodExpensesClientPage() {
 
   return (
     <div className="space-y-4">
-        <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">
-                    Total Expenses ({
-                        dateFilter === 'today' ? 'Today' :
-                        dateFilter === 'last_7_days' ? 'Last 7 Days' :
-                        dateFilter === 'this_month' ? 'This Month' : 'All Time'
-                    })
-                </CardTitle>
-                 <DollarSign className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-                <div className="text-2xl font-bold">
-                    {loadingExpenses && totalExpensesAmount === 0 ? <Loader2 className="h-6 w-6 animate-spin"/> : `₹${totalExpensesAmount.toFixed(2)}`}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                    {user.role === 'admin' && !activeStallId ? 'Total for all stalls in this site. ' : ''}
-                    Total expenses for the selected period and category.
-                </p>
-            </CardContent>
-        </Card>
-
-      <div className="flex flex-col sm:flex-row items-stretch gap-2 p-4 border rounded-lg bg-card shadow-sm">
-        <div className="flex-1 flex flex-wrap gap-2">
-           <Button variant={dateFilter === 'today' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('today')}>Today</Button>
-           <Button variant={dateFilter === 'last_7_days' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('last_7_days')}>Last 7 Days</Button>
-           <Button variant={dateFilter === 'this_month' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('this_month')}>This Month</Button>
-           <Button variant={dateFilter === 'all_time' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('all_time')}>All Time</Button>
-        </div>
-
-        <Select value={categoryFilter} onValueChange={handleCategoryChange}>
-          <SelectTrigger className="w-full sm:w-[220px] bg-input">
-            <ListFilter className="mr-2 h-4 w-4 text-muted-foreground" />
-            <SelectValue placeholder="Filter by category" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Categories</SelectItem>
-            {foodExpenseCategories.map(cat => (
-              <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+            <div>
+              <CardTitle>Filter & Summary</CardTitle>
+              <CardDescription className="mt-1">
+                Total expenses for the selected period and category.
+                {user.role === 'admin' && !activeStallId ? ' (Aggregated for all stalls in site)' : ''}
+              </CardDescription>
+            </div>
+            <div className="text-left sm:text-right">
+              <p className="text-sm text-muted-foreground">Total Expenses</p>
+              <p className="text-2xl font-bold">
+                {loadingExpenses && totalExpensesAmount === 0 ? <Loader2 className="h-6 w-6 animate-spin"/> : `₹${totalExpensesAmount.toFixed(2)}`}
+              </p>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="flex flex-col md:flex-row md:items-center gap-2 border-t pt-4">
+          <div className="flex-1 flex flex-wrap gap-2">
+            <Button variant={dateFilter === 'today' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('today')}>Today</Button>
+            <Button variant={dateFilter === 'last_7_days' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('last_7_days')}>Last 7 Days</Button>
+            <Button variant={dateFilter === 'this_month' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('this_month')}>This Month</Button>
+            <Button variant={dateFilter === 'all_time' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('all_time')}>All Time</Button>
+          </div>
+          <Select value={categoryFilter} onValueChange={handleCategoryChange}>
+            <SelectTrigger className="w-full md:w-[220px] bg-input">
+              <ListFilter className="mr-2 h-4 w-4 text-muted-foreground" />
+              <SelectValue placeholder="Filter by category" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Categories</SelectItem>
+              {foodExpenseCategories.map(cat => (
+                <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </CardContent>
+      </Card>
 
       {loadingExpenses && expenses.length === 0 && (
         <div className="flex justify-center items-center py-10">
