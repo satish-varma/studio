@@ -29,6 +29,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import Link from "next/link";
+import type { Timestamp } from "firebase/firestore";
 
 interface FoodExpensesTableProps {
   expenses: FoodItemExpense[];
@@ -77,10 +78,12 @@ export function FoodExpensesTable({
   itemsPerPage,
   isLoading,
 }: FoodExpensesTableProps) {
-  const formatDateForDisplay = (date: Date | string) => {
+  const formatDateForDisplay = (date: Date | string | Timestamp) => {
     if (!date) return "N/A";
     try {
-      return format(new Date(date), "MMM dd, yyyy");
+      // Check if it's a Firestore Timestamp and convert it, otherwise create a new Date
+      const dateObj = (date as Timestamp)?.toDate ? (date as Timestamp).toDate() : new Date(date as string | Date);
+      return format(dateObj, "MMM dd, yyyy");
     } catch (e) {
       return "Invalid Date";
     }
