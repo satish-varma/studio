@@ -44,12 +44,10 @@ export async function generateMetadata({ params }: { params: { siteId: string } 
   }
 }
 
-// Admins only route - further protection should be via security rules & auth context checks in client component
-export default async function ManageStallsPage({ params }: { params: { siteId: string } }) {
-  // The StallsClientPage will handle fetching site details and stalls based on the siteId from params (using useParams hook)
-  // The 'params' prop here is primarily for server-side logic like generateMetadata or if data was fetched directly on this page.
-  // We can log it here if needed for debugging or future server-side data fetching.
-  // console.log("ManageStallsPage received params:", params);
-  
+// Admins only route - further protection is handled by client component.
+// This server component simply renders the client page.
+export default function ManageStallsPage() {
+  // The client component will get the siteId from the URL using useParams hook.
+  // This parent component doesn't need to handle props.
   return <StallsClientPage />;
 }
