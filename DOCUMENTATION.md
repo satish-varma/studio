@@ -47,7 +47,7 @@
 
 ## 1. Introduction
 
-StallSync is a comprehensive stock and sales management application designed for businesses with multiple sites and stalls (e.g., retail counters, storage areas). It allows users to track inventory, record sales, manage staff, and gain insights into their operations. It also includes a dedicated module for managing food stall specific expenses and sales. The application features role-based access control (Admin, Manager, Staff) and leverages AI for tasks like product description generation and sales trend summarization.
+StallSync is a comprehensive stock and sales management application designed for businesses with multiple sites and stalls (e.g., retail counters, storage areas). It allows users to track inventory, record sales, manage staff, and gain insights into their operations. It also includes a dedicated module for managing food stall specific expenses and sales. The application features role-based access control (Admin, Manager, Staff), is fully mobile-responsive, and leverages AI for tasks like product description generation and sales trend summarization.
 
 ---
 
@@ -82,10 +82,12 @@ A brief overview of important directories:
         *   `layout.tsx`: Main authenticated layout with sidebar and header (reused by other sections).
     *   `(auth)/`: Authentication-related pages (login).
     *   `foodstall/`: Authenticated routes for the Food Stall Management module (e.g., `/foodstall/dashboard`).
+        *   `activity-log/`: Activity log specific to food stall operations.
         *   `dashboard/`: Food stall dashboard.
         *   `expenses/`: Food stall expense tracking pages.
+        *   `reports/`: Food stall financial reports.
         *   `sales/`: Food stall sales tracking pages.
-        *   `layout.tsx`: Layout for the food stall section (currently reuses the main app layout).
+        *   `layout.tsx`: Layout for the food stall section (reuses the main app layout).
     *   `api/`: Next.js API routes (server-side logic).
     *   `error.tsx`: Global error boundary.
     *   `globals.css`: Global styles and Tailwind CSS theme.
@@ -93,7 +95,8 @@ A brief overview of important directories:
     *   `loading.tsx`: Global loading UI.
     *   `page.tsx`: Root page, usually redirects based on auth state.
 *   **`/src/components`**: Reusable UI components.
-    *   `admin/`, `auth/`, `items/`, `layout/`, `reports/`, `sales/`, `shared/`, `users/`, `dashboard/`, `foodstall/`: Feature-specific components.
+    *   `admin/`, `auth/`, `items/`, `layout/`, `reports/`, `sales/`, `shared/`, `users/`, `dashboard/`: Feature-specific components.
+    *   `foodstall/`: Components specific to the food stall module (e.g., `FoodExpensesTable`, `FoodSalesTable`, `FoodStallReportClientPage`).
     *   `ui/`: ShadCN UI primitive components (Accordion, Button, Card, etc.).
 *   **`/src/contexts`**: React Context providers.
     *   `AuthContext.tsx`: Manages user authentication state, active site/stall context.
@@ -101,10 +104,12 @@ A brief overview of important directories:
 *   **`/src/hooks`**: Custom React hooks (e.g., `use-toast`, `use-mobile`).
 *   **`/src/lib`**: Utility functions and configurations.
     *   `firebaseConfig.ts`: Firebase client SDK configuration.
+    *   `foodStallLogger.ts`: Utility for logging food stall sales and expenses.
     *   `stockLogger.ts`: Utility for logging stock movements.
     *   `utils.ts`: General utility functions (e.g., `cn` for Tailwind class merging).
     *   `__tests__/`: Directory for unit tests for library functions.
 *   **`/src/types`**: TypeScript type definitions for data models.
+    *   `food.ts`, `food_log.ts`: Data models for food stall management.
 *   **Root Files:**
     *   `next.config.ts`, `tailwind.config.ts`, `tsconfig.json`, `package.json`, etc.
     *   `firebase.json`, `firestore.rules`, `firestore.indexes.json`, `storage.rules`: Firebase project configuration and rules.
@@ -295,15 +300,16 @@ GOOGLE_REDIRECT_URI=YOUR_CONFIGURED_GOOGLE_OAUTH_REDIRECT_URI
 ### Food Stall Management
 
 *   **Path:** `/foodstall/...`
-*   **Food Stall Dashboard (`/foodstall/dashboard`):** Overview of food stall specific metrics (currently placeholder).
+*   **Food Stall Dashboard (`/foodstall/dashboard`):** Overview of food stall specific metrics like total sales, total expenses, and net profit for a selected period (Today, Last 7 Days, This Month, All Time).
 *   **Expense Tracking:**
-    *   Record Food Stall Expenses (`/foodstall/expenses/record`): Form to input purchases of groceries, supplies, etc. (currently placeholder form).
-    *   View Expenses (`/foodstall/expenses`): List and filter food stall expenses (currently placeholder list).
+    *   Record Food Stall Expenses (`/foodstall/expenses/record`): A detailed form to input purchases of groceries, supplies, etc. by category.
+    *   View Expenses (`/foodstall/expenses`): A paginated and filterable list of all food stall expenses.
 *   **Sales Tracking:**
-    *   Record Food Stall Sales (`/foodstall/sales/record`): Form to input sales of meals, beverages, etc. (currently placeholder form).
-    *   View Sales (`/foodstall/sales`): List and filter food stall sales transactions (currently placeholder list).
+    *   Manage Daily Sales (`/foodstall/sales/record`): A form to input and edit the total sales for a specific day, broken down by meal times (Breakfast, Lunch, Dinner, Snacks) and payment methods (HungerBox, UPI, Other).
+    *   View Sales (`/foodstall/sales`): A paginated list of all daily sales summaries.
+*   **Activity Log (`/foodstall/activity-log`):** View a paginated history of all recorded sales and expenses for food stalls.
+*   **Financial Reports (`/foodstall/reports`):** A dedicated report page to analyze food stall financial performance, including total sales, total expenses, net profit, and top expense categories for a given period.
 *   **Dedicated Data Models:** Uses `FoodItemExpense` and `FoodSaleTransaction` types defined in `src/types/food.ts`.
-*   **Future Enhancements:** Could include recipe management, cost-per-meal calculation, food-specific reporting, and integration with main inventory for shared items if applicable.
 
 ### User Management (Admin)
 
@@ -388,7 +394,7 @@ GOOGLE_REDIRECT_URI=YOUR_CONFIGURED_GOOGLE_OAUTH_REDIRECT_URI
 *   **`/src/components/auth`**: `LoginForm` (public sign-up form is deprecated).
 *   **`/src/components/context`**: `SiteStallSelector` (used in header for context switching).
 *   **`/src/components/dashboard`**: `DashboardSalesChart`.
-*   **`/src/components/foodstall`**: (Placeholder components for expense/sale forms and lists would go here, e.g., `RecordFoodExpenseForm`, `FoodExpensesTable`)
+*   **`/src/components/foodstall`**: `FoodExpensesClientPage`, `FoodSalesClientPage`, `FoodStallReportClientPage`, `FoodExpensesTable`, `FoodSalesTable`.
 *   **`/src/components/items`**: `ItemControls`, `ItemForm`, `ItemTable`.
 *   **`/src/components/layout`**: `AppHeaderContent`, `AppSidebarNav`, `UserNav`.
 *   **`/src/components/reports`**: `ReportControls`, `SalesSummaryReportClientPage`.
@@ -502,6 +508,7 @@ TypeScript interfaces and Zod schemas define the structure of data used througho
 *   `StockMovementLog` (`log.ts`): Logs for tracking inventory changes.
 *   `UserGoogleOAuthTokens` (`user.ts`): For Google Sheets integration.
 *   `FoodItemExpense`, `FoodSaleTransaction` (`food.ts`): Data models for food stall management.
+*   `FoodStallActivityLog` (`food_log.ts`): Log for food stall activities.
 
 ---
 
@@ -530,58 +537,58 @@ TypeScript interfaces and Zod schemas define the structure of data used througho
 5.  **User Creation:** Navigates to "User Management".
     *   Creates a "Manager" user, assigns them to manage "Main Warehouse".
     *   Creates a "Staff" user, assigns their default site to "Main Warehouse" and default stall to "Retail Counter A".
-6.  **Master Stock Creation:** Navigates to "Stock Items". Selects "Main Warehouse" and ensures no specific stall is selected (or selects "Master Stock" filter). Adds new items (e.g., "Product X", "Product Y") to the master stock.
+6.  **Master Stock Creation:** Navigates to "Stock & Sales" -> "Stock Items". Selects "Main Warehouse" and ensures no specific stall is selected (or selects "Master Stock" filter). Adds new items (e.g., "Product X", "Product Y") to the master stock.
 7.  **Stock Allocation:** From the "Stock Items" (Master Stock view), allocates quantities of "Product X" and "Product Y" to "Retail Counter A" and "Back Storage".
-8.  **View Activity Log:** Checks the "Activity Log" to see records of item creation and allocation.
-9.  **View Reports:** Navigates to "Reports", selects "Main Warehouse" and a date range to see sales summaries (initially zero).
+8.  **View Activity Log:** Checks the "Stock Activity Log" to see records of item creation and allocation.
+9.  **View Reports:** Navigates to "Sales Reports", selects "Main Warehouse" and a date range to see sales summaries (initially zero).
 10. **Settings:** Explores "Settings" to check data export options or reset application data.
 11. **Profile:** Updates their own display name or default viewing preferences.
 12. **Monitor Operations:** Periodically reviews dashboard, sales history for all staff/sites, and reports.
-13. **Food Stall Setup (Optional):** If managing a food stall, navigates to "Food Stall Management" (via `/foodstall/dashboard`), records initial expenses for groceries via `/foodstall/expenses/record`.
+13. **Food Stall Setup (Optional):** If managing a food stall, navigates to "Food Stall" -> "Dashboard", then to "Add Expense" to record initial expenses for groceries via `/foodstall/expenses/record`.
 
 ### Manager User
 
 1.  **Login:** Accesses the system. Their `AuthContext` might default to one of their managed sites, or they select one from the header. Their context is always "All Stalls" for the selected site.
 2.  **Dashboard:** Views dashboard for their selected managed site (e.g., "Main Warehouse"), with data aggregated from "All Stalls".
-3.  **Stock Review:** Navigates to "Stock Items".
+3.  **Stock Review:** Navigates to "Stock & Sales" -> "Stock Items".
     *   Views "All Stock (Site-wide)" for "Main Warehouse".
     *   Filters to see only "Retail Counter A" stock (using the stall filter). Notices "Product X" is low.
     *   Filters to see "Back Storage" stock.
 4.  **Stock Transfer:** From the "Stock Items" page, finds an item in "Back Storage", uses the item's action menu to "Transfer to Stall", and moves a quantity of "Product X" to "Retail Counter A".
-5.  **Record Sale (Context Dependent):** If the manager needs to record a sale, they would typically use the system in a context that implies a specific stall (e.g., if covering a stall, they might select that stall if the UI/permissions allow, or sales are recorded at the site level if that's the operational model). For this app, sale recording is tied to a specific stall context in the header. Managers do not have a specific stall context set by default for sales (their view is "All Stalls"). If an admin has given a manager a *default* stall in their user profile (not standard manager setup), or if UI allows temporary stall selection for action, they could. Otherwise, staff at specific stalls primarily record sales.
+5.  **Record Sale (Context Dependent):** If the manager needs to record a sale, they would navigate to "Stock & Sales" -> "Record Sale". They must first select the specific stall where the sale is occurring from a dropdown on the form itself.
 6.  **Sales History:** Views sales history for "Main Warehouse", can filter by staff working there.
 7.  **Reports:** Generates sales reports for "Main Warehouse". Uses AI summary.
 8.  **Settings:** Exports sales data for "Main Warehouse" to CSV.
 9.  **Profile:** Sets their default item filter preferences.
-10. **Food Stall Check (If applicable):** If their managed site includes a food stall, they might navigate to "Food Stall Management" (via `/foodstall/dashboard`) to review recent expenses or sales for that stall.
+10. **Food Stall Check (If applicable):** If their managed site includes a food stall, they might navigate to "Food Stall" -> "Dashboard" to review recent expenses or sales for that stall. They can also view the "Food Stall Reports".
 
 ### Staff User
 
 1.  **Login:** Accesses the system. Their context is automatically set to their assigned default site and stall (e.g., "Main Warehouse", "Retail Counter A"). If no stall is assigned, context is their site's master stock.
 2.  **Dashboard:** Views dashboard specific to "Retail Counter A". Sees items low on stock *at their stall*.
-3.  **Stock Check:** Navigates to "Stock Items". View is automatically filtered to "Retail Counter A".
+3.  **Stock Check:** Navigates to "Stock & Sales" -> "Stock Items". View is automatically filtered to "Retail Counter A".
     *   Updates quantity for "Product X" after a manual count (using "Update Stock" action).
-4.  **Record Sale:** Navigates to "Record Sale".
+4.  **Record Sale:** Navigates to "Stock & Sales" -> "Record Sale". The form is pre-set to their assigned stall.
     *   Adds "Product X" and "Product Y" to a customer's order from available stall stock.
     *   Completes the sale. Stock for "Product X" and "Product Y" at "Retail Counter A" (and linked master stock) is automatically decremented.
 5.  **Sales History:** Views their own sales for "Retail Counter A".
 6.  **Profile:** Updates their display name.
 7.  **Request Stock (Implicit):** If "Product Y" runs out, they might verbally request more from a manager or from "Back Storage" (system doesn't have a formal request feature, this would be an operational flow leading to a manager/admin performing an allocation or transfer).
 8.  **Food Stall Operations (If assigned to a food stall):**
-    *   Records sales of food items via `/foodstall/sales/record`.
-    *   Records expenses for grocery purchases via `/foodstall/expenses/record`.
+    *   Manages daily sales totals via "Food Stall" -> "Add Sales".
+    *   Records expenses for grocery purchases via "Food Stall" -> "Add Expense".
 
 ---
 
 ## 13. Production Readiness Considerations
 
-Making StallSync fully production-ready involves several key areas beyond core feature development.
+Making StallSync fully production-ready involves several key areas beyond core feature development. The application is built to be fully responsive and mobile-friendly.
 
 ### Firestore Security Rules
 
 *   **Current Status:** The `firestore.rules` file in the project root provides a detailed set of rules with helper functions for role checks and ownership.
 *   **Action Required:** **CRITICAL REVIEW AND TESTING.** Before deploying to production, these rules must be thoroughly audited, tested (using Firebase Emulator Suite or unit tests for rules), and refined to ensure they precisely match the application's access control requirements. Deny by default and only allow specific operations needed by each role for each collection/document. Pay close attention to write rules for `stockItems` to prevent unauthorized quantity or price changes.
-    *   Ensure rules for new collections like `foodItemExpenses` and `foodSaleTransactions` are added and appropriately secured.
+    *   Ensure rules for new collections like `foodItemExpenses`, `foodSaleTransactions`, and `foodStallActivityLogs` are added and appropriately secured.
 
 ### Testing Strategy
 
@@ -638,3 +645,5 @@ Making StallSync fully production-ready involves several key areas beyond core f
     *   **Consult Legal Advice:** For production applications handling sensitive user data or operating in regulated industries, consult with a legal professional to ensure compliance with all applicable laws and regulations.
 
 This document should give you a solid foundation. Remember that documentation is a living thing and should be updated as the application evolves!
+
+    
