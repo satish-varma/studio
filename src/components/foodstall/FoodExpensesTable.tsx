@@ -56,10 +56,10 @@ const TableRowSkeleton = () => (
     <TableCell>
       <Skeleton className="h-4 w-24" />
     </TableCell>
-    <TableCell>
+    <TableCell className="hidden md:table-cell">
       <Skeleton className="h-4 w-20" />
     </TableCell>
-    <TableCell>
+    <TableCell className="hidden md:table-cell">
       <Skeleton className="h-4 w-32" />
     </TableCell>
     <TableCell>
@@ -103,8 +103,8 @@ export function FoodExpensesTable({
               <TableHead>Date</TableHead>
               <TableHead className="text-right">Total Cost</TableHead>
               <TableHead>Payment Method</TableHead>
-              <TableHead>Vendor</TableHead>
-              <TableHead>Recorded By</TableHead>
+              <TableHead className="hidden md:table-cell">Vendor</TableHead>
+              <TableHead className="hidden md:table-cell">Recorded By</TableHead>
               <TableHead>Notes</TableHead>
               <TableHead>Bill</TableHead>
             </TableRow>
@@ -143,8 +143,8 @@ export function FoodExpensesTable({
               <TableHead className="w-[120px]">Purchase Date</TableHead>
               <TableHead className="w-[120px] text-right">Total Cost</TableHead>
               <TableHead className="w-[130px]">Payment Method</TableHead>
-              <TableHead className="w-[130px]">Vendor</TableHead>
-              <TableHead className="w-[130px]">Recorded By</TableHead>
+              <TableHead className="w-[130px] hidden md:table-cell">Vendor</TableHead>
+              <TableHead className="w-[130px] hidden md:table-cell">Recorded By</TableHead>
               <TableHead className="min-w-[180px]">Notes</TableHead>
               <TableHead className="w-[60px]">Bill</TableHead>
             </TableRow>
@@ -166,10 +166,10 @@ export function FoodExpensesTable({
                 <TableCell className="text-foreground">
                   {expense.paymentMethod}
                 </TableCell>
-                <TableCell className="text-muted-foreground">
+                <TableCell className="text-muted-foreground hidden md:table-cell">
                   {expense.vendor || "N/A"}
                 </TableCell>
-                <TableCell className="text-muted-foreground text-xs">
+                <TableCell className="text-muted-foreground text-xs hidden md:table-cell">
                   {expense.recordedByName || expense.recordedByUid.substring(0, 8)}
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate">

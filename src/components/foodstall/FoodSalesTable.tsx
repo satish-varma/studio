@@ -33,8 +33,8 @@ const TableRowSkeleton = () => (
   <TableRow>
     <TableCell><Skeleton className="h-4 w-24" /></TableCell>
     <TableCell className="text-right"><Skeleton className="h-4 w-20 inline-block" /></TableCell>
+    <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-24" /></TableCell>
     <TableCell><Skeleton className="h-4 w-full" /></TableCell>
-    <TableCell><Skeleton className="h-4 w-24" /></TableCell>
     <TableCell><Skeleton className="h-8 w-8" /></TableCell>
   </TableRow>
 );
@@ -92,7 +92,7 @@ export function FoodSalesTable({
             <TableRow>
               <TableHead>Date</TableHead>
               <TableHead className="text-right">Total Amount</TableHead>
-              <TableHead>Recorded By</TableHead>
+              <TableHead className="hidden md:table-cell">Recorded By</TableHead>
               <TableHead>Notes</TableHead>
               <TableHead>Actions</TableHead>
             </TableRow>
@@ -124,7 +124,7 @@ export function FoodSalesTable({
             <TableRow>
               <TableHead className="w-[120px]">Date</TableHead>
               <TableHead className="w-[150px] text-right font-semibold">Total Amount</TableHead>
-              <TableHead className="w-[150px]">Recorded By</TableHead>
+              <TableHead className="w-[150px] hidden md:table-cell">Recorded By</TableHead>
               <TableHead className="min-w-[200px]">Notes</TableHead>
               <TableHead className="w-[80px]">Actions</TableHead>
             </TableRow>
@@ -151,7 +151,7 @@ export function FoodSalesTable({
                       </Tooltip>
                     </TooltipProvider>
                 </TableCell>
-                <TableCell className="text-muted-foreground text-xs">{sale.recordedByName || sale.recordedByUid.substring(0, 8)}</TableCell>
+                <TableCell className="text-muted-foreground text-xs hidden md:table-cell">{sale.recordedByName || sale.recordedByUid.substring(0, 8)}</TableCell>
                 <TableCell className="text-xs text-muted-foreground max-w-[250px] truncate">
                   {sale.notes ? (
                     <Tooltip><TooltipTrigger asChild><span className="cursor-help underline decoration-dotted">{sale.notes.substring(0, 35)}{sale.notes.length > 35 ? "..." : ""}</span></TooltipTrigger><TooltipContent className="max-w-xs"><p>{sale.notes}</p></TooltipContent></Tooltip>

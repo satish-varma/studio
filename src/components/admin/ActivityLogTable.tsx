@@ -113,8 +113,8 @@ export function ActivityLogTable({
               <TableHead className="text-center">Qty Change</TableHead>
               <TableHead className="text-center">Before</TableHead>
               <TableHead className="text-center">After</TableHead>
-              <TableHead>Location</TableHead>
-              <TableHead>Notes</TableHead>
+              <TableHead className="hidden lg:table-cell">Location</TableHead>
+              <TableHead className="hidden lg:table-cell">Notes</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -150,7 +150,7 @@ export function ActivityLogTable({
                 </TableCell>
                 <TableCell className="text-center text-muted-foreground">{log.quantityBefore}</TableCell>
                 <TableCell className="text-center font-medium">{log.quantityAfter}</TableCell>
-                <TableCell className="text-xs">
+                <TableCell className="text-xs hidden lg:table-cell">
                   <div className="flex items-center">
                     <Building size={12} className="mr-1 text-primary/70 flex-shrink-0" />
                     <Tooltip>
@@ -172,7 +172,7 @@ export function ActivityLogTable({
                     </div>
                   )}
                 </TableCell>
-                <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate">
+                <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate hidden lg:table-cell">
                   {log.notes ? (
                     <Tooltip>
                       <TooltipTrigger asChild>
