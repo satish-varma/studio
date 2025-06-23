@@ -11,8 +11,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { getFirestore, collection, query, where, onSnapshot, Timestamp, QueryConstraint } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
-import { startOfDay, endOfDay } from "date-fns";
-import type { FoodItemExpense, FoodSaleTransaction, FoodSaleTransactionAdmin } from "@/types";
+import { startOfDay, endOfDay, subDays, startOfMonth } from "date-fns";
+import type { FoodItemExpense, FoodSaleTransaction } from "@/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -28,42 +28,67 @@ if (!getApps().length) {
   db = getFirestore(getApp());
 }
 
+type DateFilterOption = 'today' | 'last_7_days' | 'this_month' | 'all_time';
+
 export default function FoodStallDashboardPage() {
   const { user, activeSiteId, activeStallId, loading: authLoading } = useAuth();
-  const [todaysSales, setTodaysSales] = useState(0);
-  const [todaysExpenses, setTodaysExpenses] = useState(0);
+  const [totalSales, setTotalSales] = useState(0);
+  const [totalExpenses, setTotalExpenses] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [dateFilter, setDateFilter] = useState<DateFilterOption>('today');
 
   useEffect(() => {
     // If auth is loading or we don't have a site, we can't fetch data.
     if (authLoading || !db || !activeSiteId) {
         if (!authLoading) setLoading(false);
-        setTodaysSales(0);
-        setTodaysExpenses(0);
+        setTotalSales(0);
+        setTotalExpenses(0);
         return;
     }
     
     if (!activeStallId && user?.role !== 'admin') {
-        setTodaysSales(0);
-        setTodaysExpenses(0);
+        setTotalSales(0);
+        setTotalExpenses(0);
         setLoading(false);
         return;
     }
     
     setLoading(true);
 
-    const todayStart = Timestamp.fromDate(startOfDay(new Date()));
-    const todayEnd = Timestamp.fromDate(endOfDay(new Date()));
-    
-    const baseSalesQueryConstraints: QueryConstraint[] = [
-        where("siteId", "==", activeSiteId),
-        where("saleDate", ">=", todayStart),
-        where("saleDate", "<=", todayEnd)
-    ];
-    if (activeStallId) {
-      baseSalesQueryConstraints.push(where("stallId", "==", activeStallId));
+    // Date range calculation based on filter
+    const now = new Date();
+    let startDate: Date | null = null;
+    let endDate: Date | null = endOfDay(now);
+
+    switch (dateFilter) {
+        case 'today':
+            startDate = startOfDay(now);
+            break;
+        case 'last_7_days':
+            startDate = startOfDay(subDays(now, 6));
+            break;
+        case 'this_month':
+            startDate = startOfMonth(now);
+            break;
+        case 'all_time':
+            startDate = null; // No start date filter
+            endDate = null;   // No end date filter
+            break;
     }
-    const salesQuery = query(collection(db, "foodSaleTransactions"), ...baseSalesQueryConstraints);
+
+    const fromTimestamp = startDate ? Timestamp.fromDate(startDate) : null;
+    const toTimestamp = endDate ? Timestamp.fromDate(endDate) : null;
+    
+    // --- Sales Fetch ---
+    const salesCollectionRef = collection(db, "foodSaleTransactions");
+    let salesQueryConstraints: QueryConstraint[] = [ where("siteId", "==", activeSiteId) ];
+    if (activeStallId) {
+      salesQueryConstraints.push(where("stallId", "==", activeStallId));
+    }
+    if (fromTimestamp) salesQueryConstraints.push(where("saleDate", ">=", fromTimestamp));
+    if (toTimestamp) salesQueryConstraints.push(where("saleDate", "<=", toTimestamp));
+
+    const salesQuery = query(salesCollectionRef, ...salesQueryConstraints);
 
     const unsubscribeSales = onSnapshot(salesQuery, (snapshot) => {
         let total = 0;
@@ -71,22 +96,23 @@ export default function FoodStallDashboardPage() {
             const sale = doc.data() as FoodSaleTransaction;
             total += sale.totalAmount;
         });
-        setTodaysSales(total);
+        setTotalSales(total);
         setLoading(false);
     }, (error) => {
-        console.error("Error fetching today's food sales:", error);
+        console.error("Error fetching food sales:", error);
         setLoading(false);
     });
 
-    const baseExpensesQueryConstraints: QueryConstraint[] = [
-        where("siteId", "==", activeSiteId),
-        where("purchaseDate", ">=", todayStart),
-        where("purchaseDate", "<=", todayEnd)
-    ];
-     if (activeStallId) {
-      baseExpensesQueryConstraints.push(where("stallId", "==", activeStallId));
+    // --- Expenses Fetch ---
+    const expensesCollectionRef = collection(db, "foodItemExpenses");
+    let expensesQueryConstraints: QueryConstraint[] = [ where("siteId", "==", activeSiteId) ];
+    if (activeStallId) {
+      expensesQueryConstraints.push(where("stallId", "==", activeStallId));
     }
-    const expensesQuery = query(collection(db, "foodItemExpenses"), ...baseExpensesQueryConstraints);
+    if (fromTimestamp) expensesQueryConstraints.push(where("purchaseDate", ">=", fromTimestamp));
+    if (toTimestamp) expensesQueryConstraints.push(where("purchaseDate", "<=", toTimestamp));
+
+    const expensesQuery = query(expensesCollectionRef, ...expensesQueryConstraints);
 
     const unsubscribeExpenses = onSnapshot(expensesQuery, (snapshot) => {
         let total = 0;
@@ -94,10 +120,10 @@ export default function FoodStallDashboardPage() {
             const expense = doc.data() as FoodItemExpense;
             total += expense.totalCost;
         });
-        setTodaysExpenses(total);
+        setTotalExpenses(total);
         setLoading(false);
     }, (error) => {
-        console.error("Error fetching today's food expenses:", error);
+        console.error("Error fetching food expenses:", error);
         setLoading(false);
     });
 
@@ -105,9 +131,16 @@ export default function FoodStallDashboardPage() {
         unsubscribeSales();
         unsubscribeExpenses();
     };
-  }, [activeSiteId, activeStallId, authLoading, user?.role]);
+  }, [activeSiteId, activeStallId, authLoading, user?.role, dateFilter]);
 
-  const netProfit = todaysSales - todaysExpenses;
+  const netProfit = totalSales - totalExpenses;
+
+  const dateFilterLabels: Record<DateFilterOption, string> = {
+    today: 'Today',
+    last_7_days: 'Last 7 Days',
+    this_month: 'This Month',
+    all_time: 'All Time'
+  };
 
   const quickNavItems = [
     {
@@ -170,6 +203,14 @@ export default function FoodStallDashboardPage() {
         description="Overview of your food stall's financial health and operations."
       />
 
+      <div className="flex flex-wrap gap-2">
+        {(['today', 'last_7_days', 'this_month', 'all_time'] as DateFilterOption[]).map((filter) => (
+          <Button key={filter} variant={dateFilter === filter ? 'default' : 'outline'} onClick={() => setDateFilter(filter)}>
+            {dateFilterLabels[filter]}
+          </Button>
+        ))}
+      </div>
+
       {!activeStallId && user?.role !== 'admin' && (
         <Alert variant="default" className="border-primary/50">
             <Info className="h-4 w-4" />
@@ -192,31 +233,31 @@ export default function FoodStallDashboardPage() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <Card className="shadow-md">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Sales Today</CardTitle>
+            <CardTitle className="text-sm font-medium">Total Sales ({dateFilterLabels[dateFilter]})</CardTitle>
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            {loading ? <Skeleton className="h-8 w-32 mt-1" /> : <div className="text-2xl font-bold">₹{todaysSales.toFixed(2)}</div>}
+            {loading ? <Skeleton className="h-8 w-32 mt-1" /> : <div className="text-2xl font-bold">₹{totalSales.toFixed(2)}</div>}
             <p className="text-xs text-muted-foreground">
-              Total revenue from sales today.
+              Total revenue from sales.
             </p>
           </CardContent>
         </Card>
         <Card className="shadow-md">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Expenses Today</CardTitle>
+            <CardTitle className="text-sm font-medium">Total Expenses ({dateFilterLabels[dateFilter]})</CardTitle>
             <ShoppingBag className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            {loading ? <Skeleton className="h-8 w-32 mt-1" /> : <div className="text-2xl font-bold">₹{todaysExpenses.toFixed(2)}</div>}
+            {loading ? <Skeleton className="h-8 w-32 mt-1" /> : <div className="text-2xl font-bold">₹{totalExpenses.toFixed(2)}</div>}
             <p className="text-xs text-muted-foreground">
-             Total cost of purchases today.
+             Total cost of purchases.
             </p>
           </CardContent>
         </Card>
         <Card className="shadow-md">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Net Profit Today</CardTitle>
+            <CardTitle className="text-sm font-medium">Net Profit ({dateFilterLabels[dateFilter]})</CardTitle>
             <Utensils className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -226,7 +267,7 @@ export default function FoodStallDashboardPage() {
                 </div>
             }
             <p className="text-xs text-muted-foreground">
-              Sales minus expenses for today.
+              Sales minus expenses.
             </p>
           </CardContent>
         </Card>
