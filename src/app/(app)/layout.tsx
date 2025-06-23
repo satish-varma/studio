@@ -4,7 +4,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import { Loader2, LogOut } from 'lucide-react'; // Imported LogOut from lucide-react
+import { Loader2, LogOut } from 'lucide-react'; 
 import { 
   SidebarProvider, 
   Sidebar, 
@@ -12,7 +12,6 @@ import {
   SidebarContent,
   SidebarFooter,
   SidebarInset,
-  SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { AppSidebarNav } from "@/components/layout/AppSidebarNav";
 import { AppHeaderContent } from "@/components/layout/AppHeaderContent";
@@ -39,7 +38,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   if (!user) {
-    // This should ideally not be reached if useEffect redirect works, but as a fallback.
     return null; 
   }
 

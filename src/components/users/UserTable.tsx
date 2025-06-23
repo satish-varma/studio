@@ -155,7 +155,7 @@ export function UserTable({
 
   return (
     <>
-      <div className="rounded-lg border shadow-sm overflow-hidden bg-card">
+      <div className="rounded-lg border shadow-sm bg-card">
         <Table>
           <TableHeader>
             <TableRow>
@@ -209,7 +209,7 @@ export function UserTable({
                     onValueChange={(newSiteId) => handleDefaultSiteChangeInternal(user.uid, newSiteId)}
                     disabled={isCurrentUserBeingManaged || isUpdatingAssignment === user.uid || sites.length === 0}
                   >
-                    <SelectTrigger className="w-[160px] bg-input text-xs h-8" disabled={isCurrentUserBeingManaged}>
+                    <SelectTrigger className="w-full sm:w-[160px] bg-input text-xs h-8" disabled={isCurrentUserBeingManaged}>
                        <Building size={12} className="mr-1.5 text-muted-foreground" />
                       <SelectValue placeholder={sites.length === 0 ? "No sites" : "Default Site"} />
                     </SelectTrigger>
@@ -239,7 +239,7 @@ export function UserTable({
                         onValueChange={(newRole) => handleRoleChangeInternal(user.uid, newRole as UserRole)}
                         disabled={isCurrentUserBeingManaged || isUpdatingRole === user.uid}
                       >
-                        <SelectTrigger className="w-[120px] bg-input text-xs h-8" disabled={isCurrentUserBeingManaged}>
+                        <SelectTrigger className="w-full sm:w-[120px] bg-input text-xs h-8" disabled={isCurrentUserBeingManaged}>
                           <SelectValue placeholder="Select role" />
                         </SelectTrigger>
                         <SelectContent>
@@ -265,7 +265,7 @@ export function UserTable({
                         onValueChange={(newStallId) => handleDefaultStallChangeInternal(user.uid, newStallId)}
                         disabled={isCurrentUserBeingManaged || isUpdatingAssignment === user.uid || !user.defaultSiteId || stallsForSelectedSite.length === 0}
                       >
-                        <SelectTrigger className="w-[170px] bg-input text-xs h-8" disabled={isCurrentUserBeingManaged || !user.defaultSiteId}>
+                        <SelectTrigger className="w-full sm:w-[170px] bg-input text-xs h-8" disabled={isCurrentUserBeingManaged || !user.defaultSiteId}>
                            <Store size={12} className="mr-1.5 text-muted-foreground" />
                           <SelectValue placeholder={!user.defaultSiteId ? "Select site first" : (stallsForSelectedSite.length === 0 ? "No stalls" : "Default Stall")} />
                         </SelectTrigger>
@@ -386,4 +386,3 @@ export function UserTable({
     </>
   );
 }
-    

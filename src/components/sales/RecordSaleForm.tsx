@@ -458,7 +458,7 @@ export default function RecordSaleForm() {
   }
 
   return (
-    <Card className="w-full max-w-2xl mx-auto shadow-xl">
+    <Card className="w-full max-w-3xl mx-auto shadow-xl">
       <CardHeader>
         <CardTitle className="text-2xl flex items-center">
           <IndianRupee className="mr-2 h-6 w-6 text-accent" />
@@ -515,7 +515,7 @@ export default function RecordSaleForm() {
             )}
 
             {fields.map((field, index) => (
-              <div key={field.id} className="flex items-end gap-4 p-4 border rounded-md bg-muted/30" data-testid={`sale-item-row-${index}`}>
+              <div key={field.id} className="flex flex-col sm:flex-row items-stretch sm:items-end gap-2 p-4 border rounded-md bg-muted/30" data-testid={`sale-item-row-${index}`}>
                 <FormField
                   control={form.control}
                   name={`items.${index}.itemId`}
@@ -548,64 +548,66 @@ export default function RecordSaleForm() {
                     </FormItem>
                   )}
                 />
-                <FormField
-                  control={form.control}
-                  name={`items.${index}.quantity`}
-                  render={({ field: formField }) => {
-                    const currentItem = availableItems.find(ai => ai.id === watchedItems[index]?.itemId);
-                    const maxQuantity = currentItem ? currentItem.quantity : undefined;
-                    return (
-                      <FormItem className="w-24">
-                        <FormLabel>Quantity</FormLabel>
+                <div className="flex gap-2 w-full sm:w-auto">
+                    <FormField
+                    control={form.control}
+                    name={`items.${index}.quantity`}
+                    render={({ field: formField }) => {
+                        const currentItem = availableItems.find(ai => ai.id === watchedItems[index]?.itemId);
+                        const maxQuantity = currentItem ? currentItem.quantity : undefined;
+                        return (
+                        <FormItem className="flex-grow">
+                            <FormLabel>Quantity</FormLabel>
+                            <FormControl>
+                            <Input
+                                type="number"
+                                placeholder="Qty"
+                                {...formField}
+                                className="bg-input"
+                                min="1"
+                                max={maxQuantity?.toString()}
+                                disabled={isSubmitting || !watchedItems[index]?.itemId || availableItems.length === 0}
+                                onChange={(e) => {
+                                    const parsedVal = parseAndCapQuantity(e.target.value, maxQuantity);
+                                    formField.onChange(parsedVal);
+                                }}
+                                data-testid={`quantity-input-${index}`}
+                            />
+                            </FormControl>
+                            <FormMessage />
+                        </FormItem>
+                        );
+                    }}
+                    />
+                    <FormField
+                    control={form.control}
+                    name={`items.${index}.pricePerUnit`}
+                    render={({ field: formField }) => (
+                        <FormItem className="flex-grow">
+                        <FormLabel>Price/Unit (₹)</FormLabel>
                         <FormControl>
-                          <Input
-                            type="number"
-                            placeholder="Qty"
-                            {...formField}
-                            className="bg-input"
-                            min="1"
-                            max={maxQuantity?.toString()}
-                            disabled={isSubmitting || !watchedItems[index]?.itemId || availableItems.length === 0}
-                            onChange={(e) => {
-                                const parsedVal = parseAndCapQuantity(e.target.value, maxQuantity);
-                                formField.onChange(parsedVal);
-                            }}
-                            data-testid={`quantity-input-${index}`}
-                          />
+                            <Input
+                                type="number"
+                                placeholder="Price"
+                                {...formField}
+                                className="bg-input text-muted-foreground"
+                                readOnly
+                                disabled
+                                data-testid={`price-input-${index}`}
+                            />
                         </FormControl>
                         <FormMessage />
-                      </FormItem>
-                    );
-                  }}
-                />
-                 <FormField
-                  control={form.control}
-                  name={`items.${index}.pricePerUnit`}
-                  render={({ field: formField }) => (
-                    <FormItem className="w-28">
-                      <FormLabel>Price/Unit (₹)</FormLabel>
-                      <FormControl>
-                        <Input
-                            type="number"
-                            placeholder="Price"
-                            {...formField}
-                            className="bg-input text-muted-foreground"
-                            readOnly
-                            disabled
-                            data-testid={`price-input-${index}`}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                        </FormItem>
+                    )}
+                    />
+                </div>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
                   onClick={() => remove(index)}
                   disabled={fields.length <= 1 || isSubmitting}
-                  className="text-destructive hover:bg-destructive/10"
+                  className="text-destructive hover:bg-destructive/10 shrink-0"
                   data-testid={`remove-item-button-${index}`}
                   aria-label={`Remove item ${index + 1}`}
                 >
@@ -647,6 +649,3 @@ export default function RecordSaleForm() {
     </Card>
   );
 }
-    
-
-    

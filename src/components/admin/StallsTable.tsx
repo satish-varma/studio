@@ -117,7 +117,7 @@ export function StallsTable({ stalls }: StallsTableProps) {
 
   return (
     <>
-      <div className="rounded-lg border shadow-sm overflow-hidden bg-card">
+      <div className="rounded-lg border shadow-sm bg-card">
         <Table>
           <TableHeader>
             <TableRow>
