@@ -14,7 +14,7 @@ export default function FoodStallSalesPage() {
         title="Food Stall Daily Sales Summaries"
         description="View and edit daily sales totals for your food stall, broken down by payment type."
         actions={
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
             <Link href="/foodstall/sales/record">
               <Button>
                 <PlusCircle className="mr-2 h-4 w-4" /> Manage Today's Sales

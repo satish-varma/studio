@@ -17,7 +17,7 @@ export default function FoodStallExpensesPage() {
         title="Food Stall Expenses"
         description="Track and manage all your food stall purchases and operational costs."
         actions={
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
             {/* Filter button functionality will be handled within FoodExpensesClientPage or a dedicated filter component */}
             {/* <Button variant="outline">
               <ListFilter className="mr-2 h-4 w-4" /> Filter Expenses
@@ -34,4 +34,3 @@ export default function FoodStallExpensesPage() {
     </div>
   );
 }
-
