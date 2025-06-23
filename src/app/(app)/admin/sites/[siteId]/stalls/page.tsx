@@ -29,11 +29,7 @@ async function getSiteName(siteId: string): Promise<string | null> {
   }
 }
 
-interface ManageStallsPageProps {
-  params: { siteId: string };
-}
-
-export async function generateMetadata({ params }: ManageStallsPageProps): Promise<Metadata> {
+export async function generateMetadata({ params }: { params: { siteId: string } }): Promise<Metadata> {
   try {
     const siteName = await getSiteName(params.siteId);
     if (!siteName) {
@@ -49,7 +45,7 @@ export async function generateMetadata({ params }: ManageStallsPageProps): Promi
 }
 
 // Admins only route - further protection should be via security rules & auth context checks in client component
-export default async function ManageStallsPage({ params }: ManageStallsPageProps) {
+export default async function ManageStallsPage({ params }: { params: { siteId: string } }) {
   // The StallsClientPage will handle fetching site details and stalls based on the siteId from params (using useParams hook)
   // The 'params' prop here is primarily for server-side logic like generateMetadata or if data was fetched directly on this page.
   // We can log it here if needed for debugging or future server-side data fetching.
