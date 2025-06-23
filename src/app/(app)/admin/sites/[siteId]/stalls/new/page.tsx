@@ -15,6 +15,11 @@ if (!getApps().length) {
 }
 const db = getFirestore();
 
+// Define a standard props interface for the page and metadata function
+interface PageProps {
+  params: { siteId: string };
+}
+
 async function getSiteName(siteId: string): Promise<string | null> {
   if (!db || !siteId) return null;
   try {
@@ -30,11 +35,7 @@ async function getSiteName(siteId: string): Promise<string | null> {
   }
 }
 
-interface AddNewStallPageProps {
-  params: { siteId: string };
-}
-
-export async function generateMetadata({ params }: AddNewStallPageProps): Promise<Metadata> {
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   try {
     const siteName = await getSiteName(params.siteId);
     if (!siteName) {
@@ -49,7 +50,7 @@ export async function generateMetadata({ params }: AddNewStallPageProps): Promis
   }
 }
 
-export default async function AddNewStallPage({ params }: AddNewStallPageProps) {
+export default async function AddNewStallPage({ params }: PageProps) {
   let siteName: string | null = null;
   
   try {
