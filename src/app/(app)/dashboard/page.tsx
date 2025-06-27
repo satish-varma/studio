@@ -3,7 +3,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Package, IndianRupee, TrendingUp, AlertTriangle, Loader2, Info, BarChart2, PackageSearch } from "lucide-react";
+import { Package, IndianRupee, TrendingUp, AlertTriangle, Loader2, Info, BarChart2, PackageSearch, ArrowRight } from "lucide-react";
 import PageHeader from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
@@ -15,8 +15,8 @@ import type { StockItem, SaleTransaction } from '@/types';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { subDays, startOfDay, endOfDay, isWithinInterval, format, eachDayOfInterval } from 'date-fns';
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Skeleton } from '@/components/ui/skeleton'; // Added Skeleton
-import dynamic from 'next/dynamic'; // Added dynamic
+import { Skeleton } from '@/components/ui/skeleton';
+import dynamic from 'next/dynamic';
 
 const LOG_PREFIX = "[DashboardPage]";
 
@@ -41,11 +41,11 @@ interface SalesChartDataPoint {
   totalSales: number;
 }
 
-// Dynamically import the chart component
+// Dynamically import the chart component to prevent SSR issues with recharts
 const DashboardSalesChart = dynamic(
   () => import('@/components/dashboard/DashboardSalesChart').then(mod => mod.DashboardSalesChart),
   { 
-    ssr: false, // Charts are often client-side only
+    ssr: false,
     loading: () => (
       <div className="min-h-[250px] w-full flex items-center justify-center">
         <Skeleton className="h-[230px] w-[95%]" />
@@ -343,132 +343,111 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      <Card className="shadow-lg" data-testid="sales-chart-card">
-        <CardHeader>
-          <CardTitle className="flex items-center">
-            <BarChart2 className="h-5 w-5 mr-2 text-primary"/>
-            Sales Over Last 7 Days
-          </CardTitle>
-          <CardDescription>Total sales amount per day for the current site/stall context.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {salesChartData.length > 0 ? (
-             <DashboardSalesChart salesChartData={salesChartData} />
-          ) : (
-            <p className="text-sm text-center text-muted-foreground py-10" data-testid="no-sales-chart-data">No sales data available for the last 7 days in this context.</p>
-          )}
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-6 md:grid-cols-2">
-        <Card className="shadow-lg" data-testid="recent-sales-card">
+      <div className="grid gap-6 lg:grid-cols-5">
+        <Card className="shadow-lg lg:col-span-3" data-testid="sales-chart-card">
           <CardHeader>
-            <CardTitle>Recent Sales</CardTitle>
-            <CardDescription>A quick look at your most recent transactions in this context (last 7 days).</CardDescription>
+            <CardTitle className="flex items-center">
+              <BarChart2 className="h-5 w-5 mr-2 text-primary"/>
+              Sales Over Last 7 Days
+            </CardTitle>
+            <CardDescription>Total sales amount per day for the current site/stall context.</CardDescription>
           </CardHeader>
           <CardContent>
-            {recentSales.length > 0 ? (
-              <div className="space-y-4">
-                {recentSales.map((sale) => (
-                  <div key={sale.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-md" data-testid={`recent-sale-${sale.id}`}>
-                    <div>
-                      <p className="font-medium text-foreground hover:underline cursor-pointer" onClick={() => router.push(`/sales/history/${sale.id}`)}>
-                        Sale ID #{sale.id.substring(0,8)}...
-                      </p>
-                      <p className="text-sm text-muted-foreground">
-                        {sale.items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)} items - ₹{sale.totalAmount.toFixed(2)}
-                      </p>
-                    </div>
-                    <span className="text-sm text-muted-foreground">{new Date(sale.transactionDate).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit'})}</span>
-                  </div>
-                ))}
-              </div>
+            {salesChartData.length > 0 ? (
+             <DashboardSalesChart salesChartData={salesChartData} />
             ) : (
-              <p className="text-sm text-muted-foreground" data-testid="no-recent-sales-data">No recent sales in the current context (last 7 days).</p>
+              <p className="text-sm text-center text-muted-foreground py-10" data-testid="no-sales-chart-data">No sales data available for the last 7 days in this context.</p>
             )}
           </CardContent>
         </Card>
-        <Card className="shadow-lg" data-testid="low-stock-items-card">
-          <CardHeader>
+        <div className="lg:col-span-2 space-y-6">
+          <Card className="shadow-lg" data-testid="recent-sales-card">
+            <CardHeader>
+              <CardTitle>Recent Sales</CardTitle>
+              <CardDescription>A quick look at your most recent transactions.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {recentSales.length > 0 ? (
+                <div className="space-y-4">
+                  {recentSales.map((sale) => (
+                    <div key={sale.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-md" data-testid={`recent-sale-${sale.id}`}>
+                      <div>
+                        <p className="font-medium text-foreground hover:underline cursor-pointer" onClick={() => router.push(`/sales/history/${sale.id}`)}>
+                          Sale ID #{sale.id.substring(0,8)}...
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          {sale.items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)} items - ₹{sale.totalAmount.toFixed(2)}
+                        </p>
+                      </div>
+                      <span className="text-sm text-muted-foreground">{new Date(sale.transactionDate).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit'})}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground" data-testid="no-recent-sales-data">No recent sales in the current context (last 7 days).</p>
+              )}
+            </CardContent>
+          </Card>
+           <Card className="shadow-lg">
+            <CardHeader>
+              <CardTitle>Quick Actions</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col sm:flex-row gap-3">
+              <Button
+                data-testid="record-sale-button"
+                className="flex-1"
+                onClick={() => router.push('/sales/record')}
+                disabled={!activeSiteId || !activeStallId}
+              >
+                Record New Sale
+              </Button>
+              <Button
+                data-testid="add-new-item-button"
+                variant="secondary"
+                className="flex-1"
+                onClick={() => router.push('/items/new')}
+                disabled={!activeSiteId}
+              >
+                Add New Item
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+       <Card className="shadow-lg" data-testid="low-stock-items-card">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
             <CardTitle className="flex items-center">
               <PackageSearch className="h-5 w-5 mr-2 text-destructive"/>
               Items Low on Stock
             </CardTitle>
             <CardDescription>Top items that have reached or fallen below their low stock threshold.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {lowStockItemsData.length > 0 ? (
-              <ScrollArea className="h-[200px] pr-3"> 
-                <div className="space-y-3">
-                  {lowStockItemsData.map((item) => (
-                    <div key={item.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-md hover:bg-muted/75 transition-colors" data-testid={`low-stock-item-${item.id}`}>
-                      <div>
-                        <p className="font-medium text-foreground">{item.name}</p>
-                        <p className="text-sm text-muted-foreground">
-                          Qty: <span className="font-semibold text-destructive">{item.quantity}</span> {item.unit} (Threshold: {item.lowStockThreshold})
-                        </p>
-                      </div>
-                      <Button variant="outline" size="sm" onClick={() => router.push(`/items/${item.id}/edit`)}>
-                        View/Edit
-                      </Button>
-                    </div>
-                  ))}
+          </div>
+          <Button variant="outline" size="sm" onClick={() => router.push('/items')}>
+             View All Items <ArrowRight className="ml-2 h-4 w-4" />
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {lowStockItemsData.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {lowStockItemsData.map((item) => (
+                <div key={item.id} className="p-3 bg-muted/50 rounded-md border" data-testid={`low-stock-item-${item.id}`}>
+                    <p className="font-medium text-foreground truncate">{item.name}</p>
+                    <p className="text-sm text-muted-foreground">
+                      Qty: <span className="font-semibold text-destructive">{item.quantity}</span> / {item.lowStockThreshold}
+                    </p>
+                    <Button variant="link" size="sm" className="p-0 h-auto mt-1 text-xs" onClick={() => router.push(`/items/${item.id}/edit`)}>
+                      View/Edit
+                    </Button>
                 </div>
-              </ScrollArea>
-            ) : (
-              <p className="text-sm text-center text-muted-foreground py-10" data-testid="no-low-stock-data">No items are currently low on stock in this context.</p>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-       <Card className="shadow-lg">
-          <CardHeader>
-            <CardTitle>Quick Actions</CardTitle>
-            <CardDescription>Common tasks at your fingertips.</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3">
-            <Button
-              data-testid="record-sale-button"
-              className="flex-1"
-              onClick={() => router.push('/sales/record')}
-              disabled={!activeSiteId || !activeStallId}
-            >
-              Record New Sale
-            </Button>
-            <Button
-              data-testid="add-new-item-button"
-              variant="secondary"
-              className="flex-1"
-              onClick={() => router.push('/items/new')}
-              disabled={!activeSiteId}
-            >
-              Add New Item
-            </Button>
-          </CardContent>
-          {(!activeSiteId) && (
-            <CardFooter className="pt-3 pb-4 justify-center">
-                <p className="text-xs text-muted-foreground text-center">
-                    Select an active site to enable quick actions. Sales require a specific stall.
-                </p>
-            </CardFooter>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-center text-muted-foreground py-6" data-testid="no-low-stock-data">No items are currently low on stock in this context.</p>
           )}
-          {(activeSiteId && !activeStallId && user?.role !== 'staff') && (
-             <CardFooter className="pt-3 pb-4 justify-center">
-                <p className="text-xs text-muted-foreground text-center">
-                    "Add New Item" is enabled for site master stock. Select a specific stall to record sales.
-                </p>
-            </CardFooter>
-          )}
-           {(activeSiteId && !activeStallId && user?.role === 'staff') && (
-             <CardFooter className="pt-3 pb-4 justify-center">
-                <p className="text-xs text-muted-foreground text-center">
-                    "Add New Item" is available for Master Stock. "Record New Sale" is disabled as no specific stall is assigned/selected for sales.
-                </p>
-            </CardFooter>
-          )}
-        </Card>
+        </CardContent>
+      </Card>
     </div>
   );
 }
-    

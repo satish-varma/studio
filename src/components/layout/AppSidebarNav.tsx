@@ -5,21 +5,16 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
-  Package,
   ShoppingCart,
-  History,
   Users,
   Settings,
   LucideIcon,
   UserCircle,
   LifeBuoy,
-  Building, 
-  BarChart3, 
-  FileText, 
   UtensilsCrossed, 
   ChevronDown,
   ShieldAlert,
-  PlusCircle, // Added icon
+  PlusCircle,
 } from "lucide-react";
 import {
   SidebarMenu,
@@ -38,7 +33,7 @@ interface NavSubItem {
   href: string;
   label: string;
   roles?: UserRole[];
-  icon?: LucideIcon; // Added icon property
+  icon?: LucideIcon;
 }
 
 interface NavItem {
@@ -68,7 +63,7 @@ const navItems: NavItem[] = [
   },
   
   { 
-    href: "/foodstall/dashboard",
+    href: "/foodstall",
     label: "Food Stall", 
     icon: UtensilsCrossed, 
     roles: ['staff', 'manager', 'admin'],
