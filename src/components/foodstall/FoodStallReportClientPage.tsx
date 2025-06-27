@@ -18,7 +18,7 @@ import {
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
-import { Loader2, Info, IndianRupee, ShoppingBag, TrendingUp, AlertTriangle, ListOrdered, Utensils } from "lucide-react";
+import { Loader2, Info, IndianRupee, ShoppingBag, TrendingUp, AlertTriangle, ListOrdered, Percent } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -52,6 +52,8 @@ interface ReportSummaryData {
   netProfit: number;
   numberOfSales: number;
   numberOfExpenses: number;
+  totalCommission: number;
+  totalHungerboxSales: number;
 }
 
 interface TopExpenseCategory {
@@ -123,8 +125,20 @@ export default function FoodStallReportClientPage() {
       const salesQuery = query(salesCollectionRef, ...salesQueryConstraints);
       const salesSnapshot = await getDocs(salesQuery);
       const salesTransactions = salesSnapshot.docs.map(doc => doc.data() as FoodSaleTransaction);
-      const totalSalesAmount = salesTransactions.reduce((sum, tx) => sum + tx.totalAmount, 0);
-      console.log(`${LOG_PREFIX} Fetched ${salesTransactions.length} sales transactions, total amount: ${totalSalesAmount}`);
+      
+      let totalSalesAmount = 0;
+      let totalHungerboxSales = 0;
+
+      salesTransactions.forEach(sale => {
+        totalSalesAmount += sale.totalAmount;
+        if (sale.breakfast) totalHungerboxSales += sale.breakfast.hungerbox || 0;
+        if (sale.lunch) totalHungerboxSales += sale.lunch.hungerbox || 0;
+        if (sale.dinner) totalHungerboxSales += sale.dinner.hungerbox || 0;
+        if (sale.snacks) totalHungerboxSales += sale.snacks.hungerbox || 0;
+      });
+      const totalCommission = totalHungerboxSales * 0.20;
+      console.log(`${LOG_PREFIX} Fetched ${salesTransactions.length} sales transactions, total amount: ${totalSalesAmount}, commission: ${totalCommission}`);
+
 
       // --- Fetch Expenses ---
       const expensesCollectionRef = collection(db, "foodItemExpenses");
@@ -167,9 +181,11 @@ export default function FoodStallReportClientPage() {
       setSummaryData({
         totalSalesAmount,
         totalExpensesAmount,
-        netProfit: totalSalesAmount - totalExpensesAmount,
+        netProfit: totalSalesAmount - totalCommission - totalExpensesAmount,
         numberOfSales: salesTransactions.length,
         numberOfExpenses: expenseTransactions.length,
+        totalCommission,
+        totalHungerboxSales,
       });
 
     } catch (error: any) {
@@ -196,9 +212,10 @@ export default function FoodStallReportClientPage() {
   }, [user, activeSite, activeStall]);
   
   const summaryCards = summaryData ? [
-    { title: "Total Sales", value: `₹${summaryData.totalSalesAmount.toFixed(2)}`, icon: IndianRupee, color: "text-green-600" },
-    { title: "Total Expenses", value: `₹${summaryData.totalExpensesAmount.toFixed(2)}`, icon: ShoppingBag, color: "text-red-500" },
-    { title: "Net Profit", value: `₹${summaryData.netProfit.toFixed(2)}`, icon: TrendingUp, color: summaryData.netProfit >= 0 ? "text-accent" : "text-destructive" },
+    { title: "Gross Sales", value: `₹${summaryData.totalSalesAmount.toFixed(2)}`, icon: IndianRupee, color: "text-green-600", description: `Across ${summaryData.numberOfSales} sale days` },
+    { title: "Aggregator Commission", value: `- ₹${summaryData.totalCommission.toFixed(2)}`, icon: Percent, color: "text-orange-500", description: `20% on ₹${summaryData.totalHungerboxSales.toFixed(2)} (HungerBox)` },
+    { title: "Total Expenses", value: `- ₹${summaryData.totalExpensesAmount.toFixed(2)}`, icon: ShoppingBag, color: "text-red-500", description: `From ${summaryData.numberOfExpenses} expense records` },
+    { title: "Net Profit", value: `₹${summaryData.netProfit.toFixed(2)}`, icon: TrendingUp, color: summaryData.netProfit >= 0 ? "text-accent" : "text-destructive", description: "Gross Sales - Commission - Expenses" },
   ] : [];
 
 
@@ -228,7 +245,7 @@ export default function FoodStallReportClientPage() {
         <Alert variant="default" className="border-primary/50"><Info className="h-4 w-4" /><AlertTitle>Site Selection Required</AlertTitle><AlertDescription>{pageHeaderDescription}</AlertDescription></Alert>
       ) : summaryData && (
         <>
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               {summaryCards.map((stat) => (
                 <Card key={stat.title} className="shadow-md hover:shadow-lg transition-shadow">
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 border-b">
@@ -237,6 +254,7 @@ export default function FoodStallReportClientPage() {
                     </CardHeader>
                     <CardContent className="pt-3">
                     <div className="text-2xl font-bold text-foreground">{stat.value}</div>
+                    {stat.description && <CardDescription className="text-xs text-muted-foreground pt-1">{stat.description}</CardDescription>}
                     </CardContent>
                 </Card>
               ))}

@@ -5,7 +5,7 @@ import { useState, useEffect } from "react";
 import PageHeader from "@/components/shared/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { DollarSign, ShoppingBag, Utensils, ArrowRight, LineChart, ClipboardList, Loader2, Info } from "lucide-react";
+import { DollarSign, ShoppingBag, Utensils, ArrowRight, LineChart, ClipboardList, Loader2, Info, Percent } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { getFirestore, collection, query, where, onSnapshot, Timestamp, QueryConstraint } from "firebase/firestore";
@@ -34,6 +34,8 @@ export default function FoodStallDashboardPage() {
   const { user, activeSiteId, activeStallId, loading: authLoading } = useAuth();
   const [totalSales, setTotalSales] = useState(0);
   const [totalExpenses, setTotalExpenses] = useState(0);
+  const [commission, setCommission] = useState(0);
+  const [hungerboxSales, setHungerboxSales] = useState(0);
   const [loading, setLoading] = useState(true);
   const [dateFilter, setDateFilter] = useState<DateFilterOption>('today');
 
@@ -43,12 +45,16 @@ export default function FoodStallDashboardPage() {
         if (!authLoading) setLoading(false);
         setTotalSales(0);
         setTotalExpenses(0);
+        setCommission(0);
+        setHungerboxSales(0);
         return;
     }
     
     if (!activeStallId && user?.role !== 'admin') {
         setTotalSales(0);
         setTotalExpenses(0);
+        setCommission(0);
+        setHungerboxSales(0);
         setLoading(false);
         return;
     }
@@ -91,12 +97,19 @@ export default function FoodStallDashboardPage() {
     const salesQuery = query(salesCollectionRef, ...salesQueryConstraints);
 
     const unsubscribeSales = onSnapshot(salesQuery, (snapshot) => {
-        let total = 0;
+        let salesTotal = 0;
+        let hbSalesTotal = 0;
         snapshot.forEach(doc => {
             const sale = doc.data() as FoodSaleTransaction;
-            total += sale.totalAmount;
+            salesTotal += sale.totalAmount;
+            if (sale.breakfast) hbSalesTotal += sale.breakfast.hungerbox || 0;
+            if (sale.lunch) hbSalesTotal += sale.lunch.hungerbox || 0;
+            if (sale.dinner) hbSalesTotal += sale.dinner.hungerbox || 0;
+            if (sale.snacks) hbSalesTotal += sale.snacks.hungerbox || 0;
         });
-        setTotalSales(total);
+        setTotalSales(salesTotal);
+        setHungerboxSales(hbSalesTotal);
+        setCommission(hbSalesTotal * 0.20);
         setLoading(false);
     }, (error) => {
         console.error("Error fetching food sales:", error);
@@ -133,7 +146,7 @@ export default function FoodStallDashboardPage() {
     };
   }, [activeSiteId, activeStallId, authLoading, user?.role, dateFilter]);
 
-  const netProfit = totalSales - totalExpenses;
+  const netProfit = totalSales - commission - totalExpenses;
 
   const dateFilterLabels: Record<DateFilterOption, string> = {
     today: 'Today',
@@ -165,7 +178,7 @@ export default function FoodStallDashboardPage() {
       href: "/foodstall/reports",
       icon: LineChart,
       cta: "View Reports",
-      disabled: false, // Enabled this
+      disabled: false,
     },
   ];
 
@@ -230,34 +243,46 @@ export default function FoodStallDashboardPage() {
         </Alert>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card className="shadow-md">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Sales ({dateFilterLabels[dateFilter]})</CardTitle>
+            <CardTitle className="text-sm font-medium">Total Gross Sales ({dateFilterLabels[dateFilter]})</CardTitle>
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             {loading ? <Skeleton className="h-8 w-32 mt-1" /> : <div className="text-2xl font-bold">₹{totalSales.toFixed(2)}</div>}
             <p className="text-xs text-muted-foreground">
-              Total revenue from sales.
+              Total revenue from all sales channels.
             </p>
           </CardContent>
         </Card>
         <Card className="shadow-md">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Expenses ({dateFilterLabels[dateFilter]})</CardTitle>
+            <CardTitle className="text-sm font-medium">Aggregator Commission</CardTitle>
+            <Percent className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            {loading ? <Skeleton className="h-8 w-32 mt-1" /> : <div className="text-2xl font-bold text-orange-600">- ₹{commission.toFixed(2)}</div>}
+            <p className="text-xs text-muted-foreground">
+              20% on ₹{hungerboxSales.toFixed(2)} from HungerBox.
+            </p>
+          </CardContent>
+        </Card>
+        <Card className="shadow-md">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Expenses</CardTitle>
             <ShoppingBag className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            {loading ? <Skeleton className="h-8 w-32 mt-1" /> : <div className="text-2xl font-bold">₹{totalExpenses.toFixed(2)}</div>}
+            {loading ? <Skeleton className="h-8 w-32 mt-1" /> : <div className="text-2xl font-bold text-red-600">- ₹{totalExpenses.toFixed(2)}</div>}
             <p className="text-xs text-muted-foreground">
-             Total cost of purchases.
+             Total cost of all purchases.
             </p>
           </CardContent>
         </Card>
         <Card className="shadow-md">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Net Profit ({dateFilterLabels[dateFilter]})</CardTitle>
+            <CardTitle className="text-sm font-medium">Net Profit</CardTitle>
             <Utensils className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -267,7 +292,7 @@ export default function FoodStallDashboardPage() {
                 </div>
             }
             <p className="text-xs text-muted-foreground">
-              Sales minus expenses.
+              Gross Sales - Commission - Expenses.
             </p>
           </CardContent>
         </Card>
