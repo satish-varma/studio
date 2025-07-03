@@ -33,11 +33,21 @@ export const foodExpenseFormSchema = z.object({
   category: z.enum(foodExpenseCategories, { required_error: "Category is required" }),
   totalCost: z.coerce.number().positive("Total cost must be a positive number"),
   paymentMethod: z.enum(paymentMethods, { required_error: "Payment method is required." }),
+  otherPaymentMethodDetails: z.string().optional().nullable(),
   purchaseDate: z.date({ required_error: "Purchase date is required." }),
   vendor: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
   billImageUrl: z.string().url({ message: "Please enter a valid URL." }).optional().or(z.literal("")),
+}).refine(data => {
+    if (data.paymentMethod === "Other" && (!data.otherPaymentMethodDetails || data.otherPaymentMethodDetails.trim() === "")) {
+        return false;
+    }
+    return true;
+}, {
+    message: "Please specify the payment method.",
+    path: ["otherPaymentMethodDetails"],
 });
+
 
 export type FoodItemExpenseFormValues = z.infer<typeof foodExpenseFormSchema>;
 
@@ -47,6 +57,7 @@ export interface FoodItemExpense {
   category: FoodExpenseCategory;
   totalCost: number;
   paymentMethod: PaymentMethod;
+  otherPaymentMethodDetails?: string | null;
   purchaseDate: Date | Timestamp;
   vendor?: string | null;
   notes?: string | null;

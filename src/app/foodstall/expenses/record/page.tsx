@@ -77,12 +77,15 @@ export default function RecordFoodExpensePage() {
       category: undefined,
       totalCost: undefined, // Let placeholder show
       paymentMethod: undefined,
+      otherPaymentMethodDetails: "",
       purchaseDate: new Date(),
       vendor: "",
       notes: "",
       billImageUrl: "",
     },
   });
+
+  const paymentMethod = form.watch("paymentMethod");
 
   async function onSubmit(values: FoodItemExpenseFormValues) {
     if (!user || !activeSiteId || !activeStallId || !db) {
@@ -117,7 +120,7 @@ export default function RecordFoodExpensePage() {
         details: {
             expenseCategory: values.category,
             totalCost: values.totalCost,
-            notes: `Vendor: ${values.vendor || 'N/A'}`
+            notes: `Vendor: ${values.vendor || 'N/A'}. Payment: ${values.paymentMethod}${values.paymentMethod === 'Other' ? ` (${values.otherPaymentMethodDetails})` : ''}`
         }
       });
       
@@ -131,6 +134,7 @@ export default function RecordFoodExpensePage() {
         category: undefined,
         totalCost: undefined,
         paymentMethod: undefined,
+        otherPaymentMethodDetails: "",
         purchaseDate: new Date(),
         vendor: "",
         notes: "",
@@ -298,6 +302,29 @@ export default function RecordFoodExpensePage() {
                   )}
                 />
               </div>
+              
+              {paymentMethod === 'Other' && (
+                <FormField
+                  control={form.control}
+                  name="otherPaymentMethodDetails"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Specify Other Payment Method *</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="e.g., Sodexo, Meal Voucher"
+                          {...field}
+                          value={field.value ?? ""}
+                          disabled={isSubmitting}
+                          className="bg-input"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+
               <FormField
                 control={form.control}
                 name="vendor"
