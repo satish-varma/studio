@@ -28,14 +28,27 @@ export type FoodExpenseCategory = (typeof foodExpenseCategories)[number];
 export const paymentMethods = ["Cash", "Card", "UPI", "Other"] as const;
 export type PaymentMethod = (typeof paymentMethods)[number];
 
-// New, simplified schema
+export const foodVendors = [
+    "Laxmi Kirana",
+    "CVR",
+    "lingampally veg market",
+    "Random",
+    "D-Mart",
+    "Krishna reddy",
+    "Batsingaram fruit market",
+    "Delizia",
+    "Other"
+] as const;
+export type FoodVendor = (typeof foodVendors)[number];
+
 export const foodExpenseFormSchema = z.object({
   category: z.enum(foodExpenseCategories, { required_error: "Category is required" }),
   totalCost: z.coerce.number().positive("Total cost must be a positive number"),
   paymentMethod: z.enum(paymentMethods, { required_error: "Payment method is required." }),
   otherPaymentMethodDetails: z.string().optional().nullable(),
   purchaseDate: z.date({ required_error: "Purchase date is required." }),
-  vendor: z.string().optional().nullable(),
+  vendor: z.enum(foodVendors, { required_error: "Vendor selection is required." }),
+  otherVendorDetails: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
   billImageUrl: z.string().url({ message: "Please enter a valid URL." }).optional().or(z.literal("")),
 }).refine(data => {
@@ -44,14 +57,21 @@ export const foodExpenseFormSchema = z.object({
     }
     return true;
 }, {
-    message: "Please specify the payment method.",
+    message: "Please specify the 'other' payment method.",
     path: ["otherPaymentMethodDetails"],
+}).refine(data => {
+    if (data.vendor === "Other" && (!data.otherVendorDetails || data.otherVendorDetails.trim() === "")) {
+        return false;
+    }
+    return true;
+}, {
+    message: "Please specify the vendor name.",
+    path: ["otherVendorDetails"],
 });
 
 
 export type FoodItemExpenseFormValues = z.infer<typeof foodExpenseFormSchema>;
 
-// This interface is now simplified and doesn't contain the item-specific fields.
 export interface FoodItemExpense {
   id: string; // Firestore document ID
   category: FoodExpenseCategory;
@@ -59,7 +79,8 @@ export interface FoodItemExpense {
   paymentMethod: PaymentMethod;
   otherPaymentMethodDetails?: string | null;
   purchaseDate: Date | Timestamp;
-  vendor?: string | null;
+  vendor?: FoodVendor | null;
+  otherVendorDetails?: string | null;
   notes?: string | null;
   billImageUrl?: string | null;
   siteId: string;

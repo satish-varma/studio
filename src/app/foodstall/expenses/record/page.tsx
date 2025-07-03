@@ -25,6 +25,7 @@ import {
   type FoodItemExpenseFormValues,
   foodExpenseCategories,
   paymentMethods,
+  foodVendors,
 } from "@/types/food";
 import { ArrowLeft, Loader2, Info } from "lucide-react";
 import Link from "next/link";
@@ -79,13 +80,15 @@ export default function RecordFoodExpensePage() {
       paymentMethod: undefined,
       otherPaymentMethodDetails: "",
       purchaseDate: new Date(),
-      vendor: "",
+      vendor: undefined,
+      otherVendorDetails: "",
       notes: "",
       billImageUrl: "",
     },
   });
 
   const paymentMethod = form.watch("paymentMethod");
+  const vendor = form.watch("vendor");
 
   async function onSubmit(values: FoodItemExpenseFormValues) {
     if (!user || !activeSiteId || !activeStallId || !db) {
@@ -111,6 +114,8 @@ export default function RecordFoodExpensePage() {
       };
 
       const docRef = await addDoc(collection(db, "foodItemExpenses"), expenseData);
+      
+      const vendorNameForLog = values.vendor === 'Other' ? values.otherVendorDetails : values.vendor;
 
       await logFoodStallActivity(user, {
         siteId: activeSiteId,
@@ -120,7 +125,7 @@ export default function RecordFoodExpensePage() {
         details: {
             expenseCategory: values.category,
             totalCost: values.totalCost,
-            notes: `Vendor: ${values.vendor || 'N/A'}. Payment: ${values.paymentMethod}${values.paymentMethod === 'Other' ? ` (${values.otherPaymentMethodDetails})` : ''}`
+            notes: `Vendor: ${vendorNameForLog || 'N/A'}. Payment: ${values.paymentMethod}${values.paymentMethod === 'Other' ? ` (${values.otherPaymentMethodDetails})` : ''}`
         }
       });
       
@@ -136,7 +141,8 @@ export default function RecordFoodExpensePage() {
         paymentMethod: undefined,
         otherPaymentMethodDetails: "",
         purchaseDate: new Date(),
-        vendor: "",
+        vendor: undefined,
+        otherVendorDetails: "",
         notes: "",
         billImageUrl: "",
       });
@@ -210,7 +216,7 @@ export default function RecordFoodExpensePage() {
                       <FormLabel>Category *</FormLabel>
                       <Select
                         onValueChange={field.onChange}
-                        defaultValue={field.value}
+                        value={field.value}
                         disabled={isSubmitting}
                       >
                         <FormControl>
@@ -252,6 +258,58 @@ export default function RecordFoodExpensePage() {
                   )}
                 />
               </div>
+
+               <FormField
+                  control={form.control}
+                  name="vendor"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Vendor *</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        value={field.value}
+                        disabled={isSubmitting}
+                      >
+                        <FormControl>
+                          <SelectTrigger id="vendor" className="bg-input">
+                            <SelectValue placeholder="Select a vendor" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                           {foodVendors.map((v) => (
+                            <SelectItem key={v} value={v}>
+                              {v}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                {vendor === 'Other' && (
+                <FormField
+                  control={form.control}
+                  name="otherVendorDetails"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Specify Other Vendor *</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="Enter vendor name"
+                          {...field}
+                          value={field.value ?? ""}
+                          disabled={isSubmitting}
+                          className="bg-input"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <FormField
                   control={form.control}
@@ -261,7 +319,7 @@ export default function RecordFoodExpensePage() {
                       <FormLabel>Payment Method *</FormLabel>
                       <Select
                         onValueChange={field.onChange}
-                        defaultValue={field.value}
+                        value={field.value}
                         disabled={isSubmitting}
                       >
                         <FormControl>
@@ -324,26 +382,7 @@ export default function RecordFoodExpensePage() {
                   )}
                 />
               )}
-
-              <FormField
-                control={form.control}
-                name="vendor"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Vendor (Optional)</FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="e.g., Local Market, Dairy Farm"
-                        {...field}
-                        value={field.value ?? ""}
-                        disabled={isSubmitting}
-                        className="bg-input"
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              
               <FormField
                 control={form.control}
                 name="billImageUrl"

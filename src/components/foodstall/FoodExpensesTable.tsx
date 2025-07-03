@@ -93,6 +93,13 @@ export function FoodExpensesTable({
     return `₹${amount.toFixed(2)}`;
   };
 
+  const getVendorName = (expense: FoodItemExpense) => {
+    if (expense.vendor === 'Other') {
+        return expense.otherVendorDetails || 'Other';
+    }
+    return expense.vendor || 'N/A';
+  }
+
   if (isLoading && expenses.length === 0) {
     return (
       <div className="rounded-lg border shadow-sm overflow-hidden bg-card">
@@ -167,7 +174,7 @@ export function FoodExpensesTable({
                   {expense.paymentMethod}
                 </TableCell>
                 <TableCell className="text-muted-foreground hidden md:table-cell">
-                  {expense.vendor || "N/A"}
+                  {getVendorName(expense)}
                 </TableCell>
                 <TableCell className="text-muted-foreground text-xs hidden md:table-cell">
                   {expense.recordedByName || expense.recordedByUid.substring(0, 8)}
