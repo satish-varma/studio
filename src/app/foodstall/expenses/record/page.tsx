@@ -25,11 +25,10 @@ import {
   type FoodItemExpenseFormValues,
   foodExpenseCategories,
   paymentMethods,
-  foodVendors,
 } from "@/types/food";
 import { ArrowLeft, Loader2, Info } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
@@ -48,6 +47,9 @@ import {
   collection,
   addDoc,
   Timestamp,
+  query,
+  orderBy,
+  onSnapshot
 } from "firebase/firestore";
 import { firebaseConfig } from "@/lib/firebaseConfig";
 import { getApps, initializeApp, getApp } from "firebase/app";
@@ -71,6 +73,8 @@ export default function RecordFoodExpensePage() {
   const { user, activeSiteId, activeStallId } = useAuth();
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [vendors, setVendors] = useState<string[]>([]);
+  const [loadingVendors, setLoadingVendors] = useState(true);
 
   const form = useForm<FoodItemExpenseFormValues>({
     resolver: zodResolver(foodExpenseFormSchema),
@@ -89,6 +93,24 @@ export default function RecordFoodExpensePage() {
 
   const paymentMethod = form.watch("paymentMethod");
   const vendor = form.watch("vendor");
+  
+  useEffect(() => {
+    if (!db) return;
+    setLoadingVendors(true);
+    const vendorsCollectionRef = collection(db, "foodVendors");
+    const q = query(vendorsCollectionRef, orderBy("name", "asc"));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedVendors = snapshot.docs.map(doc => doc.data().name as string);
+      setVendors(fetchedVendors);
+      setLoadingVendors(false);
+    }, (error) => {
+      console.error("Error fetching vendors:", error);
+      toast({ title: "Error", description: "Could not fetch vendors list.", variant: "destructive" });
+      setLoadingVendors(false);
+    });
+    return () => unsubscribe();
+  }, [toast]);
 
   async function onSubmit(values: FoodItemExpenseFormValues) {
     if (!user || !activeSiteId || !activeStallId || !db) {
@@ -268,19 +290,20 @@ export default function RecordFoodExpensePage() {
                       <Select
                         onValueChange={field.onChange}
                         value={field.value}
-                        disabled={isSubmitting}
+                        disabled={isSubmitting || loadingVendors}
                       >
                         <FormControl>
                           <SelectTrigger id="vendor" className="bg-input">
-                            <SelectValue placeholder="Select a vendor" />
+                            <SelectValue placeholder={loadingVendors ? "Loading vendors..." : "Select a vendor"} />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                           {foodVendors.map((v) => (
+                           {vendors.map((v) => (
                             <SelectItem key={v} value={v}>
                               {v}
                             </SelectItem>
                           ))}
+                          <SelectItem value="Other">Other</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />

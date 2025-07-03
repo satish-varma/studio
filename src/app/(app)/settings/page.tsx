@@ -3,7 +3,7 @@
 
 import PageHeader from "@/components/shared/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
-import { Settings as SettingsIcon, Palette, BellRing, DatabaseZap, Download, Loader2, MailWarning, SheetIcon, ShieldAlert, AlertTriangle } from "lucide-react";
+import { Settings as SettingsIcon, Palette, BellRing, DatabaseZap, Download, Loader2, MailWarning, SheetIcon, ShieldAlert, AlertTriangle, Utensils } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { useAuth as useAppAuth } from "@/contexts/AuthContext"; // Renamed useAuth to useAppAuth
+import ManageVendorsDialog from "@/components/foodstall/ManageVendorsDialog";
 
 const LOG_PREFIX = "[SettingsPage]";
 
@@ -63,6 +64,8 @@ export default function SettingsPage() {
   const [resetConfirmationInput, setResetConfirmationInput] = useState("");
   const [isResettingData, setIsResettingData] = useState(false);
   const RESET_CONFIRMATION_PHRASE = "RESET DATA";
+
+  const [showManageVendorsDialog, setShowManageVendorsDialog] = useState(false);
 
 
   const escapeCsvCell = (cellData: any): string => {
@@ -486,6 +489,30 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
       </div>
+      
+       <div className="grid gap-6 md:grid-cols-2">
+          <Card className="shadow-lg">
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <Utensils className="mr-2 h-5 w-5 text-primary" />
+                Food Stall Settings
+              </CardTitle>
+              <CardDescription>
+                Manage settings specific to the Food Stall module.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => setShowManageVendorsDialog(true)}
+              >
+                Manage Food Vendors
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+
 
        <Card className="shadow-lg">
         <CardHeader>
@@ -587,7 +614,7 @@ export default function SettingsPage() {
               Ensure the provided Google Sheet ID is correct and that the sheet format matches the expected structure for imports.
               For exports, if no Sheet ID is provided, a new sheet will be created in your Google Drive.
             </p>
-        </CardFooter>
+         </CardFooter>
       </Card>
 
       {appUser?.role === 'admin' && (
@@ -700,9 +727,13 @@ export default function SettingsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      
+      <ManageVendorsDialog 
+        isOpen={showManageVendorsDialog}
+        onClose={() => setShowManageVendorsDialog(false)}
+      />
 
     </div>
   );
 }
     
-

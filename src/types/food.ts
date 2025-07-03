@@ -2,6 +2,13 @@
 import * as z from "zod";
 import type { Timestamp } from "firebase/firestore";
 
+// --------------- Food Vendor Management ---------------
+export interface FoodVendor {
+  id: string; // Firestore document ID
+  name: string;
+  createdAt: string; // ISO date string
+}
+
 // --------------- Food Expense Tracking ---------------
 export const foodExpenseCategories = [
   "Groceries",
@@ -28,26 +35,13 @@ export type FoodExpenseCategory = (typeof foodExpenseCategories)[number];
 export const paymentMethods = ["Cash", "Card", "UPI", "Other"] as const;
 export type PaymentMethod = (typeof paymentMethods)[number];
 
-export const foodVendors = [
-    "Laxmi Kirana",
-    "CVR",
-    "lingampally veg market",
-    "Random",
-    "D-Mart",
-    "Krishna reddy",
-    "Batsingaram fruit market",
-    "Delizia",
-    "Other"
-] as const;
-export type FoodVendor = (typeof foodVendors)[number];
-
 export const foodExpenseFormSchema = z.object({
   category: z.enum(foodExpenseCategories, { required_error: "Category is required" }),
   totalCost: z.coerce.number().positive("Total cost must be a positive number"),
   paymentMethod: z.enum(paymentMethods, { required_error: "Payment method is required." }),
   otherPaymentMethodDetails: z.string().optional().nullable(),
   purchaseDate: z.date({ required_error: "Purchase date is required." }),
-  vendor: z.enum(foodVendors, { required_error: "Vendor selection is required." }),
+  vendor: z.string({ required_error: "Vendor selection is required." }).min(1, "Vendor selection is required."),
   otherVendorDetails: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
   billImageUrl: z.string().url({ message: "Please enter a valid URL." }).optional().or(z.literal("")),
@@ -79,7 +73,7 @@ export interface FoodItemExpense {
   paymentMethod: PaymentMethod;
   otherPaymentMethodDetails?: string | null;
   purchaseDate: Date | Timestamp;
-  vendor?: FoodVendor | null;
+  vendor?: string | null; // Changed from enum to string
   otherVendorDetails?: string | null;
   notes?: string | null;
   billImageUrl?: string | null;
