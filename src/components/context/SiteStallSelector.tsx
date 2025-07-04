@@ -139,7 +139,10 @@ export default function SiteStallSelector() {
           setStallsForSelector(fetchedStalls.sort((a,b) => a.name.localeCompare(b.name)));
           console.log("SiteStallSelector (useEffect stalls): Fetched stalls for admin for site", activeSiteId, ":", fetchedStalls.length);
 
-          if (activeStallId && !fetchedStalls.find(s => s.id === activeStallId)) {
+          if (fetchedStalls.length === 1) {
+            console.log(`SiteStallSelector: Only one stall found ('${fetchedStalls[0].name}'). Auto-selecting it.`);
+            setActiveStall(fetchedStalls[0].id);
+          } else if (activeStallId && !fetchedStalls.find(s => s.id === activeStallId)) {
              console.log(`SiteStallSelector (useEffect stalls): Active stall ${activeStallId} not in new list for admin, clearing.`);
              setActiveStall(null);
           }
