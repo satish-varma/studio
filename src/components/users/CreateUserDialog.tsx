@@ -131,6 +131,17 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
     }
   }, [selectedRole, selectedDefaultSiteId, stalls, form]);
 
+  // Auto-select stall if only one is available for the selected site
+  useEffect(() => {
+    if (selectedRole === 'staff' && stallsForSelectedSite.length === 1) {
+      const singleStallId = stallsForSelectedSite[0].id;
+      if (form.getValues('defaultStallId') !== singleStallId) {
+        console.log(`${LOG_PREFIX} Auto-selecting the only available stall: ${singleStallId}`);
+        form.setValue('defaultStallId', singleStallId);
+      }
+    }
+  }, [stallsForSelectedSite, selectedRole, form]);
+
   const handleSubmit = async (values: CreateUserFormValues) => {
     console.log(`${LOG_PREFIX} handleSubmit called. Values:`, { ...values, password: '***', confirmPassword: '***' });
     setIsSubmitting(true);

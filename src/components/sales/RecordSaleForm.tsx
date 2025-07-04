@@ -115,6 +115,17 @@ export default function RecordSaleForm() {
     }
   }, [user?.role, activeSiteId, toast]);
 
+  // Auto-select stall for manager if only one exists
+  useEffect(() => {
+    if (user?.role === 'manager' && stallsForManager.length === 1) {
+      const singleStallId = stallsForManager[0].id;
+      if (managerSelectedStallId !== singleStallId) {
+        console.log(`${LOG_PREFIX} Manager context: auto-selecting the only available stall: ${singleStallId}`);
+        setManagerSelectedStallId(singleStallId);
+      }
+    }
+  }, [stallsForManager, managerSelectedStallId, user?.role]);
+
 
   // Fetch available items based on effective stall ID
   useEffect(() => {
