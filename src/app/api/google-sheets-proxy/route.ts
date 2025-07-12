@@ -66,15 +66,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Server Error: Google OAuth2 client not configured.' }, { status: 500 });
   }
 
+  let body;
   try {
-    let body;
-    try {
-        body = await request.json();
-    } catch (jsonError: any) {
-        console.error(`${LOG_PREFIX} Invalid JSON in request body:`, jsonError.message);
-        return NextResponse.json({ error: "Invalid JSON in request body.", details: jsonError.message }, { status: 400 });
-    }
+      body = await request.json();
+  } catch (jsonError: any) {
+      console.error(`${LOG_PREFIX} Invalid JSON in request body:`, jsonError.message);
+      return NextResponse.json({ error: "Invalid JSON in request body.", details: jsonError.message }, { status: 400 });
+  }
 
+  try {
     const { action, dataType, sheetId, sheetName = 'Sheet1' } = body;
     console.log(`${LOG_PREFIX} Received request. Action: ${action}, DataType: ${dataType}, SheetID: ${sheetId || '(New Sheet)'}, SheetName: ${sheetName}`);
 
@@ -490,6 +490,11 @@ export async function POST(request: NextRequest) {
             const batch = adminDb.batch();
             const errors: { row: number; message: string; data: any[] }[] = [];
             let importedCount = 0;
+            
+            const userDocSnap = await adminDb.collection('users').doc(uid).get();
+            const recordedByName = userDocSnap.data()?.displayName || 'Imported';
+            console.log(`${LOG_PREFIX} Fetched importer's name for logging: ${recordedByName}`);
+
 
             for (let i = 1; i < rows.length; i++) {
                 const row = rows[i];
@@ -522,7 +527,7 @@ export async function POST(request: NextRequest) {
                         siteId: expenseDataFromSheet.siteId,
                         stallId: expenseDataFromSheet.stallId,
                         recordedByUid: uid,
-                        recordedByName: (await adminDb.collection('users').doc(uid).get()).data()?.displayName || 'Imported',
+                        recordedByName: recordedByName,
                         createdAt: AdminTimestamp.now().toDate().toISOString(),
                         updatedAt: AdminTimestamp.now().toDate().toISOString(),
                     };
