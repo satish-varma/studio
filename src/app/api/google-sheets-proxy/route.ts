@@ -583,27 +583,22 @@ export async function POST(request: NextRequest) {
     const currentUidForReauth = typeof uid === 'string' ? uid : "unknown_user_needs_reauth"; // Fallback if uid wasn't set before error
 
     // Handle OAuth specific errors that require re-authentication
-    if (error.code === 401 || // Typically from our own token verification
+    if (oauth2Client && (error.code === 401 || // Typically from our own token verification
         error.message?.toLowerCase().includes('unauthorized') ||
         error.message?.toLowerCase().includes('token') ||
         (error.response?.data?.error === 'invalid_grant') || // Google specific: refresh token invalid
-        (error.response?.data?.error === 'unauthorized_client')) {
+        (error.response?.data?.error === 'unauthorized_client'))) {
 
-        if (currentUidForReauth !== "unknown_user_needs_reauth" && adminDb && oauth2Client) {
+        if (currentUidForReauth !== "unknown_user_needs_reauth" && adminDb) {
             console.warn(`${LOG_PREFIX} OAuth error encountered for user ${currentUidForReauth}. Error details:`, error.response?.data || error.message);
             // Attempt to delete stored tokens to force re-auth flow
             await adminDb.collection('userGoogleOAuthTokens').doc(currentUidForReauth).delete().catch(delErr => console.error(`${LOG_PREFIX} Failed to delete stale/invalid tokens for UID ${currentUidForReauth}:`, delErr));
-            const authUrl = oauth2Client.generateAuthUrl({
-                access_type: 'offline', scope: ['https://www.googleapis.com/auth/spreadsheets'], prompt: 'consent', state: currentUidForReauth
-            });
-            return NextResponse.json({ error: 'Google authorization is invalid or expired. Please re-authorize.', needsAuth: true, authUrl: authUrl }, { status: 403 });
-        } else if (oauth2Client) {
-             // If uid is unknown or db not available, still try to send authUrl
-             const authUrl = oauth2Client.generateAuthUrl({
-                access_type: 'offline', scope: ['https://www.googleapis.com/auth/spreadsheets'], prompt: 'consent', state: currentUidForReauth
-            });
-             return NextResponse.json({ error: 'Google authorization is invalid or expired. Please re-authorize.', needsAuth: true, authUrl: authUrl }, { status: 403 });
         }
+        
+        const authUrl = oauth2Client.generateAuthUrl({
+            access_type: 'offline', scope: ['https://www.googleapis.com/auth/spreadsheets'], prompt: 'consent', state: currentUidForReauth
+        });
+        return NextResponse.json({ error: 'Google authorization is invalid or expired. Please re-authorize.', needsAuth: true, authUrl: authUrl }, { status: 403 });
     }
      // Handle JSON parsing error from request.json()
     if (error instanceof SyntaxError && error.message.includes("JSON")) {
@@ -615,3 +610,4 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error.message || 'An unexpected error occurred on the server.', code: error.code, details: error.response?.data?.error_description }, { status: 500 });
   }
 }
+
