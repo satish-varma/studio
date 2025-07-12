@@ -1,11 +1,12 @@
 
+
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import admin, { initializeApp, getApps, getApp, App as AdminApp, cert } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { getFirestore as getAdminFirestore, Timestamp as AdminTimestamp } from 'firebase-admin/firestore';
 import { google, Auth, sheets_v4 } from 'googleapis';
-import type { UserGoogleOAuthTokens, StockItem, SaleTransaction, SoldItem } from '@/types';
+import type { UserGoogleOAuthTokens, StockItem, SaleTransaction, SoldItem, FoodItemExpense } from '@/types';
 import { stockItemSchema } from '@/types/item'; 
 import { z } from 'zod'; // Import Zod for detailed validation error messages
 
@@ -58,6 +59,7 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET && GOOGLE_REDIRECT_URI) {
 
 const STOCK_ITEMS_HEADERS = ["ID", "Name", "Category", "Quantity", "Unit", "Cost Price", "Selling Price", "Low Stock Threshold", "Image URL", "Site ID", "Stall ID", "Original Master Item ID"];
 const SALES_HISTORY_HEADERS = ["Transaction ID (Sheet)", "Date", "Staff Name", "Staff ID", "Total Amount", "Site ID", "Stall ID", "Items (JSON)"];
+const FOOD_EXPENSES_HEADERS = ["Expense ID (Sheet)", "Category", "Total Cost", "Payment Method", "Other Payment Method Details", "Purchase Date", "Vendor", "Other Vendor Details", "Notes", "Bill Image URL", "Site ID", "Stall ID"];
 
 
 // Extended Zod schema for import, allowing more flexibility for optional/nullable fields from sheet
@@ -489,6 +491,112 @@ export async function POST(request: NextRequest) {
             console.error(`${LOG_PREFIX} Error exporting sales history for user ${uid}:`, e.message, e.stack);
             return NextResponse.json({ error: 'Failed to export sales history to Google Sheet.', details: e.message }, { status: 500 });
         }
+      
+      case 'importFoodExpenses':
+        if (!sheetId) return NextResponse.json({ error: 'Sheet ID is required for food expense import.' }, { status: 400 });
+        try {
+            console.log(`${LOG_PREFIX} Importing food expenses from sheet ${sheetId} for user ${uid}.`);
+            const response = await sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range: `${sheetName}!A:Z` });
+            const rows = response.data.values;
+            if (!rows || rows.length <= 1) return NextResponse.json({ message: 'No data found in the sheet.' });
+
+            const headerRowFromSheet = rows[0].map(h => String(h || "").trim());
+            if (JSON.stringify(headerRowFromSheet) !== JSON.stringify(FOOD_EXPENSES_HEADERS)) {
+                return NextResponse.json({ error: 'Food expenses sheet header mismatch.' }, { status: 400 });
+            }
+
+            const batch = adminDb.batch();
+            const errors: { row: number; message: string; data: any[] }[] = [];
+            let importedCount = 0;
+
+            for (let i = 1; i < rows.length; i++) {
+                const row = rows[i];
+                if (row.every(cell => !cell || String(cell).trim() === "")) continue;
+
+                try {
+                    const expenseDataFromSheet: Record<string, any> = {};
+                    FOOD_EXPENSES_HEADERS.forEach((header, index) => {
+                        const key = header.toLowerCase().replace(/\s\(.*\)/g, '').replace(/\s+/g, '_').replace(/_([a-z])/g, (g) => g[1].toUpperCase());
+                        expenseDataFromSheet[key] = row[index] !== undefined && row[index] !== null ? String(row[index]).trim() : null;
+                    });
+                    
+                    if (!expenseDataFromSheet.siteId || !expenseDataFromSheet.stallId) {
+                        throw new Error("Site ID and Stall ID are required for each expense row.");
+                    }
+
+                    const purchaseDate = new Date(String(expenseDataFromSheet.purchaseDate));
+                    if (isNaN(purchaseDate.getTime())) throw new Error("Invalid purchase date format.");
+                    
+                    const dataToSave: Omit<FoodItemExpense, 'id' | 'purchaseDate'> & { purchaseDate: AdminTimestamp } = {
+                        category: expenseDataFromSheet.category,
+                        totalCost: parseFloat(expenseDataFromSheet.totalCost),
+                        paymentMethod: expenseDataFromSheet.paymentMethod,
+                        otherPaymentMethodDetails: expenseDataFromSheet.otherPaymentMethodDetails || null,
+                        purchaseDate: AdminTimestamp.fromDate(purchaseDate),
+                        vendor: expenseDataFromSheet.vendor || null,
+                        otherVendorDetails: expenseDataFromSheet.otherVendorDetails || null,
+                        notes: expenseDataFromSheet.notes || null,
+                        billImageUrl: expenseDataFromSheet.billImageUrl || null,
+                        siteId: expenseDataFromSheet.siteId,
+                        stallId: expenseDataFromSheet.stallId,
+                        recordedByUid: uid,
+                        recordedByName: (await adminDb.collection('users').doc(uid).get()).data()?.displayName || 'Imported',
+                        createdAt: AdminTimestamp.now().toDate().toISOString(),
+                        updatedAt: AdminTimestamp.now().toDate().toISOString(),
+                    };
+
+                    const docRef = adminDb.collection('foodItemExpenses').doc();
+                    batch.set(docRef, dataToSave);
+                    importedCount++;
+                } catch (e: any) {
+                    errors.push({ row: i + 1, message: e.message, data: row });
+                }
+            }
+
+            if (importedCount > 0) await batch.commit();
+            return NextResponse.json({
+                message: `Food expenses import processed. ${importedCount} items imported. ${errors.length} rows had issues.`,
+                importedCount, errors
+            });
+
+        } catch (e: any) {
+            console.error(`${LOG_PREFIX} Error importing food expenses for user ${uid}:`, e.message, e.stack);
+            return NextResponse.json({ error: 'Failed to import food expenses from Google Sheet.', details: e.message }, { status: 500 });
+        }
+
+      case 'exportFoodExpenses':
+        try {
+            console.log(`${LOG_PREFIX} Exporting food expenses for user ${uid}.`);
+            const expensesSnapshot = await adminDb.collection('foodItemExpenses').orderBy('purchaseDate', 'desc').get();
+            const expensesData: FoodItemExpense[] = expensesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FoodItemExpense));
+
+            const values = [FOOD_EXPENSES_HEADERS];
+            expensesData.forEach(exp => {
+                values.push([
+                    exp.id, exp.category, String(exp.totalCost), exp.paymentMethod,
+                    exp.otherPaymentMethodDetails || "",
+                    (exp.purchaseDate instanceof AdminTimestamp ? exp.purchaseDate.toDate() : new Date(exp.purchaseDate as any)).toLocaleDateString('en-CA'),
+                    exp.vendor || "", exp.otherVendorDetails || "", exp.notes || "", exp.billImageUrl || "",
+                    exp.siteId, exp.stallId
+                ]);
+            });
+
+            if (!spreadsheetIdToUse) {
+                const newSheet = await sheets.spreadsheets.create({ requestBody: { properties: { title: `StallSync Food Expenses Export ${new Date().toISOString().split('T')[0]}` } } });
+                spreadsheetIdToUse = newSheet.data.spreadsheetId;
+                if (!spreadsheetIdToUse) throw new Error("Failed to create new Google Sheet.");
+                await sheets.spreadsheets.values.update({ spreadsheetId: spreadsheetIdToUse, range: `${sheetName}!A1`, valueInputOption: 'USER_ENTERED', requestBody: { values } });
+                return NextResponse.json({ message: `Food expenses exported successfully to new sheet.`, spreadsheetId: spreadsheetIdToUse, url: `https://docs.google.com/spreadsheets/d/${spreadsheetIdToUse}` });
+            } else {
+                await sheets.spreadsheets.values.clear({ spreadsheetId: spreadsheetIdToUse, range: sheetName });
+                await sheets.spreadsheets.values.update({ spreadsheetId: spreadsheetIdToUse, range: `${sheetName}!A1`, valueInputOption: 'USER_ENTERED', requestBody: { values } });
+                return NextResponse.json({ message: `Food expenses exported successfully to existing sheet.`, spreadsheetId: spreadsheetIdToUse, url: `https://docs.google.com/spreadsheets/d/${spreadsheetIdToUse}` });
+            }
+        } catch (e: any) {
+            console.error(`${LOG_PREFIX} Error exporting food expenses for user ${uid}:`, e.message, e.stack);
+            return NextResponse.json({ error: 'Failed to export food expenses to Google Sheet.', details: e.message }, { status: 500 });
+        }
+
 
       default:
         console.warn(`${LOG_PREFIX} Invalid action specified: ${action}`);

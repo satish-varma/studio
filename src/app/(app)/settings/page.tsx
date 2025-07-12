@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import PageHeader from "@/components/shared/PageHeader";
@@ -41,19 +42,23 @@ if (!getApps().length) {
 const db = getFirestore();
 const firebaseAuth = getAuth(getApp()); // Used firebaseAuth instead of auth to avoid conflict with useAppAuth
 
-type GoogleSheetAction = "importStockItems" | "exportStockItems" | "importSalesHistory" | "exportSalesHistory";
-type DataTypeForSheets = 'stock' | 'sales';
+type GoogleSheetAction = "importStockItems" | "exportStockItems" | "importSalesHistory" | "exportSalesHistory" | "importFoodExpenses" | "exportFoodExpenses";
+type DataTypeForSheets = 'stock' | 'sales' | 'foodExpenses';
 
 export default function SettingsPage() {
   const { user: appUser } = useAppAuth(); // Use the hook from AuthContext
   const { toast } = useToast();
   const [isExportingStockCsv, setIsExportingStockCsv] = useState(false);
   const [isExportingSalesCsv, setIsExportingSalesCsv] = useState(false);
+  const [isExportingFoodExpensesCsv, setIsExportingFoodExpensesCsv] = useState(false);
 
   const [isProcessingStockSheetsImport, setIsProcessingStockSheetsImport] = useState(false);
   const [isProcessingStockSheetsExport, setIsProcessingStockSheetsExport] = useState(false);
   const [isProcessingSalesSheetsImport, setIsProcessingSalesSheetsImport] = useState(false);
   const [isProcessingSalesSheetsExport, setIsProcessingSalesSheetsExport] = useState(false);
+  const [isProcessingFoodExpensesSheetsImport, setIsProcessingFoodExpensesSheetsImport] = useState(false);
+  const [isProcessingFoodExpensesSheetsExport, setIsProcessingFoodExpensesSheetsExport] = useState(false);
+
 
   const [showSheetIdDialog, setShowSheetIdDialog] = useState(false);
   const [sheetIdInputValue, setSheetIdInputValue] = useState("");
@@ -233,6 +238,70 @@ export default function SettingsPage() {
       setIsExportingSalesCsv(false);
     }
   };
+  
+  const exportFoodExpensesToCsv = async () => {
+    setIsExportingFoodExpensesCsv(true);
+    console.log(`${LOG_PREFIX} Starting food expenses CSV export.`);
+    try {
+      const expensesCollectionRef = collection(db, "foodItemExpenses");
+      const q = query(expensesCollectionRef, orderBy("purchaseDate", "desc"));
+      const querySnapshot = await getDocs(q);
+
+      if (querySnapshot.empty) {
+        toast({ title: "No Food Expenses Data", description: "There are no food expenses to export.", variant: "default" });
+        setIsExportingFoodExpensesCsv(false);
+        return;
+      }
+      
+      const headers = [
+        "Expense ID", "Category", "Total Cost", "Payment Method",
+        "Other Payment Details", "Purchase Date", "Vendor", "Other Vendor Details",
+        "Notes", "Bill Image URL", "Site ID", "Stall ID", "Recorded By (Name)", "Recorded By (UID)"
+      ];
+      const csvRows = [headers.join(",")];
+      
+      querySnapshot.forEach(doc => {
+        const expense = doc.data();
+        const row = [
+          escapeCsvCell(doc.id),
+          escapeCsvCell(expense.category),
+          escapeCsvCell(expense.totalCost.toFixed(2)),
+          escapeCsvCell(expense.paymentMethod),
+          escapeCsvCell(expense.otherPaymentMethodDetails || ""),
+          escapeCsvCell(new Date((expense.purchaseDate as Timestamp).toDate()).toLocaleDateString('en-CA')),
+          escapeCsvCell(expense.vendor || ""),
+          escapeCsvCell(expense.otherVendorDetails || ""),
+          escapeCsvCell(expense.notes || ""),
+          escapeCsvCell(expense.billImageUrl || ""),
+          escapeCsvCell(expense.siteId),
+          escapeCsvCell(expense.stallId),
+          escapeCsvCell(expense.recordedByName || ""),
+          escapeCsvCell(expense.recordedByUid),
+        ];
+        csvRows.push(row.join(','));
+      });
+      
+      const csvString = csvRows.join("\n");
+      const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement("a");
+      if (link.download !== undefined) {
+        const url = URL.createObjectURL(blob);
+        link.setAttribute("href", url);
+        link.setAttribute("download", `stallsync_food_expenses_${new Date().toISOString().split('T')[0]}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }
+      toast({ title: "Export Successful", description: "Food expenses CSV downloaded." });
+    } catch (error: any) {
+      console.error(`${LOG_PREFIX} Error exporting food expenses:`, error.message, error.stack);
+      toast({ title: "Export Failed", description: `Could not export food expenses: ${error.message}`, variant: "destructive" });
+    } finally {
+      setIsExportingFoodExpensesCsv(false);
+    }
+  };
 
   const getLoadingStateSetter = (action: GoogleSheetAction): React.Dispatch<React.SetStateAction<boolean>> => {
     switch (action) {
@@ -240,6 +309,8 @@ export default function SettingsPage() {
       case "exportStockItems": return setIsProcessingStockSheetsExport;
       case "importSalesHistory": return setIsProcessingSalesSheetsImport;
       case "exportSalesHistory": return setIsProcessingSalesSheetsExport;
+      case "importFoodExpenses": return setIsProcessingFoodExpensesSheetsImport;
+      case "exportFoodExpenses": return setIsProcessingFoodExpensesSheetsExport;
       default: 
         console.warn(`${LOG_PREFIX} Unknown GoogleSheetAction: ${action}`);
         return () => {}; 
@@ -524,7 +595,7 @@ export default function SettingsPage() {
             Download your application data in CSV format.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <Button
             variant="outline"
             className="w-full"
@@ -551,6 +622,19 @@ export default function SettingsPage() {
             )}
             Export Sales Data (CSV)
           </Button>
+           <Button
+            variant="outline"
+            className="w-full"
+            onClick={exportFoodExpensesToCsv}
+            disabled={isExportingFoodExpensesCsv}
+          >
+            {isExportingFoodExpensesCsv ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="mr-2 h-4 w-4" />
+            )}
+            Export Food Expenses (CSV)
+          </Button>
         </CardContent>
       </Card>
 
@@ -564,7 +648,7 @@ export default function SettingsPage() {
                 Import or export data with Google Sheets. <strong>Note:</strong> This is an advanced feature requiring developer setup of Google Cloud Project credentials, OAuth 2.0 configuration (including Redirect URI setup in Google Cloud Console), and a properly configured backend API route (<code>/api/google-sheets-proxy</code>) to handle Google API calls securely.
             </CardDescription>
         </CardHeader>
-        <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <div className="space-y-3 p-4 border rounded-md bg-muted/20">
                 <h4 className="font-medium text-foreground">Stock Items</h4>
                 <Button
@@ -605,6 +689,27 @@ export default function SettingsPage() {
                 >
                     {isProcessingSalesSheetsExport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SheetIcon className="mr-2 h-4 w-4 text-green-700" />}
                     Export Sales to Sheets
+                </Button>
+            </div>
+             <div className="space-y-3 p-4 border rounded-md bg-muted/20">
+                <h4 className="font-medium text-foreground">Food Stall Expenses</h4>
+                <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => openSheetIdPrompt("importFoodExpenses", 'foodExpenses')}
+                    disabled={isProcessingFoodExpensesSheetsImport || isProcessingFoodExpensesSheetsExport}
+                >
+                     {isProcessingFoodExpensesSheetsImport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4 text-green-700" />}
+                    Import Expenses from Sheets
+                </Button>
+                <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => openSheetIdPrompt("exportFoodExpenses", 'foodExpenses')}
+                    disabled={isProcessingFoodExpensesSheetsImport || isProcessingFoodExpensesSheetsExport}
+                >
+                    {isProcessingFoodExpensesSheetsExport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SheetIcon className="mr-2 h-4 w-4 text-green-700" />}
+                    Export Expenses to Sheets
                 </Button>
             </div>
         </CardContent>
