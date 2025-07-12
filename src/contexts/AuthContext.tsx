@@ -14,7 +14,7 @@ import {
   type User as FirebaseUser
 } from 'firebase/auth';
 import { getFirestore, doc, getDoc, setDoc, onSnapshot, type Firestore, Timestamp } from 'firebase/firestore';
-import { app, auth, db, isFirebaseConfigValid, firebaseConfig, firebaseInitializationError } from '@/lib/firebaseConfig';
+import { app, auth, db, isFirebaseConfigValid, firebaseInitializationError } from '@/lib/firebaseConfig';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
