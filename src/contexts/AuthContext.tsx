@@ -98,41 +98,32 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const setActiveSite = useCallback((siteId: string | null) => {
-    console.log(`${LOG_PREFIX_CONTEXT} setActiveSite called. New siteId: ${siteId}, User role: ${user?.role}`);
+    console.log(`${LOG_PREFIX_CONTEXT} setActiveSite called. New siteId: ${siteId}`);
     setActiveSiteState(siteId);
-    if (user?.role !== 'manager') { // Managers handle their stall view ("All Stalls") differently
-      console.log(`${LOG_PREFIX_CONTEXT} Site changed for non-manager or site cleared, clearing activeStallId.`);
-      setActiveStallState(null);
-    }
+    setActiveStallState(null); // Always reset stall when site changes
+    
     if (typeof window !== 'undefined') {
       if (siteId) {
         localStorage.setItem('activeSiteId', siteId);
       } else {
         localStorage.removeItem('activeSiteId');
       }
-       if (!siteId || user?.role !== 'manager') {
+      localStorage.removeItem('activeStallId'); // Always remove stall from storage on site change
+    }
+  }, []);
+
+
+  const setActiveStall = useCallback((stallId: string | null) => {
+    console.log(`${LOG_PREFIX_CONTEXT} setActiveStall called. New stallId: ${stallId}`);
+    setActiveStallState(stallId);
+    if (typeof window !== 'undefined') {
+      if (stallId) {
+        localStorage.setItem('activeStallId', stallId);
+      } else {
         localStorage.removeItem('activeStallId');
       }
     }
-  }, [user?.role]);
-
-  const setActiveStall = useCallback((stallId: string | null) => {
-    console.log(`${LOG_PREFIX_CONTEXT} setActiveStall called. New stallId: ${stallId}, User role: ${user?.role}`);
-    if (user?.role === 'manager') {
-      console.log(`${LOG_PREFIX_CONTEXT} Manager role detected. Forcing activeStallId to null (All Stalls). Original request was for: ${stallId}`);
-      setActiveStallState(null);
-      if (typeof window !== 'undefined') localStorage.removeItem('activeStallId');
-    } else {
-      setActiveStallState(stallId);
-      if (typeof window !== 'undefined') {
-        if (stallId) {
-          localStorage.setItem('activeStallId', stallId);
-        } else {
-          localStorage.removeItem('activeStallId');
-        }
-      }
-    }
-  }, [user?.role]);
+  }, []);
 
   useEffect(() => {
     console.log(`${LOG_PREFIX_CONTEXT} useEffect: Initializing auth state listener.`);
@@ -197,26 +188,38 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           const storedStallId = typeof window !== 'undefined' ? localStorage.getItem('activeStallId') : null;
           console.log(`${LOG_PREFIX_CONTEXT} Initializing context. FirestoreUser: defaultSite='${appUserToSet.defaultSiteId}', defaultStall='${appUserToSet.defaultStallId}'. LocalStorage: site='${storedSiteId}', stall='${storedStallId}'. Role: '${appUserToSet.role}'.`);
 
-          if (appUserToSet.role === 'admin') {
-              initialSiteId = appUserToSet.defaultSiteId || storedSiteId || null;
-              // For admin, stall follows site preference. If site is user's default, use user's default stall. If site is from localStorage, use localStorage stall (if it belongs to that site).
-              initialStallId = initialSiteId === appUserToSet.defaultSiteId 
-                                ? (appUserToSet.defaultStallId || (initialSiteId ? storedStallId : null)) 
-                                : (initialSiteId ? storedStallId : null);
-              console.log(`${LOG_PREFIX_CONTEXT} Admin context determined. Site: ${initialSiteId}, Stall: ${initialStallId}.`);
-          } else if (appUserToSet.role === 'manager') {
-              if (appUserToSet.managedSiteIds && appUserToSet.managedSiteIds.length > 0) {
-                  const preferredSite = (appUserToSet.defaultSiteId && appUserToSet.managedSiteIds.includes(appUserToSet.defaultSiteId))
-                                      ? appUserToSet.defaultSiteId
-                                      : (storedSiteId && appUserToSet.managedSiteIds.includes(storedSiteId) ? storedSiteId : appUserToSet.managedSiteIds[0]);
-                  initialSiteId = preferredSite;
-                  console.log(`${LOG_PREFIX_CONTEXT} Manager context determined. Site chosen: ${initialSiteId} (from defaults/stored/first managed).`);
-              } else {
-                  initialSiteId = null; 
-                  console.log(`${LOG_PREFIX_CONTEXT} Manager has no managed sites. Site set to null.`);
+          if (appUserToSet.role === 'admin' || appUserToSet.role === 'manager') {
+              let possibleSites: string[] = [];
+              if (appUserToSet.role === 'admin') {
+                  // For admin, any site is possible. We just need to find a valid one.
+                  // We can't query all sites here, so we rely on stored/default.
+              } else if (appUserToSet.role === 'manager') {
+                  possibleSites = appUserToSet.managedSiteIds || [];
               }
-              initialStallId = null; // Managers always see "All Stalls"
-              console.log(`${LOG_PREFIX_CONTEXT} Manager stall context set to null (All Stalls).`);
+              
+              let preferredSite: string | null = null;
+              if (appUserToSet.defaultSiteId && (appUserToSet.role === 'admin' || possibleSites.includes(appUserToSet.defaultSiteId))) {
+                  preferredSite = appUserToSet.defaultSiteId;
+              } else if (storedSiteId && (appUserToSet.role === 'admin' || possibleSites.includes(storedSiteId))) {
+                  preferredSite = storedSiteId;
+              } else if (appUserToSet.role === 'manager' && possibleSites.length > 0) {
+                  preferredSite = possibleSites[0];
+              }
+              initialSiteId = preferredSite;
+              
+              // Stall logic for admin/manager
+              if (initialSiteId) {
+                  // If selected site matches the user's default site, use their default stall preference
+                  if (initialSiteId === appUserToSet.defaultSiteId) {
+                      initialStallId = appUserToSet.defaultStallId || storedStallId || null;
+                  } else { // Otherwise, just use what's in local storage for that site
+                      initialStallId = storedStallId || null;
+                  }
+              } else {
+                  initialStallId = null;
+              }
+              console.log(`${LOG_PREFIX_CONTEXT} Admin/Manager context determined. Site: ${initialSiteId}, Stall: ${initialStallId}.`);
+
           } else { // staff
               initialSiteId = appUserToSet.defaultSiteId;
               initialStallId = appUserToSet.defaultSiteId ? appUserToSet.defaultStallId : null;
@@ -496,4 +499,3 @@ export const useAuth = (): AuthContextType => {
   }
   return context;
 };
-

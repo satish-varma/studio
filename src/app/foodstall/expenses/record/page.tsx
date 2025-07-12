@@ -26,7 +26,7 @@ import {
   foodExpenseCategories,
   paymentMethods,
 } from "@/types/food";
-import { ArrowLeft, Loader2, Info } from "lucide-react";
+import { ArrowLeft, Loader2, Info, Store } from "lucide-react";
 import Link from "next/link";
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
@@ -52,7 +52,7 @@ import {
   onSnapshot
 } from "firebase/firestore";
 import { firebaseConfig } from "@/lib/firebaseConfig";
-import { getApps, initializeApp, getApp } from "firebase/app";
+import { getApps, initializeApp, getApp } from 'firebase/app';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Textarea } from "@/components/ui/textarea";
 import { logFoodStallActivity } from "@/lib/foodStallLogger";
@@ -70,7 +70,7 @@ if (!getApps().length) {
 }
 
 export default function RecordFoodExpensePage() {
-  const { user, activeSiteId, activeStallId } = useAuth();
+  const { user, activeSiteId, activeStallId, activeSite, activeStall } = useAuth();
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [vendors, setVendors] = useState<string[]>([]);
@@ -200,6 +200,7 @@ export default function RecordFoodExpensePage() {
             To record a food stall expense, please ensure you have an active
             Site and a specific Stall selected in the header. This context is
             necessary to correctly associate the expense.
+             {user.role === 'manager' && !activeStallId && activeSiteId && " As a manager, you can select a specific stall from the header dropdown to proceed."}
           </AlertDescription>
         </Alert>
       </div>
@@ -210,7 +211,7 @@ export default function RecordFoodExpensePage() {
     <div className="space-y-6">
       <PageHeader
         title="Record New Food Stall Expense"
-        description="Enter the details of the purchase or operational cost."
+        description={<span className="flex items-center gap-2 text-sm text-muted-foreground">Recording expense for: <Store size={14} /> {activeStall?.name || '...'} at {activeSite?.name || '...'}</span>}
         actions={
           <Link href="/foodstall/expenses">
             <Button variant="outline" disabled={isSubmitting}>

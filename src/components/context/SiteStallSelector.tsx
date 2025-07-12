@@ -121,34 +121,24 @@ export default function SiteStallSelector() {
       return;
     }
 
-    if (user.role === 'manager') {
-        console.log("SiteStallSelector (useEffect stalls): User is manager, setting stallsForSelector to empty and activeStall to null.");
-        setStallsForSelector([]);
-        setLoadingStalls(false);
-        if (activeStallId !== null) {
-            setActiveStall(null);
-        }
-        return;
-    }
-
-    if (user.role === 'admin') {
+    if (user.role === 'admin' || user.role === 'manager') {
         setLoadingStalls(true);
         const stallsQuery = query(collection(db, "stalls"), where("siteId", "==", activeSiteId));
         const unsubscribe = onSnapshot(stallsQuery, (snapshot: QuerySnapshot<DocumentData>) => {
           const fetchedStalls = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Stall));
           setStallsForSelector(fetchedStalls.sort((a,b) => a.name.localeCompare(b.name)));
-          console.log("SiteStallSelector (useEffect stalls): Fetched stalls for admin for site", activeSiteId, ":", fetchedStalls.length);
+          console.log(`SiteStallSelector (useEffect stalls): Fetched stalls for ${user.role} for site`, activeSiteId, ":", fetchedStalls.length);
 
-          if (fetchedStalls.length === 1) {
+          if (fetchedStalls.length === 1 && activeStallId !== fetchedStalls[0].id) {
             console.log(`SiteStallSelector: Only one stall found ('${fetchedStalls[0].name}'). Auto-selecting it.`);
             setActiveStall(fetchedStalls[0].id);
           } else if (activeStallId && !fetchedStalls.find(s => s.id === activeStallId)) {
-             console.log(`SiteStallSelector (useEffect stalls): Active stall ${activeStallId} not in new list for admin, clearing.`);
+             console.log(`SiteStallSelector (useEffect stalls): Active stall ${activeStallId} not in new list for ${user.role}, clearing.`);
              setActiveStall(null);
           }
           setLoadingStalls(false);
         }, (error) => {
-          console.error(`SiteStallSelector (useEffect stalls): Error fetching stalls for admin for site ${activeSiteId}:`, error);
+          console.error(`SiteStallSelector (useEffect stalls): Error fetching stalls for ${user.role} for site ${activeSiteId}:`, error);
           setLoadingStalls(false);
           setStallsForSelector([]);
         });
@@ -230,7 +220,7 @@ export default function SiteStallSelector() {
         </SelectContent>
       </Select>
 
-      {user.role === 'admin' && (
+      {(user.role === 'admin' || user.role === 'manager') && (
         <Select
             value={activeStallId || "all-stalls"}
             onValueChange={handleStallChange}
@@ -252,10 +242,7 @@ export default function SiteStallSelector() {
             </SelectContent>
         </Select>
       )}
-       {user.role === 'manager' && activeSiteId && (
-         <Badge variant="outline" className="h-9 px-3 text-xs" data-testid="manager-all-stalls-badge">All Stalls</Badge>
-       )}
-      {(loadingSites || (activeSiteId && loadingStalls && user.role === 'admin' )) && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" data-testid="selector-loader"/>}
+      {(loadingSites || (activeSiteId && loadingStalls && (user.role === 'admin' || user.role === 'manager'))) && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" data-testid="selector-loader"/>}
     </div>
   );
 }
