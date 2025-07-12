@@ -503,7 +503,11 @@ export async function POST(request: NextRequest) {
                 try {
                     const expenseDataFromSheet: Record<string, any> = {};
                     FOOD_EXPENSES_HEADERS.forEach((header, index) => {
-                        const key = header.toLowerCase().replace(/\s\(.*\)/g, '').replace(/\s+/g, '_').replace(/_([a-z])/g, (g) => g[1].toUpperCase());
+                        const key = header
+                            .replace(/\s\(.*\)/g, '') // remove "(text in parentheses)"
+                            .replace(/\s+/g, '_')
+                            .replace(/_([a-z])/g, (g) => g[1].toUpperCase())
+                            .replace(/^(.)/, (g) => g.toLowerCase()); // Convert to camelCase
                         expenseDataFromSheet[key] = row[index] !== undefined && row[index] !== null ? String(row[index]).trim() : null;
                     });
                     
@@ -617,3 +621,4 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error.message || 'An unexpected error occurred on the server.', code: error.code, details: error.response?.data?.error_description }, { status: 500 });
   }
 }
+
