@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
-import { initializeAdminSdk } from '@/lib/firebaseAdmin'; // Import the robust initializer
+import { initializeAdminSdk } from '@/lib/firebaseAdmin';
 
 const LOG_PREFIX = "[API:CreateUser]";
 
@@ -87,11 +87,11 @@ export async function POST(request: NextRequest) {
     } else if (error.code === 'auth/invalid-password') {
       errorMessage = 'Password must be at least 6 characters long (Firebase requirement).';
       statusCode = 400;
-    } else if (error.message?.includes('UNAUTHENTICATED') || error.code === 'auth/internal-error' || error.code === 16 || error.code === '16') {
-        errorMessage = `Firebase service (e.g., Auth) reported an UNAUTHENTICATED error. This usually means the service account used by the Admin SDK lacks the necessary IAM permissions (e.g., 'Firebase Authentication Admin') to perform this action. Please check the service account's roles in the Google Cloud Console. Original error: ${error.message}`;
-        statusCode = 403;
-    } else if (error.code === 'auth/insufficient-permission') {
-        errorMessage = `Firebase service reported an INSUFFICIENT_PERMISSION error. The service account used by the Admin SDK likely lacks the necessary IAM permissions. Please check its roles in Google Cloud Console. Details: ${error.message}`;
+    } else if (error.code === 'auth/argument-error' || error.code === 'auth/id-token-expired') {
+      errorMessage = 'Unauthorized: Invalid or expired admin token.';
+      statusCode = 401;
+    } else if (error.message?.includes('UNAUTHENTICATED') || error.code === 'auth/internal-error' || error.code === 16 || error.code === '16' || error.code === 'auth/insufficient-permission') {
+        errorMessage = `Firebase service reported an permission error. This usually means the service account used by the Admin SDK lacks the necessary IAM permissions (e.g., 'Firebase Authentication Admin') to perform this action. Please check the service account's roles in the Google Cloud Console. Original error: ${error.message}`;
         statusCode = 403;
     } else {
         errorMessage = error.message || errorMessage;

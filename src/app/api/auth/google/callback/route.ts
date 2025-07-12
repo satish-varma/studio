@@ -8,39 +8,26 @@ import { initializeAdminSdk } from '@/lib/firebaseAdmin';
 
 const LOG_PREFIX = "[API:GoogleCallback]";
 
-// Ensure Firebase Admin SDK is initialized
-const { adminApp, error: adminAppError } = initializeAdminSdk();
-let adminDb: ReturnType<typeof getAdminFirestore> | undefined;
-
-if (adminApp) {
-    adminDb = getAdminFirestore(adminApp);
-} else {
-    console.error(`${LOG_PREFIX} CRITICAL: Firebase Admin App is not initialized due to error: ${adminAppError}. Firestore Admin DB cannot be obtained.`);
-}
-
-// Google OAuth2 Client Setup
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI; 
 
-let oauth2Client: Auth.OAuth2Client | null = null;
-if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET && GOOGLE_REDIRECT_URI) {
-    oauth2Client = new google.auth.OAuth2(
-        GOOGLE_CLIENT_ID,
-        GOOGLE_CLIENT_SECRET,
-        GOOGLE_REDIRECT_URI
-    );
-    console.log(`${LOG_PREFIX} Google OAuth2 client configured.`);
-} else {
-    console.error(`${LOG_PREFIX} CRITICAL: Google OAuth2 client credentials (ID, Secret, Redirect URI) are not configured. OAuth flow will fail.`);
-}
-
 export async function GET(request: NextRequest) {
   console.log(`${LOG_PREFIX} GET request received. URL: ${request.url}`);
-  if (!adminDb || !oauth2Client) {
-    console.error(`${LOG_PREFIX} Server configuration error. Admin SDK Initialized: ${!!adminDb}, OAuth2 Client Initialized: ${!!oauth2Client}`);
-    return NextResponse.json({ error: 'Server configuration error (Admin SDK or OAuth2 client not initialized).' }, { status: 500 });
+  
+  const { adminApp, error: adminAppError } = initializeAdminSdk();
+  if (adminAppError || !adminApp) {
+    console.error(`${LOG_PREFIX} Server Configuration Error: ${adminAppError}`);
+    return NextResponse.json({ error: 'Server configuration error (Admin SDK not initialized).', details: adminAppError }, { status: 500 });
   }
+  const adminDb = getAdminFirestore(adminApp);
+
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !GOOGLE_REDIRECT_URI) {
+    console.error(`${LOG_PREFIX} CRITICAL: Google OAuth2 client credentials (ID, Secret, Redirect URI) are not configured. OAuth flow will fail.`);
+    return NextResponse.json({ error: 'Server configuration error (Google OAuth credentials missing).' }, { status: 500 });
+  }
+  const oauth2Client = new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI);
+  console.log(`${LOG_PREFIX} Google OAuth2 client configured.`);
 
   const { searchParams } = new URL(request.url);
   const code = searchParams.get('code');
@@ -58,7 +45,6 @@ export async function GET(request: NextRequest) {
   const uid = state; 
   console.log(`${LOG_PREFIX} Received 'code' and 'state' (UID: ${uid}).`);
 
-  // Optional: Validate UID (e.g., check if user exists in Firestore)
   try {
     const userRef = adminDb.collection('users').doc(uid);
     const userSnap = await userRef.get();
@@ -85,7 +71,6 @@ export async function GET(request: NextRequest) {
     if (!tokens.refresh_token && !tokens.id_token) { 
         console.warn(`${LOG_PREFIX} No refresh_token or id_token received for UID ${uid}. This is unusual if this is the first authorization.`);
     }
-
 
     const userGoogleTokens: UserGoogleOAuthTokens = {
       access_token: tokens.access_token,

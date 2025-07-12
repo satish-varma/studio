@@ -1,10 +1,9 @@
 
-
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { getFirestore as getAdminFirestore, CollectionReference, Query, WriteBatch } from 'firebase-admin/firestore';
-import { initializeAdminSdk } from '@/lib/firebaseAdmin'; // Import the robust initializer
+import { initializeAdminSdk } from '@/lib/firebaseAdmin';
 
 const LOG_PREFIX = "[API:ResetData]";
 

@@ -194,20 +194,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
           if (appUserToSet.role === 'admin' || appUserToSet.role === 'manager') {
               let possibleSites: string[] = [];
-              if (appUserToSet.role === 'admin') {
-                  // For admin, any site is possible. We just need to find a valid one.
-                  // We can't query all sites here, so we rely on stored/default.
-              } else if (appUserToSet.role === 'manager') {
+              if (appUserToSet.role === 'manager') {
                   possibleSites = appUserToSet.managedSiteIds || [];
               }
               
               let preferredSite: string | null = null;
-              if (appUserToSet.defaultSiteId && (appUserToSet.role === 'admin' || possibleSites.includes(appUserToSet.defaultSiteId))) {
-                  preferredSite = appUserToSet.defaultSiteId;
-              } else if (storedSiteId && (appUserToSet.role === 'admin' || possibleSites.includes(storedSiteId))) {
-                  preferredSite = storedSiteId;
-              } else if (appUserToSet.role === 'manager' && possibleSites.length > 0) {
-                  preferredSite = possibleSites[0];
+              if (appUserToSet.role === 'admin') {
+                preferredSite = storedSiteId || appUserToSet.defaultSiteId || null;
+              } else if (appUserToSet.role === 'manager') {
+                if (storedSiteId && possibleSites.includes(storedSiteId)) {
+                    preferredSite = storedSiteId;
+                } else if (possibleSites.length > 0) {
+                    preferredSite = possibleSites[0];
+                }
               }
               initialSiteId = preferredSite;
               

@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
-import { initializeAdminSdk } from '@/lib/firebaseAdmin'; // Import the robust initializer
+import { initializeAdminSdk } from '@/lib/firebaseAdmin';
 
 const LOG_PREFIX = "[API:DeleteUser]";
 
@@ -56,8 +56,11 @@ export async function DELETE(request: NextRequest, context: { params: { uid: str
       errorMessage = `Firebase Auth user with UID ${uidToDelete} not found. They may have already been deleted.`;
       statusCode = 404; 
     } else if (error.message?.includes("UNAUTHENTICATED") || error.code === 'auth/insufficient-permission' || error.code === 16 || String(error.code) === '16') { 
-        errorMessage = `Firebase service reported an UNAUTHENTICATED or INSUFFICIENT_PERMISSION error (Code: ${error.code}). This usually means the service account used by the Admin SDK lacks the necessary IAM permissions (e.g., 'Firebase Authentication Admin') to perform this action. Please check the service account's roles in the Google Cloud Console. Original error: ${error.message}`;
+        errorMessage = `Firebase service reported a permission error (Code: ${error.code}). This usually means the service account used by the Admin SDK lacks the necessary IAM permissions (e.g., 'Firebase Authentication Admin'). Please check its roles in the Google Cloud Console. Original error: ${error.message}`;
         statusCode = 403;
+    } else if (error.code === 'auth/argument-error' || error.code === 'auth/id-token-expired') {
+      errorMessage = 'Unauthorized: Invalid or expired admin token.';
+      statusCode = 401;
     } else {
       errorMessage = error.message || errorMessage;
     }

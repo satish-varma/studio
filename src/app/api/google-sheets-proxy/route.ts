@@ -135,10 +135,18 @@ async function getAuthenticatedClient(uid: string, adminDb: FirebaseFirestore.Fi
             return { error: 'Google authorization expired (no refresh token). Please re-authorize.', needsAuth: true, authUrl: authUrl };
         }
         console.log(`${LOG_PREFIX} Refreshing Google access token for UID: ${uid}`);
-        const { credentials } = await oauth2Client.refreshAccessToken();
-        await userTokensRef.set(credentials, { merge: true });
-        oauth2Client.setCredentials(credentials);
-        console.log(`${LOG_PREFIX} Token refreshed and saved for UID: ${uid}`);
+        try {
+            const { credentials } = await oauth2Client.refreshAccessToken();
+            await userTokensRef.set(credentials, { merge: true });
+            oauth2Client.setCredentials(credentials);
+            console.log(`${LOG_PREFIX} Token refreshed and saved for UID: ${uid}`);
+        } catch (refreshError: any) {
+            console.error(`${LOG_PREFIX} Failed to refresh Google token for UID ${uid}:`, refreshError.message);
+            // This happens if the refresh token is revoked or expired. Clear the tokens and prompt for re-auth.
+            await userTokensRef.delete();
+            const authUrl = oauth2Client.generateAuthUrl({ access_type: 'offline', scope: ['https://www.googleapis.com/auth/spreadsheets'], prompt: 'consent', state: uid });
+            return { error: 'Google authorization expired or was revoked. Please re-authorize.', needsAuth: true, authUrl: authUrl };
+        }
     }
     return oauth2Client;
 }
