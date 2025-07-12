@@ -4,7 +4,6 @@
 import type { ReactNode } from 'react';
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import type { AppUser, UserRole } from '@/types/user';
-import { initializeApp, getApps, type FirebaseApp, getApp } from 'firebase/app';
 import {
   getAuth,
   onAuthStateChanged,
@@ -15,46 +14,11 @@ import {
   type User as FirebaseUser
 } from 'firebase/auth';
 import { getFirestore, doc, getDoc, setDoc, onSnapshot, type Firestore, Timestamp } from 'firebase/firestore';
-import { firebaseConfig, isFirebaseConfigValid } from '@/lib/firebaseConfig';
+import { app, auth, db, isFirebaseConfigValid, firebaseConfig, firebaseInitializationError } from '@/lib/firebaseConfig';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 const LOG_PREFIX_CONTEXT = "[AuthContext]";
-
-let _app: FirebaseApp | undefined;
-let auth: Auth | undefined;
-let db: Firestore | undefined;
-
-if (isFirebaseConfigValid()) {
-    if (!getApps().length) {
-      try {
-        console.log(`${LOG_PREFIX_CONTEXT} Attempting Firebase app initialization...`);
-        _app = initializeApp(firebaseConfig);
-        console.log(`${LOG_PREFIX_CONTEXT} Firebase app initialized. Project ID from config:`, firebaseConfig.projectId);
-      } catch (error: any) {
-        console.error(`${LOG_PREFIX_CONTEXT} Firebase app initialization error:`, error.message, error.stack);
-      }
-    } else {
-      _app = getApp();
-      console.log(`${LOG_PREFIX_CONTEXT} Firebase app already initialized. Project ID from app options:`, _app?.options?.projectId);
-    }
-} else {
-    console.error(`${LOG_PREFIX_CONTEXT} Firebase config is not valid. Skipping Firebase initialization.`);
-}
-
-
-if (_app) {
-  try {
-    auth = getAuth(_app);
-    db = getFirestore(_app);
-    console.log(`${LOG_PREFIX_CONTEXT} Firebase Auth and Firestore services obtained.`);
-  } catch (error: any) {
-    console.warn(`${LOG_PREFIX_CONTEXT} Error obtaining Auth/Firestore services: ${error.message}. This might happen if Firebase app object (_app) is undefined due to an earlier initialization failure.`);
-  }
-} else {
-  console.warn(`${LOG_PREFIX_CONTEXT} Firebase App object (_app) is undefined after initialization attempt. This indicates a problem with firebaseConfig or initializeApp itself. Firebase features will not work.`);
-}
-
 
 interface AuthContextType {
   user: AppUser | null;
@@ -80,7 +44,9 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUserState] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
-  const [initializationError, setInitializationError] = useState<string | null>(null);
+  
+  // The initialization error is now sourced from firebaseConfig.ts
+  const initializationError = firebaseInitializationError;
 
   const [activeSiteId, setActiveSiteState] = useState<string | null>(() => {
     if (typeof window !== 'undefined') return localStorage.getItem('activeSiteId');
@@ -132,20 +98,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     console.log(`${LOG_PREFIX_CONTEXT} useEffect: Initializing auth state listener.`);
-    if (!isFirebaseConfigValid()) {
-      const configErrorMsg = `${LOG_PREFIX_CONTEXT} CRITICAL CONFIG FAILURE: Firebase 'projectId' or 'apiKey' is a placeholder or missing in firebaseConfig. Please review your '.env.local' file and ensure NEXT_PUBLIC_FIREBASE_PROJECT_ID and NEXT_PUBLIC_FIREBASE_API_KEY are correctly set. Then, restart your development server. This is likely due to an incomplete Firebase project setup or missing environment variables.`;
-      console.error(configErrorMsg, { configUsed: firebaseConfig });
-      setInitializationError(configErrorMsg);
-      setLoading(false);
-      return;
-    }
-
-    if (!auth || !db) {
-      const serviceErrorMsg = `${LOG_PREFIX_CONTEXT} CRITICAL SERVICE FAILURE: Firebase Auth or Firestore service not initialized. This usually means the Firebase app object (_app) failed to initialize, possibly due to incorrect 'firebaseConfig' values or network issues preventing SDK load. Check previous logs for 'Firebase app initialization error'.`;
-      console.error(serviceErrorMsg);
-      setInitializationError(serviceErrorMsg);
-      setLoading(false);
-      return;
+    
+    if (initializationError || !auth || !db) {
+        setLoading(false);
+        return;
     }
 
     setLoading(true);
@@ -210,12 +166,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               }
               initialSiteId = preferredSite;
               
-              // Stall logic for admin/manager
               if (initialSiteId) {
-                  // If selected site matches the user's default site, use their default stall preference
                   if (initialSiteId === appUserToSet.defaultSiteId) {
                       initialStallId = appUserToSet.defaultStallId || storedStallId || null;
-                  } else { // Otherwise, just use what's in local storage for that site
+                  } else { 
                       initialStallId = storedStallId || null;
                   }
               } else {
@@ -268,7 +222,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         userDocUnsubscribe();
       }
     };
-  }, []); 
+  }, [initializationError, auth, db]); 
 
   useEffect(() => {
     if (!db) return;
@@ -456,16 +410,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               <li><strong>Check Environment Variables:</strong> Confirm all <code>NEXT_PUBLIC_FIREBASE_...</code> variables (e.g., <code>API_KEY</code>, <code>PROJECT_ID</code>) are present and correct. They must come from your Firebase project's web app settings.</li>
               <li><strong>No Quotes in <code>.env.local</code>:</strong> Values should be like <code>NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSy...</code> (without surrounding quotes).</li>
               <li><strong>Restart Server:</strong> After any changes to <code>.env.local</code>, you MUST stop and restart your Next.js development server (<code>npm run dev</code>).</li>
-              <li><strong>Network Connectivity:</strong> Ensure your machine can reach Firebase services.</li>
-              <li><strong>Firebase Console:</strong> Double-check that the web app is correctly registered in your Firebase project console and the config values match precisely.</li>
             </ol>
           </div>
-          <details className="mb-6 text-left text-xs text-destructive-foreground/80">
-            <summary className="cursor-pointer font-medium text-destructive-foreground hover:underline">Click to see current Firebase config (as loaded by app)</summary>
-            <pre className="mt-2 p-3 bg-destructive-foreground/10 border border-destructive-foreground/30 rounded-md overflow-x-auto text-destructive-foreground">
-              {JSON.stringify(firebaseConfig, null, 2)}
-            </pre>
-          </details>
            <Button onClick={() => window.location.reload()} variant="outline" size="lg" className="border-destructive-foreground text-destructive-foreground hover:bg-destructive-foreground/10">
             Attempt to Reload Application
           </Button>

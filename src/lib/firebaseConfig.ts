@@ -1,32 +1,10 @@
 
-// =================================================================================
-// !! VERY IMPORTANT FOR PRODUCTION !!
-//
-// 1. GO TO THE FIREBASE CONSOLE (https://console.firebase.google.com/)
-// 2. Select your Firebase project.
-// 3. Go to Project Settings (gear icon ⚙️).
-// 4. In the "General" tab, under "Your apps":
-//    - If you haven't registered this web app yet:
-//      - Click "Add app", select the Web icon (</>).
-//      - Give it a nickname (e.g., "StallSync Web App") and click "Register app".
-//    - Firebase will display a `firebaseConfig` object. These are the values you need.
-//
-// 5. REPLACE ALL PLACEHOLDER VALUES BELOW (if not using environment variables)
-//    OR (PREFERRED):
-//    CREATE A `.env.local` FILE in the root of your project.
-//    ADD your Firebase configuration values to `.env.local`, prefixed with `NEXT_PUBLIC_`.
-//
-//    Example `.env.local` file:
-//    NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSyC...
-//    NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your-project-id.firebaseapp.com
-//    NEXT_PUBLIC_FIREBASE_PROJECT_ID=your-project-id
-//    NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your-project-id.appspot.com
-//    NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=1234567890
-//    NEXT_PUBLIC_FIREBASE_APP_ID=1:1234567890:web:abcd1234efgh5678
-//    NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=G-ABCDEF1234 (Optional, for Google Analytics)
-//
-// 6. Ensure these environment variables are also set in your hosting environment (e.g., Firebase Hosting, Vercel) for production.
-// =================================================================================
+import { initializeApp, getApps, type FirebaseApp, getApp } from 'firebase/app';
+import { getAuth, type Auth } from 'firebase/auth';
+import { getFirestore, type Firestore } from 'firebase/firestore';
+
+const LOG_PREFIX_CONFIG = "[FirebaseConfig]";
+
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -37,30 +15,46 @@ const firebaseConfig = {
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID
 };
 
-// This function checks if the essential Firebase config values are present.
-// It helps diagnose setup issues by providing a clear error message.
+let app: FirebaseApp | undefined;
+let auth: Auth | undefined;
+let db: Firestore | undefined;
+let firebaseInitializationError: string | null = null;
+
 export const isFirebaseConfigValid = () => {
     return !!(
         firebaseConfig.apiKey &&
         firebaseConfig.authDomain &&
         firebaseConfig.projectId &&
-        firebaseConfig.apiKey !== "YOUR_API_KEY_HERE" && // Check against placeholder
-        firebaseConfig.projectId !== "YOUR_PROJECT_ID" // Check against placeholder
+        firebaseConfig.apiKey !== "YOUR_API_KEY_HERE" && 
+        firebaseConfig.projectId !== "YOUR_PROJECT_ID" 
     );
 };
 
+if (isFirebaseConfigValid()) {
+    if (!getApps().length) {
+      try {
+        console.log(`${LOG_PREFIX_CONFIG} Initializing Firebase client app...`);
+        app = initializeApp(firebaseConfig);
+        auth = getAuth(app);
+        db = getFirestore(app);
+        console.log(`${LOG_PREFIX_CONFIG} Firebase client app initialized successfully.`);
+      } catch (error: any) {
+        console.error(`${LOG_PREFIX_CONFIG} Firebase client app initialization error:`, error.message, error.stack);
+        firebaseInitializationError = `Firebase client app initialization error: ${error.message}`;
+      }
+    } else {
+      console.log(`${LOG_PREFIX_CONFIG} Getting existing Firebase client app...`);
+      app = getApp();
+      auth = getAuth(app);
+      db = getFirestore(app);
+    }
+} else {
+    console.error(`${LOG_PREFIX_CONFIG} Firebase config is not valid. Skipping Firebase initialization.`);
+    const missingKeys = Object.entries(firebaseConfig)
+        .filter(([key, value]) => !value || value.startsWith("YOUR_"))
+        .map(([key]) => `NEXT_PUBLIC_FIREBASE_${key.replace(/([A-Z])/g, '_$1').toUpperCase()}`);
 
-// IMPORTANT:
-// This file (`src/lib/firebaseConfig.ts`) reads your Firebase project configuration.
-// The recommended way to provide these values is through environment variables (see steps above).
-// The `AuthContext.tsx` file (or a similar Firebase initialization file in your project)
-// uses this `firebaseConfig` object to initialize the Firebase SDK, connecting your
-// Next.js application to your specific Firebase project services (Auth, Firestore, etc.).
-//
-// If Firebase is not initializing correctly, double-check:
-// 1. You have correctly registered this web application in your Firebase project settings.
-// 2. The values in your `.env.local` file (or directly in this file if not using .env.local)
-//    exactly match the configuration provided by Firebase.
-// 3. You have restarted your Next.js development server after creating or modifying `.env.local`.
+    firebaseInitializationError = `CRITICAL CONFIG FAILURE: The following required environment variables are missing or are placeholder values in your .env.local file: ${missingKeys.join(', ')}. Please update your .env.local file with the correct values from your Firebase project settings and restart the development server.`;
+}
 
-export { firebaseConfig };
+export { app, auth, db, firebaseConfig, firebaseInitializationError };
