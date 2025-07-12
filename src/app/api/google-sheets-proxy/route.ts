@@ -2,43 +2,15 @@
 
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import admin, { initializeApp, getApps, getApp, App as AdminApp, cert } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { getFirestore as getAdminFirestore, Timestamp as AdminTimestamp } from 'firebase-admin/firestore';
 import { google, Auth, sheets_v4 } from 'googleapis';
 import type { UserGoogleOAuthTokens, StockItem, SaleTransaction, SoldItem, FoodItemExpense } from '@/types';
 import { stockItemSchema } from '@/types/item'; 
-import { z } from 'zod'; // Import Zod for detailed validation error messages
+import { z } from 'zod'; 
+import { initializeAdminSdk } from '@/lib/firebaseAdmin';
 
 const LOG_PREFIX = "[API:GoogleSheetsProxy]";
-
-// Firebase Admin SDK Initialization
-let adminApp: AdminApp | undefined;
-let adminDb: ReturnType<typeof getAdminFirestore> | undefined;
-
-console.log(`${LOG_PREFIX} Checking Firebase Admin SDK initialization status...`);
-if (!getApps().length) {
-  try {
-    console.log(`${LOG_PREFIX} No existing Firebase Admin app found. Attempting to initialize...`);
-    // Attempt to initialize using Application Default Credentials (recommended for deployed environments)
-    adminApp = initializeApp();
-    console.log(`${LOG_PREFIX} Firebase Admin SDK initialized successfully using Application Default Credentials. Project ID: ${adminApp.options.projectId}`);
-  } catch (e: any) {
-    console.error(`${LOG_PREFIX} Firebase Admin SDK default initialization failed:`, e.message, e.stack);
-    // Further error handling or alternative initialization methods could be placed here if needed.
-    // For now, adminApp will remain undefined if this critical step fails.
-  }
-} else {
-  adminApp = getApp();
-  console.log(`${LOG_PREFIX} Firebase Admin SDK already initialized. Using existing app. Project ID: ${adminApp.options.projectId}`);
-}
-
-if (adminApp && adminApp.options.projectId) { // Ensure app is initialized and has a project ID
-    adminDb = getAdminFirestore(adminApp);
-    console.log(`${LOG_PREFIX} Firestore Admin DB obtained for project: ${adminApp.options.projectId}.`);
-} else {
-    console.error(`${LOG_PREFIX} CRITICAL - Firebase Admin App is not properly initialized or project ID is missing. Firestore Admin DB cannot be obtained. Further operations will likely fail.`);
-}
 
 // Google OAuth2 Client Setup
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
@@ -82,10 +54,13 @@ const importStockItemSchemaInternal = z.object({
 export async function POST(request: NextRequest) {
   let uid: string | undefined = undefined; // To store UID for logging even in early errors
 
-  if (!adminApp || !adminDb) {
+  const { adminApp, error: adminAppError } = initializeAdminSdk();
+  if (adminAppError || !adminApp) {
     console.error(`${LOG_PREFIX} Firebase Admin SDK not properly initialized on server when POST request received.`);
-    return NextResponse.json({ error: 'Server Error: Firebase Admin SDK not properly initialized.' }, { status: 500 });
+    return NextResponse.json({ error: 'Server Error: Firebase Admin SDK not properly initialized.', details: adminAppError }, { status: 500 });
   }
+  const adminDb = getAdminFirestore(adminApp);
+  
   if (!oauth2Client) {
      console.error(`${LOG_PREFIX} Google OAuth2 client not configured on server when POST request received.`);
     return NextResponse.json({ error: 'Server Error: Google OAuth2 client not configured.' }, { status: 500 });
@@ -612,7 +587,7 @@ export async function POST(request: NextRequest) {
         error.message?.toLowerCase().includes('unauthorized') ||
         error.message?.toLowerCase().includes('token') ||
         (error.response?.data?.error === 'invalid_grant') || // Google specific: refresh token invalid
-        (error.response?.data?.error === 'unauthorized_client')) { // Google specific: client not authorized
+        (error.response?.data?.error === 'unauthorized_client')) {
 
         if (currentUidForReauth !== "unknown_user_needs_reauth" && adminDb && oauth2Client) {
             console.warn(`${LOG_PREFIX} OAuth error encountered for user ${currentUidForReauth}. Error details:`, error.response?.data || error.message);
