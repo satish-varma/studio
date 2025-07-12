@@ -12,7 +12,7 @@ import { useState, useEffect } from "react";
 import { getFirestore, collection, getDocs, query, orderBy, where, Timestamp } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
-import type { StockItem, SaleTransaction } from "@/types";
+import type { StockItem, SaleTransaction, FoodItemExpense } from "@/types";
 import { useToast } from "@/hooks/use-toast";
 import { getAuth } from 'firebase/auth';
 import {
@@ -39,7 +39,7 @@ if (!getApps().length) {
     console.error(`${LOG_PREFIX} Firebase initialization error:`, error);
   }
 }
-const db = getFirestore();
+const db = getFirestore(getApp());
 const firebaseAuth = getAuth(getApp()); // Used firebaseAuth instead of auth to avoid conflict with useAppAuth
 
 type GoogleSheetAction = "importStockItems" | "exportStockItems" | "importSalesHistory" | "exportSalesHistory" | "importFoodExpenses" | "exportFoodExpenses";
@@ -463,41 +463,25 @@ export default function SettingsPage() {
         body: JSON.stringify({ confirmation: RESET_CONFIRMATION_PHRASE }),
       });
 
+      const result = await response.json();
+
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`${LOG_PREFIX} Data reset API error (${response.status}):`, errorText);
+        console.error(`${LOG_PREFIX} Data reset API error (${response.status}):`, result);
         toast({ 
           title: `Data Reset Failed (Status: ${response.status})`, 
-          description: `Server error: ${errorText.substring(0, 150)}... Check server logs.`, 
+          description: `Server error: ${result.error || result.details || "Unknown error"}. Check server logs.`, 
           variant: "destructive", 
           duration: 10000 
         });
         setIsResettingData(false);
         return; 
       }
+      
+      console.log(`${LOG_PREFIX} Data reset successful:`, result.message);
+      toast({ title: "Data Reset Successful", description: result.message || "Application data (excluding users) has been reset.", duration: 7000 });
+      setShowResetDataDialog(false);
+      setResetConfirmationInput("");
 
-      const contentType = response.headers.get("content-type");
-      if (contentType && contentType.indexOf("application/json") !== -1) {
-        const result = await response.json();
-        if (result.error) {
-            console.error(`${LOG_PREFIX} Data reset API returned JSON error:`, result);
-            toast({ title: "Data Reset Failed", description: result.error, variant: "destructive", duration: 10000 });
-        } else {
-            console.log(`${LOG_PREFIX} Data reset successful:`, result.message);
-            toast({ title: "Data Reset Successful", description: result.message || "Application data (excluding users) has been reset.", duration: 7000 });
-            setShowResetDataDialog(false);
-            setResetConfirmationInput("");
-        }
-      } else {
-        const responseText = await response.text();
-        console.error(`${LOG_PREFIX} Data reset API returned non-JSON response despite OK status. Status: ${response.status}. Response Text:`, responseText);
-        toast({
-          title: "Data Reset Failed",
-          description: `Server returned an unexpected response type (Status: ${response.status}). Content: ${responseText.substring(0,100)}...`,
-          variant: "destructive",
-          duration: 10000,
-        });
-      }
     } catch (error: any) {
       console.error(`${LOG_PREFIX} Error calling data reset API (client-side):`, error.message, error.stack);
       toast({ title: "Client-side Reset Error", description: `Failed to initiate data reset. Error: ${error.message}`, variant: "destructive", duration: 10000 });
@@ -735,9 +719,11 @@ export default function SettingsPage() {
                 <ul className="list-disc list-inside text-sm text-destructive pl-4">
                   <li>All Stock Items (Master & Stall)</li>
                   <li>All Sales Transactions</li>
-                  <li>All Stock Movement Logs</li>
+                  <li>All Food Stall Expenses & Sales</li>
+                  <li>All Stock Movement & Food Stall Logs</li>
                   <li>All Sites and Stalls</li>
                   <li>All Google OAuth Tokens</li>
+                  <li>All Food Vendors</li>
                 </ul>
                 <div className="font-bold">The 'users' collection (user accounts, roles, and preferences) WILL NOT be deleted.</div>
                 <div>To proceed, please type "<strong className="text-foreground">{RESET_CONFIRMATION_PHRASE}</strong>" into the box below.</div>

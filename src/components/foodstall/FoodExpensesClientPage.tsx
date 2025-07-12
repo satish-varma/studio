@@ -39,6 +39,8 @@ import {
 import { cn } from "@/lib/utils";
 import { format, subDays, startOfDay, endOfDay, startOfMonth, startOfWeek } from "date-fns";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card";
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
 import { getAuth } from "firebase/auth";
 
 
@@ -56,7 +58,6 @@ const db = getFirestore(getApp());
 const firebaseAuth = getAuth(getApp());
 
 type GoogleSheetAction = "importFoodExpenses" | "exportFoodExpenses";
-type DataTypeForSheets = 'foodExpenses';
 
 type DateFilterOption = 'today' | 'last_7_days' | 'this_month' | 'all_time';
 

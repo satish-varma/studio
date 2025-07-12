@@ -200,7 +200,6 @@ export default function RecordFoodExpensePage() {
             To record a food stall expense, please ensure you have an active
             Site and a specific Stall selected in the header. This context is
             necessary to correctly associate the expense.
-             {user.role === 'manager' && !activeStallId && activeSiteId && " As a manager, you can select a specific stall from the header dropdown to proceed."}
           </AlertDescription>
         </Alert>
       </div>

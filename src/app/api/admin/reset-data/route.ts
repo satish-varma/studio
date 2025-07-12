@@ -1,86 +1,12 @@
 
+
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import admin, { initializeApp, getApps, getApp, App as AdminApp, cert, applicationDefault } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { getFirestore as getAdminFirestore, CollectionReference, Query, WriteBatch } from 'firebase-admin/firestore';
+import { initializeAdminSdk } from '@/lib/firebaseAdmin'; // Import the robust initializer
 
 const LOG_PREFIX = "[API:ResetData]";
-
-const adminAppInstances = new Map<string, AdminApp>();
-let adminSdkInitializationError: string | null = null;
-
-function initializeAdminSdkForReset(): AdminApp | undefined {
-  const instanceSuffix = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
-  const UNIQUE_APP_NAME = `firebase-admin-app-reset-data-route-${instanceSuffix}`;
-
-  if (adminAppInstances.has(UNIQUE_APP_NAME) && adminAppInstances.get(UNIQUE_APP_NAME)?.options) {
-    const existingApp = adminAppInstances.get(UNIQUE_APP_NAME)!;
-    if (existingApp.options.projectId) {
-      console.log(`${LOG_PREFIX} Re-using existing valid Admin SDK instance for reset: ${UNIQUE_APP_NAME}`);
-      return existingApp;
-    }
-    console.warn(`${LOG_PREFIX} Existing Admin SDK instance ${UNIQUE_APP_NAME} was invalid (no projectId). Attempting re-initialization.`);
-  }
-  
-  adminSdkInitializationError = null; 
-  let newAdminApp: AdminApp | undefined;
-  let methodUsed = "";
-  let parsedServiceAccountProjectId: string | undefined = undefined;
-
-  try {
-    const serviceAccountJsonEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
-    const serviceAccountPathEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-
-    if (serviceAccountJsonEnv) {
-      methodUsed = "JSON_ENV";
-      console.log(`${LOG_PREFIX} Found GOOGLE_APPLICATION_CREDENTIALS_JSON. Length: ${serviceAccountJsonEnv.length}. Attempting to parse...`);
-      let serviceAccount;
-      try {
-        serviceAccount = JSON.parse(serviceAccountJsonEnv);
-        parsedServiceAccountProjectId = serviceAccount.project_id;
-      } catch (parseError: any) {
-        adminSdkInitializationError = `Failed to parse GOOGLE_APPLICATION_CREDENTIALS_JSON. Error: ${parseError.message}. JSON (first 100 chars): ${serviceAccountJsonEnv.substring(0, 100)}`;
-        throw new Error(adminSdkInitializationError);
-      }
-      if (!parsedServiceAccountProjectId) {
-        adminSdkInitializationError = `GOOGLE_APPLICATION_CREDENTIALS_JSON was parsed, but 'project_id' is missing.`;
-        throw new Error(adminSdkInitializationError);
-      }
-      newAdminApp = initializeApp({ credential: cert(serviceAccount) }, UNIQUE_APP_NAME);
-    } else if (serviceAccountPathEnv) {
-      methodUsed = "PATH_ENV";
-      console.log(`${LOG_PREFIX} Found GOOGLE_APPLICATION_CREDENTIALS (path): ${serviceAccountPathEnv}. Initializing with file path.`);
-      newAdminApp = initializeApp({ credential: applicationDefault() }, UNIQUE_APP_NAME); // Use applicationDefault()
-    } else {
-      methodUsed = "ADC";
-      console.log(`${LOG_PREFIX} No specific service account JSON or path found. Attempting generic Application Default Credentials (ADC).`);
-      newAdminApp = initializeApp(undefined, UNIQUE_APP_NAME);
-    }
-    
-    if (!newAdminApp) {
-      adminSdkInitializationError = `Admin SDK initializeApp call with ${methodUsed} returned undefined for app name ${UNIQUE_APP_NAME}. This is highly unusual.`;
-      throw new Error(adminSdkInitializationError);
-    }
-
-    if (!newAdminApp.options.projectId) {
-      adminSdkInitializationError = `Admin SDK initialized via ${methodUsed}, but the resulting app instance (name: ${newAdminApp.name}) is missing a projectId. Parsed SA project_id: '${parsedServiceAccountProjectId || 'N/A for PATH/ADC'}'. App options: ${JSON.stringify(newAdminApp.options)}.`;
-      throw new Error(adminSdkInitializationError);
-    }
-    
-    console.log(`${LOG_PREFIX} Admin SDK initialized successfully via ${methodUsed} for reset. App name: ${newAdminApp.name}, Project ID: ${newAdminApp.options.projectId}`);
-    adminAppInstances.set(UNIQUE_APP_NAME, newAdminApp);
-    return newAdminApp;
-
-  } catch (error: any) {
-    if (!adminSdkInitializationError) { 
-        adminSdkInitializationError = `Initialization attempt (${methodUsed}) for reset failed. Error: ${error.message}.`;
-    }
-    console.error(`${LOG_PREFIX} Firebase Admin SDK initialization CRITICAL error for reset: ${adminSdkInitializationError}`, error.stack);
-    return undefined;
-  }
-}
-
 
 const COLLECTIONS_TO_DELETE = [
   "stockItems",
@@ -88,7 +14,11 @@ const COLLECTIONS_TO_DELETE = [
   "stockMovementLogs",
   "sites",
   "stalls",
-  "userGoogleOAuthTokens"
+  "userGoogleOAuthTokens",
+  "foodItemExpenses",
+  "foodSaleTransactions",
+  "foodStallActivityLogs",
+  "foodVendors",
 ];
 const BATCH_SIZE = 500;
 
@@ -144,13 +74,12 @@ async function deleteQueryBatch(
 export async function POST(request: NextRequest) {
   console.log(`${LOG_PREFIX} POST request received.`);
   
-  const adminAppInstance = initializeAdminSdkForReset();
-  if (!adminAppInstance || !adminAppInstance.options.projectId) {
-    const detailMessage = `Firebase Admin SDK not properly initialized or is in an invalid state for reset. ${adminSdkInitializationError || "An unknown initialization error occurred."}`;
-    console.error(`${LOG_PREFIX} Critical Failure: ${detailMessage}`);
-    return NextResponse.json({ error: 'Server Configuration Error.', details: detailMessage }, { status: 500 });
+  const { adminApp, error } = initializeAdminSdk();
+  if (error || !adminApp) {
+    console.error(`${LOG_PREFIX} Critical Failure: ${error}`);
+    return NextResponse.json({ error: 'Server Configuration Error.', details: error }, { status: 500 });
   }
-  const adminDbInstance = getAdminFirestore(adminAppInstance);
+  const adminDbInstance = getAdminFirestore(adminApp);
 
 
   let callingUserUid: string | undefined;
@@ -161,7 +90,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized: Missing or invalid token format.' }, { status: 401 });
     }
     const idToken = authorization.split('Bearer ')[1];
-    const decodedToken = await getAdminAuth(adminAppInstance).verifyIdToken(idToken);
+    const decodedToken = await getAdminAuth(adminApp).verifyIdToken(idToken);
     callingUserUid = decodedToken.uid;
 
     const adminUserDocRef = adminDbInstance.collection('users').doc(callingUserUid);
