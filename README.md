@@ -48,28 +48,36 @@ git clone <repository-url>
 cd stallsync-project # Or your project directory name
 ```
 
-### 2. Environment Variables
+### 2. Environment Variables (**CRITICAL STEP**)
 
-Create a `.env.local` file in the root of your project. This file is crucial for connecting to your Firebase project and other services.
-**Refer to the "Environment Variables (.env.local)" section in [DOCUMENTATION.md](DOCUMENTATION.md) for a complete list of required variables and how to obtain them.**
+This application **WILL NOT RUN** without your Firebase project credentials. You must create a `.env.local` file in the root of your project to provide these keys.
+
+**Refer to the "Environment Variables (.env.local)" section in [DOCUMENTATION.md](DOCUMENTATION.md) for a complete list of required variables and detailed steps on how to obtain them.**
 
 _Example `.env.local` structure:_
 ```env
-# Firebase Client SDK Configuration
-NEXT_PUBLIC_FIREBASE_API_KEY=YOUR_FIREBASE_API_KEY
-# ... other Firebase client vars
+# Firebase Client SDK Configuration (from Firebase Console -> Project Settings -> Your Web App)
+NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSy...
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your-project-id.firebaseapp.com
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=your-project-id
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your-project-id.appspot.com
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=...
+NEXT_PUBLIC_FIREBASE_APP_ID=1:...:web:...
 
-# Firebase Admin SDK Configuration (if applicable, see docs)
-# GOOGLE_APPLICATION_CREDENTIALS_JSON='{...}' # Or use GOOGLE_APPLICATION_CREDENTIALS path
+# Firebase Admin SDK Configuration (for server-side operations)
+# See documentation for how to get this JSON from Firebase Console -> Service Accounts
+GOOGLE_APPLICATION_CREDENTIALS_JSON='{"type": "service_account", ...}'
 
-# Google OAuth Credentials (for Google Sheets)
-GOOGLE_CLIENT_ID=YOUR_GOOGLE_CLIENT_ID
-# ... other Google OAuth vars
+# Google OAuth Credentials (for Google Sheets feature)
+# See documentation for how to get these from Google Cloud Console
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_REDIRECT_URI=http://localhost:9002/api/auth/google/callback
 
 # Genkit/Google AI (if applicable)
-# GEMINI_API_KEY=YOUR_GEMINI_API_KEY
+# GEMINI_API_KEY=...
 ```
-**Ensure `.env.local` is added to your `.gitignore` file.**
+**IMPORTANT:** After creating or modifying `.env.local`, you **must restart your Next.js development server** for the changes to take effect.
 
 ### 3. Firebase Project Setup
 
@@ -88,33 +96,20 @@ npm install
 yarn install
 ```
 
-### 5. Deploy Firebase Functions (if applicable)
-
-The application uses a Firebase Function (`createAuthUser`) for admin-initiated user creation via the `/api/admin/create-user` route, though the API route itself uses the Admin SDK. If you plan to use the callable Firebase Function directly or other functions are added, deploy them:
-```bash
-# If you have a 'functions' directory:
-cd functions
-npm install # If not already done at root
-npm run build
-cd ..
-firebase deploy --only functions
-```
-Alternatively, most backend logic is handled by Next.js API routes which are deployed with the Next.js app.
-
-### 6. Run the Development Server
+### 5. Run the Development Server
 
 ```bash
 npm run dev
 ```
 The application will typically be available at `http://localhost:9002`.
 
-### 7. Build for Production
+### 6. Build for Production
 
 ```bash
 npm run build
 ```
 
-### 8. Start Production Server (Locally)
+### 7. Start Production Server (Locally)
 
 ```bash
 npm run start

@@ -28,17 +28,29 @@
 // 6. Ensure these environment variables are also set in your hosting environment (e.g., Firebase Hosting, Vercel) for production.
 // =================================================================================
 const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "YOUR_API_KEY_HERE",
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "YOUR_PROJECT.firebaseapp.com",
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "YOUR_PROJECT_ID",
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "YOUR_PROJECT.appspot.com",
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "YOUR_MESSAGING_SENDER_ID",
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "YOUR_APP_ID",
-  // measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID || "YOUR_MEASUREMENT_ID" // Optional, for Google Analytics
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID
+};
+
+// This function checks if the essential Firebase config values are present.
+// It helps diagnose setup issues by providing a clear error message.
+export const isFirebaseConfigValid = () => {
+    return !!(
+        firebaseConfig.apiKey &&
+        firebaseConfig.authDomain &&
+        firebaseConfig.projectId &&
+        firebaseConfig.apiKey !== "YOUR_API_KEY_HERE" && // Check against placeholder
+        firebaseConfig.projectId !== "YOUR_PROJECT_ID" // Check against placeholder
+    );
 };
 
 
-// IMPORTANT: 
+// IMPORTANT:
 // This file (`src/lib/firebaseConfig.ts`) reads your Firebase project configuration.
 // The recommended way to provide these values is through environment variables (see steps above).
 // The `AuthContext.tsx` file (or a similar Firebase initialization file in your project)
@@ -52,4 +64,3 @@ const firebaseConfig = {
 // 3. You have restarted your Next.js development server after creating or modifying `.env.local`.
 
 export { firebaseConfig };
-

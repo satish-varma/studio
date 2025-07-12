@@ -15,7 +15,7 @@ import {
   type User as FirebaseUser
 } from 'firebase/auth';
 import { getFirestore, doc, getDoc, setDoc, onSnapshot, type Firestore, Timestamp } from 'firebase/firestore';
-import { firebaseConfig } from '@/lib/firebaseConfig';
+import { firebaseConfig, isFirebaseConfigValid } from '@/lib/firebaseConfig';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -25,18 +25,23 @@ let _app: FirebaseApp | undefined;
 let auth: Auth | undefined;
 let db: Firestore | undefined;
 
-if (!getApps().length) {
-  try {
-    console.log(`${LOG_PREFIX_CONTEXT} Attempting Firebase app initialization...`);
-    _app = initializeApp(firebaseConfig);
-    console.log(`${LOG_PREFIX_CONTEXT} Firebase app initialized. Project ID from config:`, firebaseConfig.projectId);
-  } catch (error: any) {
-    console.error(`${LOG_PREFIX_CONTEXT} Firebase app initialization error:`, error.message, error.stack);
-  }
+if (isFirebaseConfigValid()) {
+    if (!getApps().length) {
+      try {
+        console.log(`${LOG_PREFIX_CONTEXT} Attempting Firebase app initialization...`);
+        _app = initializeApp(firebaseConfig);
+        console.log(`${LOG_PREFIX_CONTEXT} Firebase app initialized. Project ID from config:`, firebaseConfig.projectId);
+      } catch (error: any) {
+        console.error(`${LOG_PREFIX_CONTEXT} Firebase app initialization error:`, error.message, error.stack);
+      }
+    } else {
+      _app = getApp();
+      console.log(`${LOG_PREFIX_CONTEXT} Firebase app already initialized. Project ID from app options:`, _app?.options?.projectId);
+    }
 } else {
-  _app = getApp();
-  console.log(`${LOG_PREFIX_CONTEXT} Firebase app already initialized. Project ID from app options:`, _app?.options?.projectId);
+    console.error(`${LOG_PREFIX_CONTEXT} Firebase config is not valid. Skipping Firebase initialization.`);
 }
+
 
 if (_app) {
   try {
@@ -127,8 +132,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     console.log(`${LOG_PREFIX_CONTEXT} useEffect: Initializing auth state listener.`);
-    if (!firebaseConfig || firebaseConfig.projectId === "YOUR_PROJECT_ID" || !firebaseConfig.projectId ||
-        firebaseConfig.apiKey === "YOUR_API_KEY_HERE" || !firebaseConfig.apiKey || firebaseConfig.apiKey === "") {
+    if (!isFirebaseConfigValid()) {
       const configErrorMsg = `${LOG_PREFIX_CONTEXT} CRITICAL CONFIG FAILURE: Firebase 'projectId' or 'apiKey' is a placeholder or missing in firebaseConfig. Please review your '.env.local' file and ensure NEXT_PUBLIC_FIREBASE_PROJECT_ID and NEXT_PUBLIC_FIREBASE_API_KEY are correctly set. Then, restart your development server. This is likely due to an incomplete Firebase project setup or missing environment variables.`;
       console.error(configErrorMsg, { configUsed: firebaseConfig });
       setInitializationError(configErrorMsg);

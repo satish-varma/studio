@@ -1,34 +1,21 @@
 
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { initializeApp, getApps, getApp, App as AdminApp } from 'firebase-admin/app';
 import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
 import { google, Auth } from 'googleapis';
 import type { UserGoogleOAuthTokens } from '@/types'; 
+import { initializeAdminSdk } from '@/lib/firebaseAdmin';
 
 const LOG_PREFIX = "[API:GoogleCallback]";
 
 // Ensure Firebase Admin SDK is initialized
-let adminApp: AdminApp | undefined;
+const { adminApp, error: adminAppError } = initializeAdminSdk();
 let adminDb: ReturnType<typeof getAdminFirestore> | undefined;
-
-if (!getApps().length) {
-  try {
-    adminApp = initializeApp(); 
-    console.log(`${LOG_PREFIX} Firebase Admin SDK initialized successfully.`);
-  } catch (e: any) {
-    console.error(`${LOG_PREFIX} Firebase Admin SDK initialization error:`, e.message);
-    adminApp = undefined;
-  }
-} else {
-  adminApp = getApp();
-  console.log(`${LOG_PREFIX} Firebase Admin SDK already initialized, got existing instance.`);
-}
 
 if (adminApp) {
     adminDb = getAdminFirestore(adminApp);
 } else {
-    console.error(`${LOG_PREFIX} CRITICAL: Firebase Admin App is not initialized. Firestore Admin DB cannot be obtained.`);
+    console.error(`${LOG_PREFIX} CRITICAL: Firebase Admin App is not initialized due to error: ${adminAppError}. Firestore Admin DB cannot be obtained.`);
 }
 
 // Google OAuth2 Client Setup
@@ -75,7 +62,7 @@ export async function GET(request: NextRequest) {
   try {
     const userRef = adminDb.collection('users').doc(uid);
     const userSnap = await userRef.get();
-    if (!userSnap.exists) { // Corrected: .exists is a property
+    if (!userSnap.exists) {
         console.warn(`${LOG_PREFIX} UID from state ('${uid}') does not correspond to an existing user in Firestore.`);
         return NextResponse.redirect(new URL('/settings?error=oauth_invalid_user_state&details=User identified by state parameter not found.', request.nextUrl.origin), { status: 302 });
     }

@@ -8,7 +8,7 @@
 3.  [Project Structure](#project-structure)
 4.  [Setup and Installation](#setup-and-installation)
     *   [Prerequisites](#prerequisites)
-    *   [Environment Variables (.env.local)](#environment-variables-envlocal)
+    *   [Environment Variables (.env.local) - **CRITICAL STEP**](#environment-variables-envlocal---critical-step)
     *   [Firebase Project Setup](#firebase-project-setup)
     *   [Running the Application](#running-the-application)
 5.  [Core Features & Functionality](#core-features--functionality)
@@ -126,49 +126,59 @@ A brief overview of important directories:
 *   npm or yarn
 *   Firebase CLI (`npm install -g firebase-tools`)
 
-### Environment Variables (.env.local)
+### Environment Variables (.env.local) - **CRITICAL STEP**
 
-Create a `.env.local` file in the root of your project. This file is crucial for connecting to your Firebase project and other services. **Do not commit this file to version control.**
+The application **will not function** without connecting to your Firebase project. This connection is configured using environment variables.
 
-```env
-# Firebase Client SDK Configuration (for Next.js frontend)
-NEXT_PUBLIC_FIREBASE_API_KEY=YOUR_FIREBASE_API_KEY
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=YOUR_FIREBASE_AUTH_DOMAIN
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=YOUR_FIREBASE_PROJECT_ID
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=YOUR_FIREBASE_STORAGE_BUCKET
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=YOUR_FIREBASE_MESSAGING_SENDER_ID
-NEXT_PUBLIC_FIREBASE_APP_ID=YOUR_FIREBASE_APP_ID
-# NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=YOUR_FIREBASE_MEASUREMENT_ID (Optional)
+1.  **Create the File**: In the root directory of your project, create a new file named `.env.local`. This file is ignored by Git and should **never** be committed to your repository.
 
-# Firebase Admin SDK Configuration (for Cloud Functions & Next.js API Routes acting as backend)
-# This is typically a JSON string for the service account key.
-# Ensure it's properly escaped if stored directly as a string.
-# For deployed environments, it's often better to set this via the hosting provider's secret management.
-# For local Firebase Emulator Suite, GOOGLE_APPLICATION_CREDENTIALS might not be needed if emulators are auto-configured.
-# If deploying to Firebase Hosting/Functions or App Hosting, these can often be auto-detected or configured in the environment.
-# GOOGLE_APPLICATION_CREDENTIALS_JSON='{"type": "service_account", ...}' # Option 1: Paste JSON content as string
-# GOOGLE_APPLICATION_CREDENTIALS=/path/to/your/serviceAccountKey.json # Option 2: Path to service account file (preferred for local dev if not using JSON string)
+2.  **Add Your Firebase Keys**: Copy the following template into your `.env.local` file and replace the placeholder values with your actual Firebase project credentials.
 
+    ```env
+    # --------------------------------------------------------------------------
+    # FIREBASE CLIENT SDK CONFIGURATION (REQUIRED FOR THE APP TO RUN)
+    # Get these from Firebase Console > Project Settings (⚙️) > Your Web App
+    # --------------------------------------------------------------------------
+    NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSy...
+    NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your-project-id.firebaseapp.com
+    NEXT_PUBLIC_FIREBASE_PROJECT_ID=your-project-id
+    NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your-project-id.appspot.com
+    NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=...
+    NEXT_PUBLIC_FIREBASE_APP_ID=1:...:web:...
+    # NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=G-... (Optional, for Google Analytics)
 
-# Google OAuth Credentials (for Google Sheets API integration)
-# These should NOT be prefixed with NEXT_PUBLIC_ as they are sensitive.
-GOOGLE_CLIENT_ID=YOUR_GOOGLE_OAUTH_CLIENT_ID
-GOOGLE_CLIENT_SECRET=YOUR_GOOGLE_OAUTH_CLIENT_SECRET
-# Example for local dev: http://localhost:9002/api/auth/google/callback
-# Example for prod: https://your-app-domain.com/api/auth/google/callback
-GOOGLE_REDIRECT_URI=YOUR_CONFIGURED_GOOGLE_OAUTH_REDIRECT_URI
+    # --------------------------------------------------------------------------
+    # FIREBASE ADMIN SDK CONFIGURATION (REQUIRED FOR SERVER-SIDE ACTIONS)
+    # Get this from Firebase Console > Project Settings > Service Accounts > Generate new private key
+    # Copy the entire contents of the downloaded JSON file and paste it here as a single-line string.
+    # --------------------------------------------------------------------------
+    GOOGLE_APPLICATION_CREDENTIALS_JSON='{"type": "service_account", "project_id": "...", ...}'
 
-# Genkit/Google AI - If using a specific API key for Genkit (often configured via gcloud auth or service account)
-# GEMINI_API_KEY=YOUR_GEMINI_API_KEY (If not using Application Default Credentials)
-```
+    # --------------------------------------------------------------------------
+    # GOOGLE OAUTH CREDENTIALS (for Google Sheets integration feature)
+    # Get these from Google Cloud Console > APIs & Services > Credentials > Create OAuth 2.0 Client ID
+    # --------------------------------------------------------------------------
+    GOOGLE_CLIENT_ID=...
+    GOOGLE_CLIENT_SECRET=...
+    GOOGLE_REDIRECT_URI=http://localhost:9002/api/auth/google/callback
+
+    # --------------------------------------------------------------------------
+    # GENKIT / GOOGLE AI (if using specific API key)
+    # --------------------------------------------------------------------------
+    # GEMINI_API_KEY=...
+    ```
+
+3.  **Restart Your Server**: After saving the `.env.local` file, you **must stop and restart** your Next.js development server for the changes to take effect.
+    ```bash
+    # If server is running, press Ctrl+C, then:
+    npm run dev
+    ```
 
 *   **Firebase Client Config:** Obtain these from your Firebase project settings > Your apps > Select your web app > Firebase SDK snippet (Config).
-*   **Firebase Admin SDK (`GOOGLE_APPLICATION_CREDENTIALS_JSON` or `GOOGLE_APPLICATION_CREDENTIALS` path):**
+*   **Firebase Admin SDK (`GOOGLE_APPLICATION_CREDENTIALS_JSON`):**
     *   Go to Firebase Console > Project Settings > Service accounts.
     *   Generate a new private key (JSON file).
-    *   **Option 1 (Path - Recommended for local dev if not using functions emulator directly):** Set the `GOOGLE_APPLICATION_CREDENTIALS` environment variable in your terminal or `.env.local` to the *path* of this downloaded JSON file (e.g., `GOOGLE_APPLICATION_CREDENTIALS=/path/to/your/serviceAccountKey.json`). Next.js and Firebase Admin SDK might pick this up automatically.
-    *   **Option 2 (JSON String):** Copy the *contents* of the JSON file into the `GOOGLE_APPLICATION_CREDENTIALS_JSON` variable in `.env.local` as a single-line, properly escaped JSON string. This is useful for environments where setting a file path is difficult.
-    *   **For Cloud Functions & Firebase Hosting/App Hosting:** These services often have their own mechanisms for service account authentication (e.g., using the runtime service account). The Admin SDK `initializeApp()` without arguments will try to use Application Default Credentials.
+    *   Copy the *entire contents* of the JSON file and paste it as a single-line string into the `GOOGLE_APPLICATION_CREDENTIALS_JSON` variable in `.env.local`.
 *   **Google OAuth Credentials:**
     *   Go to Google Cloud Console > APIs & Services > Credentials.
     *   Create an OAuth 2.0 Client ID (for Web application).
@@ -645,5 +655,3 @@ Making StallSync fully production-ready involves several key areas beyond core f
     *   **Consult Legal Advice:** For production applications handling sensitive user data or operating in regulated industries, consult with a legal professional to ensure compliance with all applicable laws and regulations.
 
 This document should give you a solid foundation. Remember that documentation is a living thing and should be updated as the application evolves!
-
-    
