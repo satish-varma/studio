@@ -74,7 +74,7 @@ const navItems: NavItem[] = [
       { href: "/foodstall/sales", label: "Sales Summaries", roles: ['staff', 'manager', 'admin'] },
       { href: "/foodstall/expenses", label: "Expense History", roles: ['staff', 'manager', 'admin'] },
       { href: "/foodstall/reports", label: "Reports", roles: ['manager', 'admin'] },
-      { href: "/foodstall/activity-log", label: "Activity Log", roles: ['manager', 'admin'] },
+      { href: "/foodstall/activity-log", label: "Activity Log", roles: ['admin'] },
     ]
   },
 
