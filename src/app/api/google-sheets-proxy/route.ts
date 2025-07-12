@@ -67,7 +67,14 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const body = await request.json();
+    let body;
+    try {
+        body = await request.json();
+    } catch (jsonError: any) {
+        console.error(`${LOG_PREFIX} Invalid JSON in request body:`, jsonError.message);
+        return NextResponse.json({ error: "Invalid JSON in request body.", details: jsonError.message }, { status: 400 });
+    }
+
     const { action, dataType, sheetId, sheetName = 'Sheet1' } = body;
     console.log(`${LOG_PREFIX} Received request. Action: ${action}, DataType: ${dataType}, SheetID: ${sheetId || '(New Sheet)'}, SheetName: ${sheetName}`);
 
@@ -600,14 +607,8 @@ export async function POST(request: NextRequest) {
         });
         return NextResponse.json({ error: 'Google authorization is invalid or expired. Please re-authorize.', needsAuth: true, authUrl: authUrl }, { status: 403 });
     }
-     // Handle JSON parsing error from request.json()
-    if (error instanceof SyntaxError && error.message.includes("JSON")) {
-        console.error(`${LOG_PREFIX} Invalid JSON in request body for user ${uid || 'unknown_user'}:`, error.message);
-        return NextResponse.json({ error: "Invalid JSON in request body.", details: error.message }, { status: 400 });
-    }
     
     // Generic server error
     return NextResponse.json({ error: error.message || 'An unexpected error occurred on the server.', code: error.code, details: error.response?.data?.error_description }, { status: 500 });
   }
 }
-
