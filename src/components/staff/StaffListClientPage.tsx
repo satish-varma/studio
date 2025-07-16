@@ -50,6 +50,7 @@ export default function StaffListClientPage() {
     users,
     sites,
     stalls,
+    staffDetails,
     loading,
     error,
     handleCreateUserFirestoreDoc,
@@ -130,6 +131,7 @@ export default function StaffListClientPage() {
       <StaffListTable 
         users={staffUsers} 
         sitesMap={sitesMap} 
+        staffDetailsMap={staffDetails}
         selectedUserIds={selectedUserIds}
         onSelectionChange={setSelectedUserIds}
       />

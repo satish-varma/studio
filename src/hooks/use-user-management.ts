@@ -20,7 +20,7 @@ import { getAuth } from "firebase/auth";
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import type { AppUser, UserRole, Site, Stall, UserStatus } from "@/types";
+import type { AppUser, UserRole, Site, Stall, UserStatus, StaffDetails } from "@/types";
 import { logStaffActivity } from "@/lib/staffLogger";
 
 const LOG_PREFIX = "[useUserManagement]";
@@ -40,6 +40,7 @@ export function useUserManagement() {
   const { toast } = useToast();
 
   const [users, setUsers] = useState<AppUser[]>([]);
+  const [staffDetails, setStaffDetails] = useState<Map<string, StaffDetails>>(new Map());
   const [sites, setSites] = useState<Site[]>([]);
   const [stalls, setStalls] = useState<Stall[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,6 +64,7 @@ export function useUserManagement() {
     const usersQuery = query(collection(db, "users"), orderBy("displayName", "asc"));
     const sitesQuery = query(collection(db, "sites"), orderBy("name", "asc"));
     const stallsQuery = query(collection(db, "stalls"), orderBy("name", "asc"));
+    const staffDetailsQuery = query(collection(db, "staffDetails"));
 
     const unsubUsers = onSnapshot(usersQuery, (snapshot) => {
       setUsers(snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser)));
@@ -85,11 +87,21 @@ export function useUserManagement() {
       setError("Failed to load stalls list.");
     });
 
+    const unsubStaffDetails = onSnapshot(staffDetailsQuery, (snapshot) => {
+        const newDetailsMap = new Map<string, StaffDetails>();
+        snapshot.forEach(doc => newDetailsMap.set(doc.id, doc.data() as StaffDetails));
+        setStaffDetails(newDetailsMap);
+    }, (err) => {
+        console.error(`${LOG_PREFIX} Error fetching staff details:`, err);
+        setError("Failed to load staff details.");
+    });
+
     // Combine loading states
     Promise.all([
       new Promise(resolve => onSnapshot(usersQuery, () => resolve(true))),
       new Promise(resolve => onSnapshot(sitesQuery, () => resolve(true))),
       new Promise(resolve => onSnapshot(stallsQuery, () => resolve(true))),
+      new Promise(resolve => onSnapshot(staffDetailsQuery, () => resolve(true))),
     ]).then(() => {
         setLoading(false);
     }).catch(err => {
@@ -101,6 +113,7 @@ export function useUserManagement() {
       unsubUsers();
       unsubSites();
       unsubStalls();
+      unsubStaffDetails();
     };
   }, [currentUser, authLoading]);
 
@@ -278,6 +291,7 @@ export function useUserManagement() {
     users,
     sites,
     stalls,
+    staffDetails,
     loading: authLoading || loading,
     error,
     handleCreateUserFirestoreDoc,
