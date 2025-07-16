@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
@@ -378,13 +377,24 @@ export default function StaffAttendanceClientPage() {
     }
     
     if (validClears === 0) {
-        // This case is unlikely unless no staff were selected, which is checked above.
         setIsBulkUpdating(false);
         return;
     }
 
     try {
         await batch.commit();
+        
+        // Optimistically update local state
+        setAttendance(prev => {
+            const newAttendance = JSON.parse(JSON.stringify(prev || {}));
+            selectedStaffUids.forEach(uid => {
+                if (newAttendance[uid] && newAttendance[uid][dateStr]) {
+                    delete newAttendance[uid][dateStr];
+                }
+            });
+            return newAttendance;
+        });
+
         await logStaffActivity(user, {
             type: 'ATTENDANCE_MARKED',
             relatedStaffUid: 'MULTIPLE',
