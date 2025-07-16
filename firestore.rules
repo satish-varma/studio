@@ -1,4 +1,3 @@
-
 rules_version = '2';
 
 service cloud.firestore {
@@ -67,13 +66,10 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isUser(userId) || isAdmin() || isManagerRole();
       allow create: if isAdmin(); 
-      allow update: if (isUser(userId) &&
-                        !request.resource.data.keys().hasAny(['role', 'uid', 'email', 'createdAt']) &&
-                        (getAuthenticatedUserRole() == 'admin' || 
-                          (getAuthenticatedUserRole() == 'manager' && !request.resource.data.keys().hasAny(['managedSiteIds', 'defaultSiteId', 'defaultStallId'])) ||
-                          (getAuthenticatedUserRole() == 'staff' && !request.resource.data.keys().hasAny(['managedSiteIds', 'defaultSiteId', 'defaultStallId']))
-                        )
-                       ) || (isAdmin() && !request.resource.data.keys().hasAny(['uid', 'email', 'createdAt']));
+      // User can update their own non-critical fields.
+      // Admin can update any field for any user (except they can't delete themselves).
+      allow update: if (isUser(userId) && !request.resource.data.keys().hasAny(['role', 'uid', 'email', 'createdAt', 'managedSiteIds', 'defaultSiteId', 'defaultStallId', 'status'])) 
+                   || isAdmin();
       allow delete: if isAdmin() && request.auth.uid != userId;
     }
     match /users {
@@ -289,6 +285,24 @@ service cloud.firestore {
     
     // --- Staff Management Specific Rules ---
     
+    match /staffDetails/{userId} {
+      // Helper function to get the site ID of the staff member being managed
+      function getStaffSiteId() {
+        return getUserData(userId).defaultSiteId;
+      }
+      
+      // Staff can read their own details.
+      // Admins can read any staff details.
+      // Managers can read details of staff assigned to a site they manage.
+      allow read: if isUser(userId) || isAdmin() || (isManagerRole() && isManagerOfSite(getStaffSiteId()));
+
+      // Only Admins or Managers of the staff's assigned site can create/update details.
+      allow create, update: if isAdmin() || (isManagerRole() && isManagerOfSite(getStaffSiteId()));
+
+      // Only Admins can delete staff details records.
+      allow delete: if isAdmin();
+    }
+    
     match /staffAttendance/{attendanceId} {
       // Managers can create/update attendance for staff in their managed sites. Admins can do so for any site.
       allow create, update: if isSignedIn() &&
@@ -308,8 +322,8 @@ service cloud.firestore {
 
     match /advances/{advanceId} {
       // Managers can create advance records for staff in their managed sites. Admins can do so for any site.
-      // This rule assumes the 'advances' documents contain a siteId.
-       allow create: if isSignedIn() &&
+      // This rule requires the `advances` document to have a `siteId` field.
+      allow create: if isSignedIn() &&
                       request.resource.data.recordedByUid == request.auth.uid &&
                       request.resource.data.siteId != null &&
                       (isAdmin() || (isManagerRole() && isManagerOfSite(request.resource.data.siteId)));
@@ -321,15 +335,6 @@ service cloud.firestore {
     }
     match /advances {
       allow list: if isSignedIn() && (isAdmin() || isManagerRole());
-    }
-
-    match /staffDetails/{userId} {
-      // A user can read their own details.
-      // Admins can read any. Managers can read details for staff in their managed sites.
-      allow read: if isUser(userId) || isAdmin() || (isManagerRole() && isManagerOfSite(getUserData(userId).defaultSiteId));
-      // Only Admins or managers of the user's site can write/update.
-      allow write: if isAdmin() || (isManagerRole() && isManagerOfSite(getUserData(userId).defaultSiteId));
-      allow delete: if isAdmin();
     }
   }
 }
