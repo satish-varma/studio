@@ -8,3 +8,4 @@ export type { StockMovementLog, StockMovementType } from './log';
 export type { FoodVendor, FoodItemExpense, FoodSaleTransaction, FoodExpenseCategory, FoodSaleTransactionFormValues } from './food';
 export type { FoodStallActivityLog, FoodStallActivityType } from './food_log';
 export type { StaffDetails, StaffAttendance, SalaryAdvance, AttendanceStatus } from './staff';
+export type { Holiday } from './holiday';

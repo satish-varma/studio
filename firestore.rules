@@ -1,3 +1,4 @@
+
 rules_version = '2';
 
 service cloud.firestore {
@@ -66,11 +67,9 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isUser(userId) || isAdmin() || isManagerRole();
       allow create: if isAdmin();
-      // Admins can update any user.
-      // Other users can only update their own document, and cannot change protected fields.
-      allow update: if isAdmin() ||
-                      (isUser(userId) &&
-                       !request.resource.data.keys().hasAny(['role', 'uid', 'email', 'createdAt', 'status', 'managedSiteIds', 'defaultSiteId', 'defaultStallId']));
+      allow update: if (isUser(userId) &&
+                        !request.resource.data.keys().hasAny(['role', 'uid', 'email', 'createdAt', 'managedSiteIds', 'defaultSiteId', 'defaultStallId', 'status']))
+                        || (isAdmin() && request.auth.uid != userId);
       allow delete: if isAdmin() && request.auth.uid != userId;
     }
     match /users {
@@ -201,12 +200,6 @@ service cloud.firestore {
         allow list: if isAdmin() || isManagerRole();
     }
 
-    match /userGoogleOAuthTokens/{userId} {
-      allow read, write, delete: if isUser(userId);
-      allow create: if isUser(userId) &&
-                      request.resource.data.access_token is string &&
-                      request.resource.data.refresh_token is string;
-    }
     
     // --- Food Stall Specific Rules ---
     
@@ -286,24 +279,6 @@ service cloud.firestore {
     
     // --- Staff Management Specific Rules ---
     
-    match /staffDetails/{userId} {
-      // Helper function to get the site ID of the staff member being managed
-      function getStaffSiteId() {
-        return getUserData(userId).defaultSiteId;
-      }
-      
-      // Staff can read their own details.
-      // Admins can read any staff details.
-      // Managers can read details of staff assigned to a site they manage.
-      allow read: if isUser(userId) || isAdmin() || (isManagerRole() && isManagerOfSite(getStaffSiteId()));
-
-      // Only Admins or Managers of the staff's assigned site can create/update details.
-      allow create, update: if isAdmin() || (isManagerRole() && isManagerOfSite(getStaffSiteId()));
-
-      // Only Admins can delete staff details records.
-      allow delete: if isAdmin();
-    }
-    
     match /staffAttendance/{attendanceId} {
       // Managers can create/update attendance for staff in their managed sites. Admins can do so for any site.
       allow create, update: if isSignedIn() &&
@@ -336,6 +311,29 @@ service cloud.firestore {
     }
     match /advances {
       allow list: if isSignedIn() && (isAdmin() || isManagerRole());
+    }
+    
+    match /staffDetails/{userId} {
+      // Helper function to get the site ID of the staff member being managed
+      function getStaffSiteId() {
+        return getUserData(userId).defaultSiteId;
+      }
+      
+      // Staff can read their own details.
+      // Admins can read any staff details.
+      // Managers can read details of staff assigned to a site they manage.
+      allow read: if isUser(userId) || isAdmin() || (isManagerRole() && isManagerOfSite(getStaffSiteId()));
+
+      // Only Admins or Managers of the staff's assigned site can create/update details.
+      allow create, update: if isAdmin() || (isManagerRole() && isManagerOfSite(getStaffSiteId()));
+
+      // Only Admins can delete staff details records.
+      allow delete: if isAdmin();
+    }
+    
+    match /holidays/{holidayId} {
+        allow read: if isSignedIn();
+        allow write: if isAdmin();
     }
   }
 }

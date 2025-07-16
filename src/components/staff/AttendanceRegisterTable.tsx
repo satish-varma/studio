@@ -5,11 +5,12 @@ import { useState, useMemo } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { format, getDaysInMonth, startOfMonth, addDays, getDay } from 'date-fns';
 import { cn } from "@/lib/utils";
-import type { AppUser, StaffAttendance, AttendanceStatus, Site } from "@/types";
+import type { AppUser, StaffAttendance, AttendanceStatus, Site, Holiday } from "@/types";
 import { attendanceStatuses } from "@/types/staff";
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { doc, setDoc, getFirestore } from 'firebase/firestore';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface AttendanceRegisterTableProps {
   staffList: AppUser[];
@@ -17,6 +18,7 @@ interface AttendanceRegisterTableProps {
   month: Date;
   isAllSitesView: boolean;
   sitesMap: Record<string, string>;
+  holidays: Holiday[];
 }
 
 const db = getFirestore();
@@ -30,17 +32,44 @@ const statusBadgeClasses: Record<AttendanceStatus, string> = {
     "Half-day": "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/50 dark:text-blue-300 dark:border-blue-800",
 };
 
-export function AttendanceRegisterTable({ staffList, attendanceData, month, isAllSitesView, sitesMap }: AttendanceRegisterTableProps) {
-  const { user } = useAuth();
+export function AttendanceRegisterTable({ staffList, attendanceData, month, isAllSitesView, sitesMap, holidays }: AttendanceRegisterTableProps) {
+  const { user, activeSiteId } = useAuth();
   const { toast } = useToast();
   
   const daysInMonth = useMemo(() => getDaysInMonth(month), [month]);
   const firstDayOfMonth = useMemo(() => startOfMonth(month), [month]);
   const daysArray = Array.from({ length: daysInMonth }, (_, i) => addDays(firstDayOfMonth, i));
 
+  const holidaysMap = useMemo(() => {
+    const map = new Map<string, Holiday>();
+    holidays.forEach(holiday => {
+      // Key: YYYY-MM-DD_siteId (or YYYY-MM-DD_global for global holidays)
+      const key = `${holiday.date}_${holiday.siteId || 'global'}`;
+      map.set(key, holiday);
+    });
+    return map;
+  }, [holidays]);
+
+  const isHoliday = (date: Date, staffSiteId?: string | null) => {
+    const dayOfWeek = getDay(date);
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      return { holiday: true, name: "Weekend" };
+    }
+    const dateStr = format(date, 'yyyy-MM-dd');
+    const globalHoliday = holidaysMap.get(`${dateStr}_global`);
+    if (globalHoliday) return { holiday: true, name: globalHoliday.name };
+
+    if (staffSiteId) {
+      const siteHoliday = holidaysMap.get(`${dateStr}_${staffSiteId}`);
+      if (siteHoliday) return { holiday: true, name: siteHoliday.name };
+    }
+    return { holiday: false, name: null };
+  };
+
   const handleStatusChange = async (staff: AppUser, date: Date) => {
-    if (!user || !staff.defaultSiteId || isAllSitesView) {
+    if (!user || !staff.defaultSiteId || isAllSitesView || isHoliday(date, staff.defaultSiteId).holiday) {
       if(isAllSitesView) toast({title: "Read-only", description: "Select a specific site to mark attendance."});
+      if(isHoliday(date, staff.defaultSiteId).holiday) toast({ title: "Holiday", description: "Cannot mark attendance on a holiday.", variant: "default" });
       return;
     }
     
@@ -68,16 +97,16 @@ export function AttendanceRegisterTable({ staffList, attendanceData, month, isAl
   };
 
   return (
+    <TooltipProvider>
     <div className="overflow-x-auto rounded-lg border shadow-sm bg-card">
       <Table className="min-w-full border-collapse">
         <TableHeader className="sticky top-0 bg-card z-10">
           <TableRow>
             <TableHead className="sticky left-0 bg-card z-20 min-w-[200px] font-semibold text-foreground">Staff Member</TableHead>
             {daysArray.map(day => {
-              const dayOfWeek = getDay(day);
-              const isWeekend = dayOfWeek === 0; // Sunday
+              const { holiday, name } = isHoliday(day, activeSiteId); // Check holiday for the active site context for header color
               return (
-                <TableHead key={format(day, 'yyyy-MM-dd')} className={cn("text-center p-1 border-l", isWeekend && "bg-muted/60")}>
+                <TableHead key={format(day, 'yyyy-MM-dd')} className={cn("text-center p-1 border-l", holiday && "bg-muted/60")}>
                   <div className="text-xs text-muted-foreground">{format(day, 'EEE')}</div>
                   <div className="text-sm font-bold">{format(day, 'd')}</div>
                 </TableHead>
@@ -100,30 +129,45 @@ export function AttendanceRegisterTable({ staffList, attendanceData, month, isAl
                     {daysArray.map(day => {
                         const dateStr = format(day, 'yyyy-MM-dd');
                         const status = attendanceData[staff.uid]?.[dateStr]?.status;
-                        const dayOfWeek = getDay(day);
-                        const isWeekend = dayOfWeek === 0; // Sunday
+                        const { holiday, name: holidayName } = isHoliday(day, staff.defaultSiteId);
 
-                        if (status === 'Present') presentCount++;
-                        if (status === 'Absent') absentCount++;
-                        if (status === 'Leave') leaveCount++;
-                        if (status === 'Half-day') halfDayCount += 0.5; // Count half-day as 0.5 for total presence
+                        if (!holiday) {
+                            if (status === 'Present') presentCount++;
+                            if (status === 'Absent') absentCount++;
+                            if (status === 'Leave') leaveCount++;
+                            if (status === 'Half-day') {
+                                presentCount += 0.5;
+                                halfDayCount++;
+                            }
+                        }
+
+                        const cellContent = holiday ? (
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <div className="h-full w-full flex items-center justify-center text-xs text-muted-foreground">H</div>
+                                </TooltipTrigger>
+                                <TooltipContent><p>{holidayName}</p></TooltipContent>
+                            </Tooltip>
+                        ) : (
+                            <div className={cn("h-full w-full flex items-center justify-center font-bold text-xs min-h-[40px] cursor-pointer", 
+                                status ? statusBadgeClasses[status] : "hover:bg-muted/50"
+                            )}>
+                                {status ? status.charAt(0) : '-'}
+                            </div>
+                        );
 
                         return (
                             <TableCell 
                                 key={dateStr} 
-                                className={cn("text-center p-0 border-l", isWeekend && "bg-muted/60")}
+                                className={cn("text-center p-0 border-l", holiday && "bg-muted/60")}
                                 onClick={() => handleStatusChange(staff, day)}
                             >
-                                <div className={cn("h-full w-full flex items-center justify-center font-bold text-xs min-h-[40px] cursor-pointer", 
-                                  status ? statusBadgeClasses[status] : "hover:bg-muted/50"
-                                )}>
-                                    {status ? status.charAt(0) : '-'}
-                                </div>
+                               {cellContent}
                             </TableCell>
                         );
                     })}
                     <TableCell className="border-l text-center text-xs text-muted-foreground p-1">
-                        <div>P: <span className="font-bold text-green-600">{presentCount + halfDayCount}</span></div>
+                        <div>P: <span className="font-bold text-green-600">{presentCount}</span></div>
                         <div>A: <span className="font-bold text-red-600">{absentCount}</span></div>
                         <div>L: <span className="font-bold text-yellow-600">{leaveCount}</span></div>
                     </TableCell>
@@ -133,6 +177,6 @@ export function AttendanceRegisterTable({ staffList, attendanceData, month, isAl
         </TableBody>
       </Table>
     </div>
+    </TooltipProvider>
   );
 }
-
