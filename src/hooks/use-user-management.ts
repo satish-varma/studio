@@ -196,15 +196,23 @@ export function useUserManagement() {
     }
   }, [currentUser, toast]);
 
-  const handleStatusChange = useCallback(async (userId: string, newStatus: UserStatus) => {
+  const handleStatusChange = useCallback(async (userId: string, newStatus: UserStatus, exitDate?: Date | null) => {
     if (!currentUser || currentUser.role !== 'admin' || userId === currentUser.uid) {
       toast({ title: "Permission Denied", description: "You cannot change this user's status.", variant: "destructive" });
       return;
     }
     const userDocRef = doc(db, "users", userId);
     try {
-      await updateDoc(userDocRef, { status: newStatus });
-      toast({ title: "Status Updated", description: `User has been set to ${newStatus}.` });
+      const updates: Record<string, any> = { status: newStatus };
+      await updateDoc(userDocRef, updates);
+
+      if (exitDate) {
+        const detailsDocRef = doc(db, "staffDetails", userId);
+        await setDoc(detailsDocRef, { exitDate: exitDate.toISOString() }, { merge: true });
+        toast({ title: "Status & Exit Date Updated", description: `User set to ${newStatus} with exit date.` });
+      } else {
+        toast({ title: "Status Updated", description: `User has been set to ${newStatus}.` });
+      }
     } catch (error: any) {
       toast({ title: "Update Failed", description: `Could not update status: ${error.message}`, variant: "destructive" });
     }

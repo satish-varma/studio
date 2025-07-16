@@ -49,6 +49,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import UpdateStatusDialog from "./UpdateStatusDialog";
 
 interface UserTableProps {
   users: AppUser[];
@@ -59,7 +60,7 @@ interface UserTableProps {
   onDefaultSiteChange: (userId: string, newSiteId: string | null) => Promise<void>;
   onDefaultStallChange: (userId: string, newStallId: string | null) => Promise<void>;
   onManagedSitesChange: (userId: string, managedSiteIds: string[]) => Promise<void>;
-  onStatusChange: (userId: string, newStatus: UserStatus) => Promise<void>;
+  onStatusChange: (userId: string, newStatus: UserStatus, exitDate?: Date | null) => Promise<void>;
   currentUserId?: string;
 }
 
@@ -77,7 +78,6 @@ export function UserTable({
 }: UserTableProps) {
   const [isUpdatingRole, setIsUpdatingRole] = useState<string | null>(null);
   const [isUpdatingAssignment, setIsUpdatingAssignment] = useState<string | null>(null);
-  const [isUpdatingStatus, setIsUpdatingStatus] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [userToDelete, setUserToDelete] = useState<AppUser | null>(null);
 
@@ -85,6 +85,9 @@ export function UserTable({
   const [currentUserForSiteManagement, setCurrentUserForSiteManagement] = useState<AppUser | null>(null);
   const [selectedManagedSites, setSelectedManagedSites] = useState<string[]>([]);
   const [isSavingManagedSites, setIsSavingManagedSites] = useState(false);
+
+  const [userForStatusUpdate, setUserForStatusUpdate] = useState<AppUser | null>(null);
+  const [isStatusDialogOpn, setIsStatusDialogOpen] = useState(false);
 
 
   const handleRoleChangeInternal = async (userId: string, newRole: UserRole) => {
@@ -108,13 +111,6 @@ export function UserTable({
     setIsUpdatingAssignment(null);
   };
 
-  const handleStatusChangeInternal = async (userId: string, currentStatus: UserStatus) => {
-    setIsUpdatingStatus(userId);
-    const newStatus: UserStatus = currentStatus === 'active' ? 'inactive' : 'active';
-    await onStatusChange(userId, newStatus);
-    setIsUpdatingStatus(null);
-  };
-
   const handleDeleteInternal = async () => {
     if (!userToDelete) return;
     setIsDeleting(true);
@@ -136,6 +132,17 @@ export function UserTable({
     setIsSavingManagedSites(false);
     setShowManageSitesDialog(false);
     setCurrentUserForSiteManagement(null);
+  };
+  
+  const handleOpenStatusDialog = (user: AppUser) => {
+    setUserForStatusUpdate(user);
+    setIsStatusDialogOpen(true);
+  };
+
+  const handleConfirmStatusUpdate = async (userId: string, newStatus: UserStatus, exitDate?: Date | null) => {
+    await onStatusChange(userId, newStatus, exitDate);
+    setIsStatusDialogOpen(false);
+    setUserForStatusUpdate(null);
   };
 
   const formatDate = (dateString?: string) => {
@@ -265,19 +272,15 @@ export function UserTable({
                     {isCurrentUserBeingManaged && <Badge variant="outline" className="mt-1 text-xs border-primary text-primary">Current Admin</Badge>}
                   </TableCell>
                   <TableCell>
-                    {isUpdatingStatus === user.uid ? (
-                        <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                    ) : (
-                        <div className="flex items-center space-x-2">
-                            <Switch
-                                id={`status-switch-${user.uid}`}
-                                checked={userStatus === 'active'}
-                                onCheckedChange={() => handleStatusChangeInternal(user.uid, userStatus)}
-                                disabled={isCurrentUserBeingManaged}
-                            />
-                            <Label htmlFor={`status-switch-${user.uid}`} className="text-xs capitalize">{userStatus}</Label>
-                        </div>
-                    )}
+                    <div className="flex items-center space-x-2">
+                        <Switch
+                            id={`status-switch-${user.uid}`}
+                            checked={userStatus === 'active'}
+                            onCheckedChange={() => handleOpenStatusDialog(user)}
+                            disabled={isCurrentUserBeingManaged}
+                        />
+                        <Label htmlFor={`status-switch-${user.uid}`} className="text-xs capitalize">{userStatus}</Label>
+                    </div>
                   </TableCell>
                   <TableCell>
                     {isUpdatingAssignment === user.uid && (isStaff || isManager) ? (
@@ -335,6 +338,15 @@ export function UserTable({
           </TableBody>
         </Table>
       </div>
+      
+      {userForStatusUpdate && (
+        <UpdateStatusDialog
+            isOpen={isStatusDialogOpn}
+            onClose={() => setIsStatusDialogOpen(false)}
+            user={userForStatusUpdate}
+            onConfirm={handleConfirmStatusUpdate}
+        />
+      )}
 
       {userToDelete && (
         <AlertDialog open={!!userToDelete} onOpenChange={(open) => !open && setUserToDelete(null)}>
