@@ -7,11 +7,11 @@ import { Settings as SettingsIcon, Palette, BellRing, DatabaseZap, Download, Loa
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { getFirestore, collection, getDocs, query, orderBy, where, Timestamp } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
-import type { StockItem, SaleTransaction, FoodItemExpense } from "@/types";
+import type { StockItem, SaleTransaction, FoodItemExpense, Site, Stall } from "@/types";
 import { useToast } from "@/hooks/use-toast";
 import {
   AlertDialog,
@@ -52,6 +52,40 @@ export default function SettingsPage() {
   const RESET_CONFIRMATION_PHRASE = "RESET DATA";
 
   const [showManageVendorsDialog, setShowManageVendorsDialog] = useState(false);
+  
+  const [sitesMap, setSitesMap] = useState<Record<string, string>>({});
+  const [stallsMap, setStallsMap] = useState<Record<string, string>>({});
+  const [loadingContext, setLoadingContext] = useState(true);
+
+  useEffect(() => {
+    const fetchContextData = async () => {
+      setLoadingContext(true);
+      try {
+        const sitesSnapshot = await getDocs(query(collection(db, "sites")));
+        const newSitesMap: Record<string, string> = {};
+        sitesSnapshot.forEach(doc => {
+          const site = doc.data() as Site;
+          newSitesMap[doc.id] = site.name;
+        });
+        setSitesMap(newSitesMap);
+
+        const stallsSnapshot = await getDocs(query(collection(db, "stalls")));
+        const newStallsMap: Record<string, string> = {};
+        stallsSnapshot.forEach(doc => {
+            const stall = doc.data() as Stall;
+            newStallsMap[doc.id] = stall.name;
+        });
+        setStallsMap(newStallsMap);
+
+      } catch (error) {
+        console.error(`${LOG_PREFIX} Error fetching context data:`, error);
+        toast({ title: "Error", description: "Could not load site/stall data for exports.", variant: "destructive" });
+      } finally {
+        setLoadingContext(false);
+      }
+    };
+    fetchContextData();
+  }, [toast]);
 
   const escapeCsvCell = (cellData: any): string => {
     if (cellData === null || cellData === undefined) {
@@ -62,6 +96,17 @@ export default function SettingsPage() {
       return `"${stringData.replace(/"/g, '""')}"`;
     }
     return stringData;
+  };
+  
+  const getFormattedTimestamp = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = (now.getMonth() + 1).toString().padStart(2, '0');
+    const day = now.getDate().toString().padStart(2, '0');
+    const hours = now.getHours().toString().padStart(2, '0');
+    const minutes = now.getMinutes().toString().padStart(2, '0');
+    const seconds = now.getSeconds().toString().padStart(2, '0');
+    return `${year}-${month}-${day}_${hours}-${minutes}-${seconds}`;
   };
 
   const exportStockItemsToCsv = async () => {
@@ -86,7 +131,7 @@ export default function SettingsPage() {
 
       const headers = [
         "ID", "Name", "Category", "Quantity", "Unit",
-        "Cost Price (₹)", "Selling Price (₹)", "Low Stock Threshold", "Image URL", "Last Updated", "Site ID", "Stall ID", "Original Master Item ID"
+        "Cost Price (₹)", "Selling Price (₹)", "Low Stock Threshold", "Image URL", "Last Updated", "Site Name", "Stall Name", "Original Master Item ID"
       ];
 
       const csvRows = [headers.join(",")];
@@ -103,8 +148,8 @@ export default function SettingsPage() {
           escapeCsvCell(item.lowStockThreshold),
           escapeCsvCell(item.imageUrl || ""),
           escapeCsvCell(item.lastUpdated ? new Date(item.lastUpdated).toLocaleString('en-IN') : ""),
-          escapeCsvCell(item.siteId || ""),
-          escapeCsvCell(item.stallId || ""),
+          escapeCsvCell(item.siteId ? sitesMap[item.siteId] || item.siteId : "N/A"),
+          escapeCsvCell(item.stallId ? stallsMap[item.stallId] || item.stallId : "N/A"),
           escapeCsvCell(item.originalMasterItemId || "")
         ];
         csvRows.push(row.join(","));
@@ -116,7 +161,7 @@ export default function SettingsPage() {
       if (link.download !== undefined) {
         const url = URL.createObjectURL(blob);
         link.setAttribute("href", url);
-        link.setAttribute("download", `stallsync_stock_items_${new Date().toISOString().split('T')[0]}.csv`);
+        link.setAttribute("download", `stallsync_stock_items_${getFormattedTimestamp()}.csv`);
         link.style.visibility = 'hidden';
         document.body.appendChild(link);
         link.click();
@@ -165,7 +210,7 @@ export default function SettingsPage() {
 
       const headers = [
         "Transaction ID", "Date", "Staff Name", "Staff ID", "Total Amount (₹)",
-        "Number of Item Types", "Total Quantity of Items", "Site ID", "Stall ID", "Items Sold (JSON)"
+        "Number of Item Types", "Total Quantity of Items", "Site Name", "Stall Name", "Items Sold (JSON)"
       ];
       const csvRows = [headers.join(",")];
 
@@ -188,8 +233,8 @@ export default function SettingsPage() {
           escapeCsvCell(sale.totalAmount.toFixed(2)),
           escapeCsvCell(numberOfItemTypes),
           escapeCsvCell(totalQuantityOfItems),
-          escapeCsvCell(sale.siteId || ""),
-          escapeCsvCell(sale.stallId || ""),
+          escapeCsvCell(sale.siteId ? sitesMap[sale.siteId] || sale.siteId : "N/A"),
+          escapeCsvCell(sale.stallId ? stallsMap[sale.stallId] || sale.stallId : "N/A"),
           escapeCsvCell(itemsJson)
         ];
         csvRows.push(row.join(","));
@@ -201,7 +246,7 @@ export default function SettingsPage() {
       if (link.download !== undefined) {
         const url = URL.createObjectURL(blob);
         link.setAttribute("href", url);
-        link.setAttribute("download", `stallsync_sales_data_${new Date().toISOString().split('T')[0]}.csv`);
+        link.setAttribute("download", `stallsync_sales_data_${getFormattedTimestamp()}.csv`);
         link.style.visibility = 'hidden';
         document.body.appendChild(link);
         link.click();
@@ -236,7 +281,7 @@ export default function SettingsPage() {
       const headers = [
         "Expense ID", "Category", "Total Cost", "Payment Method",
         "Other Payment Details", "Purchase Date", "Vendor", "Other Vendor Details",
-        "Notes", "Bill Image URL", "Site ID", "Stall ID", "Recorded By (Name)", "Recorded By (UID)"
+        "Notes", "Bill Image URL", "Site Name", "Stall Name", "Recorded By (Name)", "Recorded By (UID)"
       ];
       const csvRows = [headers.join(",")];
       
@@ -253,8 +298,8 @@ export default function SettingsPage() {
           escapeCsvCell(expense.otherVendorDetails || ""),
           escapeCsvCell(expense.notes || ""),
           escapeCsvCell(expense.billImageUrl || ""),
-          escapeCsvCell(expense.siteId),
-          escapeCsvCell(expense.stallId),
+          escapeCsvCell(expense.siteId ? sitesMap[expense.siteId] || expense.siteId : "N/A"),
+          escapeCsvCell(expense.stallId ? stallsMap[expense.stallId] || expense.stallId : "N/A"),
           escapeCsvCell(expense.recordedByName || ""),
           escapeCsvCell(expense.recordedByUid),
         ];
@@ -267,7 +312,7 @@ export default function SettingsPage() {
       if (link.download !== undefined) {
         const url = URL.createObjectURL(blob);
         link.setAttribute("href", url);
-        link.setAttribute("download", `stallsync_food_expenses_${new Date().toISOString().split('T')[0]}.csv`);
+        link.setAttribute("download", `stallsync_food_expenses_${getFormattedTimestamp()}.csv`);
         link.style.visibility = 'hidden';
         document.body.appendChild(link);
         link.click();
@@ -430,7 +475,7 @@ export default function SettingsPage() {
             variant="outline"
             className="w-full"
             onClick={exportStockItemsToCsv}
-            disabled={isExportingStockCsv}
+            disabled={isExportingStockCsv || loadingContext}
           >
             {isExportingStockCsv ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -443,7 +488,7 @@ export default function SettingsPage() {
             variant="outline"
             className="w-full"
             onClick={exportSalesDataToCsv}
-            disabled={isExportingSalesCsv}
+            disabled={isExportingSalesCsv || loadingContext}
           >
             {isExportingSalesCsv ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -456,7 +501,7 @@ export default function SettingsPage() {
             variant="outline"
             className="w-full"
             onClick={exportFoodExpensesToCsv}
-            disabled={isExportingFoodExpensesCsv}
+            disabled={isExportingFoodExpensesCsv || loadingContext}
           >
             {isExportingFoodExpensesCsv ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -471,7 +516,7 @@ export default function SettingsPage() {
       {appUser?.role === 'admin' && (
         <Card className="shadow-lg border-destructive">
           <AlertDialog open={showResetDataDialog} onOpenChange={setShowResetDataDialog}>
-            <CardHeader className="pt-6"> {/* This part is for the trigger button, should be above AlertDialog */}
+            <CardHeader className="pt-6">
               <CardTitle className="flex items-center text-destructive">
                 <AlertTriangle className="mr-2 h-5 w-5" />
                 Danger Zone
@@ -549,4 +594,5 @@ export default function SettingsPage() {
 
     </div>
   );
-}
+
+    
