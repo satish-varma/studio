@@ -2,7 +2,8 @@
 export type StaffActivityType =
   | 'ATTENDANCE_MARKED'
   | 'SALARY_ADVANCE_GIVEN'
-  | 'STAFF_DETAILS_UPDATED';
+  | 'STAFF_DETAILS_UPDATED'
+  | 'SALARY_PAID';
 
 export interface StaffActivityLog {
   id?: string; // Firestore document ID
@@ -16,9 +17,9 @@ export interface StaffActivityLog {
     // Attendance details
     date?: string; // YYYY-MM-DD
     status?: string | null;
-    // Salary advance details
+    // Salary advance/payment details
     amount?: number;
-    relatedDocumentId?: string; // ID of the advance document
+    relatedDocumentId?: string; // ID of the advance or payment document
     // Common details
     notes?: string | null;
   };

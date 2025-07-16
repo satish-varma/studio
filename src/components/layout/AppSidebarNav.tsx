@@ -16,7 +16,8 @@ import {
   ShieldAlert,
   PlusCircle,
   Briefcase,
-  FileText, // Added FileText
+  FileText,
+  IndianRupee,
 } from "lucide-react";
 import {
   SidebarMenu,
@@ -89,6 +90,7 @@ const navItems: NavItem[] = [
       { href: "/staff/dashboard", label: "Dashboard", roles: ['manager', 'admin'] },
       { href: "/staff/list", label: "Staff List", roles: ['manager', 'admin'] },
       { href: "/staff/attendance", label: "Attendance", roles: ['manager', 'admin'] },
+      { href: "/staff/payroll", label: "Payroll", roles: ['manager', 'admin'], icon: IndianRupee },
       { href: "/staff/advances", label: "Salary Advances", roles: ['manager', 'admin'] },
       { href: "/staff/activity-log", label: "Activity Log", roles: ['manager', 'admin'], icon: FileText },
     ]

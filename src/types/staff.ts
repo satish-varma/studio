@@ -63,3 +63,26 @@ export const salaryAdvanceFormSchema = z.object({
 });
 
 export type SalaryAdvanceFormValues = z.infer<typeof salaryAdvanceFormSchema>;
+
+
+// --------------- Salary Payment ---------------
+export interface SalaryPayment {
+    id: string;
+    staffUid: string;
+    amountPaid: number;
+    paymentDate: string; // ISO date string
+    forMonth: number; // 1-12
+    forYear: number;
+    notes?: string;
+    recordedByUid: string;
+    recordedByName: string;
+    siteId: string;
+}
+
+export const salaryPaymentFormSchema = z.object({
+    amountPaid: z.coerce.number().positive("Paid amount must be a positive number."),
+    paymentDate: z.date({ required_error: "Payment date is required." }),
+    notes: z.string().optional(),
+});
+
+export type SalaryPaymentFormValues = z.infer<typeof salaryPaymentFormSchema>;
