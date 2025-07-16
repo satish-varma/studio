@@ -1,10 +1,9 @@
 
-
 "use client";
 
 import PageHeader from "@/components/shared/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
-import { Settings as SettingsIcon, Palette, BellRing, DatabaseZap, Download, Loader2, ShieldAlert, AlertTriangle, Utensils } from "lucide-react";
+import { Settings as SettingsIcon, Palette, BellRing, DatabaseZap, Download, Loader2, ShieldAlert, AlertTriangle, Utensils, MailQuestion } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -376,7 +375,7 @@ export default function SettingsPage() {
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between p-4 bg-muted/30 rounded-md">
               <div className="flex items-center space-x-2">
-                <MailWarning className="h-4 w-4 text-muted-foreground" />
+                <MailQuestion className="h-4 w-4 text-muted-foreground" />
                 <Label htmlFor="low-stock-alerts" className="text-sm font-medium">Low Stock Email Alerts</Label>
               </div>
               <Switch id="low-stock-alerts" disabled />
