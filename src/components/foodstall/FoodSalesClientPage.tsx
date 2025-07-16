@@ -61,28 +61,30 @@ export default function FoodSalesClientPage() {
   const [currentPage, setCurrentPage] = useState(1);
 
   const fetchSales = useCallback(async (direction: 'initial' | 'next' | 'prev' = 'initial') => {
-    if (authLoading || !db || !user || !activeSiteId) {
+    if (authLoading || !db || !user) {
       if (!authLoading) setLoadingSales(false);
       return;
     }
-     if (!activeStallId && user.role !== 'admin') {
+    if (user.role !== 'admin' && !activeSiteId) {
         if (!authLoading) setLoadingSales(false);
         return;
     }
     
     setLoadingSales(true);
     if(direction === 'initial') {
-        setTotalSalesAmount(0); // Reset total on new filter fetch
+        setTotalSalesAmount(0);
     }
     setErrorSales(null);
     console.log(`${LOG_PREFIX} Fetching sales. Direction: ${direction}, Site: ${activeSiteId}, Stall: ${activeStallId}, DateFilter: ${dateFilter}`);
 
     const salesCollectionRef = collection(db, "foodSaleTransactions");
-    let qConstraints: QueryConstraint[] = [
-      where("siteId", "==", activeSiteId),
-    ];
-    if (activeStallId) {
-      qConstraints.push(where("stallId", "==", activeStallId));
+    let qConstraints: QueryConstraint[] = [];
+    
+    if (activeSiteId) {
+        qConstraints.push(where("siteId", "==", activeSiteId));
+        if (activeStallId) {
+          qConstraints.push(where("stallId", "==", activeStallId));
+        }
     }
     
     const now = new Date();
@@ -100,8 +102,8 @@ export default function FoodSalesClientPage() {
             startDate = startOfMonth(now);
             break;
         case 'all_time':
-            startDate = null; // No start date filter
-            endDate = null;   // No end date filter
+            startDate = null; 
+            endDate = null;   
             break;
     }
 
@@ -137,7 +139,6 @@ export default function FoodSalesClientPage() {
       
       setSales(fetchedSales);
       
-      // Recalculate total only on initial load for a filter set
       if(direction === 'initial') {
         const totalQueryConstraints = qConstraints.filter(c => c.type !== 'limit' && c.type !== 'startAfter' && c.type !== 'endBefore' && c.type !== 'limitToLast');
         const totalQuery = query(salesCollectionRef, ...totalQueryConstraints);
@@ -171,14 +172,12 @@ export default function FoodSalesClientPage() {
   // Effect for initial fetch and filter changes
   useEffect(() => {
     document.title = "Food Stall Sales - StallSync";
-    // Reset pagination state when filters change, then fetch
     setFirstVisibleDoc(null);
     setLastVisibleDoc(null);
     setCurrentPage(1);
     fetchSales('initial');
     return () => { document.title = "StallSync - Stock Management"; }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateFilter, user, activeSiteId, activeStallId]);
+  }, [dateFilter, user, activeSiteId, activeStallId, fetchSales]);
 
 
   const handleDateFilterChange = (filter: DateFilterOption) => {
@@ -200,48 +199,27 @@ export default function FoodSalesClientPage() {
   if (!user) {
     return (
       <Alert variant="destructive">
-        <Info className="h-4 w-4" />
-        <AlertTitle>Authentication Error</AlertTitle>
-        <AlertDescription>
-          Could not verify user. Please try logging in again.
-        </AlertDescription>
+        <Info className="h-4 w-4" /><AlertTitle>Authentication Error</AlertTitle>
+        <AlertDescription>Could not verify user. Please try logging in again.</AlertDescription>
       </Alert>
     )
   }
 
-  if (!activeSiteId) {
+  if (user.role !== 'admin' && !activeSiteId) {
     return (
       <Alert variant="default" className="border-primary/50">
-        <Info className="h-4 w-4" />
-        <AlertTitle>Site Selection Required</AlertTitle>
-        <AlertDescription>
-          Please select an active site from the header to view food stall sales.
-        </AlertDescription>
-      </Alert>
-    );
-  }
-
-  if (!activeStallId && user.role !== 'admin') {
-    return (
-      <Alert variant="default" className="border-primary/50">
-        <Info className="h-4 w-4" />
-        <AlertTitle>Stall Selection Required</AlertTitle>
-        <AlertDescription>
-          Food stall data is specific to each stall. Please select a specific stall from the header menu to view its sales history. Admins may view all stalls by not selecting one.
-        </AlertDescription>
+        <Info className="h-4 w-4" /><AlertTitle>Site Selection Required</AlertTitle>
+        <AlertDescription>Please select an active site from the header to view food stall sales.</AlertDescription>
       </Alert>
     );
   }
 
   return (
     <div className="space-y-4">
-      {user.role === 'admin' && !activeStallId && (
+      {user.role === 'admin' && !activeSiteId && (
           <Alert variant="default" className="border-primary/50">
-            <Info className="h-4 w-4" />
-            <AlertTitle>Viewing All Stalls</AlertTitle>
-            <AlertDescription>
-                You are currently viewing aggregated sales data for all stalls within this site.
-            </AlertDescription>
+            <Info className="h-4 w-4" /><AlertTitle>Viewing All Sites</AlertTitle>
+            <AlertDescription>You are currently viewing aggregated sales data for all stalls across all sites.</AlertDescription>
         </Alert>
       )}
 
@@ -252,7 +230,7 @@ export default function FoodSalesClientPage() {
               <CardTitle>Filter & Summary</CardTitle>
               <CardDescription className="mt-1">
                 Total sales for the selected period.
-                {user?.role === 'admin' && !activeStallId ? ' (Aggregated for all stalls in site)' : ''}
+                {!activeSiteId ? ' (Aggregated for all sites)' : !activeStallId ? ' (Aggregated for all stalls in site)' : ''}
               </CardDescription>
             </div>
             <div className="text-left sm:text-right">

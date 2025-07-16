@@ -94,11 +94,12 @@ export default function FoodExpensesClientPage() {
   }, [toast]);
   
   const fetchExpenses = useCallback(async (direction: 'initial' | 'next' | 'prev' = 'initial') => {
-    if (authLoading || !db || !user || !activeSiteId) {
+    if (authLoading || !db || !user) {
       if (!authLoading) setLoadingExpenses(false);
       return;
     }
-    if (!activeStallId && user.role !== 'admin') {
+    // Admin can view all, Manager/Staff need a site.
+    if (user.role !== 'admin' && !activeSiteId) {
         if (!authLoading) setLoadingExpenses(false);
         return;
     }
@@ -111,8 +112,14 @@ export default function FoodExpensesClientPage() {
     setErrorExpenses(null);
 
     const expensesCollectionRef = collection(db, "foodItemExpenses");
-    let qConstraints: QueryConstraint[] = [where("siteId", "==", activeSiteId)];
-    if (activeStallId) qConstraints.push(where("stallId", "==", activeStallId));
+    let qConstraints: QueryConstraint[] = [];
+
+    if (activeSiteId) {
+      qConstraints.push(where("siteId", "==", activeSiteId));
+      if (activeStallId) {
+        qConstraints.push(where("stallId", "==", activeStallId));
+      }
+    }
     
     const now = new Date(); let startDate: Date | null = null; let endDate: Date | null = endOfDay(now);
     switch (dateFilter) {
@@ -200,7 +207,8 @@ export default function FoodExpensesClientPage() {
   
   const handleExport = async () => {
     setIsExporting(true);
-    if (expenses.length === 0) {
+    const itemsToExport = expenses;
+    if (itemsToExport.length === 0) {
       toast({ title: "No Expenses to Export", description: "There are no expenses matching the current filters.", variant: "default" });
       setIsExporting(false);
       return;
@@ -208,7 +216,7 @@ export default function FoodExpensesClientPage() {
     try {
       const headers = ["Expense ID", "Category", "Total Cost", "Payment Method", "Other Payment Details", "Purchase Date", "Vendor", "Other Vendor Details", "Notes", "Bill Image URL", "Site Name", "Stall Name", "Recorded By (Name)", "Recorded By (UID)"];
       const csvRows = [headers.join(',')];
-      expenses.forEach(expense => {
+      itemsToExport.forEach(expense => {
         const row = [
           escapeCsvCell(expense.id), escapeCsvCell(expense.category), escapeCsvCell(expense.totalCost.toFixed(2)),
           escapeCsvCell(expense.paymentMethod), escapeCsvCell(expense.otherPaymentMethodDetails || ""),
@@ -234,13 +242,13 @@ export default function FoodExpensesClientPage() {
     return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading user context...</p></div>;
   }
   
-  if (!user || !activeSiteId || (!activeStallId && user.role !== 'admin')) {
+  if (user?.role !== 'admin' && !activeSiteId) {
     return (
       <Alert variant="default" className="border-primary/50">
         <Info className="h-4 w-4" />
         <AlertTitle>Context Required</AlertTitle>
         <AlertDescription>
-          Please select an active site and stall from the header to view expenses. Admins can view site-wide expenses.
+          Please select an active site from the header to view expenses.
         </AlertDescription>
       </Alert>
     );
@@ -255,7 +263,7 @@ export default function FoodExpensesClientPage() {
               <CardTitle>Filter & Summary</CardTitle>
               <CardDescription className="mt-1">
                 Total expenses for the selected period and category.
-                {user.role === 'admin' && !activeStallId ? ' (Aggregated for all stalls in site)' : ''}
+                {!activeSiteId ? ' (Aggregated for all sites)' : !activeStallId ? ' (Aggregated for all stalls in site)' : ''}
               </CardDescription>
             </div>
             <div className="text-left sm:text-right">
