@@ -18,14 +18,15 @@ import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
 import { format, startOfMonth, endOfMonth, addMonths, subMonths, isBefore, isAfter, startOfDay } from 'date-fns';
 import { Button } from "@/components/ui/button";
-import type { AppUser, StaffAttendance, Site, Holiday, AttendanceStatus, StaffDetails } from "@/types";
-import { Loader2, Info, ChevronLeft, ChevronRight, CalendarDays } from "lucide-react";
+import type { AppUser, StaffAttendance, Site, Holiday, AttendanceStatus, StaffDetails, UserStatus } from "@/types";
+import { Loader2, Info, ChevronLeft, ChevronRight, CalendarDays, Filter } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import PageHeader from "@/components/shared/PageHeader";
 import { AttendanceRegisterTable } from "./AttendanceRegisterTable";
 import ManageHolidaysDialog from "./ManageHolidaysDialog";
 import { logStaffActivity } from "@/lib/staffLogger";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const LOG_PREFIX = "[StaffAttendanceClientPage]";
 
@@ -44,7 +45,7 @@ const statusCycle: (AttendanceStatus | null)[] = ["Present", "Absent", "Leave", 
 export default function StaffAttendanceClientPage() {
   const { user, activeSiteId, loading: authLoading } = useAuth();
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [staffList, setStaffList] = useState<AppUser[]>([]);
+  const [allStaffForSite, setAllStaffForSite] = useState<AppUser[]>([]);
   const [staffDetailsMap, setStaffDetailsMap] = useState<Map<string, StaffDetails>>(new Map());
   const [attendance, setAttendance] = useState<Record<string, Record<string, StaffAttendance>> | null>(null);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
@@ -53,6 +54,7 @@ export default function StaffAttendanceClientPage() {
   const [sitesMap, setSitesMap] = useState<Record<string, string>>({});
   const [sites, setSites] = useState<Site[]>([]);
   const [isHolidaysDialogOpen, setIsHolidaysDialogOpen] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<UserStatus | 'all'>('active');
 
   const isAllSitesView = user?.role === 'admin' && !activeSiteId;
 
@@ -71,16 +73,23 @@ export default function StaffAttendanceClientPage() {
     return q;
   }, [activeSiteId, authLoading, user]);
 
+  const filteredStaffList = useMemo(() => {
+    if (statusFilter === 'all') {
+      return allStaffForSite;
+    }
+    return allStaffForSite.filter(u => (u.status || 'active') === statusFilter);
+  }, [allStaffForSite, statusFilter]);
+
   useEffect(() => {
     if (!staffQuery) {
       if (!authLoading) setLoading(false);
-      setStaffList([]);
+      setAllStaffForSite([]);
       return;
     }
     setLoading(true);
     const unsubscribe = onSnapshot(staffQuery, async (snapshot) => {
       const fetchedStaff = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser));
-      setStaffList(fetchedStaff.sort((a, b) => (a.displayName || a.email || "").localeCompare(b.displayName || b.email || "")));
+      setAllStaffForSite(fetchedStaff.sort((a, b) => (a.displayName || a.email || "").localeCompare(b.displayName || b.email || "")));
       
       // Fetch staff details as well
       if(fetchedStaff.length > 0) {
@@ -119,7 +128,7 @@ export default function StaffAttendanceClientPage() {
     const firstDay = startOfMonth(currentMonth);
     const lastDay = endOfMonth(currentMonth);
 
-    const uids = staffList.map(s => s.uid);
+    const uids = allStaffForSite.map(s => s.uid);
     setAttendance({});
 
     if (uids.length > 0) {
@@ -152,7 +161,7 @@ export default function StaffAttendanceClientPage() {
 
         return () => unsubscribers.forEach(unsub => unsub());
     }
-  }, [currentMonth, staffList]);
+  }, [currentMonth, allStaffForSite]);
 
   useEffect(() => {
     const firstDay = startOfMonth(currentMonth);
@@ -285,8 +294,21 @@ export default function StaffAttendanceClientPage() {
             <Button variant="outline" size="icon" onClick={handleNextMonth} aria-label="Next month"><ChevronRight className="h-4 w-4" /></Button>
             <Button variant="outline" onClick={handleGoToCurrentMonth}>Current Month</Button>
           </div>
-          <div className="text-xs text-muted-foreground p-2 bg-muted/50 rounded-md">
-            Click on a cell to cycle through: Present (P), Absent (A), Leave (L), Half-day (H), and cleared (-).
+          <div className="flex items-center gap-2">
+            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as any)}>
+              <SelectTrigger className="w-[180px] bg-input">
+                <Filter className="mr-2 h-4 w-4 text-muted-foreground"/>
+                <SelectValue placeholder="Filter by status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="active">Active Staff</SelectItem>
+                <SelectItem value="inactive">Inactive Staff</SelectItem>
+                <SelectItem value="all">All Staff</SelectItem>
+              </SelectContent>
+            </Select>
+            <div className="text-xs text-muted-foreground p-2 bg-muted/50 rounded-md max-w-xs">
+              Click on a cell to cycle through: Present (P), Absent (A), Leave (L), Half-day (H), and cleared (-).
+            </div>
           </div>
         </div>
 
@@ -297,11 +319,11 @@ export default function StaffAttendanceClientPage() {
         </Alert>
       ) : loading || attendance === null ? (
         <div className="flex justify-center items-center py-10"><Loader2 className="h-6 w-6 animate-spin" /><p className="ml-2">Loading staff and attendance data...</p></div>
-      ) : staffList.length === 0 ? (
-        <div className="text-center py-10 text-muted-foreground">No staff found for the selected context.</div>
+      ) : filteredStaffList.length === 0 ? (
+        <div className="text-center py-10 text-muted-foreground">No staff matching the current filters found for the selected context.</div>
       ) : (
         <AttendanceRegisterTable
-            staffList={staffList}
+            staffList={filteredStaffList}
             staffDetailsMap={staffDetailsMap}
             attendanceData={attendance}
             month={currentMonth}
