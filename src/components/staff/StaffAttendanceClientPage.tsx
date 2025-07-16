@@ -8,15 +8,17 @@ import {
   query,
   where,
   onSnapshot,
-  getDocs
+  getDocs,
+  doc,
+  setDoc,
 } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
 import { format, startOfMonth, endOfMonth, addMonths, subMonths } from 'date-fns';
 import { Button } from "@/components/ui/button";
-import type { AppUser, StaffAttendance, Site, Holiday } from "@/types";
-import { Loader2, Info, ChevronLeft, ChevronRight, CalendarDays } from "lucide-react";
+import type { AppUser, StaffAttendance, Site, Holiday, AttendanceStatus } from "@/types";
+import { Loader2, Info, ChevronLeft, ChevronRight, CalendarDays, ThumbsUp } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import PageHeader from "@/components/shared/PageHeader";
@@ -34,12 +36,13 @@ if (!getApps().length) {
 }
 const db = getFirestore();
 
+const statusCycle: AttendanceStatus[] = ["Present", "Absent", "Leave", "Half-day"];
 
 export default function StaffAttendanceClientPage() {
   const { user, activeSiteId, loading: authLoading } = useAuth();
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [staffList, setStaffList] = useState<AppUser[]>([]);
-  const [attendance, setAttendance] = useState<Record<string, Record<string, StaffAttendance>>>();
+  const [attendance, setAttendance] = useState<Record<string, Record<string, StaffAttendance>> | null>(null);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
@@ -67,6 +70,7 @@ export default function StaffAttendanceClientPage() {
   useEffect(() => {
     if (!staffQuery) {
       if (!authLoading) setLoading(false);
+      setStaffList([]);
       return;
     }
     setLoading(true);
@@ -101,37 +105,43 @@ export default function StaffAttendanceClientPage() {
     const lastDay = endOfMonth(currentMonth);
 
     const uids = staffList.map(s => s.uid);
-    setAttendance({}); // Reset on month change
+    setAttendance({});
 
-    // Fetch attendance
     if (uids.length > 0) {
         const uidsBatches: string[][] = [];
         for (let i = 0; i < uids.length; i += 30) {
-        uidsBatches.push(uids.slice(i, i + 30));
+            uidsBatches.push(uids.slice(i, i + 30));
         }
+        
         const unsubscribers: (() => void)[] = [];
-        uidsBatches.forEach(batch => {
-          const attendanceQuery = query(
-            collection(db, "staffAttendance"),
-            where("date", ">=", format(firstDay, 'yyyy-MM-dd')),
-            where("date", "<=", format(lastDay, 'yyyy-MM-dd')),
-            where("staffUid", "in", batch)
-          );
-          const unsubscribe = onSnapshot(attendanceQuery, (snapshot) => {
-            const batchAttendance: Record<string, Record<string, StaffAttendance>> = {};
-            snapshot.forEach(doc => {
-              const data = doc.data() as StaffAttendance;
-              if (!batchAttendance[data.staffUid]) batchAttendance[data.staffUid] = {};
-              batchAttendance[data.staffUid][data.date] = data;
-            });
-            setAttendance(prev => ({...prev, ...batchAttendance}));
-          });
-          unsubscribers.push(unsubscribe);
-        });
-        unsubscribers.forEach(unsub => unsub());
-    }
 
-    // Fetch holidays
+        uidsBatches.forEach(batch => {
+            if (batch.length === 0) return;
+            const attendanceQuery = query(
+                collection(db, "staffAttendance"),
+                where("date", ">=", format(firstDay, 'yyyy-MM-dd')),
+                where("date", "<=", format(lastDay, 'yyyy-MM-dd')),
+                where("staffUid", "in", batch)
+            );
+            const unsubscribe = onSnapshot(attendanceQuery, (snapshot) => {
+                const batchAttendance: Record<string, Record<string, StaffAttendance>> = {};
+                snapshot.forEach(doc => {
+                    const data = doc.data() as StaffAttendance;
+                    if (!batchAttendance[data.staffUid]) batchAttendance[data.staffUid] = {};
+                    batchAttendance[data.staffUid][data.date] = data;
+                });
+                setAttendance(prev => ({...prev, ...batchAttendance}));
+            });
+            unsubscribers.push(unsubscribe);
+        });
+
+        return () => unsubscribers.forEach(unsub => unsub());
+    }
+  }, [currentMonth, staffList]);
+
+  useEffect(() => {
+    const firstDay = startOfMonth(currentMonth);
+    const lastDay = endOfMonth(currentMonth);
     const holidaysQuery = query(
         collection(db, "holidays"),
         where("date", ">=", format(firstDay, 'yyyy-MM-dd')),
@@ -141,10 +151,70 @@ export default function StaffAttendanceClientPage() {
       const fetchedHolidays = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Holiday));
       setHolidays(fetchedHolidays);
     });
-
     return () => unsubscribeHolidays();
+  }, [currentMonth]);
+  
+  const handleStatusChange = async (staff: AppUser, date: Date) => {
+    const holidayInfo = isHoliday(date, staff.defaultSiteId);
+    if (!user || !staff.defaultSiteId || isAllSitesView || holidayInfo.holiday) {
+      if(isAllSitesView) toast({title: "Read-only", description: "Select a specific site to mark attendance."});
+      if(holidayInfo.holiday) toast({ title: "Holiday", description: `Cannot mark attendance on ${holidayInfo.name}.`, variant: "default" });
+      return;
+    }
+    
+    const dateStr = format(date, 'yyyy-MM-dd');
+    const docId = `${dateStr}_${staff.uid}`;
+    
+    const currentStatus = attendance?.[staff.uid]?.[dateStr]?.status;
+    const nextIndex = currentStatus ? (statusCycle.indexOf(currentStatus) + 1) % statusCycle.length : 0;
+    const newStatus = statusCycle[nextIndex];
+    
+    // Optimistic UI update
+    const prevAttendance = attendance;
+    setAttendance(prev => {
+        const newAttendance = JSON.parse(JSON.stringify(prev || {})); // Deep copy
+        if (!newAttendance[staff.uid]) newAttendance[staff.uid] = {};
+        newAttendance[staff.uid][dateStr] = {
+            id: docId, staffUid: staff.uid, date: dateStr, status: newStatus,
+            siteId: staff.defaultSiteId!, recordedByUid: user.uid, recordedByName: user.displayName || user.email!
+        };
+        return newAttendance;
+    });
 
-  }, [currentMonth, staffList]);
+    try {
+      const docRef = doc(db, "staffAttendance", docId);
+      await setDoc(docRef, {
+        staffUid: staff.uid,
+        date: dateStr,
+        status: newStatus,
+        siteId: staff.defaultSiteId,
+        recordedByUid: user.uid,
+        recordedByName: user.displayName || user.email,
+        updatedAt: new Date().toISOString(),
+      }, { merge: true });
+    } catch(error: any) {
+      console.error("Error saving attendance:", error);
+      toast({ title: "Save Failed", description: `Failed to save status for ${staff.displayName}. Reverting change.`, variant: "destructive"});
+      // Revert UI on failure
+      setAttendance(prevAttendance);
+    }
+  };
+
+  const isHoliday = (date: Date, staffSiteId?: string | null) => {
+    const dayOfWeek = date.getDay();
+    if (dayOfWeek === 0) { // Sunday
+      return { holiday: true, name: "Weekend" };
+    }
+    const dateStr = format(date, 'yyyy-MM-dd');
+    const globalHoliday = holidays.find(h => h.date === dateStr && h.siteId === null);
+    if (globalHoliday) return { holiday: true, name: globalHoliday.name };
+
+    if (staffSiteId) {
+      const siteHoliday = holidays.find(h => h.date === dateStr && h.siteId === staffSiteId);
+      if (siteHoliday) return { holiday: true, name: siteHoliday.name };
+    }
+    return { holiday: false, name: null };
+  };
 
   if (authLoading) return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin" /></div>;
 
@@ -167,6 +237,9 @@ export default function StaffAttendanceClientPage() {
             <Button variant="outline" size="icon" onClick={handleNextMonth} aria-label="Next month"><ChevronRight className="h-4 w-4" /></Button>
             <Button variant="outline" onClick={handleGoToCurrentMonth}>Today</Button>
           </div>
+          <div className="text-xs text-muted-foreground p-2 bg-muted/50 rounded-md">
+            Click on a cell to cycle through: Present (P), Absent (A), Leave (L), Half-day (H).
+          </div>
         </div>
 
       {!isAllSitesView && !activeSiteId && !authLoading ? (
@@ -174,18 +247,20 @@ export default function StaffAttendanceClientPage() {
             <Info className="h-4 w-4" /><AlertTitle>Site Selection Required</AlertTitle>
             <AlertDescription>Please select a site from the header to manage staff attendance, or select "All Sites" if you are an admin.</AlertDescription>
         </Alert>
-      ) : loading ? (
+      ) : loading || attendance === null ? (
         <div className="flex justify-center items-center py-10"><Loader2 className="h-6 w-6 animate-spin" /><p className="ml-2">Loading staff and attendance data...</p></div>
       ) : staffList.length === 0 ? (
         <div className="text-center py-10 text-muted-foreground">No staff found for the selected context.</div>
       ) : (
         <AttendanceRegisterTable
             staffList={staffList}
-            attendanceData={attendance || {}}
+            attendanceData={attendance}
             month={currentMonth}
             isAllSitesView={isAllSitesView}
             sitesMap={sitesMap}
             holidays={holidays}
+            onStatusChange={handleStatusChange}
+            isHoliday={isHoliday}
         />
       )}
       {user?.role === 'admin' && (

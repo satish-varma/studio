@@ -1,15 +1,11 @@
 
 "use client";
 
-import { useState, useMemo } from 'react';
+import { useMemo } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { format, getDaysInMonth, startOfMonth, addDays, getDay } from 'date-fns';
+import { format } from 'date-fns';
 import { cn } from "@/lib/utils";
-import type { AppUser, StaffAttendance, AttendanceStatus, Site, Holiday } from "@/types";
-import { attendanceStatuses } from "@/types/staff";
-import { useAuth } from '@/contexts/AuthContext';
-import { useToast } from '@/hooks/use-toast';
-import { doc, setDoc, getFirestore } from 'firebase/firestore';
+import type { AppUser, StaffAttendance, AttendanceStatus, Holiday } from "@/types";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface AttendanceRegisterTableProps {
@@ -19,11 +15,9 @@ interface AttendanceRegisterTableProps {
   isAllSitesView: boolean;
   sitesMap: Record<string, string>;
   holidays: Holiday[];
+  onStatusChange: (staff: AppUser, date: Date) => void;
+  isHoliday: (date: Date, staffSiteId?: string | null) => { holiday: boolean; name: string | null };
 }
-
-const db = getFirestore();
-
-const statusCycle: AttendanceStatus[] = ["Present", "Absent", "Leave", "Half-day"];
 
 const statusBadgeClasses: Record<AttendanceStatus, string> = {
     "Present": "bg-green-100 text-green-800 border-green-200 dark:bg-green-900/50 dark:text-green-300 dark:border-green-800",
@@ -32,69 +26,22 @@ const statusBadgeClasses: Record<AttendanceStatus, string> = {
     "Half-day": "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/50 dark:text-blue-300 dark:border-blue-800",
 };
 
-export function AttendanceRegisterTable({ staffList, attendanceData, month, isAllSitesView, sitesMap, holidays }: AttendanceRegisterTableProps) {
-  const { user, activeSiteId } = useAuth();
-  const { toast } = useToast();
+export function AttendanceRegisterTable({
+  staffList,
+  attendanceData,
+  month,
+  isAllSitesView,
+  sitesMap,
+  holidays,
+  onStatusChange,
+  isHoliday
+}: AttendanceRegisterTableProps) {
   
-  const daysInMonth = useMemo(() => getDaysInMonth(month), [month]);
-  const firstDayOfMonth = useMemo(() => startOfMonth(month), [month]);
-  const daysArray = Array.from({ length: daysInMonth }, (_, i) => addDays(firstDayOfMonth, i));
-
-  const holidaysMap = useMemo(() => {
-    const map = new Map<string, Holiday>();
-    holidays.forEach(holiday => {
-      // Key: YYYY-MM-DD_siteId (or YYYY-MM-DD_global for global holidays)
-      const key = `${holiday.date}_${holiday.siteId || 'global'}`;
-      map.set(key, holiday);
-    });
-    return map;
-  }, [holidays]);
-
-  const isHoliday = (date: Date, staffSiteId?: string | null) => {
-    const dayOfWeek = getDay(date);
-    if (dayOfWeek === 0 || dayOfWeek === 6) {
-      return { holiday: true, name: "Weekend" };
-    }
-    const dateStr = format(date, 'yyyy-MM-dd');
-    const globalHoliday = holidaysMap.get(`${dateStr}_global`);
-    if (globalHoliday) return { holiday: true, name: globalHoliday.name };
-
-    if (staffSiteId) {
-      const siteHoliday = holidaysMap.get(`${dateStr}_${staffSiteId}`);
-      if (siteHoliday) return { holiday: true, name: siteHoliday.name };
-    }
-    return { holiday: false, name: null };
-  };
-
-  const handleStatusChange = async (staff: AppUser, date: Date) => {
-    if (!user || !staff.defaultSiteId || isAllSitesView || isHoliday(date, staff.defaultSiteId).holiday) {
-      if(isAllSitesView) toast({title: "Read-only", description: "Select a specific site to mark attendance."});
-      if(isHoliday(date, staff.defaultSiteId).holiday) toast({ title: "Holiday", description: "Cannot mark attendance on a holiday.", variant: "default" });
-      return;
-    }
-    
-    const dateStr = format(date, 'yyyy-MM-dd');
-    const currentStatus = attendanceData[staff.uid]?.[dateStr]?.status;
-    const nextIndex = currentStatus ? (statusCycle.indexOf(currentStatus) + 1) % statusCycle.length : 0;
-    const newStatus = statusCycle[nextIndex];
-    
-    const docId = `${dateStr}_${staff.uid}`;
-    const docRef = doc(db, "staffAttendance", docId);
-    
-    try {
-      await setDoc(docRef, {
-        staffUid: staff.uid,
-        date: dateStr,
-        status: newStatus,
-        siteId: staff.defaultSiteId,
-        recordedByUid: user.uid,
-        recordedByName: user.displayName || user.email,
-      }, { merge: true });
-    } catch(error: any) {
-      console.error("Error saving attendance:", error);
-      toast({ title: "Save Failed", description: error.message, variant: "destructive"});
-    }
-  };
+  const daysArray = useMemo(() => {
+    const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+    const firstDayOfMonth = new Date(month.getFullYear(), month.getMonth(), 1);
+    return Array.from({ length: daysInMonth }, (_, i) => new Date(firstDayOfMonth.getFullYear(), firstDayOfMonth.getMonth(), i + 1));
+  }, [month]);
 
   return (
     <TooltipProvider>
@@ -104,7 +51,7 @@ export function AttendanceRegisterTable({ staffList, attendanceData, month, isAl
           <TableRow>
             <TableHead className="sticky left-0 bg-card z-20 min-w-[200px] font-semibold text-foreground">Staff Member</TableHead>
             {daysArray.map(day => {
-              const { holiday, name } = isHoliday(day, activeSiteId); // Check holiday for the active site context for header color
+              const { holiday } = isHoliday(day); // Check global holiday for header color
               return (
                 <TableHead key={format(day, 'yyyy-MM-dd')} className={cn("text-center p-1 border-l", holiday && "bg-muted/60")}>
                   <div className="text-xs text-muted-foreground">{format(day, 'EEE')}</div>
@@ -117,7 +64,8 @@ export function AttendanceRegisterTable({ staffList, attendanceData, month, isAl
         </TableHeader>
         <TableBody>
           {staffList.map(staff => {
-            let presentCount = 0; let absentCount = 0; let leaveCount = 0; let halfDayCount = 0;
+            let presentCount = 0; let absentCount = 0; let leaveCount = 0;
+            
             return (
                 <TableRow key={staff.uid}>
                     <TableCell className="sticky left-0 bg-card z-10 border-r min-w-[200px]">
@@ -128,17 +76,14 @@ export function AttendanceRegisterTable({ staffList, attendanceData, month, isAl
                     </TableCell>
                     {daysArray.map(day => {
                         const dateStr = format(day, 'yyyy-MM-dd');
-                        const status = attendanceData[staff.uid]?.[dateStr]?.status;
+                        const status = attendanceData?.[staff.uid]?.[dateStr]?.status;
                         const { holiday, name: holidayName } = isHoliday(day, staff.defaultSiteId);
 
                         if (!holiday) {
                             if (status === 'Present') presentCount++;
                             if (status === 'Absent') absentCount++;
                             if (status === 'Leave') leaveCount++;
-                            if (status === 'Half-day') {
-                                presentCount += 0.5;
-                                halfDayCount++;
-                            }
+                            if (status === 'Half-day') presentCount += 0.5;
                         }
 
                         const cellContent = holiday ? (
@@ -149,8 +94,8 @@ export function AttendanceRegisterTable({ staffList, attendanceData, month, isAl
                                 <TooltipContent><p>{holidayName}</p></TooltipContent>
                             </Tooltip>
                         ) : (
-                            <div className={cn("h-full w-full flex items-center justify-center font-bold text-xs min-h-[40px] cursor-pointer", 
-                                status ? statusBadgeClasses[status] : "hover:bg-muted/50"
+                            <div className={cn("h-full w-full flex items-center justify-center font-bold text-xs min-h-[40px]", 
+                                status ? statusBadgeClasses[status] : "hover:bg-muted/50 cursor-pointer"
                             )}>
                                 {status ? status.charAt(0) : '-'}
                             </div>
@@ -160,7 +105,7 @@ export function AttendanceRegisterTable({ staffList, attendanceData, month, isAl
                             <TableCell 
                                 key={dateStr} 
                                 className={cn("text-center p-0 border-l", holiday && "bg-muted/60")}
-                                onClick={() => handleStatusChange(staff, day)}
+                                onClick={() => onStatusChange(staff, day)}
                             >
                                {cellContent}
                             </TableCell>
