@@ -15,13 +15,13 @@ import {
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
-import { format, isValid } from 'date-fns';
+import { format, isValid, addDays, subDays } from 'date-fns';
 import { Button } from "@/components/ui/button";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { AppUser, StaffAttendance, AttendanceStatus, Site } from "@/types";
 import { attendanceStatuses } from "@/types/staff";
-import { Loader2, Info, UserCheck, UserX, CalendarClock, Users } from "lucide-react";
+import { Loader2, Info, UserCheck, UserX, Users, ChevronLeft, ChevronRight } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
@@ -56,6 +56,10 @@ export default function StaffAttendanceClientPage() {
   const [sitesMap, setSitesMap] = useState<Record<string, string>>({});
 
   const isAllSitesView = user?.role === 'admin' && !activeSiteId;
+
+  const handlePrevDay = () => setSelectedDate(prev => subDays(prev, 1));
+  const handleNextDay = () => setSelectedDate(prev => addDays(prev, 1));
+  const handleGoToToday = () => setSelectedDate(new Date());
 
   useEffect(() => {
     if (authLoading) return;
@@ -194,14 +198,16 @@ export default function StaffAttendanceClientPage() {
   return (
     <div className="space-y-6">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-             <CalendarClock className="h-8 w-8 text-primary" />
-             <div>
-                <h2 className="text-xl font-semibold">Attendance for {format(selectedDate, "PPP")}</h2>
-                <p className="text-sm text-muted-foreground">{isAllSitesView ? "Viewing all staff across all sites." : "Viewing staff for the selected site."}</p>
-             </div>
+          <div>
+            <h2 className="text-xl font-semibold">Attendance Register</h2>
+            <p className="text-sm text-muted-foreground">{isAllSitesView ? "Viewing all staff across all sites." : "Viewing staff for the selected site."}</p>
           </div>
-          <DatePicker date={selectedDate} onDateChange={(d) => setSelectedDate(d || new Date())} />
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="icon" onClick={handlePrevDay} aria-label="Previous day"><ChevronLeft className="h-4 w-4" /></Button>
+            <DatePicker date={selectedDate} onDateChange={(d) => setSelectedDate(d || new Date())} />
+            <Button variant="outline" size="icon" onClick={handleNextDay} aria-label="Next day"><ChevronRight className="h-4 w-4" /></Button>
+            <Button variant="outline" onClick={handleGoToToday}>Today</Button>
+          </div>
         </div>
         
         <div className="grid gap-4 md:grid-cols-3">
@@ -212,7 +218,7 @@ export default function StaffAttendanceClientPage() {
 
         <Card>
             <CardHeader>
-                <CardTitle>Attendance Register</CardTitle>
+                <CardTitle>Attendance for {format(selectedDate, "PPP")}</CardTitle>
                 <CardDescription>
                   {isAllSitesView 
                     ? "Viewing all staff. To mark attendance, please select a specific site from the header." 
