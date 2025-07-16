@@ -1,4 +1,3 @@
-
 rules_version = '2';
 
 service cloud.firestore {
@@ -66,10 +65,8 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if isUser(userId) || isAdmin() || isManagerRole();
-      allow create: if isAdmin();
-      allow update: if (isUser(userId) &&
-                        !request.resource.data.keys().hasAny(['role', 'uid', 'email', 'createdAt', 'managedSiteIds', 'defaultSiteId', 'defaultStallId', 'status']))
-                        || (isAdmin() && request.auth.uid != userId);
+      allow create: if isAdmin(); 
+      allow update: if (isUser(userId) && !request.resource.data.keys().hasAny(['role', 'uid', 'email', 'createdAt'])) || isAdmin();
       allow delete: if isAdmin() && request.auth.uid != userId;
     }
     match /users {
@@ -199,7 +196,6 @@ service cloud.firestore {
     match /stockMovementLogs {
         allow list: if isAdmin() || isManagerRole();
     }
-
     
     // --- Food Stall Specific Rules ---
     
@@ -281,7 +277,7 @@ service cloud.firestore {
     
     match /staffAttendance/{attendanceId} {
       // Managers can create/update attendance for staff in their managed sites. Admins can do so for any site.
-      allow create, update: if isSignedIn() &&
+      allow write: if isSignedIn() &&
                                request.resource.data.siteId != null &&
                                (isAdmin() || (isManagerRole() && isManagerOfSite(request.resource.data.siteId)));
       
@@ -325,15 +321,18 @@ service cloud.firestore {
       allow read: if isUser(userId) || isAdmin() || (isManagerRole() && isManagerOfSite(getStaffSiteId()));
 
       // Only Admins or Managers of the staff's assigned site can create/update details.
-      allow create, update: if isAdmin() || (isManagerRole() && isManagerOfSite(getStaffSiteId()));
+      allow write: if isAdmin() || (isManagerRole() && isManagerOfSite(getStaffSiteId()));
 
       // Only Admins can delete staff details records.
       allow delete: if isAdmin();
     }
     
     match /holidays/{holidayId} {
-        allow read: if isSignedIn();
-        allow write: if isAdmin();
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    match /holidays {
+      allow list: if isSignedIn();
     }
   }
 }
