@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import type { AppUser, Site } from "@/types";
+import type { AppUser, Site, Stall } from "@/types";
 import { 
   getFirestore, 
   collection, 
@@ -13,9 +13,14 @@ import {
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
-import { Loader2, ShieldAlert } from "lucide-react";
+import { Loader2, ShieldAlert, PlusCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { StaffListTable } from "@/components/staff/StaffListTable";
+import PageHeader from "@/components/shared/PageHeader";
+import { Button } from "@/components/ui/button";
+import CreateUserDialog from "@/components/users/CreateUserDialog";
+import { useUserManagement } from "@/hooks/use-user-management";
+
 
 const LOG_PREFIX = "[StaffListClientPage]";
 
@@ -31,51 +36,23 @@ const db = getFirestore();
 export default function StaffListClientPage() {
   const { user: currentUser, loading: authLoading } = useAuth();
   
-  const [staffUsers, setStaffUsers] = useState<AppUser[]>([]);
-  const [sitesMap, setSitesMap] = useState<Record<string, string>>({});
-  const [loadingData, setLoadingData] = useState(true);
-  const [errorData, setErrorData] = useState<string | null>(null);
+  const {
+    users,
+    sites,
+    stalls,
+    loading: loadingData,
+    error: errorData,
+    handleCreateUserFirestoreDoc,
+  } = useUserManagement();
 
-  useEffect(() => {
-    if (authLoading) return;
-    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) {
-      setErrorData("Access Denied: You do not have permission to view this page.");
-      setLoadingData(false);
-      return;
-    }
+  const [showCreateUserDialog, setShowCreateUserDialog] = useState(false);
 
-    setLoadingData(true);
-
-    const usersQuery = query(
-        collection(db, "users"), 
-        orderBy("displayName", "asc")
-    );
-    
-    const unsubscribeUsers = onSnapshot(usersQuery, (snapshot) => {
-        const fetchedUsers = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser))
-            .filter(u => u.role === 'staff' || u.role === 'manager'); // Show staff and managers
-        setStaffUsers(fetchedUsers);
-        setLoadingData(false);
-    }, (error) => {
-        console.error("Error fetching staff users:", error);
-        setErrorData("Failed to load staff list.");
-        setLoadingData(false);
-    });
-
-    const sitesQuery = query(collection(db, "sites"));
-    const unsubscribeSites = onSnapshot(sitesQuery, (snapshot) => {
-        const newSitesMap: Record<string, string> = {};
-        snapshot.forEach(doc => {
-            newSitesMap[doc.id] = (doc.data() as Site).name;
-        });
-        setSitesMap(newSitesMap);
-    });
-
-    return () => {
-        unsubscribeUsers();
-        unsubscribeSites();
-    };
-  }, [currentUser, authLoading]);
+  const staffUsers = users.filter(u => u.role === 'staff' || u.role === 'manager');
+  const sitesMap: Record<string, string> = sites.reduce((acc, site) => {
+    acc[site.id] = site.name;
+    return acc;
+  }, {});
+  
 
   if (authLoading || loadingData) {
     return (
@@ -96,7 +73,35 @@ export default function StaffListClientPage() {
     );
   }
 
+  if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) {
+    return (
+        <Alert variant="destructive">
+            <ShieldAlert className="h-4 w-4" />
+            <AlertTitle>Access Denied</AlertTitle>
+            <AlertDescription>You do not have permission to view this page.</AlertDescription>
+        </Alert>
+    );
+  }
+
   return (
-    <StaffListTable users={staffUsers} sitesMap={sitesMap} />
+    <div className="space-y-6">
+       <PageHeader
+        title="Staff Members"
+        description="View all staff and managers. Add new team members or view their profiles."
+        actions={
+          <Button onClick={() => setShowCreateUserDialog(true)} disabled={loadingData}>
+            <PlusCircle className="mr-2 h-5 w-5" /> Add New Member
+          </Button>
+        }
+      />
+      <StaffListTable users={staffUsers} sitesMap={sitesMap} />
+      <CreateUserDialog
+        isOpen={showCreateUserDialog}
+        onClose={() => setShowCreateUserDialog(false)}
+        onCreateUserFirestoreDoc={handleCreateUserFirestoreDoc}
+        sites={sites} 
+        stalls={stalls}
+      />
+    </div>
   );
 }
