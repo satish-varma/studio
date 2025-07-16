@@ -18,7 +18,7 @@ import { ScrollArea } from '../ui/scroll-area';
 import { format } from "date-fns";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form";
 import { Badge } from '../ui/badge';
 
 let db: ReturnType<typeof getFirestore> | undefined;
@@ -88,7 +88,7 @@ export default function ManageHolidaysDialog({ isOpen, onClose, sites }: ManageH
       await addDoc(collection(db, "holidays"), {
         name: values.name,
         date: format(values.date, 'yyyy-MM-dd'),
-        siteId: values.siteId || null,
+        siteId: values.siteId === 'global' ? null : values.siteId, // Handle 'global' value
         createdAt: new Date().toISOString(),
       });
       toast({ title: "Holiday Added", description: `"${values.name}" has been added.` });
