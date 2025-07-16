@@ -11,7 +11,7 @@ export default function StaffAttendancePage() {
     <div className="space-y-6">
       <PageHeader
         title="Staff Attendance"
-        description="Mark and view daily attendance records for your staff."
+        description="View daily attendance summaries and mark attendance for your staff."
       />
       <StaffAttendanceClientPage />
     </div>
