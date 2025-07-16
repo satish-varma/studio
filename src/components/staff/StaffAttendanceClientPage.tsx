@@ -11,6 +11,7 @@ import {
   getDocs,
   doc,
   setDoc,
+  deleteDoc,
 } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
@@ -36,7 +37,8 @@ if (!getApps().length) {
 }
 const db = getFirestore();
 
-const statusCycle: AttendanceStatus[] = ["Present", "Absent", "Leave", "Half-day"];
+const statusCycle: (AttendanceStatus | null)[] = ["Present", "Absent", "Leave", "Half-day", null];
+
 
 export default function StaffAttendanceClientPage() {
   const { user, activeSiteId, loading: authLoading } = useAuth();
@@ -185,29 +187,38 @@ export default function StaffAttendanceClientPage() {
     const nextIndex = currentStatus ? (statusCycle.indexOf(currentStatus) + 1) % statusCycle.length : 0;
     const newStatus = statusCycle[nextIndex];
     
+    const docRef = doc(db, "staffAttendance", docId);
+    const prevAttendance = JSON.parse(JSON.stringify(attendance || {}));
+
     // Optimistic UI update
-    const prevAttendance = JSON.parse(JSON.stringify(attendance || {})); // Deep copy
     setAttendance(prev => {
         const newAttendance = JSON.parse(JSON.stringify(prev || {}));
         if (!newAttendance[staff.uid]) newAttendance[staff.uid] = {};
-        newAttendance[staff.uid][dateStr] = {
-            id: docId, staffUid: staff.uid, date: dateStr, status: newStatus,
-            siteId: staff.defaultSiteId!, recordedByUid: user.uid, recordedByName: user.displayName || user.email!
-        };
+        if (newStatus === null) {
+            delete newAttendance[staff.uid][dateStr];
+        } else {
+            newAttendance[staff.uid][dateStr] = {
+                id: docId, staffUid: staff.uid, date: dateStr, status: newStatus,
+                siteId: staff.defaultSiteId!, recordedByUid: user.uid, recordedByName: user.displayName || user.email!
+            };
+        }
         return newAttendance;
     });
 
     try {
-      const docRef = doc(db, "staffAttendance", docId);
-      await setDoc(docRef, {
-        staffUid: staff.uid,
-        date: dateStr,
-        status: newStatus,
-        siteId: staff.defaultSiteId,
-        recordedByUid: user.uid,
-        recordedByName: user.displayName || user.email,
-        updatedAt: new Date().toISOString(),
-      }, { merge: true });
+      if (newStatus === null) {
+        await deleteDoc(docRef);
+      } else {
+        await setDoc(docRef, {
+            staffUid: staff.uid,
+            date: dateStr,
+            status: newStatus,
+            siteId: staff.defaultSiteId,
+            recordedByUid: user.uid,
+            recordedByName: user.displayName || user.email,
+            updatedAt: new Date().toISOString(),
+        }, { merge: true });
+      }
     } catch(error: any) {
       console.error("Error saving attendance:", error);
       toast({ title: "Save Failed", description: `Failed to save status for ${staff.displayName}. Reverting change.`, variant: "destructive"});
