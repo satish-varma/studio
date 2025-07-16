@@ -12,7 +12,8 @@ import {
   setDoc,
   getDoc,
   query,
-  orderBy
+  orderBy,
+  writeBatch
 } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { getAuth } from "firebase/auth";
@@ -20,6 +21,7 @@ import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import type { AppUser, UserRole, Site, Stall, UserStatus } from "@/types";
+import { logStaffActivity } from "@/lib/staffLogger";
 
 const LOG_PREFIX = "[useUserManagement]";
 
@@ -218,6 +220,59 @@ export function useUserManagement() {
     }
   }, [currentUser, toast]);
 
+  const handleBatchUpdateStaffDetails = useCallback(async (userIds: string[], updates: { salary?: number; joiningDate?: Date | null; }) => {
+    if (!currentUser || currentUser.role !== 'admin') {
+      toast({ title: "Permission Denied", description: "Only admins can perform batch updates.", variant: "destructive" });
+      return;
+    }
+    if (userIds.length === 0) {
+      toast({ title: "No Users Selected", description: "Please select users to update.", variant: "default" });
+      return;
+    }
+    
+    const batch = writeBatch(db);
+    let updateCount = 0;
+    
+    for (const userId of userIds) {
+      const detailsDocRef = doc(db, "staffDetails", userId);
+      const updateData: Record<string, any> = {};
+
+      if (updates.salary !== undefined) {
+        updateData.salary = updates.salary;
+      }
+      if (updates.joiningDate) {
+        updateData.joiningDate = updates.joiningDate.toISOString();
+      }
+      
+      if (Object.keys(updateData).length > 0) {
+        batch.set(detailsDocRef, updateData, { merge: true });
+        
+        logStaffActivity(currentUser, {
+            type: 'STAFF_DETAILS_UPDATED',
+            relatedStaffUid: userId,
+            siteId: users.find(u => u.uid === userId)?.defaultSiteId || null,
+            details: {
+                notes: `Batch update applied. Salary updated: ${updates.salary !== undefined}, Joining date updated: ${!!updates.joiningDate}`,
+            }
+        });
+
+        updateCount++;
+      }
+    }
+
+    if (updateCount === 0) {
+        toast({ title: "No Updates Applied", description: "No changes were specified to apply.", variant: "default" });
+        return;
+    }
+
+    try {
+        await batch.commit();
+        toast({ title: "Batch Update Successful", description: `Successfully updated details for ${updateCount} staff member(s).` });
+    } catch (error: any) {
+        toast({ title: "Batch Update Failed", description: `An error occurred: ${error.message}`, variant: "destructive"});
+    }
+  }, [currentUser, toast, users]);
+
 
   return {
     users,
@@ -232,5 +287,6 @@ export function useUserManagement() {
     handleDefaultStallChange,
     handleUpdateManagedSites,
     handleStatusChange,
+    handleBatchUpdateStaffDetails,
   };
 }

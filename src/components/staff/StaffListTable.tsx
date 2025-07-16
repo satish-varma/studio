@@ -14,14 +14,34 @@ import type { AppUser, Site } from "@/types";
 import { Users as UsersIcon, Edit, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useRouter } from "next/navigation";
+import { useMemo } from 'react';
+import { Checkbox } from "@/components/ui/checkbox";
 
 interface StaffListTableProps {
   users: AppUser[];
   sitesMap: Record<string, string>;
+  selectedUserIds: string[];
+  onSelectionChange: (ids: string[]) => void;
 }
 
-export function StaffListTable({ users, sitesMap }: StaffListTableProps) {
+export function StaffListTable({ users, sitesMap, selectedUserIds, onSelectionChange }: StaffListTableProps) {
   const router = useRouter();
+
+  const isAllSelected = useMemo(() => users.length > 0 && selectedUserIds.length === users.length, [users, selectedUserIds]);
+  const isIndeterminate = useMemo(() => selectedUserIds.length > 0 && selectedUserIds.length < users.length, [users, selectedUserIds]);
+
+  const handleSelectAll = (checked: boolean | 'indeterminate') => {
+    onSelectionChange(checked === true ? users.map(u => u.uid) : []);
+  };
+  
+  const handleSelectOne = (userId: string, checked: boolean | 'indeterminate') => {
+    if (checked === true) {
+      onSelectionChange([...selectedUserIds, userId]);
+    } else {
+      onSelectionChange(selectedUserIds.filter(id => id !== userId));
+    }
+  };
+
 
   if (users.length === 0) {
     return (
@@ -54,6 +74,14 @@ export function StaffListTable({ users, sitesMap }: StaffListTableProps) {
       <Table>
         <TableHeader>
           <TableRow>
+            <TableHead className="w-[50px]">
+                <Checkbox
+                  checked={isAllSelected}
+                  onCheckedChange={handleSelectAll}
+                  aria-label="Select all staff"
+                  data-state={isIndeterminate ? 'indeterminate' : isAllSelected ? 'checked' : 'unchecked'}
+                />
+            </TableHead>
             <TableHead>Name</TableHead>
             <TableHead className="hidden md:table-cell">Email</TableHead>
             <TableHead>Role</TableHead>
@@ -63,7 +91,14 @@ export function StaffListTable({ users, sitesMap }: StaffListTableProps) {
         </TableHeader>
         <TableBody>
           {users.map((user) => (
-            <TableRow key={user.uid}>
+            <TableRow key={user.uid} data-state={selectedUserIds.includes(user.uid) ? "selected" : ""}>
+              <TableCell>
+                  <Checkbox
+                    checked={selectedUserIds.includes(user.uid)}
+                    onCheckedChange={(checked) => handleSelectOne(user.uid, checked)}
+                    aria-label={`Select user ${user.displayName}`}
+                  />
+              </TableCell>
               <TableCell className="font-medium text-foreground">{user.displayName || "N/A"}</TableCell>
               <TableCell className="text-muted-foreground hidden md:table-cell">{user.email}</TableCell>
               <TableCell>
