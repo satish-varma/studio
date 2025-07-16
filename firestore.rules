@@ -1,3 +1,4 @@
+
 rules_version = '2';
 
 service cloud.firestore {
@@ -66,10 +67,16 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isUser(userId) || isAdmin() || isManagerRole();
       allow create: if isAdmin(); 
-      // User can update their own non-critical fields.
-      // Admin can update any field for any user (except they can't delete themselves).
-      allow update: if (isUser(userId) && !request.resource.data.keys().hasAny(['role', 'uid', 'email', 'createdAt', 'managedSiteIds', 'defaultSiteId', 'defaultStallId', 'status'])) 
-                   || isAdmin();
+      allow update: if (isUser(userId) &&
+                        !request.resource.data.keys().hasAny(['role', 'uid', 'email', 'createdAt']) &&
+                        (getAuthenticatedUserRole() == 'admin' || 
+                          (getAuthenticatedUserRole() == 'manager' && !request.resource.data.keys().hasAny(['managedSiteIds', 'defaultSiteId', 'defaultStallId'])) ||
+                          (getAuthenticatedUserRole() == 'staff' && !request.resource.data.keys().hasAny(['managedSiteIds', 'defaultSiteId', 'defaultStallId']))
+                        )
+                       ) || (isAdmin() && (
+                          // Admin can update all fields except the non-editable ones
+                          !request.resource.data.keys().hasAny(['uid', 'email', 'createdAt'])
+                        ));
       allow delete: if isAdmin() && request.auth.uid != userId;
     }
     match /users {
@@ -302,7 +309,7 @@ service cloud.firestore {
       // Only Admins can delete staff details records.
       allow delete: if isAdmin();
     }
-    
+
     match /staffAttendance/{attendanceId} {
       // Managers can create/update attendance for staff in their managed sites. Admins can do so for any site.
       allow create, update: if isSignedIn() &&

@@ -20,7 +20,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Loader2, Save } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
-import { getFirestore, doc, setDoc } from "firebase/firestore";
+import { getFirestore, doc, setDoc, updateDoc } from "firebase/firestore";
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp } from 'firebase/app';
 import { useState } from "react";
@@ -56,23 +56,35 @@ export default function StaffDetailsForm({ staffUid, initialData, staffUser }: S
       address: initialData?.address || "",
       joiningDate: initialData?.joiningDate ? new Date(initialData.joiningDate) : null,
       salary: initialData?.salary || 0,
+      exitDate: initialData?.exitDate ? new Date(initialData.exitDate) : null,
     },
   });
 
   async function onSubmit(values: StaffDetailsFormValues) {
     setIsSubmitting(true);
     const detailsDocRef = doc(db, "staffDetails", staffUid);
+    const userDocRef = doc(db, "users", staffUid);
+
     try {
       const dataToSave = {
         ...values,
         joiningDate: values.joiningDate ? values.joiningDate.toISOString() : null,
+        exitDate: values.exitDate ? values.exitDate.toISOString() : null,
         salary: values.salary || 0,
-        uid: staffUid, // Ensure UID is part of the doc
+        uid: staffUid,
       };
 
       await setDoc(detailsDocRef, dataToSave, { merge: true });
-      toast({ title: "Success", description: `${staffUser.displayName}'s details have been updated.` });
-      router.back();
+      
+      if (values.exitDate) {
+        await updateDoc(userDocRef, { status: 'inactive' });
+        toast({ title: "Success", description: `${staffUser.displayName}'s details updated and account set to inactive.` });
+      } else {
+        toast({ title: "Success", description: `${staffUser.displayName}'s details have been updated.` });
+      }
+      
+      router.push('/staff/list'); // Go back to the list page
+      router.refresh(); // Force a refresh of the user list data
     } catch (error: any) {
       toast({ title: "Error", description: `Could not save details: ${error.message}`, variant: "destructive" });
     } finally {
@@ -91,10 +103,13 @@ export default function StaffDetailsForm({ staffUid, initialData, staffUser }: S
           <CardContent className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <FormField name="phoneNumber" control={form.control} render={({ field }) => ( <FormItem><FormLabel>Phone Number</FormLabel><FormControl><Input placeholder="e.g., +91..." {...field} value={field.value ?? ""} /></FormControl><FormMessage /></FormItem> )} />
-              <FormField name="joiningDate" control={form.control} render={({ field }) => ( <FormItem><FormLabel>Joining Date</FormLabel><DatePicker date={field.value ?? undefined} onDateChange={field.onChange} /></FormItem> )} />
+              <FormField name="salary" control={form.control} render={({ field }) => ( <FormItem><FormLabel>Salary (Monthly, ₹)</FormLabel><FormControl><Input type="number" placeholder="e.g., 25000" {...field} value={field.value ?? 0} onChange={e => field.onChange(parseInt(e.target.value, 10) || 0)}/></FormControl><FormMessage /></FormItem> )} />
             </div>
-            <FormField name="address" control={form.control} render={({ field }) => ( <FormItem><FormLabel>Address</FormLabel><FormControl><Textarea placeholder="Full address" {...field} value={field.value ?? ""} /></FormControl><FormMessage /></FormItem> )} />
-            <FormField name="salary" control={form.control} render={({ field }) => ( <FormItem><FormLabel>Salary (Monthly, ₹)</FormLabel><FormControl><Input type="number" placeholder="e.g., 25000" {...field} value={field.value ?? 0} /></FormControl><FormMessage /></FormItem> )} />
+             <FormField name="address" control={form.control} render={({ field }) => ( <FormItem><FormLabel>Address</FormLabel><FormControl><Textarea placeholder="Full address" {...field} value={field.value ?? ""} /></FormControl><FormMessage /></FormItem> )} />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+               <FormField name="joiningDate" control={form.control} render={({ field }) => ( <FormItem><FormLabel>Joining Date</FormLabel><DatePicker date={field.value ?? undefined} onDateChange={field.onChange} /></FormItem> )} />
+               <FormField name="exitDate" control={form.control} render={({ field }) => ( <FormItem><FormLabel>Exit Date (Optional)</FormLabel><DatePicker date={field.value ?? undefined} onDateChange={field.onChange} /><FormDescription className="text-xs">Setting this will make the user inactive.</FormDescription></FormItem> )} />
+            </div>
           </CardContent>
           <CardFooter className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={() => router.back()} disabled={isSubmitting}>Cancel</Button>

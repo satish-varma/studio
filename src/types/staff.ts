@@ -9,6 +9,7 @@ export interface StaffDetails {
   address?: string;
   joiningDate?: string; // ISO date string
   salary?: number;
+  exitDate?: string | null; // ISO date string
   // Other details like emergency contact, ID numbers can be added here
 }
 
@@ -17,6 +18,7 @@ export const staffDetailsFormSchema = z.object({
     address: z.string().optional(),
     joiningDate: z.date().optional().nullable(),
     salary: z.coerce.number().min(0).optional(),
+    exitDate: z.date().optional().nullable(),
 });
 
 export type StaffDetailsFormValues = z.infer<typeof staffDetailsFormSchema>;
@@ -51,6 +53,7 @@ export interface SalaryAdvance {
   notes?: string;
   recordedByUid: string;
   recordedByName: string;
+  siteId: string;
 }
 
 export const salaryAdvanceFormSchema = z.object({
