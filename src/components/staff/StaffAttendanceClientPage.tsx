@@ -20,7 +20,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { format, startOfMonth, endOfMonth, addMonths, subMonths, isBefore, isAfter, startOfDay } from 'date-fns';
 import { Button } from "@/components/ui/button";
 import type { AppUser, StaffAttendance, Site, Holiday, AttendanceStatus, StaffDetails, UserStatus } from "@/types";
-import { Loader2, Info, ChevronLeft, ChevronRight, CalendarDays, Filter } from "lucide-react";
+import { Loader2, Info, ChevronLeft, ChevronRight, CalendarDays, Filter, XCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import PageHeader from "@/components/shared/PageHeader";
@@ -352,6 +352,59 @@ export default function StaffAttendanceClientPage() {
     }
   };
 
+  const handleBulkClear = async () => {
+    if (!user || isAllSitesView) {
+        toast({title: "Action Denied", description: "Select a specific site to perform bulk actions."});
+        return;
+    }
+    if (selectedStaffUids.length === 0 || !bulkUpdateDate) {
+        toast({title: "Missing Info", description: "Please select staff members and a date to clear."});
+        return;
+    }
+
+    setIsBulkUpdating(true);
+    const dateStr = format(bulkUpdateDate, 'yyyy-MM-dd');
+    const batch = writeBatch(db);
+    let validClears = 0;
+
+    for (const uid of selectedStaffUids) {
+        const staff = allStaffForSite.find(s => s.uid === uid);
+        if (!staff) continue;
+        
+        const docId = `${dateStr}_${uid}`;
+        const docRef = doc(db, "staffAttendance", docId);
+        batch.delete(docRef);
+        validClears++;
+    }
+    
+    if (validClears === 0) {
+        // This case is unlikely unless no staff were selected, which is checked above.
+        setIsBulkUpdating(false);
+        return;
+    }
+
+    try {
+        await batch.commit();
+        await logStaffActivity(user, {
+            type: 'ATTENDANCE_MARKED',
+            relatedStaffUid: 'MULTIPLE',
+            siteId: activeSiteId,
+            details: {
+                date: dateStr,
+                status: 'Cleared',
+                notes: `Bulk attendance cleared for ${validClears} staff member(s).`,
+            }
+        });
+        toast({ title: "Bulk Clear Successful", description: `Attendance for ${validClears} staff cleared for ${format(bulkUpdateDate, 'PPP')}.`});
+        setSelectedStaffUids([]);
+    } catch(error: any) {
+        console.error("Bulk clear failed:", error);
+        toast({ title: "Bulk Clear Failed", description: error.message, variant: "destructive"});
+    } finally {
+        setIsBulkUpdating(false);
+    }
+  };
+
 
   if (authLoading) return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin" /></div>;
 
@@ -401,6 +454,7 @@ export default function StaffAttendanceClientPage() {
                 <Button size="sm" variant="outline" className="bg-red-100 hover:bg-red-200" onClick={() => handleBulkUpdate('Absent')} disabled={isBulkUpdating}>Mark Absent</Button>
                 <Button size="sm" variant="outline" className="bg-yellow-100 hover:bg-yellow-200" onClick={() => handleBulkUpdate('Leave')} disabled={isBulkUpdating}>Mark Leave</Button>
                 <Button size="sm" variant="outline" className="bg-blue-100 hover:bg-blue-200" onClick={() => handleBulkUpdate('Half-day')} disabled={isBulkUpdating}>Mark Half-day</Button>
+                <Button size="sm" variant="destructive" onClick={handleBulkClear} disabled={isBulkUpdating}><XCircle className="h-4 w-4 mr-1"/>Clear</Button>
                 {isBulkUpdating && <Loader2 className="h-5 w-5 animate-spin"/>}
             </div>
         </div>
