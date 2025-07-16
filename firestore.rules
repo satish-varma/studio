@@ -16,10 +16,6 @@ service cloud.firestore {
       let userDocPath = /databases/$(database)/documents/users/$(userId);
       return exists(userDocPath) ? get(userDocPath).data : null;
     }
-    
-    function getTargetUserData(userId) {
-      return getUserData(userId);
-    }
 
     function getAuthenticatedUserData() {
       return isSignedIn() ? getUserData(request.auth.uid) : null;
@@ -48,11 +44,6 @@ service cloud.firestore {
              userData != null &&
              userData.managedSiteIds != null &&
              userData.managedSiteIds.hasAny([siteId]); // Use hasAny for list check
-    }
-    
-    function isManagerOfUser(userId) {
-      let targetUser = getTargetUserData(userId);
-      return targetUser != null && isManagerOfSite(targetUser.defaultSiteId);
     }
 
     function isStaffAssignedTo(siteId, stallId) {
@@ -84,7 +75,7 @@ service cloud.firestore {
                        ) || isAdmin();
       allow delete: if isAdmin() && request.auth.uid != userId;
     }
-    match /users/{collection} {
+    match /users {
       allow list: if isAdmin() || isManagerRole();
     }
 
@@ -211,6 +202,13 @@ service cloud.firestore {
     match /stockMovementLogs {
         allow list: if isAdmin() || isManagerRole();
     }
+
+    match /userGoogleOAuthTokens/{userId} {
+      allow read, write, delete: if isUser(userId);
+      allow create: if isUser(userId) &&
+                      request.resource.data.access_token is string &&
+                      request.resource.data.refresh_token is string;
+    }
     
     // --- Food Stall Specific Rules ---
     
@@ -309,8 +307,8 @@ service cloud.firestore {
 
     match /advances/{advanceId} {
       // Managers can create advance records for staff in their managed sites. Admins can do so for any site.
-      // This rule assumes the client adds `siteId` to the advance document for easier rules.
-       allow create: if isSignedIn() &&
+      // This rule requires the `advances` document to have a `siteId` field.
+      allow create: if isSignedIn() &&
                       request.resource.data.recordedByUid == request.auth.uid &&
                       request.resource.data.siteId != null &&
                       (isAdmin() || (isManagerRole() && isManagerOfSite(request.resource.data.siteId)));
@@ -325,16 +323,20 @@ service cloud.firestore {
     }
     
     match /staffDetails/{userId} {
-      // A user can read their own details.
-      // A manager can read details of staff in their managed sites.
-      // An admin can read any staff details.
-      allow read: if isUser(userId) || isAdmin() || isManagerOfUser(userId);
+      // Helper function to get the site ID of the staff member being managed
+      function getStaffSiteId() {
+        return getUserData(userId).defaultSiteId;
+      }
       
-      // A manager can update details for staff in their managed sites.
-      // An admin can update any staff details.
-      allow create, update: if isAdmin() || isManagerOfUser(userId);
-      
-      // Only an admin can delete a staff details document.
+      // Staff can read their own details.
+      // Admins can read any staff details.
+      // Managers can read details of staff assigned to a site they manage.
+      allow read: if isUser(userId) || isAdmin() || (isManagerRole() && isManagerOfSite(getStaffSiteId()));
+
+      // Only Admins or Managers of the staff's assigned site can create/update details.
+      allow create, update: if isAdmin() || (isManagerRole() && isManagerOfSite(getStaffSiteId()));
+
+      // Only Admins can delete staff details records.
       allow delete: if isAdmin();
     }
   }
