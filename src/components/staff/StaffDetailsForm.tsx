@@ -26,6 +26,8 @@ import { getApps, initializeApp } from 'firebase/app';
 import { useState } from "react";
 import { DatePicker } from "../ui/date-picker";
 import type { StaffDetails } from "@/types";
+import { logStaffActivity } from "@/lib/staffLogger";
+import { useAuth } from "@/contexts/AuthContext";
 
 const LOG_PREFIX = "[StaffDetailsForm]";
 
@@ -48,6 +50,7 @@ export default function StaffDetailsForm({ staffUid, initialData, staffUser }: S
   const router = useRouter();
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const { user: currentUser } = useAuth(); // Get the currently logged-in admin/manager
 
   const form = useForm<StaffDetailsFormValues>({
     resolver: zodResolver(staffDetailsFormSchema),
@@ -61,6 +64,10 @@ export default function StaffDetailsForm({ staffUid, initialData, staffUser }: S
   });
 
   async function onSubmit(values: StaffDetailsFormValues) {
+    if (!currentUser) {
+        toast({ title: "Authentication Error", description: "You are not logged in.", variant: "destructive" });
+        return;
+    }
     setIsSubmitting(true);
     const detailsDocRef = doc(db, "staffDetails", staffUid);
     const userDocRef = doc(db, "users", staffUid);
@@ -76,12 +83,22 @@ export default function StaffDetailsForm({ staffUid, initialData, staffUser }: S
 
       await setDoc(detailsDocRef, dataToSave, { merge: true });
       
+      let toastDescription = `${staffUser.displayName}'s details have been updated.`;
       if (values.exitDate) {
         await updateDoc(userDocRef, { status: 'inactive' });
-        toast({ title: "Success", description: `${staffUser.displayName}'s details updated and account set to inactive.` });
-      } else {
-        toast({ title: "Success", description: `${staffUser.displayName}'s details have been updated.` });
+        toastDescription = `${staffUser.displayName}'s details updated and account set to inactive.`;
       }
+      
+      await logStaffActivity(currentUser, {
+          type: 'STAFF_DETAILS_UPDATED',
+          relatedStaffUid: staffUid,
+          siteId: staffUser.defaultSiteId,
+          details: {
+              notes: `Profile details for ${staffUser.displayName || staffUser.email} were updated.`,
+          }
+      });
+
+      toast({ title: "Success", description: toastDescription });
       
       router.push('/staff/list'); // Go back to the list page
       router.refresh(); // Force a refresh of the user list data

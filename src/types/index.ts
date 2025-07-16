@@ -9,3 +9,4 @@ export type { FoodVendor, FoodItemExpense, FoodSaleTransaction, FoodExpenseCateg
 export type { FoodStallActivityLog, FoodStallActivityType } from './food_log';
 export type { StaffDetails, StaffAttendance, SalaryAdvance, AttendanceStatus } from './staff';
 export type { Holiday } from './holiday';
+export type { StaffActivityLog, StaffActivityType } from './staff_log';

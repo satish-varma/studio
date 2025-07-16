@@ -25,6 +25,7 @@ import { useToast } from "@/hooks/use-toast";
 import PageHeader from "@/components/shared/PageHeader";
 import { AttendanceRegisterTable } from "./AttendanceRegisterTable";
 import ManageHolidaysDialog from "./ManageHolidaysDialog";
+import { logStaffActivity } from "@/lib/staffLogger";
 
 const LOG_PREFIX = "[StaffAttendanceClientPage]";
 
@@ -219,6 +220,18 @@ export default function StaffAttendanceClientPage() {
             updatedAt: new Date().toISOString(),
         }, { merge: true });
       }
+
+      await logStaffActivity(user, {
+        type: 'ATTENDANCE_MARKED',
+        relatedStaffUid: staff.uid,
+        siteId: staff.defaultSiteId,
+        details: {
+            date: dateStr,
+            status: newStatus || 'Cleared',
+            notes: `Attendance for ${staff.displayName || staff.email} on ${dateStr} set to ${newStatus || 'Cleared'}`
+        }
+      });
+
     } catch(error: any) {
       console.error("Error saving attendance:", error);
       toast({ title: "Save Failed", description: `Failed to save status for ${staff.displayName}. Reverting change.`, variant: "destructive"});

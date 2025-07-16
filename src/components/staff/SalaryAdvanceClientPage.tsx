@@ -54,6 +54,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Loader2, Info, PlusCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { format } from "date-fns";
+import { logStaffActivity } from "@/lib/staffLogger";
 
 const LOG_PREFIX = "[SalaryAdvanceClientPage]";
 
@@ -96,41 +97,63 @@ export default function SalaryAdvanceClientPage() {
         where("defaultSiteId", "==", activeSiteId)
     );
     const unsubscribeUsers = onSnapshot(usersQuery, (snapshot) => {
-        setStaffList(snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser)));
-    });
-
-    const advancesQuery = query(
-        collection(db, "advances"),
-        // This is tricky without composite indexes. For simplicity, we filter by staff UIDs from the site.
-        // A better long-term solution might be to add siteId to the advance document.
-    );
-    const unsubscribeAdvances = onSnapshot(advancesQuery, (snapshot) => {
-        const fetchedAdvances = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SalaryAdvance));
-        const staffUidsInSite = staffList.map(s => s.uid);
-        setAdvances(fetchedAdvances.filter(adv => staffUidsInSite.includes(adv.staffUid)));
+        const fetchedStaff = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser));
+        setStaffList(fetchedStaff);
+        
+        // After fetching staff, fetch their advances
+        if (fetchedStaff.length > 0) {
+            const staffUids = fetchedStaff.map(s => s.uid);
+            const advancesQuery = query(collection(db, "advances"), where("staffUid", "in", staffUids));
+            const unsubscribeAdvances = onSnapshot(advancesQuery, (advSnapshot) => {
+                setAdvances(advSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SalaryAdvance)));
+                setLoading(false);
+            });
+            return () => unsubscribeAdvances(); // Return inner unsubscribe
+        } else {
+            setAdvances([]);
+            setLoading(false);
+        }
+    }, (error) => {
+        console.error("Error fetching staff list for advances:", error);
+        toast({ title: "Error", description: "Could not fetch staff list.", variant: "destructive" });
         setLoading(false);
     });
 
     return () => {
         unsubscribeUsers();
-        unsubscribeAdvances();
     };
-  }, [activeSiteId, authLoading, staffList]); // Re-run if staffList changes
+  }, [activeSiteId, authLoading, toast]);
+
 
   const handleAddAdvance = async (values: SalaryAdvanceFormValues) => {
-    if (!user || !selectedStaff) {
+    const staffMember = staffList.find(s => s.uid === selectedStaff);
+    if (!user || !activeSiteId || !staffMember) {
         toast({ title: "Error", description: "User context or selected staff is missing.", variant: "destructive"});
         return;
     }
 
     try {
-        await addDoc(collection(db, "advances"), {
+        const advanceData = {
             ...values,
-            staffUid: selectedStaff,
+            staffUid: staffMember.uid,
+            siteId: activeSiteId,
             date: values.date.toISOString(),
             recordedByUid: user.uid,
             recordedByName: user.displayName || user.email,
+        };
+        const docRef = await addDoc(collection(db, "advances"), advanceData);
+        
+        await logStaffActivity(user, {
+            type: 'SALARY_ADVANCE_GIVEN',
+            relatedStaffUid: staffMember.uid,
+            siteId: activeSiteId,
+            details: {
+                amount: values.amount,
+                notes: `Advance given to ${staffMember.displayName || staffMember.email} on ${format(values.date, 'PPP')}.`,
+                relatedDocumentId: docRef.id,
+            }
         });
+
         toast({ title: "Success", description: "Salary advance recorded." });
         setShowAddDialog(false);
         form.reset();
