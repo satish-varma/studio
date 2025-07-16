@@ -28,7 +28,8 @@ export default function UserManagementClientPage() {
     handleDeleteUser,
     handleDefaultSiteChange,
     handleDefaultStallChange,
-    handleUpdateManagedSites
+    handleUpdateManagedSites,
+    handleStatusChange,
   } = useUserManagement();
   
   if (authLoading || loading) {
@@ -97,6 +98,7 @@ export default function UserManagementClientPage() {
           onDefaultSiteChange={handleDefaultSiteChange}
           onDefaultStallChange={handleDefaultStallChange}
           onManagedSitesChange={handleUpdateManagedSites}
+          onStatusChange={handleStatusChange}
           currentUserId={currentUser?.uid}
       />
       <CreateUserDialog

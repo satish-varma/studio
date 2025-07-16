@@ -130,6 +130,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               uid: firebaseUser.uid, email: firebaseUser.email, role: 'staff',
               displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User",
               createdAt: new Date().toISOString(), defaultSiteId: null, defaultStallId: null, managedSiteIds: [],
+              status: 'active',
               defaultItemSearchTerm: null, defaultItemCategoryFilter: null, defaultItemStockStatusFilter: null,
               defaultItemStallFilterOption: null, defaultSalesDateRangeFrom: null, defaultSalesDateRangeTo: null,
               defaultSalesStaffFilter: null,
@@ -139,6 +140,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               .catch(error => console.error(`${LOG_PREFIX_CONTEXT} Error creating default user document for UID: ${firebaseUser.uid}:`, error));
             appUserToSet = defaultUserData;
           }
+
+          if (appUserToSet.status === 'inactive') {
+            console.warn(`${LOG_PREFIX_CONTEXT} Inactive user ${appUserToSet.uid} tried to log in. Signing out.`);
+            firebaseSignOut(auth);
+            setUserState(null);
+            setLoading(false);
+            return;
+          }
+
           setUserState(appUserToSet);
           console.log(`${LOG_PREFIX_CONTEXT} AppUser state set for ${appUserToSet.uid}. Role: ${appUserToSet.role}`);
           
@@ -295,6 +305,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       displayName: userDataFromFirestore.displayName || firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User",
       photoURL: firebaseUser.photoURL,
       role: userDataFromFirestore.role || 'staff',
+      status: userDataFromFirestore.status || 'active',
       createdAt: userDataFromFirestore.createdAt || new Date().toISOString(),
       defaultSiteId: userDataFromFirestore.defaultSiteId ?? null,
       defaultStallId: userDataFromFirestore.defaultStallId ?? null,
@@ -327,12 +338,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (userDocSnap.exists()) {
         appUserToReturn = mapFirestoreDataToAppUser(firebaseUser, userDocSnap.data());
         console.log(`${LOG_PREFIX_CONTEXT}:signIn: User document found for ${firebaseUser.uid}.`);
+        if (appUserToReturn.status === 'inactive') {
+          await firebaseSignOut(auth);
+          throw new Error("Your account has been deactivated. Please contact an administrator.");
+        }
       } else {
         console.warn(`${LOG_PREFIX_CONTEXT}:signIn: User document NOT FOUND for UID: ${firebaseUser.uid}. Creating default staff user.`);
         const defaultUserData: AppUser = {
             uid: firebaseUser.uid, email: firebaseUser.email, role: 'staff',
             displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User",
             createdAt: new Date().toISOString(), defaultSiteId: null, defaultStallId: null, managedSiteIds: [],
+            status: 'active',
             defaultItemSearchTerm: null, defaultItemCategoryFilter: null, defaultItemStockStatusFilter: null,
             defaultItemStallFilterOption: null, defaultSalesDateRangeFrom: null, defaultSalesDateRangeTo: null,
             defaultSalesStaffFilter: null,
@@ -363,6 +379,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const newUserDocData: AppUser = {
         uid: firebaseUser.uid, email: firebaseUser.email, role: 'staff' as UserRole,
         displayName: displayName, createdAt: new Date().toISOString(), defaultSiteId: null,
+        status: 'active',
         defaultStallId: null, managedSiteIds: [], defaultItemSearchTerm: null,
         defaultItemCategoryFilter: null, defaultItemStockStatusFilter: null,
         defaultItemStallFilterOption: null, defaultSalesDateRangeFrom: null,

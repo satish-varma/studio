@@ -19,7 +19,7 @@ import { getAuth } from "firebase/auth";
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import type { AppUser, UserRole, Site, Stall } from "@/types";
+import type { AppUser, UserRole, Site, Stall, UserStatus } from "@/types";
 
 const LOG_PREFIX = "[useUserManagement]";
 
@@ -109,7 +109,7 @@ export function useUserManagement() {
     }
     const userDocRef = doc(db, "users", uid);
     try {
-      await setDoc(userDocRef, { ...newUserData, createdAt: new Date().toISOString() });
+      await setDoc(userDocRef, { ...newUserData, createdAt: new Date().toISOString(), status: 'active' });
       return true;
     } catch (error: any) {
       toast({ title: "Firestore Error", description: `Could not create user document: ${error.message}`, variant: "destructive" });
@@ -196,6 +196,20 @@ export function useUserManagement() {
     }
   }, [currentUser, toast]);
 
+  const handleStatusChange = useCallback(async (userId: string, newStatus: UserStatus) => {
+    if (!currentUser || currentUser.role !== 'admin' || userId === currentUser.uid) {
+      toast({ title: "Permission Denied", description: "You cannot change this user's status.", variant: "destructive" });
+      return;
+    }
+    const userDocRef = doc(db, "users", userId);
+    try {
+      await updateDoc(userDocRef, { status: newStatus });
+      toast({ title: "Status Updated", description: `User has been set to ${newStatus}.` });
+    } catch (error: any) {
+      toast({ title: "Update Failed", description: `Could not update status: ${error.message}`, variant: "destructive" });
+    }
+  }, [currentUser, toast]);
+
 
   return {
     users,
@@ -209,5 +223,6 @@ export function useUserManagement() {
     handleDefaultSiteChange,
     handleDefaultStallChange,
     handleUpdateManagedSites,
+    handleStatusChange,
   };
 }

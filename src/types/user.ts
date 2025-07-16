@@ -1,5 +1,6 @@
 
 export type UserRole = 'staff' | 'manager' | 'admin';
+export type UserStatus = 'active' | 'inactive';
 
 export interface AppUser {
   uid: string;
@@ -7,6 +8,7 @@ export interface AppUser {
   displayName?: string | null;
   photoURL?: string | null;
   role: UserRole;
+  status?: UserStatus; // 'active' or 'inactive', defaults to 'active'
   createdAt?: string; // ISO date string, set upon user creation
   
   // For Staff:

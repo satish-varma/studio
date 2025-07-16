@@ -17,7 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import type { AppUser, UserRole, Site, Stall } from "@/types";
+import type { AppUser, UserRole, Site, Stall, UserStatus } from "@/types";
 import { Trash2, MoreHorizontal, Loader2, Info, Edit3, Users as UsersIcon, Building, Store } from "lucide-react";
 import {
   AlertDialog,
@@ -40,7 +40,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Label } from "@/components/ui/label";
-
+import { Switch } from "@/components/ui/switch";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -59,6 +59,7 @@ interface UserTableProps {
   onDefaultSiteChange: (userId: string, newSiteId: string | null) => Promise<void>;
   onDefaultStallChange: (userId: string, newStallId: string | null) => Promise<void>;
   onManagedSitesChange: (userId: string, managedSiteIds: string[]) => Promise<void>;
+  onStatusChange: (userId: string, newStatus: UserStatus) => Promise<void>;
   currentUserId?: string;
 }
 
@@ -71,10 +72,12 @@ export function UserTable({
   onDefaultSiteChange,
   onDefaultStallChange,
   onManagedSitesChange,
+  onStatusChange,
   currentUserId,
 }: UserTableProps) {
   const [isUpdatingRole, setIsUpdatingRole] = useState<string | null>(null);
   const [isUpdatingAssignment, setIsUpdatingAssignment] = useState<string | null>(null);
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [userToDelete, setUserToDelete] = useState<AppUser | null>(null);
 
@@ -103,6 +106,13 @@ export function UserTable({
     setIsUpdatingAssignment(userId);
     await onDefaultStallChange(userId, newStallId === "none" ? null : newStallId);
     setIsUpdatingAssignment(null);
+  };
+
+  const handleStatusChangeInternal = async (userId: string, currentStatus: UserStatus) => {
+    setIsUpdatingStatus(userId);
+    const newStatus: UserStatus = currentStatus === 'active' ? 'inactive' : 'active';
+    await onStatusChange(userId, newStatus);
+    setIsUpdatingStatus(null);
   };
 
   const handleDeleteInternal = async () => {
@@ -160,8 +170,8 @@ export function UserTable({
           <TableHeader>
             <TableRow>
               <TableHead>Display Name</TableHead>
-              <TableHead className="hidden md:table-cell">Email</TableHead>
               <TableHead>Role</TableHead>
+              <TableHead>Status</TableHead>
               <TableHead>Site Assignment(s)</TableHead>
               <TableHead>Default Stall (Staff)</TableHead>
               <TableHead className="hidden lg:table-cell">Joined On</TableHead>
@@ -174,6 +184,7 @@ export function UserTable({
               const isManager = user.role === 'manager';
               const isStaff = user.role === 'staff';
               const isAdmin = user.role === 'admin';
+              const userStatus = user.status || 'active';
 
               const stallsForSelectedSite = (isStaff && user.defaultSiteId)
                 ? stalls.filter(s => s.siteId === user.defaultSiteId)
@@ -228,8 +239,10 @@ export function UserTable({
 
               return (
                 <TableRow key={user.uid}>
-                  <TableCell className="font-medium text-foreground">{user.displayName || "N/A"}</TableCell>
-                  <TableCell className="text-muted-foreground hidden md:table-cell">{user.email}</TableCell>
+                  <TableCell className="font-medium">
+                    <div className="text-foreground">{user.displayName || "N/A"}</div>
+                    <div className="text-xs text-muted-foreground hidden md:block">{user.email}</div>
+                  </TableCell>
                   <TableCell>
                     {isUpdatingRole === user.uid ? (
                        <Loader2 className="h-5 w-5 animate-spin text-primary" />
@@ -250,6 +263,21 @@ export function UserTable({
                       </Select>
                     )}
                     {isCurrentUserBeingManaged && <Badge variant="outline" className="mt-1 text-xs border-primary text-primary">Current Admin</Badge>}
+                  </TableCell>
+                  <TableCell>
+                    {isUpdatingStatus === user.uid ? (
+                        <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                    ) : (
+                        <div className="flex items-center space-x-2">
+                            <Switch
+                                id={`status-switch-${user.uid}`}
+                                checked={userStatus === 'active'}
+                                onCheckedChange={() => handleStatusChangeInternal(user.uid, userStatus)}
+                                disabled={isCurrentUserBeingManaged}
+                            />
+                            <Label htmlFor={`status-switch-${user.uid}`} className="text-xs capitalize">{userStatus}</Label>
+                        </div>
+                    )}
                   </TableCell>
                   <TableCell>
                     {isUpdatingAssignment === user.uid && (isStaff || isManager) ? (
