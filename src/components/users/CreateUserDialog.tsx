@@ -40,11 +40,12 @@ import { getAuth, type User as FirebaseUser } from 'firebase/auth';
 import { getApp } from 'firebase/app';
 
 const LOG_PREFIX = "[CreateUserDialog]";
+const DEFAULT_PASSWORD = "tgg123";
 
 const createUserFormSchema = z.object({
-  email: z.string().email({ message: "Invalid email address." }),
-  password: z.string().min(6, { message: "Password must be at least 6 characters." }),
-  confirmPassword: z.string().min(6, { message: "Please confirm the password." }),
+  email: z.string().email({ message: "Invalid email address." }).optional().or(z.literal('')),
+  password: z.string().min(6, { message: "Password must be at least 6 characters." }).optional(),
+  confirmPassword: z.string().min(6, { message: "Please confirm the password." }).optional(),
   displayName: z.string().min(2, { message: "Display name must be at least 2 characters." }),
   role: z.enum(['staff', 'manager', 'admin'], { required_error: "Role is required." }),
   defaultSiteId: z.string().nullable().optional(),
@@ -86,8 +87,8 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
     resolver: zodResolver(createUserFormSchema),
     defaultValues: {
       email: "",
-      password: "",
-      confirmPassword: "",
+      password: DEFAULT_PASSWORD,
+      confirmPassword: DEFAULT_PASSWORD,
       displayName: "",
       role: "staff",
       defaultSiteId: null,
@@ -161,6 +162,12 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
       const idToken = await currentFirebaseUser.getIdToken(true);
       console.log(`${LOG_PREFIX} ID token obtained. Calling /api/admin/create-user...`);
 
+      const finalEmail = (values.email && values.email.trim() !== "") 
+        ? values.email 
+        : `${values.displayName.toLowerCase().replace(/\s+/g, '')}@tgg.in`;
+      
+      const finalPassword = values.password || DEFAULT_PASSWORD;
+
       const response = await fetch('/api/admin/create-user', {
         method: 'POST',
         headers: {
@@ -168,8 +175,8 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
           'Authorization': `Bearer ${idToken}`,
         },
         body: JSON.stringify({
-          email: values.email,
-          password: values.password,
+          email: finalEmail,
+          password: finalPassword,
           displayName: values.displayName,
         }),
       });
@@ -227,20 +234,15 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
       let isHandledApiError = false;
       
       if (typeof error.message === 'string') {
-          if (error.message.includes("Firebase Admin SDK not initialized")) {
-            toastDescription = "Server Error: Firebase Admin SDK failed to initialize. Please check server logs and environment configuration (e.g., GOOGLE_APPLICATION_CREDENTIALS_JSON).";
-            console.error(`${LOG_PREFIX} Error during user creation process: ${error.message}`);
-          } else if (error.message.includes("is already in use")) {
+          if (error.message.includes("is already in use")) {
             toastDescription = error.message;
             form.setError("email", { type: "manual", message: toastDescription });
             console.warn(`${LOG_PREFIX} User creation failed (handled): ${error.message}`);
             isHandledApiError = true;
           } else {
-            // For other errors, log them as console.error
             console.error(`${LOG_PREFIX} Error during user creation process: ${error.message}`);
           }
       } else {
-        // If error.message is not a string or error is not typical
         console.error(`${LOG_PREFIX} Unexpected error during user creation process:`, error);
       }
       
@@ -284,8 +286,9 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
               name="email"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Email Address <span className="text-destructive">*</span></FormLabel>
-                  <FormControl><Input type="email" placeholder="user@example.com" {...field} disabled={isSubmitting || adminAuthLoading} className="bg-input" /></FormControl>
+                  <FormLabel>Email Address</FormLabel>
+                  <FormControl><Input type="email" placeholder="Auto-generates if left blank" {...field} disabled={isSubmitting || adminAuthLoading} className="bg-input" /></FormControl>
+                  <FormDescription className="text-xs">If blank, an email will be generated from the display name (e.g., "Test User" becomes testuser@tgg.in).</FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
@@ -295,7 +298,7 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
                 name="password"
                 render={({ field }) => (
                     <FormItem>
-                    <FormLabel>Password <span className="text-destructive">*</span></FormLabel>
+                    <FormLabel>Password</FormLabel>
                     <FormControl>
                         <div className="relative">
                         <Input
@@ -319,6 +322,7 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
                         </Button>
                         </div>
                     </FormControl>
+                    <FormDescription className="text-xs">Defaults to '{DEFAULT_PASSWORD}' if left blank.</FormDescription>
                     <FormMessage />
                     </FormItem>
                 )}
@@ -328,7 +332,7 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
                 name="confirmPassword"
                 render={({ field }) => (
                     <FormItem>
-                    <FormLabel>Confirm Password <span className="text-destructive">*</span></FormLabel>
+                    <FormLabel>Confirm Password</FormLabel>
                     <FormControl>
                         <div className="relative">
                         <Input
