@@ -139,20 +139,17 @@ export default function StaffAttendanceClientPage() {
         
         const unsubscribe = onSnapshot(attendanceQuery, (snapshot) => {
             let newAttendanceForBatch: Record<string, AttendanceStatus> = {};
-            let presentCountForBatch = 0;
-            let absentOrLeaveCountForBatch = 0;
             snapshot.forEach(doc => {
                 const data = doc.data() as StaffAttendance;
                 newAttendanceForBatch[data.staffUid] = data.status;
-                if (data.status === 'Present') presentCountForBatch++;
-                if (['Absent', 'Leave', 'Half-day'].includes(data.status)) absentOrLeaveCountForBatch++;
             });
-            setAttendance(prev => ({...prev, ...newAttendanceForBatch}));
-            setStats(prev => ({
-                ...prev, 
-                present: Object.values({...prev, ...newAttendanceForBatch}).filter(s => s === 'Present').length,
-                absentOrLeave: Object.values({...prev, ...newAttendanceForBatch}).filter(s => ['Absent', 'Leave', 'Half-day'].includes(s)).length,
-            }));
+            setAttendance(prev => {
+                const updatedAttendance = {...prev, ...newAttendanceForBatch};
+                 const presentCount = Object.values(updatedAttendance).filter(s => s === 'Present').length;
+                const absentOrLeaveCount = Object.values(updatedAttendance).filter(s => ['Absent', 'Leave', 'Half-day'].includes(s)).length;
+                setStats(prevStats => ({...prevStats, present: presentCount, absentOrLeave: absentOrLeaveCount }));
+                return updatedAttendance;
+            });
         });
         unsubscribers.push(unsubscribe);
     });
@@ -175,7 +172,7 @@ export default function StaffAttendanceClientPage() {
             staffUid,
             date: dateStr,
             status,
-            siteId: staffMember.defaultSiteId,
+            siteId: staffMember.defaultSiteId, // Correctly use the staff member's siteId
             recordedByUid: user.uid,
             recordedByName: user.displayName || user.email,
         }, { merge: true });
