@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import type { AppUser, Site } from "@/types";
 import { Users as UsersIcon, Edit, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { useRouter } from "next/navigation";
 
 interface StaffListTableProps {
   users: AppUser[];
@@ -20,7 +21,8 @@ interface StaffListTableProps {
 }
 
 export function StaffListTable({ users, sitesMap }: StaffListTableProps) {
-  
+  const router = useRouter();
+
   if (users.length === 0) {
     return (
       <div className="text-center py-10 px-4 bg-card rounded-lg border shadow-sm">
@@ -69,8 +71,8 @@ export function StaffListTable({ users, sitesMap }: StaffListTableProps) {
               </TableCell>
               <TableCell className="text-muted-foreground">{getSiteAssignments(user)}</TableCell>
               <TableCell className="text-right">
-                <Button variant="ghost" size="sm" disabled>
-                    <Edit className="mr-2 h-4 w-4" /> Edit Profile (Soon)
+                <Button variant="ghost" size="sm" onClick={() => router.push(`/staff/${user.uid}/edit`)}>
+                    <Edit className="mr-2 h-4 w-4" /> Edit Profile
                 </Button>
               </TableCell>
             </TableRow>
