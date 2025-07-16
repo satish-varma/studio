@@ -54,34 +54,55 @@ export default function StaffAttendanceClientPage() {
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
+  const isAllSitesView = user?.role === 'admin' && !activeSiteId;
+
   useEffect(() => {
-    if (authLoading || !activeSiteId) {
-        if (!authLoading) setLoading(false);
-        return;
+    if (authLoading) return;
+    if (user?.role !== 'manager' && user?.role !== 'admin') {
+      setLoading(false);
+      return;
     }
+    // If not an admin in all-sites view, a site must be selected
+    if (!isAllSitesView && !activeSiteId) {
+      setLoading(false);
+      setStaffList([]);
+      return;
+    }
+
     setLoading(true);
 
-    const usersQuery = query(
-        collection(db, "users"),
-        where("role", "in", ["staff", "manager"]),
-        where("defaultSiteId", "==", activeSiteId)
-    );
+    let usersQuery;
+    if (isAllSitesView) {
+        console.log(`${LOG_PREFIX} Admin in All Sites view. Fetching all staff/managers.`);
+        usersQuery = query(
+            collection(db, "users"),
+            where("role", "in", ["staff", "manager"])
+        );
+    } else {
+        console.log(`${LOG_PREFIX} Fetching staff for active site: ${activeSiteId}`);
+        usersQuery = query(
+            collection(db, "users"),
+            where("role", "in", ["staff", "manager"]),
+            where("defaultSiteId", "==", activeSiteId)
+        );
+    }
 
     const unsubscribe = onSnapshot(usersQuery, (snapshot) => {
         const fetchedStaff = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser));
-        setStaffList(fetchedStaff);
+        setStaffList(fetchedStaff.sort((a,b) => (a.displayName || a.email || "").localeCompare(b.displayName || b.email || "")));
         setStats(prev => ({...prev, totalStaff: fetchedStaff.length }));
         setLoading(false);
     }, (error) => {
-        console.error("Error fetching staff for site:", error);
+        console.error("Error fetching staff:", error);
+        toast({ title: "Error", description: "Could not fetch staff list.", variant: "destructive"});
         setLoading(false);
     });
 
     return () => unsubscribe();
-  }, [activeSiteId, authLoading]);
+  }, [activeSiteId, authLoading, user?.role, isAllSitesView, toast]);
 
   useEffect(() => {
-    if (staffList.length === 0 || !isValid(selectedDate) || !activeSiteId) {
+    if (staffList.length === 0 || !isValid(selectedDate)) {
         setAttendance({});
         setStats(prev => ({...prev, present: 0, absentOrLeave: 0}));
         return;
@@ -90,36 +111,47 @@ export default function StaffAttendanceClientPage() {
     const dateStr = format(selectedDate, 'yyyy-MM-dd');
     const uids = staffList.map(s => s.uid);
     setAttendance({}); // Reset for new date/staff list
+    
+    if (uids.length === 0) return;
 
-    // This query is slightly inefficient if there are many staff, as "in" queries are limited.
-    // For larger scale, consider querying all attendance for the day/site and mapping.
-    const attendanceQuery = query(
-        collection(db, "staffAttendance"),
-        where("siteId", "==", activeSiteId),
-        where("date", "==", dateStr),
-        where("staffUid", "in", uids)
-    );
+    // Firestore 'in' query is limited to 30 elements. If more staff, this needs batching.
+    const uidsBatches: string[][] = [];
+    for (let i = 0; i < uids.length; i += 30) {
+        uidsBatches.push(uids.slice(i, i + 30));
+    }
+    
+    let allNewAttendance: Record<string, AttendanceStatus> = {};
+    let unsubscribers: (()=>void)[] = [];
 
-    const unsubscribe = onSnapshot(attendanceQuery, (snapshot) => {
-        const newAttendance: Record<string, AttendanceStatus> = {};
-        let presentCount = 0;
-        let absentOrLeaveCount = 0;
-        snapshot.forEach(doc => {
-            const data = doc.data() as StaffAttendance;
-            newAttendance[data.staffUid] = data.status;
-            if (data.status === 'Present') presentCount++;
-            if (data.status === 'Absent' || data.status === 'Leave') absentOrLeaveCount++;
+    uidsBatches.forEach(batch => {
+        const attendanceQuery = query(
+            collection(db, "staffAttendance"),
+            where("date", "==", dateStr),
+            where("staffUid", "in", batch)
+        );
+        
+        const unsubscribe = onSnapshot(attendanceQuery, (snapshot) => {
+            let presentCount = 0;
+            let absentOrLeaveCount = 0;
+            snapshot.forEach(doc => {
+                const data = doc.data() as StaffAttendance;
+                allNewAttendance[data.staffUid] = data.status;
+                if (data.status === 'Present') presentCount++;
+                if (data.status === 'Absent' || data.status === 'Leave') absentOrLeaveCount++;
+            });
+            setAttendance(prev => ({...prev, ...allNewAttendance}));
+            setStats(prev => ({...prev, present: prev.present + presentCount, absentOrLeave: prev.absentOrLeave + absentOrLeaveCount}));
         });
-        setAttendance(newAttendance);
-        setStats(prev => ({...prev, present: presentCount, absentOrLeave: absentOrLeaveCount}));
+        unsubscribers.push(unsubscribe);
     });
 
-    return () => unsubscribe();
-  }, [selectedDate, staffList, activeSiteId]);
+    return () => unsubscribers.forEach(unsub => unsub());
+  }, [selectedDate, staffList]);
 
   const handleStatusChange = async (staffUid: string, status: AttendanceStatus) => {
-    if (!user || !activeSiteId || !isValid(selectedDate)) {
-        toast({ title: "Error", description: "Missing context to save attendance.", variant: "destructive"});
+    const staffMember = staffList.find(s => s.uid === staffUid);
+    if (!user || !staffMember || !staffMember.defaultSiteId || !isValid(selectedDate)) {
+        toast({ title: "Error", description: "Missing context to save attendance. The selected staff member must have a default site assigned.", variant: "destructive"});
         return;
     }
     const dateStr = format(selectedDate, 'yyyy-MM-dd');
@@ -131,12 +163,11 @@ export default function StaffAttendanceClientPage() {
             staffUid,
             date: dateStr,
             status,
-            siteId: activeSiteId,
+            siteId: staffMember.defaultSiteId, // Use staff member's own site
             recordedByUid: user.uid,
             recordedByName: user.displayName || user.email,
         }, { merge: true });
 
-        // Optimistically update local state
         setAttendance(prev => ({...prev, [staffUid]: status}));
     } catch(error: any) {
         console.error("Error saving attendance:", error);
@@ -154,12 +185,11 @@ export default function StaffAttendanceClientPage() {
     }
   };
 
-
   if (authLoading) return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin" /></div>;
-  if (!activeSiteId) return (
+  if (!isAllSitesView && !activeSiteId) return (
     <Alert variant="default" className="border-primary/50">
         <Info className="h-4 w-4" /><AlertTitle>Site Selection Required</AlertTitle>
-        <AlertDescription>Please select a site from the header to manage staff attendance.</AlertDescription>
+        <AlertDescription>Please select a site from the header to manage staff attendance, or select "All Sites" if you are an admin.</AlertDescription>
     </Alert>
   );
 
@@ -170,7 +200,7 @@ export default function StaffAttendanceClientPage() {
              <CalendarClock className="h-8 w-8 text-primary" />
              <div>
                 <h2 className="text-xl font-semibold">Attendance for {format(selectedDate, "PPP")}</h2>
-                <p className="text-sm text-muted-foreground">Select a date to view or mark attendance.</p>
+                <p className="text-sm text-muted-foreground">{isAllSitesView ? "Viewing all staff across all sites." : "Viewing staff for the selected site."}</p>
              </div>
           </div>
           <DatePicker date={selectedDate} onDateChange={(d) => setSelectedDate(d || new Date())} />
@@ -185,13 +215,17 @@ export default function StaffAttendanceClientPage() {
         <Card>
             <CardHeader>
                 <CardTitle>Attendance Register</CardTitle>
-                <CardDescription>Mark the attendance status for each staff member below.</CardDescription>
+                <CardDescription>
+                  {isAllSitesView 
+                    ? "Viewing all staff. To mark attendance, please select a specific site from the header." 
+                    : "Mark the attendance status for each staff member below."}
+                </CardDescription>
             </CardHeader>
             <CardContent>
                 {loading ? (
                     <div className="flex justify-center items-center py-10"><Loader2 className="h-6 w-6 animate-spin" /><p className="ml-2">Loading staff list...</p></div>
                 ) : staffList.length === 0 ? (
-                    <div className="text-center py-10 text-muted-foreground">No staff found for the selected site.</div>
+                    <div className="text-center py-10 text-muted-foreground">No staff found for the selected context.</div>
                 ) : (
                     <div className="rounded-md border">
                         <Table>
@@ -204,18 +238,26 @@ export default function StaffAttendanceClientPage() {
                             <TableBody>
                                 {staffList.map(staff => (
                                     <TableRow key={staff.uid}>
-                                        <TableCell className="font-medium">{staff.displayName || staff.email}</TableCell>
+                                        <TableCell className="font-medium">
+                                          <div>{staff.displayName || staff.email}</div>
+                                          {isAllSitesView && (
+                                            <div className="text-xs text-muted-foreground">{staff.defaultSiteId ? (sitesMap[staff.defaultSiteId] || "Unknown Site") : "No site assigned"}</div>
+                                          )}
+                                        </TableCell>
                                         <TableCell>
                                             <Select
                                                 value={attendance[staff.uid] || ""}
                                                 onValueChange={(status) => handleStatusChange(staff.uid, status as AttendanceStatus)}
+                                                disabled={isAllSitesView}
                                             >
                                                 <SelectTrigger className={cn("w-full sm:w-[160px]", 
                                                   attendance[staff.uid] === "Present" && "bg-green-500/10 border-green-500/50 text-green-700 font-semibold",
                                                   attendance[staff.uid] === "Absent" && "bg-red-500/10 border-red-500/50 text-red-700 font-semibold",
                                                   attendance[staff.uid] === "Leave" && "bg-yellow-500/10 border-yellow-500/50 text-yellow-700",
-                                                )}>
-                                                    <SelectValue placeholder="Mark attendance..." />
+                                                )}
+                                                disabled={isAllSitesView}
+                                                >
+                                                    <SelectValue placeholder={isAllSitesView ? "Select a site" : "Mark attendance..."} />
                                                 </SelectTrigger>
                                                 <SelectContent>
                                                     {attendanceStatuses.map(status => (

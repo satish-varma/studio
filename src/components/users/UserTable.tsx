@@ -87,7 +87,7 @@ export function UserTable({
   const [isSavingManagedSites, setIsSavingManagedSites] = useState(false);
 
   const [userForStatusUpdate, setUserForStatusUpdate] = useState<AppUser | null>(null);
-  const [isStatusDialogOpn, setIsStatusDialogOpen] = useState(false);
+  const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false);
 
 
   const handleRoleChangeInternal = async (userId: string, newRole: UserRole) => {
@@ -341,7 +341,7 @@ export function UserTable({
       
       {userForStatusUpdate && (
         <UpdateStatusDialog
-            isOpen={isStatusDialogOpn}
+            isOpen={isStatusDialogOpen}
             onClose={() => setIsStatusDialogOpen(false)}
             user={userForStatusUpdate}
             onConfirm={handleConfirmStatusUpdate}
