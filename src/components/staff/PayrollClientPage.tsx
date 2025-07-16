@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
-import type { AppUser, StaffDetails, SalaryAdvance, SalaryPayment, Site } from "@/types";
+import type { AppUser, StaffDetails, SalaryAdvance, SalaryPayment, Site, Holiday, StaffAttendance } from "@/types";
 import { 
   getFirestore, 
   collection, 
@@ -17,7 +17,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Info, ChevronLeft, ChevronRight } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { format, startOfMonth, endOfMonth, subMonths, addMonths } from "date-fns";
+import { format, startOfMonth, endOfMonth, subMonths, addMonths, getDaysInMonth } from "date-fns";
 import { Button } from "../ui/button";
 import { PayrollTable } from "./PayrollTable";
 
@@ -39,6 +39,8 @@ export interface PayrollData {
     netPayable: number;
     paidAmount: number;
     isPaid: boolean;
+    workingDays: number;
+    presentDays: number;
 }
 
 export default function PayrollClientPage() {
@@ -63,6 +65,25 @@ export default function PayrollClientPage() {
     return q;
   }, [activeSiteId, authLoading, user]);
 
+  const calculateWorkingDays = useCallback((month: Date, holidays: Holiday[], staffSiteId?: string | null) => {
+    const totalDays = getDaysInMonth(month);
+    let workingDays = 0;
+    for(let i=1; i<=totalDays; i++){
+        const currentDate = new Date(month.getFullYear(), month.getMonth(), i);
+        const dayOfWeek = currentDate.getDay();
+        const dateStr = format(currentDate, 'yyyy-MM-dd');
+        
+        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+        const isGlobalHoliday = holidays.some(h => h.date === dateStr && h.siteId === null);
+        const isSiteHoliday = staffSiteId ? holidays.some(h => h.date === dateStr && h.siteId === staffSiteId) : false;
+
+        if(!isWeekend && !isGlobalHoliday && !isSiteHoliday) {
+            workingDays++;
+        }
+    }
+    return workingDays;
+  }, []);
+
   useEffect(() => {
     if (!staffQuery) {
         if (!authLoading) setLoading(false);
@@ -83,10 +104,15 @@ export default function PayrollClientPage() {
         try {
             const uids = staffList.map(s => s.uid);
             
-            const [detailsDocs, advancesDocs, paymentsDocs] = await Promise.all([
+            const firstDayOfMonth = startOfMonth(currentMonth);
+            const lastDayOfMonth = endOfMonth(currentMonth);
+
+            const [detailsDocs, advancesDocs, paymentsDocs, holidaysDocs, attendanceDocs] = await Promise.all([
                 getDocs(query(collection(db, "staffDetails"), where("__name__", "in", uids))),
-                getDocs(query(collection(db, "advances"), where("staffUid", "in", uids), where("date", ">=", startOfMonth(currentMonth).toISOString()), where("date", "<=", endOfMonth(currentMonth).toISOString()))),
-                getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", uids), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear())))
+                getDocs(query(collection(db, "advances"), where("staffUid", "in", uids), where("date", ">=", firstDayOfMonth.toISOString()), where("date", "<=", lastDayOfMonth.toISOString()))),
+                getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", uids), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear()))),
+                getDocs(query(collection(db, "holidays"), where("date", ">=", format(firstDayOfMonth, 'yyyy-MM-dd')), where("date", "<=", format(lastDayOfMonth, 'yyyy-MM-dd')))),
+                getDocs(query(collection(db, "staffAttendance"), where("staffUid", "in", uids), where("date", ">=", format(firstDayOfMonth, 'yyyy-MM-dd')), where("date", "<=", format(lastDayOfMonth, 'yyyy-MM-dd'))))
             ]);
 
             const detailsMap = new Map<string, StaffDetails>();
@@ -103,13 +129,33 @@ export default function PayrollClientPage() {
                 const payment = doc.data() as SalaryPayment;
                 paymentsMap.set(payment.staffUid, (paymentsMap.get(payment.staffUid) || 0) + payment.amountPaid);
             });
+            
+            const fetchedHolidays = holidaysDocs.docs.map(doc => doc.data() as Holiday);
+            
+            const attendanceMap = new Map<string, { present: number, halfDay: number }>();
+            attendanceDocs.forEach(doc => {
+                const att = doc.data() as StaffAttendance;
+                const current = attendanceMap.get(att.staffUid) || { present: 0, halfDay: 0 };
+                if (att.status === 'Present') current.present++;
+                if (att.status === 'Half-day') current.halfDay++;
+                attendanceMap.set(att.staffUid, current);
+            });
 
             const newPayrollData = staffList.map(u => {
                 const details = detailsMap.get(u.uid) || null;
                 const salary = details?.salary || 0;
                 const advances = advancesMap.get(u.uid) || 0;
                 const paidAmount = paymentsMap.get(u.uid) || 0;
-                const netPayable = salary - advances;
+                
+                const workingDays = calculateWorkingDays(currentMonth, fetchedHolidays, u.defaultSiteId);
+                const attendance = attendanceMap.get(u.uid) || { present: 0, halfDay: 0 };
+                const presentDays = attendance.present + (attendance.halfDay * 0.5);
+                
+                const perDaySalary = workingDays > 0 ? salary / workingDays : 0;
+                const earnedSalary = perDaySalary * presentDays;
+                
+                const netPayable = earnedSalary - advances;
+
                 return {
                     user: u,
                     details,
@@ -117,6 +163,8 @@ export default function PayrollClientPage() {
                     netPayable,
                     paidAmount,
                     isPaid: paidAmount >= netPayable && netPayable > 0,
+                    workingDays,
+                    presentDays,
                 };
             }).sort((a,b) => (a.user.displayName || "").localeCompare(b.user.displayName || ""));
 
@@ -134,7 +182,7 @@ export default function PayrollClientPage() {
     
     return () => unsubscribe();
 
-  }, [staffQuery, currentMonth, toast]);
+  }, [staffQuery, currentMonth, toast, calculateWorkingDays]);
 
   if (authLoading) return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin" /></div>;
   if (!activeSiteId && user?.role !== 'admin') return (

@@ -44,8 +44,9 @@ export function PayrollTable({ data, month, year }: PayrollTableProps) {
 
   const handleOpenDialog = (payroll: PayrollData) => {
     setSelectedPayroll(payroll);
+    const amountToPay = payroll.netPayable - payroll.paidAmount;
     form.reset({
-      amountPaid: payroll.netPayable - payroll.paidAmount > 0 ? payroll.netPayable - payroll.paidAmount : 0,
+      amountPaid: amountToPay > 0 ? parseFloat(amountToPay.toFixed(2)) : 0,
       paymentDate: new Date(),
       notes: ""
     });
@@ -112,6 +113,8 @@ export function PayrollTable({ data, month, year }: PayrollTableProps) {
         <TableHeader>
           <TableRow>
             <TableHead>Staff Member</TableHead>
+            <TableHead className="text-center">Working Days</TableHead>
+            <TableHead className="text-center">Present</TableHead>
             <TableHead className="text-right">Base Salary</TableHead>
             <TableHead className="text-right">Advances</TableHead>
             <TableHead className="text-right">Net Payable</TableHead>
@@ -124,6 +127,8 @@ export function PayrollTable({ data, month, year }: PayrollTableProps) {
           {data.map(item => (
             <TableRow key={item.user.uid}>
               <TableCell className="font-medium">{item.user.displayName || item.user.email}</TableCell>
+              <TableCell className="text-center text-muted-foreground">{item.workingDays}</TableCell>
+              <TableCell className="text-center text-muted-foreground">{item.presentDays}</TableCell>
               <TableCell className="text-right">{formatCurrency(item.details?.salary || 0)}</TableCell>
               <TableCell className="text-right text-orange-600">{formatCurrency(item.advances)}</TableCell>
               <TableCell className="text-right font-semibold">{formatCurrency(item.netPayable)}</TableCell>
@@ -132,7 +137,9 @@ export function PayrollTable({ data, month, year }: PayrollTableProps) {
                 <Badge variant={item.isPaid ? 'default' : 'secondary'}>{item.isPaid ? 'Paid' : 'Pending'}</Badge>
               </TableCell>
               <TableCell className="text-right">
-                <Button variant="outline" size="sm" onClick={() => handleOpenDialog(item)}>Pay Salary</Button>
+                <Button variant="outline" size="sm" onClick={() => handleOpenDialog(item)} disabled={item.isPaid}>
+                  {item.isPaid ? 'Paid' : 'Pay Salary'}
+                </Button>
               </TableCell>
             </TableRow>
           ))}
@@ -151,10 +158,21 @@ export function PayrollTable({ data, month, year }: PayrollTableProps) {
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
                 <FormField name="amountPaid" control={form.control} render={({field}) => (
-                    <FormItem><FormLabel>Amount to Pay (₹)</FormLabel><FormControl><Input type="number" {...field}/></FormControl><FormMessage/></FormItem>
+                    <FormItem>
+                      <FormLabel>Amount to Pay (₹)</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          {...field}
+                          onChange={e => field.onChange(parseFloat(e.target.value) || 0)}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
                 )}/>
                 <FormField name="paymentDate" control={form.control} render={({field}) => (
-                    <FormItem><FormLabel>Payment Date</FormLabel><DatePicker date={field.value} onDateChange={field.onChange}/></FormItem>
+                    <FormItem><FormLabel>Payment Date</FormLabel><DatePicker date={field.value} onDateChange={field.onChange} /></FormItem>
                 )}/>
                 <FormField name="notes" control={form.control} render={({field}) => (
                     <FormItem><FormLabel>Notes (Optional)</FormLabel><FormControl><Textarea {...field} /></FormControl></FormItem>
