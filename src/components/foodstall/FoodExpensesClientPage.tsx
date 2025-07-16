@@ -1,9 +1,8 @@
 
-
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import type { FoodItemExpense } from "@/types/food";
+import type { FoodItemExpense, Site, Stall } from "@/types/food";
 import { 
   getFirestore, 
   collection, 
@@ -24,7 +23,7 @@ import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Info, ListFilter, DollarSign } from "lucide-react";
+import { Loader2, Info, ListFilter, DollarSign, Upload, Download } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { FoodExpensesTable } from "./FoodExpensesTable";
 import { foodExpenseCategories } from "@/types/food";
@@ -38,6 +37,7 @@ import {
 } from "@/components/ui/select";
 import { format, subDays, startOfDay, endOfDay, startOfMonth } from "date-fns";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
+import CsvImportDialog from "@/components/shared/CsvImportDialog";
 
 const LOG_PREFIX = "[FoodExpensesClientPage]";
 const EXPENSES_PER_PAGE = 15;
@@ -69,6 +69,29 @@ export default function FoodExpensesClientPage() {
   const [lastVisibleDoc, setLastVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
   const [isLastPage, setIsLastPage] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [isExporting, setIsExporting] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
+  const [sitesMap, setSitesMap] = useState<Record<string, string>>({});
+  const [stallsMap, setStallsMap] = useState<Record<string, string>>({});
+
+  const fetchContextMaps = useCallback(async () => {
+    if (!db) return false;
+    try {
+      const sitesSnapshot = await getDocs(query(collection(db, "sites")));
+      const newSitesMap: Record<string, string> = {};
+      sitesSnapshot.forEach(doc => { newSitesMap[doc.id] = (doc.data() as Site).name; });
+      setSitesMap(newSitesMap);
+
+      const stallsSnapshot = await getDocs(query(collection(db, "stalls")));
+      const newStallsMap: Record<string, string> = {};
+      stallsSnapshot.forEach(doc => { newStallsMap[doc.id] = (doc.data() as Stall).name; });
+      setStallsMap(newStallsMap);
+      return true;
+    } catch (error) {
+      toast({ title: "Error", description: "Could not load site/stall data for export.", variant: "destructive" });
+      return false;
+    }
+  }, [toast]);
   
   const fetchExpenses = useCallback(async (direction: 'initial' | 'next' | 'prev' = 'initial') => {
     if (authLoading || !db || !user || !activeSiteId) {
@@ -82,56 +105,31 @@ export default function FoodExpensesClientPage() {
     
     setLoadingExpenses(true);
     if(direction === 'initial') {
-        setTotalExpensesAmount(0); // Reset total on new filter fetch
+        setTotalExpensesAmount(0);
+        fetchContextMaps(); // Re-fetch maps on filter change just in case
     }
     setErrorExpenses(null);
-    console.log(`${LOG_PREFIX} Fetching expenses. Direction: ${direction}, Site: ${activeSiteId}, Stall: ${activeStallId}, Category: ${categoryFilter}, DateFilter: ${dateFilter}`);
 
     const expensesCollectionRef = collection(db, "foodItemExpenses");
-    let qConstraints: QueryConstraint[] = [
-      where("siteId", "==", activeSiteId),
-    ];
-    if (activeStallId) {
-        qConstraints.push(where("stallId", "==", activeStallId));
-    }
+    let qConstraints: QueryConstraint[] = [where("siteId", "==", activeSiteId)];
+    if (activeStallId) qConstraints.push(where("stallId", "==", activeStallId));
     
-    const now = new Date();
-    let startDate: Date | null = null;
-    let endDate: Date | null = endOfDay(now);
-
+    const now = new Date(); let startDate: Date | null = null; let endDate: Date | null = endOfDay(now);
     switch (dateFilter) {
-        case 'today':
-            startDate = startOfDay(now);
-            break;
-        case 'last_7_days':
-            startDate = startOfDay(subDays(now, 6));
-            break;
-        case 'this_month':
-            startDate = startOfMonth(now);
-            break;
-        case 'all_time':
-            startDate = null; // No start date filter
-            endDate = null;   // No end date filter
-            break;
+        case 'today': startDate = startOfDay(now); break;
+        case 'last_7_days': startDate = startOfDay(subDays(now, 6)); break;
+        case 'this_month': startDate = startOfMonth(now); break;
+        case 'all_time': startDate = null; endDate = null; break;
     }
-
     if(startDate) qConstraints.push(where("purchaseDate", ">=", Timestamp.fromDate(startDate)));
     if(endDate) qConstraints.push(where("purchaseDate", "<=", Timestamp.fromDate(endDate)));
-
-
-    if (categoryFilter !== "all") {
-      qConstraints.push(where("category", "==", categoryFilter));
-    }
+    if (categoryFilter !== "all") qConstraints.push(where("category", "==", categoryFilter));
     
     if (direction === 'prev' && firstVisibleDoc) {
+        qConstraints.push(orderBy("purchaseDate", "desc"), endBefore(firstVisibleDoc), limitToLast(EXPENSES_PER_PAGE));
+    } else {
         qConstraints.push(orderBy("purchaseDate", "desc"));
-        qConstraints.push(endBefore(firstVisibleDoc));
-        qConstraints.push(limitToLast(EXPENSES_PER_PAGE));
-    } else { // initial or next
-        qConstraints.push(orderBy("purchaseDate", "desc"));
-        if (direction === 'next' && lastVisibleDoc) {
-            qConstraints.push(startAfter(lastVisibleDoc));
-        }
+        if (direction === 'next' && lastVisibleDoc) qConstraints.push(startAfter(lastVisibleDoc));
         qConstraints.push(limit(EXPENSES_PER_PAGE + 1));
     }
     
@@ -139,19 +137,14 @@ export default function FoodExpensesClientPage() {
       const q = query(expensesCollectionRef, ...qConstraints);
       const querySnapshot = await getDocs(q);
       let fetchedExpenses: FoodItemExpense[] = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        purchaseDate: (doc.data().purchaseDate as Timestamp).toDate(),
+        id: doc.id, ...doc.data(), purchaseDate: (doc.data().purchaseDate as Timestamp).toDate(),
       } as FoodItemExpense));
       
       const hasMore = direction !== 'prev' && fetchedExpenses.length > EXPENSES_PER_PAGE;
-      if (hasMore) {
-        fetchedExpenses.pop();
-      }
+      if (hasMore) fetchedExpenses.pop();
 
       setExpenses(fetchedExpenses);
 
-      // Recalculate total only on initial load for a filter set
       if(direction === 'initial') {
         const totalQueryConstraints = qConstraints.filter(c => c.type !== 'limit' && c.type !== 'startAfter' && c.type !== 'endBefore' && c.type !== 'limitToLast');
         const totalQuery = query(expensesCollectionRef, ...totalQueryConstraints);
@@ -168,89 +161,90 @@ export default function FoodExpensesClientPage() {
         setIsLastPage(!hasMore);
       } else {
         if (direction === 'next') setIsLastPage(true);
-        if (direction === 'initial') {
-            setTotalExpensesAmount(0);
-            setIsLastPage(true);
-        }
+        if (direction === 'initial') { setIsLastPage(true); setTotalExpensesAmount(0); }
       }
-      console.log(`${LOG_PREFIX} Fetched ${fetchedExpenses.length} expenses. HasMore: ${hasMore}`);
-
     } catch (error: any) {
-      console.error(`${LOG_PREFIX} Error fetching expenses:`, error.message, error.stack);
       setErrorExpenses(error.message || "Failed to load expenses.");
     } finally {
       setLoadingExpenses(false);
     }
-  }, [authLoading, user, activeSiteId, activeStallId, dateFilter, categoryFilter, firstVisibleDoc, lastVisibleDoc]);
+  }, [authLoading, user, activeSiteId, activeStallId, dateFilter, categoryFilter, firstVisibleDoc, lastVisibleDoc, fetchContextMaps]);
 
-  // Effect for initial fetch and filter changes
   useEffect(() => {
     document.title = "Food Stall Expenses - StallSync";
-    // Reset pagination state when filters change, then fetch
-    setFirstVisibleDoc(null);
-    setLastVisibleDoc(null);
-    setCurrentPage(1);
+    setFirstVisibleDoc(null); setLastVisibleDoc(null); setCurrentPage(1);
     fetchExpenses('initial');
     return () => { document.title = "StallSync - Stock Management"; }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dateFilter, categoryFilter, user, activeSiteId, activeStallId]);
 
-  const handleDateFilterChange = (filter: DateFilterOption) => {
-    setDateFilter(filter);
-  };
-  
-  const handleCategoryChange = (newCategory: string) => {
-    setCategoryFilter(newCategory);
-  };
-
-  const handleNextPage = () => {
-    fetchExpenses('next');
+  const escapeCsvCell = (cellData: any): string => {
+    if (cellData === null || cellData === undefined) return "";
+    const stringData = String(cellData);
+    if (stringData.includes(",") || stringData.includes("\n") || stringData.includes('"')) {
+      return `"${stringData.replace(/"/g, '""')}"`;
+    }
+    return stringData;
   };
 
-  const handlePrevPage = () => {
-    fetchExpenses('prev');
+  const getFormattedTimestamp = () => new Date().toISOString().replace(/:/g, '-').slice(0, 19);
+
+  const downloadCsv = (csvString: string, filename: string) => {
+    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
   
+  const handleExport = async () => {
+    setIsExporting(true);
+    if (expenses.length === 0) {
+      toast({ title: "No Expenses to Export", description: "There are no expenses matching the current filters.", variant: "default" });
+      setIsExporting(false);
+      return;
+    }
+    try {
+      const headers = ["Expense ID", "Category", "Total Cost", "Payment Method", "Other Payment Details", "Purchase Date", "Vendor", "Other Vendor Details", "Notes", "Bill Image URL", "Site Name", "Stall Name", "Recorded By (Name)", "Recorded By (UID)"];
+      const csvRows = [headers.join(',')];
+      expenses.forEach(expense => {
+        const row = [
+          escapeCsvCell(expense.id), escapeCsvCell(expense.category), escapeCsvCell(expense.totalCost.toFixed(2)),
+          escapeCsvCell(expense.paymentMethod), escapeCsvCell(expense.otherPaymentMethodDetails || ""),
+          escapeCsvCell(format(new Date(expense.purchaseDate), "yyyy-MM-dd")),
+          escapeCsvCell(expense.vendor || ""), escapeCsvCell(expense.otherVendorDetails || ""),
+          escapeCsvCell(expense.notes || ""), escapeCsvCell(expense.billImageUrl || ""),
+          escapeCsvCell(expense.siteId ? sitesMap[expense.siteId] || expense.siteId : "N/A"),
+          escapeCsvCell(expense.stallId ? stallsMap[expense.stallId] || expense.stallId : "N/A"),
+          escapeCsvCell(expense.recordedByName || ""), escapeCsvCell(expense.recordedByUid),
+        ];
+        csvRows.push(row.join(','));
+      });
+      downloadCsv(csvRows.join("\n"), `stallsync_food_expenses_${getFormattedTimestamp()}.csv`);
+      toast({ title: "Export Successful", description: `${expenses.length} expenses exported.` });
+    } catch (error: any) {
+      toast({ title: "Export Failed", description: "Could not export expenses.", variant: "destructive" });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   if (authLoading) {
     return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading user context...</p></div>;
   }
   
-  if (!user) {
-    return (
-      <Alert variant="destructive">
-        <Info className="h-4 w-4" />
-        <AlertTitle>Authentication Error</AlertTitle>
-        <AlertDescription>
-          Could not verify user. Please try logging in again.
-        </AlertDescription>
-      </Alert>
-    )
-  }
-
-  if (!activeSiteId) {
+  if (!user || !activeSiteId || (!activeStallId && user.role !== 'admin')) {
     return (
       <Alert variant="default" className="border-primary/50">
         <Info className="h-4 w-4" />
-        <AlertTitle>Site Selection Required</AlertTitle>
+        <AlertTitle>Context Required</AlertTitle>
         <AlertDescription>
-          Please select an active site from the header to view food stall expenses.
+          Please select an active site and stall from the header to view expenses. Admins can view site-wide expenses.
         </AlertDescription>
       </Alert>
     );
   }
-
-  if (!activeStallId && user.role !== 'admin') {
-    return (
-      <Alert variant="default" className="border-primary/50">
-        <Info className="h-4 w-4" />
-        <AlertTitle>Stall Selection Required</AlertTitle>
-        <AlertDescription>
-          Food stall data is specific to each stall. Please select a specific stall from the header menu to view its expenses. Admins may view all stalls by not selecting one.
-        </AlertDescription>
-      </Alert>
-    );
-  }
-
 
   return (
     <div className="space-y-4">
@@ -274,51 +268,51 @@ export default function FoodExpensesClientPage() {
         </CardHeader>
         <CardContent className="flex flex-col md:flex-row md:items-center gap-2 border-t pt-4">
           <div className="flex-1 flex flex-wrap gap-2">
-            <Button variant={dateFilter === 'today' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('today')}>Today</Button>
-            <Button variant={dateFilter === 'last_7_days' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('last_7_days')}>Last 7 Days</Button>
-            <Button variant={dateFilter === 'this_month' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('this_month')}>This Month</Button>
-            <Button variant={dateFilter === 'all_time' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('all_time')}>All Time</Button>
+            <Button variant={dateFilter === 'today' ? 'default' : 'outline'} onClick={() => setDateFilter('today')}>Today</Button>
+            <Button variant={dateFilter === 'last_7_days' ? 'default' : 'outline'} onClick={() => setDateFilter('last_7_days')}>Last 7 Days</Button>
+            <Button variant={dateFilter === 'this_month' ? 'default' : 'outline'} onClick={() => setDateFilter('this_month')}>This Month</Button>
+            <Button variant={dateFilter === 'all_time' ? 'default' : 'outline'} onClick={() => setDateFilter('all_time')}>All Time</Button>
           </div>
-          <Select value={categoryFilter} onValueChange={handleCategoryChange}>
-            <SelectTrigger className="w-full md:w-[220px] bg-input">
-              <ListFilter className="mr-2 h-4 w-4 text-muted-foreground" />
-              <SelectValue placeholder="Filter by category" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Categories</SelectItem>
-              {foodExpenseCategories.map(cat => (
-                <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="flex-1 flex flex-col sm:flex-row gap-2 justify-end">
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <SelectTrigger className="w-full md:w-[220px] bg-input">
+                <ListFilter className="mr-2 h-4 w-4 text-muted-foreground" />
+                <SelectValue placeholder="Filter by category" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Categories</SelectItem>
+                {foodExpenseCategories.map(cat => (
+                  <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="outline" onClick={() => setShowImportDialog(true)}><Upload className="mr-2 h-4 w-4" />Import</Button>
+            <Button variant="outline" onClick={handleExport} disabled={isExporting}>{isExporting ? <Download className="mr-2 h-4 w-4 animate-spin"/> : <Download className="mr-2 h-4 w-4" />}Export</Button>
+          </div>
         </CardContent>
       </Card>
 
       {loadingExpenses && expenses.length === 0 && (
-        <div className="flex justify-center items-center py-10">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p className="ml-2">Loading expenses...</p>
-        </div>
+        <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading expenses...</p></div>
       )}
       {errorExpenses && (
-        <Alert variant="destructive">
-          <Info className="h-4 w-4" />
-          <AlertTitle>Error Loading Expenses</AlertTitle>
-          <AlertDescription>{errorExpenses}</AlertDescription>
-        </Alert>
+        <Alert variant="destructive"><Info className="h-4 w-4" /><AlertTitle>Error Loading Expenses</AlertTitle><AlertDescription>{errorExpenses}</AlertDescription></Alert>
       )}
       {!loadingExpenses && !errorExpenses && (
         <FoodExpensesTable 
-          expenses={expenses} 
-          onNextPage={handleNextPage}
-          onPrevPage={handlePrevPage}
-          isLastPage={isLastPage}
-          isFirstPage={currentPage === 1}
-          currentPage={currentPage}
-          itemsPerPage={EXPENSES_PER_PAGE}
+          expenses={expenses} onNextPage={() => fetchExpenses('next')} onPrevPage={() => fetchExpenses('prev')}
+          isLastPage={isLastPage} isFirstPage={currentPage === 1} currentPage={currentPage} itemsPerPage={EXPENSES_PER_PAGE}
           isLoading={loadingExpenses}
         />
       )}
+      <CsvImportDialog
+        dataType="foodExpenses"
+        isOpen={showImportDialog}
+        onClose={() => {
+          setShowImportDialog(false);
+          fetchExpenses('initial'); // Refresh data after import attempt
+        }}
+      />
     </div>
   );
 }

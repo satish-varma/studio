@@ -21,6 +21,8 @@ import { Loader2, Info } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import Link from "next/link";
+import { useToast } from "@/hooks/use-toast";
+import CsvImportDialog from "@/components/shared/CsvImportDialog";
 
 const LOG_PREFIX = "[ItemsClientPage]";
 
@@ -43,13 +45,13 @@ export type SortConfig = {
 
 export default function ItemsClientPage() {
   const { user, activeSiteId, activeStallId, loading: authLoading, activeSite, activeStall } = useAuth();
+  const { toast } = useToast();
 
   const [searchTerm, setSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [stockStatusFilter, setStockStatusFilter] = useState("all");
   const [stallFilterOption, setStallFilterOption] = useState("all");
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'name', direction: 'ascending' });
-
 
   const [items, setItems] = useState<StockItem[]>([]);
   const [stallsForFilterDropdown, setStallsForFilterDropdown] = useState<Stall[]>([]);
@@ -58,6 +60,8 @@ export default function ItemsClientPage() {
 
   const [loadingPageData, setLoadingPageData] = useState(true);
   const [errorPageData, setErrorPageData] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
 
   useEffect(() => {
     if (user && !authLoading) {
@@ -68,153 +72,101 @@ export default function ItemsClientPage() {
       if (user.role !== 'staff') {
         setStallFilterOption(user.defaultItemStallFilterOption || "all");
       } else {
-        // For staff, their view is determined by their assigned stall (or master if no stall)
         setStallFilterOption(activeStallId || "master"); 
       }
     }
   }, [user, authLoading, activeSiteId, activeStallId]);
 
-
   const fetchSupportingDataAndItems = useCallback(async () => {
     console.log(`${LOG_PREFIX} fetchSupportingDataAndItems called. AuthLoading: ${authLoading}, User: ${!!user}, DB: ${!!db}`);
     setLoadingPageData(true);
-    setErrorPageData(null); // Reset error before new fetch
+    setErrorPageData(null); 
 
-    if (authLoading) {
-        // Still waiting for auth context to resolve
-        return;
-    }
-
+    if (authLoading) return;
     if (!user) {
-      console.warn(`${LOG_PREFIX} No user authenticated. Clearing data and showing login prompt.`);
       setErrorPageData("Please log in to view items.");
-      setItems([]);
-      setStallsForFilterDropdown([]);
-      setSitesMap({});
-      setStallsMap({});
-      setLoadingPageData(false);
-      return;
+      setItems([]); setLoadingPageData(false); return;
     }
     if (!db) {
-      console.error(`${LOG_PREFIX} Firestore DB instance is not available.`);
       setErrorPageData("Firestore DB instance is not available. Cannot fetch data.");
-      setLoadingPageData(false);
-      return;
+      setLoadingPageData(false); return;
     }
 
     console.log(`${LOG_PREFIX} Starting data fetch. User: ${user.uid}, ActiveSite: ${activeSiteId}, ActiveStall: ${activeStallId}, StallFilter: ${stallFilterOption}`);
-
     try {
-      console.log(`${LOG_PREFIX} Fetching sites map...`);
-      const sitesCollectionRef = collection(db, "sites");
-      const sitesSnapshot = await getDocs(sitesCollectionRef);
+      const sitesSnapshot = await getDocs(collection(db, "sites"));
       const newSitesMap: Record<string, string> = {};
-      sitesSnapshot.forEach(doc => {
-        newSitesMap[doc.id] = (doc.data() as Site).name;
-      });
+      sitesSnapshot.forEach(doc => { newSitesMap[doc.id] = (doc.data() as Site).name; });
       setSitesMap(newSitesMap);
-      console.log(`${LOG_PREFIX} Sites map fetched. ${sitesSnapshot.size} sites loaded.`);
 
-      console.log(`${LOG_PREFIX} Fetching all stalls map...`);
-      const allStallsCollectionRef = collection(db, "stalls");
-      const allStallsSnapshot = await getDocs(allStallsCollectionRef);
+      const allStallsSnapshot = await getDocs(collection(db, "stalls"));
       const newStallsMap: Record<string, string> = {};
-      allStallsSnapshot.forEach(doc => {
-        newStallsMap[doc.id] = (doc.data() as Stall).name;
-      });
+      allStallsSnapshot.forEach(doc => { newStallsMap[doc.id] = (doc.data() as Stall).name; });
       setStallsMap(newStallsMap);
-      console.log(`${LOG_PREFIX} All stalls map fetched. ${allStallsSnapshot.size} stalls loaded.`);
 
       if (activeSiteId && user.role !== 'staff') {
-        console.log(`${LOG_PREFIX} Fetching stalls for filter dropdown for site: ${activeSiteId}`);
         const qStalls = query(collection(db, "stalls"), where("siteId", "==", activeSiteId));
         const querySnapshotStalls = await getDocs(qStalls);
         const fetchedStalls = querySnapshotStalls.docs.map(doc => ({ id: doc.id, ...doc.data() } as Stall));
         fetchedStalls.sort((a, b) => a.name.localeCompare(b.name));
         setStallsForFilterDropdown(fetchedStalls);
-        console.log(`${LOG_PREFIX} Stalls for filter dropdown fetched: ${fetchedStalls.length}`);
-
-        // Validate current stallFilterOption against fetched stalls
         if (stallFilterOption !== 'all' && stallFilterOption !== 'master' && !fetchedStalls.find(s => s.id === stallFilterOption)) {
-            console.log(`${LOG_PREFIX} Current stallFilterOption '${stallFilterOption}' invalid for site ${activeSiteId}. Resetting to 'all'.`);
-            setStallFilterOption('all'); // Reset if current selection is no longer valid
+            setStallFilterOption('all'); 
         }
       } else {
-        console.log(`${LOG_PREFIX} No active site or user is staff. Clearing stallsForFilterDropdown.`);
         setStallsForFilterDropdown([]);
-         // If not staff and filter was specific, reset it if activeSiteId is now null
          if (user.role !== 'staff' && stallFilterOption !== 'all' && stallFilterOption !== 'master' && !activeSiteId) {
-             console.log(`${LOG_PREFIX} No active site, resetting stallFilterOption to 'all'.`);
              setStallFilterOption('all');
         }
       }
 
-      // Fetch stock items based on context
       if (!activeSiteId) {
         setItems([]);
         let message = "Please select an active site to view stock items.";
          if (user.role === 'staff') {
-          message = "Your account does not have a default site assigned, or it's not yet active. Please contact an administrator to assign one. If a site was recently assigned, you might need to log out and log back in.";
+          message = "Your account does not have a default site assigned. Please contact an administrator.";
         } else if (user.role === 'admin') {
           message = "Admin: Please select a site from the header to view its stock.";
         } else if (user.role === 'manager') {
-          message = "Manager: Please select one of your managed sites from the header to view its stock.";
+          message = "Manager: Please select one of your managed sites from the header.";
         }
         setErrorPageData(message);
-        console.warn(`${LOG_PREFIX} No active site ID. Items not fetched. Error message set: ${message}`);
       } else {
         const itemsCollectionRef = collection(db, "stockItems");
-        let qConstraints: QueryConstraint[] = [
-          where("siteId", "==", activeSiteId)
-        ];
+        let qConstraints: QueryConstraint[] = [ where("siteId", "==", activeSiteId) ];
 
         let effectiveStallFilter = stallFilterOption;
         if (user.role === 'staff') {
-            // Staff's view is locked to their activeStallId (which can be null for master stock)
             effectiveStallFilter = activeStallId || "master"; 
         }
-        console.log(`${LOG_PREFIX} Effective stall filter for query: ${effectiveStallFilter}`);
-
         if (effectiveStallFilter === "master") {
             qConstraints.push(where("stallId", "==", null));
-        } else if (effectiveStallFilter !== "all") { // "all" means no stallId filter
+        } else if (effectiveStallFilter !== "all") { 
             qConstraints.push(where("stallId", "==", effectiveStallFilter));
         }
 
-        console.log(`${LOG_PREFIX} Fetching items with constraints:`, qConstraints);
         const finalItemsQuery = query(itemsCollectionRef, ...qConstraints);
         const itemsSnapshot = await getDocs(finalItemsQuery);
         let fetchedItems: StockItem[] = itemsSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        } as StockItem));
+          id: doc.id, ...doc.data() } as StockItem));
         setItems(fetchedItems);
-        console.log(`${LOG_PREFIX} Items fetched: ${fetchedItems.length}`);
       }
-
     } catch (error: any) {
-      console.error(`${LOG_PREFIX} Error fetching data:`, error.message, error.stack);
+      console.error(`${LOG_PREFIX} Error fetching data:`, error);
       const errorMessage = error.message && error.message.includes("requires an index")
           ? `Query requires a Firestore index. Please create it. Details: ${error.message.substring(error.message.indexOf('https://'))}`
-          : `Failed to load data. Error: ${error.message || "Unknown error"}. Please check console for details.`;
+          : `Failed to load data. Error: ${error.message || "Unknown error"}.`;
       setErrorPageData(errorMessage);
-      setItems([]);
-      setStallsForFilterDropdown([]);
     } finally {
       setLoadingPageData(false);
-      console.log(`${LOG_PREFIX} Data fetch attempt finished. Loading: false.`);
     }
-  }, [user, activeSiteId, activeStallId, stallFilterOption, db, authLoading]); // stallFilterOption needs to trigger re-fetch
+  }, [user, activeSiteId, activeStallId, stallFilterOption, db, authLoading]);
 
   useEffect(() => {
     fetchSupportingDataAndItems();
   }, [fetchSupportingDataAndItems]);
 
-
-  const uniqueCategories = useMemo(() => {
-    const allFetchedItemsCategories = new Set(items.map(item => item.category));
-    return Array.from(allFetchedItemsCategories).sort();
-  }, [items]);
+  const uniqueCategories = useMemo(() => Array.from(new Set(items.map(item => item.category))).sort(), [items]);
 
   const requestSort = (key: keyof StockItem) => {
     let direction: 'ascending' | 'descending' = 'ascending';
@@ -222,37 +174,26 @@ export default function ItemsClientPage() {
       direction = 'descending';
     }
     setSortConfig({ key, direction });
-    console.log(`${LOG_PREFIX} Sorting requested. Key: ${key}, Direction: ${direction}`);
   };
 
   const sortedAndFilteredItems = useMemo(() => {
     let sortableItems = [...items];
     if (sortConfig.key !== null && sortConfig.direction !== null) {
       sortableItems.sort((a, b) => {
-        const valA = a[sortConfig.key!];
-        const valB = b[sortConfig.key!];
-
+        const valA = a[sortConfig.key!]; const valB = b[sortConfig.key!];
         if (typeof valA === 'number' && typeof valB === 'number') {
           return sortConfig.direction === 'ascending' ? valA - valB : valB - valA;
         }
         if (typeof valA === 'string' && typeof valB === 'string') {
-          return sortConfig.direction === 'ascending'
-            ? valA.localeCompare(valB)
-            : valB.localeCompare(valA);
+          return sortConfig.direction === 'ascending' ? valA.localeCompare(valB) : valB.localeCompare(valA);
         }
-        if (valA == null && valB != null) return 1;
-        if (valA != null && valB == null) return -1;
-        if (valA == null && valB == null) return 0;
-        
         return 0;
       });
     }
 
     return sortableItems.filter(item => {
-      const matchesSearchTerm = item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                                (item.category && item.category.toLowerCase().includes(searchTerm.toLowerCase()));
+      const matchesSearchTerm = item.name.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesCategory = categoryFilter === "all" || !categoryFilter || item.category === categoryFilter;
-
       let matchesStockStatus = true;
       if (stockStatusFilter && stockStatusFilter !== "all") {
         const isLowStock = item.quantity <= item.lowStockThreshold;
@@ -267,38 +208,91 @@ export default function ItemsClientPage() {
 
   const pageHeaderDescription = useMemo(() => {
     if (!user) return "Manage your inventory.";
-
     if (!activeSite) {
-      if (user.role === 'staff') {
-        return "Your account needs a default site assigned. Please contact an administrator.";
-      }
-      return "Select a site to view and manage its inventory.";
+      return user.role === 'staff' ? "Your account needs a default site assigned." : "Select a site to view its inventory.";
     }
-
-    let desc = "Manage your inventory. Currently viewing: ";
+    let desc = "Currently viewing: ";
     desc += `Site: "${activeSite.name}"`;
-
     if (activeStall) {
       desc += ` (Stall: "${activeStall.name}")`;
     } else if (user.role !== 'staff') {
-        if (stallFilterOption === 'master') {
-            desc += " (Master Stock)";
-        } else if (stallFilterOption === 'all' || !stallFilterOption) {
-            desc += " (All items in site)";
-        } else if (stallsMap[stallFilterOption]) {
-            desc += ` (Stall: "${stallsMap[stallFilterOption]}")`;
-        } else {
-             desc += " (All items in site)";
-        }
-    } else if (user.role === 'staff' && !activeStallId) { // Staff viewing master stock of their assigned site
+        if (stallFilterOption === 'master') desc += " (Master Stock)";
+        else if (stallFilterOption === 'all' || !stallFilterOption) desc += " (All items in site)";
+        else if (stallsMap[stallFilterOption]) desc += ` (Stall: "${stallsMap[stallFilterOption]}")`;
+        else desc += " (All items in site)";
+    } else if (user.role === 'staff' && !activeStallId) {
         desc += " (Master Stock)";
     }
      desc += ".";
     return desc;
   }, [user, activeSite, activeStall, activeStallId, stallFilterOption, stallsMap]);
+  
+  const escapeCsvCell = (cellData: any): string => {
+    if (cellData === null || cellData === undefined) return "";
+    const stringData = String(cellData);
+    if (stringData.includes(",") || stringData.includes("\n") || stringData.includes('"')) {
+      return `"${stringData.replace(/"/g, '""')}"`;
+    }
+    return stringData;
+  };
 
+  const getFormattedTimestamp = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = (now.getMonth() + 1).toString().padStart(2, '0');
+    const day = now.getDate().toString().padStart(2, '0');
+    const hours = now.getHours().toString().padStart(2, '0');
+    const minutes = now.getMinutes().toString().padStart(2, '0');
+    return `${year}-${month}-${day}_${hours}${minutes}`;
+  };
 
-  if (authLoading || loadingPageData) { // Show loader if auth is loading OR page data is loading
+  const downloadCsv = (csvString: string, filename: string) => {
+    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    if (link.download !== undefined) {
+      const url = URL.createObjectURL(blob);
+      link.setAttribute("href", url);
+      link.setAttribute("download", filename);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  };
+
+  const handleExport = async () => {
+    setIsExporting(true);
+    const itemsToExport = sortedAndFilteredItems; // Export currently filtered/sorted items
+    if (itemsToExport.length === 0) {
+      toast({ title: "No Data", description: "There are no items to export with the current filters.", variant: "default" });
+      setIsExporting(false);
+      return;
+    }
+    try {
+      const headers = ["ID", "Name", "Category", "Description", "Quantity", "Unit", "Cost Price (₹)", "Selling Price (₹)", "Low Stock Threshold", "Image URL", "Site Name", "Stall Name", "Original Master Item ID"];
+      const csvRows = [headers.join(",")];
+      itemsToExport.forEach(item => {
+        const row = [
+          escapeCsvCell(item.id), escapeCsvCell(item.name), escapeCsvCell(item.category),
+          escapeCsvCell(item.description), escapeCsvCell(item.quantity), escapeCsvCell(item.unit),
+          escapeCsvCell((item.costPrice ?? 0).toFixed(2)), escapeCsvCell(item.price.toFixed(2)),
+          escapeCsvCell(item.lowStockThreshold), escapeCsvCell(item.imageUrl || ""),
+          escapeCsvCell(item.siteId ? sitesMap[item.siteId] || item.siteId : "N/A"),
+          escapeCsvCell(item.stallId ? stallsMap[item.stallId] || item.stallId : "N/A"),
+          escapeCsvCell(item.originalMasterItemId || "")
+        ];
+        csvRows.push(row.join(","));
+      });
+      downloadCsv(csvRows.join("\n"), `stallsync_stock_items_${getFormattedTimestamp()}.csv`);
+      toast({ title: "Export Successful", description: `${itemsToExport.length} items exported to CSV.` });
+    } catch (error: any) {
+      toast({ title: "Export Failed", description: "Could not export stock items.", variant: "destructive" });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  if (authLoading || loadingPageData) {
     return (
       <div className="flex justify-center items-center py-10">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -309,52 +303,28 @@ export default function ItemsClientPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Stock Items"
-        description={pageHeaderDescription}
-      />
+      <PageHeader title="Stock Items" description={pageHeaderDescription} />
       <ItemControls
-        searchTerm={searchTerm}
-        onSearchTermChange={setSearchTerm}
-        categoryFilter={categoryFilter}
-        onCategoryFilterChange={setCategoryFilter}
-        stockStatusFilter={stockStatusFilter}
-        onStockStatusFilterChange={setStockStatusFilter}
-
+        searchTerm={searchTerm} onSearchTermChange={setSearchTerm}
+        categoryFilter={categoryFilter} onCategoryFilterChange={setCategoryFilter}
+        stockStatusFilter={stockStatusFilter} onStockStatusFilterChange={setStockStatusFilter}
         userRole={user?.role}
         stallFilterOption={user?.role === 'staff' ? (activeStallId || "master") : stallFilterOption}
         onStallFilterOptionChange={setStallFilterOption}
         staffsEffectiveStallId={user?.role === 'staff' ? activeStallId : undefined}
         staffsAssignedStallName={user?.role === 'staff' && activeStallId ? stallsMap[activeStallId] : undefined}
-
         categories={uniqueCategories}
         availableStalls={stallsForFilterDropdown}
         isSiteActive={!!activeSiteId}
+        onExportClick={handleExport}
+        onImportClick={() => setShowImportDialog(true)}
+        isExporting={isExporting}
       />
-
       {errorPageData && !loadingPageData && (
         <Alert variant="default" className="border-primary/30">
             <Info className="h-4 w-4" />
             <AlertTitle>Information</AlertTitle>
-            <AlertDescription>
-              {errorPageData.includes("contact an administrator") ? (
-                <>
-                  {errorPageData.split("contact an administrator")[0]}
-                  contact an administrator
-                  {errorPageData.split("contact an administrator")[1].includes("log out and log back in") ? (
-                    <>
-                      {errorPageData.split("contact an administrator")[1].split("log out and log back in")[0]}
-                      <Link href="/profile" className="text-primary hover:underline font-medium">log out and log back in</Link>
-                      {errorPageData.split("log out and log back in")[1]}
-                    </>
-                  ): (
-                     errorPageData.split("contact an administrator")[1]
-                  )}
-                </>
-              ) : (
-                errorPageData
-              )}
-            </AlertDescription>
+            <AlertDescription> {errorPageData} </AlertDescription>
         </Alert>
       )}
       <ItemTable
@@ -366,6 +336,14 @@ export default function ItemsClientPage() {
           loading={loadingPageData}
           sortConfig={sortConfig}
           requestSort={requestSort}
+      />
+      <CsvImportDialog
+        dataType="stock"
+        isOpen={showImportDialog}
+        onClose={() => {
+          setShowImportDialog(false);
+          fetchSupportingDataAndItems(); // Refresh data after import dialog closes
+        }}
       />
     </div>
   );

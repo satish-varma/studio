@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
-import { CalendarIcon, Users } from "lucide-react";
+import { CalendarIcon, Users, Download } from "lucide-react";
 import type { DateRange } from "react-day-picker";
 import type { AppUser } from "@/types";
 
@@ -25,6 +25,8 @@ interface SalesHistoryControlsProps {
   staffMembers: AppUser[];
   isLoadingStaff: boolean;
   showStaffFilter: boolean;
+  onExportClick: () => void;
+  isExporting: boolean;
 }
 
 export function SalesHistoryControls({
@@ -35,6 +37,8 @@ export function SalesHistoryControls({
   staffMembers,
   isLoadingStaff,
   showStaffFilter,
+  onExportClick,
+  isExporting
 }: SalesHistoryControlsProps) {
 
   return (
@@ -95,7 +99,7 @@ export function SalesHistoryControls({
               <SelectContent data-testid="staff-filter-select-content">
                   <SelectItem value="all">All Staff</SelectItem>
                   {staffMembers
-                    .filter(staff => staff.uid && staff.uid.trim() !== "") // Filter out staff with empty UIDs
+                    .filter(staff => staff.uid && staff.uid.trim() !== "")
                     .map((staff) => (
                       <SelectItem key={staff.uid} value={staff.uid}>
                           {staff.displayName || staff.email} ({staff.role})
@@ -105,6 +109,10 @@ export function SalesHistoryControls({
           </Select>
         )}
       </div>
+       <Button variant="outline" onClick={onExportClick} disabled={isExporting}>
+            {isExporting ? <Download className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+            Export Sales
+        </Button>
     </div>
   );
 }
