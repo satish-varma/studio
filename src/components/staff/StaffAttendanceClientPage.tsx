@@ -154,7 +154,23 @@ export default function StaffAttendanceClientPage() {
     return () => unsubscribeHolidays();
   }, [currentMonth]);
   
-  const handleStatusChange = async (staff: AppUser, date: Date) => {
+  const isHoliday = useCallback((date: Date, staffSiteId?: string | null) => {
+    const dayOfWeek = date.getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) { // Sunday or Saturday
+      return { holiday: true, name: "Weekend" };
+    }
+    const dateStr = format(date, 'yyyy-MM-dd');
+    const globalHoliday = holidays.find(h => h.date === dateStr && h.siteId === null);
+    if (globalHoliday) return { holiday: true, name: globalHoliday.name };
+
+    if (staffSiteId) {
+      const siteHoliday = holidays.find(h => h.date === dateStr && h.siteId === staffSiteId);
+      if (siteHoliday) return { holiday: true, name: siteHoliday.name };
+    }
+    return { holiday: false, name: null };
+  }, [holidays]);
+
+  const handleStatusChange = useCallback(async (staff: AppUser, date: Date) => {
     const holidayInfo = isHoliday(date, staff.defaultSiteId);
     if (!user || !staff.defaultSiteId || isAllSitesView || holidayInfo.holiday) {
       if(isAllSitesView) toast({title: "Read-only", description: "Select a specific site to mark attendance."});
@@ -170,9 +186,9 @@ export default function StaffAttendanceClientPage() {
     const newStatus = statusCycle[nextIndex];
     
     // Optimistic UI update
-    const prevAttendance = attendance;
+    const prevAttendance = JSON.parse(JSON.stringify(attendance || {})); // Deep copy
     setAttendance(prev => {
-        const newAttendance = JSON.parse(JSON.stringify(prev || {})); // Deep copy
+        const newAttendance = JSON.parse(JSON.stringify(prev || {}));
         if (!newAttendance[staff.uid]) newAttendance[staff.uid] = {};
         newAttendance[staff.uid][dateStr] = {
             id: docId, staffUid: staff.uid, date: dateStr, status: newStatus,
@@ -195,26 +211,10 @@ export default function StaffAttendanceClientPage() {
     } catch(error: any) {
       console.error("Error saving attendance:", error);
       toast({ title: "Save Failed", description: `Failed to save status for ${staff.displayName}. Reverting change.`, variant: "destructive"});
-      // Revert UI on failure
-      setAttendance(prevAttendance);
+      setAttendance(prevAttendance); // Revert UI on failure
     }
-  };
+  }, [user, attendance, isHoliday, isAllSitesView, toast]);
 
-  const isHoliday = (date: Date, staffSiteId?: string | null) => {
-    const dayOfWeek = date.getDay();
-    if (dayOfWeek === 0) { // Sunday
-      return { holiday: true, name: "Weekend" };
-    }
-    const dateStr = format(date, 'yyyy-MM-dd');
-    const globalHoliday = holidays.find(h => h.date === dateStr && h.siteId === null);
-    if (globalHoliday) return { holiday: true, name: globalHoliday.name };
-
-    if (staffSiteId) {
-      const siteHoliday = holidays.find(h => h.date === dateStr && h.siteId === staffSiteId);
-      if (siteHoliday) return { holiday: true, name: siteHoliday.name };
-    }
-    return { holiday: false, name: null };
-  };
 
   if (authLoading) return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin" /></div>;
 
