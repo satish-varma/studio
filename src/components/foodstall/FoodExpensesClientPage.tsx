@@ -24,7 +24,7 @@ import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Info, ListFilter, DollarSign, SheetIcon, Download } from "lucide-react";
+import { Loader2, Info, ListFilter, DollarSign } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { FoodExpensesTable } from "./FoodExpensesTable";
 import { foodExpenseCategories } from "@/types/food";
@@ -36,13 +36,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { cn } from "@/lib/utils";
-import { format, subDays, startOfDay, endOfDay, startOfMonth, startOfWeek } from "date-fns";
-import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card";
-import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog";
-import { Input } from "@/components/ui/input";
-import { getAuth } from "firebase/auth";
-
+import { format, subDays, startOfDay, endOfDay, startOfMonth } from "date-fns";
+import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 
 const LOG_PREFIX = "[FoodExpensesClientPage]";
 const EXPENSES_PER_PAGE = 15;
@@ -55,9 +50,6 @@ if (!getApps().length) {
   }
 }
 const db = getFirestore(getApp());
-const firebaseAuth = getAuth(getApp());
-
-type GoogleSheetAction = "importFoodExpenses" | "exportFoodExpenses";
 
 type DateFilterOption = 'today' | 'last_7_days' | 'this_month' | 'all_time';
 
@@ -78,11 +70,6 @@ export default function FoodExpensesClientPage() {
   const [isLastPage, setIsLastPage] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   
-  const [showSheetIdDialog, setShowSheetIdDialog] = useState(false);
-  const [sheetIdInputValue, setSheetIdInputValue] = useState("");
-  const [currentSheetAction, setCurrentSheetAction] = useState<GoogleSheetAction | null>(null);
-  const [isProcessingSheets, setIsProcessingSheets] = useState(false);
-
   const fetchExpenses = useCallback(async (direction: 'initial' | 'next' | 'prev' = 'initial') => {
     if (authLoading || !db || !user || !activeSiteId) {
       if (!authLoading) setLoadingExpenses(false);
@@ -194,7 +181,7 @@ export default function FoodExpensesClientPage() {
     } finally {
       setLoadingExpenses(false);
     }
-  }, [authLoading, user, activeSiteId, activeStallId, dateFilter, categoryFilter, db, firstVisibleDoc, lastVisibleDoc]);
+  }, [authLoading, user, activeSiteId, activeStallId, dateFilter, categoryFilter, firstVisibleDoc, lastVisibleDoc]);
 
   // Effect for initial fetch and filter changes
   useEffect(() => {
@@ -207,46 +194,6 @@ export default function FoodExpensesClientPage() {
     return () => { document.title = "StallSync - Stock Management"; }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dateFilter, categoryFilter, user, activeSiteId, activeStallId]);
-
-
-  const callGoogleSheetsApi = async (action: GoogleSheetAction, sheetId?: string) => {
-    setIsProcessingSheets(true);
-    // Logic from settings page, simplified
-    try {
-        if (!firebaseAuth.currentUser) throw new Error("User not authenticated.");
-        const idToken = await firebaseAuth.currentUser.getIdToken();
-        const response = await fetch('/api/google-sheets-proxy', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
-            body: JSON.stringify({ action, dataType: 'foodExpenses', sheetId }),
-        });
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error || `Failed with status ${response.status}`);
-        toast({ title: "Success", description: result.message });
-        if (action === 'importFoodExpenses') fetchExpenses('initial'); // Refresh data on import
-    } catch (error: any) {
-        toast({ title: "Error", description: error.message, variant: "destructive" });
-    } finally {
-        setIsProcessingSheets(false);
-        setShowSheetIdDialog(false);
-    }
-  };
-
-  const openSheetIdPrompt = (action: GoogleSheetAction) => {
-      setCurrentSheetAction(action);
-      setShowSheetIdDialog(true);
-  };
-  
-  const handleSheetIdDialogSubmit = () => {
-    if (currentSheetAction) {
-      if (currentSheetAction.includes('import') && !sheetIdInputValue) {
-        toast({ title: "Sheet ID Required", description: "Please enter a Sheet ID for import.", variant: "default" });
-        return;
-      }
-      callGoogleSheetsApi(currentSheetAction, sheetIdInputValue.trim() || undefined);
-    }
-  };
-
 
   const handleDateFilterChange = (filter: DateFilterOption) => {
     setDateFilter(filter);
@@ -345,16 +292,6 @@ export default function FoodExpensesClientPage() {
             </SelectContent>
           </Select>
         </CardContent>
-        <CardFooter className="flex flex-col sm:flex-row gap-2 pt-4 border-t">
-          <Button variant="outline" className="w-full sm:w-auto" onClick={() => openSheetIdPrompt("importFoodExpenses")} disabled={isProcessingSheets}>
-            {isProcessingSheets ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Download className="mr-2 h-4 w-4"/>}
-            Import from Sheets
-          </Button>
-          <Button variant="outline" className="w-full sm:w-auto" onClick={() => openSheetIdPrompt("exportFoodExpenses")} disabled={isProcessingSheets}>
-             {isProcessingSheets ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <SheetIcon className="mr-2 h-4 w-4"/>}
-            Export to Sheets
-          </Button>
-        </CardFooter>
       </Card>
 
       {loadingExpenses && expenses.length === 0 && (
@@ -382,35 +319,6 @@ export default function FoodExpensesClientPage() {
           isLoading={loadingExpenses}
         />
       )}
-      
-       <AlertDialog open={showSheetIdDialog} onOpenChange={setShowSheetIdDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-                {currentSheetAction?.toLowerCase().includes('import') ? 'Enter Google Sheet ID for Import' : 'Enter Google Sheet ID for Export (Optional)'}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {currentSheetAction?.toLowerCase().includes('import')
-                ? `Please provide the ID of the Google Sheet you want to import food expenses from. The sheet must have the correct headers.`
-                : `If you provide a Sheet ID, food expenses will be exported to that specific sheet. If left blank, a new Google Sheet will be created.`}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <div className="py-4">
-            <Input
-              value={sheetIdInputValue}
-              onChange={(e) => setSheetIdInputValue(e.target.value)}
-              placeholder="Google Sheet ID (e.g., 123abCDefg...)"
-              className="bg-input"
-            />
-          </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setShowSheetIdDialog(false)}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleSheetIdDialogSubmit}>
-              Proceed
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

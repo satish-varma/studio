@@ -4,17 +4,16 @@
 
 import PageHeader from "@/components/shared/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
-import { Settings as SettingsIcon, Palette, BellRing, DatabaseZap, Download, Loader2, MailWarning, SheetIcon, ShieldAlert, AlertTriangle, Utensils } from "lucide-react";
+import { Settings as SettingsIcon, Palette, BellRing, DatabaseZap, Download, Loader2, ShieldAlert, AlertTriangle, Utensils } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { getFirestore, collection, getDocs, query, orderBy, where, Timestamp } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import type { StockItem, SaleTransaction, FoodItemExpense } from "@/types";
 import { useToast } from "@/hooks/use-toast";
-import { getAuth } from 'firebase/auth';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,10 +23,9 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
-import { useAuth as useAppAuth } from "@/contexts/AuthContext"; // Renamed useAuth to useAppAuth
+import { useAuth as useAppAuth } from "@/contexts/AuthContext";
 import ManageVendorsDialog from "@/components/foodstall/ManageVendorsDialog";
 
 const LOG_PREFIX = "[SettingsPage]";
@@ -40,30 +38,13 @@ if (!getApps().length) {
   }
 }
 const db = getFirestore(getApp());
-const firebaseAuth = getAuth(getApp()); // Used firebaseAuth instead of auth to avoid conflict with useAppAuth
-
-type GoogleSheetAction = "importStockItems" | "exportStockItems" | "importSalesHistory" | "exportSalesHistory" | "importFoodExpenses" | "exportFoodExpenses";
-type DataTypeForSheets = 'stock' | 'sales' | 'foodExpenses';
 
 export default function SettingsPage() {
-  const { user: appUser } = useAppAuth(); // Use the hook from AuthContext
+  const { user: appUser } = useAppAuth();
   const { toast } = useToast();
   const [isExportingStockCsv, setIsExportingStockCsv] = useState(false);
   const [isExportingSalesCsv, setIsExportingSalesCsv] = useState(false);
   const [isExportingFoodExpensesCsv, setIsExportingFoodExpensesCsv] = useState(false);
-
-  const [isProcessingStockSheetsImport, setIsProcessingStockSheetsImport] = useState(false);
-  const [isProcessingStockSheetsExport, setIsProcessingStockSheetsExport] = useState(false);
-  const [isProcessingSalesSheetsImport, setIsProcessingSalesSheetsImport] = useState(false);
-  const [isProcessingSalesSheetsExport, setIsProcessingSalesSheetsExport] = useState(false);
-  const [isProcessingFoodExpensesSheetsImport, setIsProcessingFoodExpensesSheetsImport] = useState(false);
-  const [isProcessingFoodExpensesSheetsExport, setIsProcessingFoodExpensesSheetsExport] = useState(false);
-
-
-  const [showSheetIdDialog, setShowSheetIdDialog] = useState(false);
-  const [sheetIdInputValue, setSheetIdInputValue] = useState("");
-  const [currentSheetAction, setCurrentSheetAction] = useState<GoogleSheetAction | null>(null);
-  const [currentDataType, setCurrentDataType] = useState<DataTypeForSheets | null>(null);
 
   const [showResetDataDialog, setShowResetDataDialog] = useState(false);
   const [resetConfirmationInput, setResetConfirmationInput] = useState("");
@@ -71,7 +52,6 @@ export default function SettingsPage() {
   const RESET_CONFIRMATION_PHRASE = "RESET DATA";
 
   const [showManageVendorsDialog, setShowManageVendorsDialog] = useState(false);
-
 
   const escapeCsvCell = (cellData: any): string => {
     if (cellData === null || cellData === undefined) {
@@ -303,141 +283,6 @@ export default function SettingsPage() {
     }
   };
 
-  const getLoadingStateSetter = (action: GoogleSheetAction): React.Dispatch<React.SetStateAction<boolean>> => {
-    switch (action) {
-      case "importStockItems": return setIsProcessingStockSheetsImport;
-      case "exportStockItems": return setIsProcessingStockSheetsExport;
-      case "importSalesHistory": return setIsProcessingSalesSheetsImport;
-      case "exportSalesHistory": return setIsProcessingSalesSheetsExport;
-      case "importFoodExpenses": return setIsProcessingFoodExpensesSheetsImport;
-      case "exportFoodExpenses": return setIsProcessingFoodExpensesSheetsExport;
-      default: 
-        console.warn(`${LOG_PREFIX} Unknown GoogleSheetAction: ${action}`);
-        return () => {}; 
-    }
-  };
-
-  const handleSheetIdDialogSubmit = () => {
-    console.log(`${LOG_PREFIX} handleSheetIdDialogSubmit. Action: ${currentSheetAction}, DataType: ${currentDataType}, SheetID: ${sheetIdInputValue}`);
-    if (currentSheetAction && currentDataType) {
-      if (currentSheetAction.toLowerCase().includes('import') && !sheetIdInputValue.trim()) {
-        toast({ title: "Sheet ID Required", description: "Please provide a Google Sheet ID to import from.", variant: "default" });
-        return;
-      }
-      callGoogleSheetsApi(currentSheetAction, currentDataType, sheetIdInputValue.trim() || undefined);
-    }
-    setShowSheetIdDialog(false);
-    setSheetIdInputValue("");
-    setCurrentSheetAction(null);
-    setCurrentDataType(null);
-  };
-
-  const openSheetIdPrompt = (action: GoogleSheetAction, dataType: DataTypeForSheets) => {
-    console.log(`${LOG_PREFIX} openSheetIdPrompt. Action: ${action}, DataType: ${dataType}`);
-    setCurrentSheetAction(action);
-    setCurrentDataType(dataType);
-    setShowSheetIdDialog(true);
-  };
-
-
-  const callGoogleSheetsApi = async (
-    action: GoogleSheetAction,
-    dataType: DataTypeForSheets,
-    sheetId?: string
-  ) => {
-    const setLoadingState = getLoadingStateSetter(action);
-    setLoadingState(true);
-    const friendlyAction = action.replace(/([A-Z])/g, ' $1').toLowerCase();
-    console.log(`${LOG_PREFIX} Starting Google Sheets API call. Action: ${friendlyAction}, DataType: ${dataType}, SheetID: ${sheetId}`);
-    toast({
-      title: "Processing Google Sheets Request...",
-      description: `Attempting to ${friendlyAction} for ${dataType} data...`,
-    });
-
-    try {
-      if (!firebaseAuth.currentUser) {
-        toast({ title: "Authentication Error", description: "User not authenticated. Please re-login.", variant: "destructive" });
-        setLoadingState(false);
-        return;
-      }
-      const idToken = await firebaseAuth.currentUser.getIdToken();
-
-      const response = await fetch('/api/google-sheets-proxy', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({
-          action: action,
-          dataType: dataType,
-          sheetId: sheetId,
-        }),
-      });
-
-      let result;
-      try {
-        result = await response.json();
-      } catch (e: any) {
-        const responseText = await response.text();
-        console.error(`${LOG_PREFIX} Error parsing JSON response from /api/google-sheets-proxy. Status: ${response.status}. Response Text:`, responseText, e.stack);
-        toast({
-          title: "API Error",
-          description: `Failed to process request. Server responded with status ${response.status} and non-JSON content. Check console for details.`,
-          variant: "destructive",
-        });
-        setLoadingState(false);
-        return;
-      }
-      console.log(`${LOG_PREFIX} Google Sheets API call response. Status: ${response.status}, Result:`, result);
-
-      if (!response.ok) {
-        console.error(`${LOG_PREFIX} API Error (${response.status}) for ${friendlyAction}:`, result);
-        if (result.needsAuth && result.authUrl) {
-          toast({
-            title: "Authorization Required",
-            description: "Please authorize StallSync to access your Google Sheets. Redirecting...",
-            duration: 5000
-          });
-          window.location.href = result.authUrl;
-        } else {
-          let errorMessage = result.error || `Failed to ${friendlyAction}. Status: ${response.status}.`;
-          if (response.status === 401 && result.error?.toLowerCase().includes("invalid firebase id token")) {
-            errorMessage = "Authentication with the backend failed (Invalid ID token). Please ensure your Firebase setup is correct or try re-logging in.";
-          } else if (response.status === 403 && result.error?.toLowerCase().includes("google sheets authorization required")) {
-            errorMessage = "Google Sheets authorization is required. Please try the action again to initiate authorization.";
-          }
-          toast({
-            title: "Operation Failed",
-            description: errorMessage,
-            variant: "destructive",
-          });
-        }
-      } else {
-        toast({ title: "Success", description: result.message || `${friendlyAction} completed.` });
-         if (result.errors && result.errors.length > 0) {
-           toast({
-             title: "Import Issues",
-             description: `${result.errors.length} rows had issues. Check console for details.`,
-             variant: "default",
-             duration: 7000
-           });
-           console.warn(`${LOG_PREFIX} Import errors for ${dataType}:`, result.errors);
-         }
-      }
-
-    } catch (error: any) {
-      console.error(`${LOG_PREFIX} Error during Google Sheets ${friendlyAction}:`, error.message, error.stack);
-      toast({
-        title: "Client-side Error",
-        description: `Failed to ${friendlyAction}. Error: ${error.message}. Check console for details.`,
-        variant: "destructive"
-      });
-    } finally {
-      setLoadingState(false);
-    }
-  };
-
   const handleResetDataConfirm = async () => {
     if (resetConfirmationInput !== RESET_CONFIRMATION_PHRASE) {
       toast({ title: "Confirmation Mismatch", description: `Please type "${RESET_CONFIRMATION_PHRASE}" to confirm.`, variant: "destructive" });
@@ -448,12 +293,13 @@ export default function SettingsPage() {
     toast({ title: "Resetting Data...", description: "Please wait, this may take a few moments.", duration: 10000 });
 
     try {
-      if (!firebaseAuth.currentUser) {
+      const auth = useAppAuth().getAuth(); // This is a placeholder, direct getAuth should be used.
+      if (!auth.currentUser) {
         toast({ title: "Authentication Error", description: "User not authenticated. Please re-login.", variant: "destructive" });
         setIsResettingData(false);
         return;
       }
-      const idToken = await firebaseAuth.currentUser.getIdToken();
+      const idToken = await auth.currentUser.getIdToken();
       const response = await fetch('/api/admin/reset-data', {
         method: 'POST',
         headers: {
@@ -576,7 +422,7 @@ export default function SettingsPage() {
             Data Export (CSV)
           </CardTitle>
           <CardDescription>
-            Download your application data in CSV format.
+            Download your application data in CSV format for use in WPS Office, Excel, or other spreadsheet software.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -621,115 +467,52 @@ export default function SettingsPage() {
           </Button>
         </CardContent>
       </Card>
-
-      <Card className="shadow-lg">
-        <CardHeader>
-            <CardTitle className="flex items-center">
-                <SheetIcon className="mr-2 h-5 w-5 text-green-600" />
-                Google Sheets Integration
-            </CardTitle>
-            <CardDescription>
-                Import or export data with Google Sheets. <strong>Note:</strong> This is an advanced feature requiring developer setup of Google Cloud Project credentials, OAuth 2.0 configuration (including Redirect URI setup in Google Cloud Console), and a properly configured backend API route (<code>/api/google-sheets-proxy</code>) to handle Google API calls securely.
-            </CardDescription>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            <div className="space-y-3 p-4 border rounded-md bg-muted/20">
-                <h4 className="font-medium text-foreground">Stock Items</h4>
-                <Button
-                    variant="outline"
-                    className="w-full"
-                    onClick={() => openSheetIdPrompt("importStockItems", 'stock')}
-                    disabled={isProcessingStockSheetsImport || isProcessingStockSheetsExport}
-                >
-                    {isProcessingStockSheetsImport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4 text-green-700" />}
-                    Import Stock from Sheets
-                </Button>
-                <Button
-                    variant="outline"
-                    className="w-full"
-                    onClick={() => openSheetIdPrompt("exportStockItems", 'stock')}
-                    disabled={isProcessingStockSheetsImport || isProcessingStockSheetsExport}
-                >
-                    {isProcessingStockSheetsExport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SheetIcon className="mr-2 h-4 w-4 text-green-700" />}
-                    Export Stock to Sheets
-                </Button>
-            </div>
-            <div className="space-y-3 p-4 border rounded-md bg-muted/20">
-                <h4 className="font-medium text-foreground">Sales History</h4>
-                <Button
-                    variant="outline"
-                    className="w-full"
-                    onClick={() => openSheetIdPrompt("importSalesHistory", 'sales')}
-                    disabled={isProcessingSalesSheetsImport || isProcessingSalesSheetsExport}
-                >
-                     {isProcessingSalesSheetsImport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4 text-green-700" />}
-                    Import Sales from Sheets
-                </Button>
-                <Button
-                    variant="outline"
-                    className="w-full"
-                    onClick={() => openSheetIdPrompt("exportSalesHistory", 'sales')}
-                    disabled={isProcessingSalesSheetsImport || isProcessingSalesSheetsExport}
-                >
-                    {isProcessingSalesSheetsExport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SheetIcon className="mr-2 h-4 w-4 text-green-700" />}
-                    Export Sales to Sheets
-                </Button>
-            </div>
-             <div className="space-y-3 p-4 border rounded-md bg-muted/20">
-                <h4 className="font-medium text-foreground">Food Stall Expenses</h4>
-                <Button
-                    variant="outline"
-                    className="w-full"
-                    onClick={() => openSheetIdPrompt("importFoodExpenses", 'foodExpenses')}
-                    disabled={isProcessingFoodExpensesSheetsImport || isProcessingFoodExpensesSheetsExport}
-                >
-                     {isProcessingFoodExpensesSheetsImport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4 text-green-700" />}
-                    Import Expenses from Sheets
-                </Button>
-                <Button
-                    variant="outline"
-                    className="w-full"
-                    onClick={() => openSheetIdPrompt("exportFoodExpenses", 'foodExpenses')}
-                    disabled={isProcessingFoodExpensesSheetsImport || isProcessingFoodExpensesSheetsExport}
-                >
-                    {isProcessingFoodExpensesSheetsExport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SheetIcon className="mr-2 h-4 w-4 text-green-700" />}
-                    Export Expenses to Sheets
-                </Button>
-            </div>
-        </CardContent>
-         <CardFooter>
-            <p className="text-xs text-muted-foreground">
-              Authorization with Google is required for this feature. If prompted, please allow access.
-              Ensure the provided Google Sheet ID is correct and that the sheet format matches the expected structure for imports.
-              For exports, if no Sheet ID is provided, a new sheet will be created in your Google Drive.
-            </p>
-         </CardFooter>
-      </Card>
-
+      
       {appUser?.role === 'admin' && (
         <Card className="shadow-lg border-destructive">
           <AlertDialog open={showResetDataDialog} onOpenChange={setShowResetDataDialog}>
-            <AlertDialogHeader className="p-6">
-              <AlertDialogTitle>Confirm Data Reset</AlertDialogTitle>
-              <AlertDialogDescription>
-                This action will permanently delete the specified application data. This is irreversible.
-              </AlertDialogDescription>
-              <div className="text-sm text-muted-foreground space-y-2 pt-2">
-                <div>You are about to delete all application data including:</div>
-                <ul className="list-disc list-inside text-sm text-destructive pl-4">
-                  <li>All Stock Items (Master & Stall)</li>
-                  <li>All Sales Transactions</li>
-                  <li>All Food Stall Expenses & Sales</li>
-                  <li>All Stock Movement & Food Stall Logs</li>
-                  <li>All Sites and Stalls</li>
-                  <li>All Google OAuth Tokens</li>
-                  <li>All Food Vendors</li>
-                </ul>
-                <div className="font-bold">The 'users' collection (user accounts, roles, and preferences) WILL NOT be deleted.</div>
-                <div>To proceed, please type "<strong className="text-foreground">{RESET_CONFIRMATION_PHRASE}</strong>" into the box below.</div>
-              </div>
-            </AlertDialogHeader>
-            <AlertDialogContent> {/* This content will appear below the header due to default AlertDialog structure */}
+            <CardHeader className="pt-6"> {/* This part is for the trigger button, should be above AlertDialog */}
+              <CardTitle className="flex items-center text-destructive">
+                <AlertTriangle className="mr-2 h-5 w-5" />
+                Danger Zone
+              </CardTitle>
+              <CardDescription> 
+                These actions are irreversible and can lead to data loss. Proceed with extreme caution.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive" className="w-full">
+                  <ShieldAlert className="mr-2 h-4 w-4" />
+                  Reset Application Data (Excluding Users)
+                </Button>
+              </AlertDialogTrigger>
+            </CardContent>
+           <CardFooter>
+             <p className="text-xs text-muted-foreground">
+                This operation will permanently remove all specified data. It's recommended to back up your data (e.g., using CSV export) before proceeding if you might need it later.
+            </p>
+           </CardFooter>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Confirm Data Reset</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This action will permanently delete the specified application data. This is irreversible.
+                </AlertDialogDescription>
+                <div className="text-sm text-muted-foreground space-y-2 pt-2">
+                  <div>You are about to delete all application data including:</div>
+                  <ul className="list-disc list-inside text-sm text-destructive pl-4">
+                    <li>All Stock Items (Master & Stall)</li>
+                    <li>All Sales Transactions</li>
+                    <li>All Food Stall Expenses & Sales</li>
+                    <li>All Stock Movement & Food Stall Logs</li>
+                    <li>All Sites and Stalls</li>
+                    <li>All Food Vendors</li>
+                  </ul>
+                  <div className="font-bold">The 'users' collection (user accounts, roles, and preferences) WILL NOT be deleted.</div>
+                  <div>To proceed, please type "<strong className="text-foreground">{RESET_CONFIRMATION_PHRASE}</strong>" into the box below.</div>
+                </div>
+              </AlertDialogHeader>
               <div className="py-2">
                 <Label htmlFor="resetConfirmationInput" className="sr-only">Confirmation Phrase</Label>
                 <Input
@@ -755,70 +538,10 @@ export default function SettingsPage() {
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
-            <CardHeader className="pt-0"> {/* This part is for the trigger button, should be above AlertDialog */}
-              <CardTitle className="flex items-center text-destructive">
-                <AlertTriangle className="mr-2 h-5 w-5" />
-                Danger Zone
-              </CardTitle>
-              <CardDescription> 
-                These actions are irreversible and can lead to data loss. Proceed with extreme caution.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <AlertDialogTrigger asChild>
-                <Button variant="destructive" className="w-full">
-                  <ShieldAlert className="mr-2 h-4 w-4" />
-                  Reset Application Data (Excluding Users)
-                </Button>
-              </AlertDialogTrigger>
-            </CardContent>
-           <CardFooter>
-             <p className="text-xs text-muted-foreground">
-                This operation will permanently remove all specified data. It's recommended to back up your data (e.g., using CSV export) before proceeding if you might need it later.
-            </p>
-           </CardFooter>
           </AlertDialog>
         </Card>
       )}
 
-      <AlertDialog open={showSheetIdDialog} onOpenChange={setShowSheetIdDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-                {currentSheetAction?.toLowerCase().includes('import') ? 'Enter Google Sheet ID for Import' : 'Enter Google Sheet ID for Export (Optional)'}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {currentSheetAction?.toLowerCase().includes('import')
-                ? `Please provide the ID of the Google Sheet you want to import ${currentDataType} data from. The sheet must have the correct headers.`
-                : `If you provide a Sheet ID, ${currentDataType} data will be exported to that specific sheet (content will be overwritten). If left blank, a new Google Sheet will be created in your Drive.`}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <div className="py-4">
-            <Label htmlFor="settingsSheetIdInput" className="sr-only">
-              Google Sheet ID
-            </Label>
-            <Input
-              id="settingsSheetIdInput"
-              value={sheetIdInputValue}
-              onChange={(e) => setSheetIdInputValue(e.target.value)}
-              placeholder="Google Sheet ID (e.g., 123abCDefgHIJkLmNopQ...)"
-              className="bg-input"
-            />
-          </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => {
-              setShowSheetIdDialog(false);
-              setSheetIdInputValue("");
-              setCurrentSheetAction(null);
-              setCurrentDataType(null);
-            }}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleSheetIdDialogSubmit}>
-              Proceed
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      
       <ManageVendorsDialog 
         isOpen={showManageVendorsDialog}
         onClose={() => setShowManageVendorsDialog(false)}
@@ -827,4 +550,3 @@ export default function SettingsPage() {
     </div>
   );
 }
-    

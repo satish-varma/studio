@@ -13,7 +13,7 @@ const COLLECTIONS_TO_DELETE = [
   "stockMovementLogs",
   "sites",
   "stalls",
-  "userGoogleOAuthTokens",
+  // "userGoogleOAuthTokens", // This collection is no longer used
   "foodItemExpenses",
   "foodSaleTransactions",
   "foodStallActivityLogs",

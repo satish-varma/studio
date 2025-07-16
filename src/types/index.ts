@@ -1,5 +1,6 @@
 
-export type { AppUser, UserRole, UserGoogleOAuthTokens } from './user'; // Added UserGoogleOAuthTokens
+
+export type { AppUser, UserRole } from './user'; // Removed UserGoogleOAuthTokens
 export type { StockItem, StockItemFormValues } from './item';
 export type { SaleTransaction, SoldItem } from './sale';
 export type { Site, SiteFormValues } from './site';

@@ -26,6 +26,8 @@ export interface AppUser {
   defaultSalesStaffFilter: string | null; // "all" or staff UID
 }
 
+// This type is no longer used and can be removed.
+// It was specific to the Google Sheets integration.
 export interface UserGoogleOAuthTokens {
   access_token: string;
   refresh_token: string;
