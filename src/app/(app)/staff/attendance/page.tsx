@@ -9,10 +9,6 @@ export const metadata = {
 export default function StaffAttendancePage() {
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Staff Attendance"
-        description="View daily attendance summaries and mark attendance for your staff."
-      />
       <StaffAttendanceClientPage />
     </div>
   );
