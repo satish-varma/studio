@@ -15,7 +15,8 @@ import {
   ChevronDown,
   ShieldAlert,
   PlusCircle,
-  Briefcase, // Added for Staff Management
+  Briefcase,
+  FileText, // Added FileText
 } from "lucide-react";
 import {
   SidebarMenu,
@@ -89,6 +90,7 @@ const navItems: NavItem[] = [
       { href: "/staff/list", label: "Staff List", roles: ['manager', 'admin'] },
       { href: "/staff/attendance", label: "Attendance", roles: ['manager', 'admin'] },
       { href: "/staff/advances", label: "Salary Advances", roles: ['manager', 'admin'] },
+      { href: "/staff/activity-log", label: "Activity Log", roles: ['manager', 'admin'], icon: FileText },
     ]
   },
 

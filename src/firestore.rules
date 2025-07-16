@@ -1,0 +1,286 @@
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- Helper Functions ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isUser(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function getUserData(userId) {
+      let userDocPath = /databases/$(database)/documents/users/$(userId);
+      return exists(userDocPath) ? get(userDocPath).data : null;
+    }
+
+    function getAuthenticatedUserData() {
+      return isSignedIn() ? getUserData(request.auth.uid) : null;
+    }
+
+    function getAuthenticatedUserRole() {
+      let userData = getAuthenticatedUserData();
+      return userData != null ? userData.role : null;
+    }
+
+    function isAdmin() {
+      return getAuthenticatedUserRole() == 'admin';
+    }
+
+    function isManagerRole() {
+      return getAuthenticatedUserRole() == 'manager';
+    }
+
+    function isStaffRole() {
+      return getAuthenticatedUserRole() == 'staff';
+    }
+
+    function isManagerOfSite(siteId) {
+      let userData = getAuthenticatedUserData();
+      return isManagerRole() &&
+             userData != null &&
+             userData.managedSiteIds != null &&
+             userData.managedSiteIds.hasAny([siteId]);
+    }
+    
+    function isStaffAssignedToSite(siteId) {
+      let userData = getAuthenticatedUserData();
+      return isStaffRole() &&
+             userData != null &&
+             userData.defaultSiteId == siteId;
+    }
+    
+    function isStaffAssignedTo(siteId, stallId) {
+      return isStaffAssignedToSite(siteId) &&
+             getAuthenticatedUserData().defaultStallId == stallId;
+    }
+
+    // --- Collections Rules ---
+
+    match /users/{userId} {
+      allow read: if isUser(userId) || isAdmin() || isManagerRole();
+      allow create: if isAdmin();
+      allow update: if isAdmin() || (isUser(userId) && !('role' in request.resource.data));
+      allow delete: if isAdmin() && request.auth.uid != userId;
+    }
+    match /users {
+      allow list: if isAdmin() || isManagerRole();
+    }
+
+    match /sites/{siteId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+    }
+    match /sites {
+      allow list: if isSignedIn();
+    }
+
+    match /stalls/{stallId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+    }
+    match /stalls {
+      allow list: if isSignedIn();
+    }
+
+    match /stockItems/{itemId} {
+      allow read: if isSignedIn();
+
+      allow create: if request.resource.data.siteId != null &&
+                       (isAdmin() ||
+                        (isManagerRole() && isManagerOfSite(request.resource.data.siteId)) ||
+                        isStaffAssignedToSite(request.resource.data.siteId)
+                       ) &&
+                       request.resource.data.name is string && request.resource.data.name.size() > 0 &&
+                       request.resource.data.quantity is number && request.resource.data.quantity >= 0 &&
+                       request.resource.data.price is number && request.resource.data.price >= 0 &&
+                       request.resource.data.lastUpdated is string; 
+
+      allow update: if resource.data.siteId != null &&
+                       (isAdmin() ||
+                        (isManagerRole() && isManagerOfSite(resource.data.siteId)) || 
+                        (isStaffRole() && 
+                          isStaffAssignedToSite(resource.data.siteId) &&
+                          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['quantity', 'lastUpdated'])
+                        )
+                       ) &&
+                       request.resource.data.lastUpdated is string &&
+                       request.resource.data.quantity is number && request.resource.data.quantity >= 0 &&
+                       (request.resource.data.siteId == resource.data.siteId || isAdmin()) && 
+                       (request.resource.data.stallId == resource.data.stallId || isAdmin());
+
+      allow delete: if resource.data.siteId != null &&
+                       (isAdmin() ||
+                        (isManagerRole() && isManagerOfSite(resource.data.siteId)) ||
+                        (isStaffRole() && isStaffAssignedToSite(resource.data.siteId))
+                       );
+    }
+    match /stockItems {
+        allow list: if isSignedIn();
+    }
+
+    match /salesTransactions/{transactionId} {
+      allow create: if isSignedIn() && 
+                       request.resource.data.staffId == request.auth.uid && 
+                       request.resource.data.siteId != null &&
+                       request.resource.data.stallId != null &&
+                       (isAdmin() || 
+                        (isManagerRole() && isManagerOfSite(request.resource.data.siteId) && request.resource.data.stallId != null) ||
+                        (isStaffRole() && isStaffAssignedTo(request.resource.data.siteId, request.resource.data.stallId)) 
+                       ) &&
+                       request.resource.data.isDeleted == false &&
+                       request.resource.data.items is list && request.resource.data.items.size() > 0 &&
+                       request.resource.data.totalAmount is number && request.resource.data.totalAmount >= 0;
+
+      allow read: if (isStaffRole() && resource.data.staffId == request.auth.uid) || 
+                     (isManagerRole() && isManagerOfSite(resource.data.siteId)) ||
+                     isAdmin();
+
+      allow update: if isAdmin() &&
+                       request.resource.data.isDeleted == true &&
+                       resource.data.isDeleted == false && 
+                       request.resource.data.deletedBy == request.auth.uid &&
+                       request.resource.data.deletionJustification is string && request.resource.data.deletionJustification.size() > 0 &&
+                       request.resource.data.deletedAt is string && 
+                       !request.resource.data.keys().hasAny(['items', 'totalAmount', 'transactionDate', 'staffId', 'siteId', 'stallId', 'staffName']);
+
+      allow delete: if false;
+    }
+    match /salesTransactions {
+        allow list: if isSignedIn();
+    }
+
+    match /stockMovementLogs/{logId} {
+      allow create: if isSignedIn() &&
+                       request.resource.data.userId == request.auth.uid &&
+                       request.resource.data.stockItemId is string &&
+                       request.resource.data.siteId is string &&
+                       request.resource.data.type is string &&
+                       request.resource.data.quantityChange is number &&
+                       request.resource.data.quantityBefore is number &&
+                       request.resource.data.quantityAfter is number &&
+                       request.resource.data.timestamp is string;
+
+      allow read: if isAdmin() || 
+                     (isManagerRole() && isManagerOfSite(resource.data.siteId));
+
+      allow update, delete: if false;
+    }
+    match /stockMovementLogs {
+        allow list: if isAdmin() || isManagerRole();
+    }
+
+    // --- Food Stall Specific Rules ---
+    match /foodItemExpenses/{expenseId} {
+      allow create: if isSignedIn() &&
+                       request.resource.data.recordedByUid == request.auth.uid &&
+                       request.resource.data.siteId != null &&
+                       request.resource.data.stallId != null &&
+                       (isAdmin() ||
+                        (isManagerRole() && isManagerOfSite(request.resource.data.siteId)) ||
+                        (isStaffRole() && isStaffAssignedTo(request.resource.data.siteId, request.resource.data.stallId))
+                       );
+      allow read: if isSignedIn() &&
+                     (isAdmin() ||
+                      (isManagerRole() && isManagerOfSite(resource.data.siteId)) ||
+                      (isStaffRole() && isStaffAssignedTo(resource.data.siteId, resource.data.stallId))
+                     );
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+    
+    match /foodSaleTransactions/{saleId} {
+      allow create, update: if isSignedIn() &&
+                         request.resource.data.recordedByUid == request.auth.uid &&
+                         request.resource.data.siteId != null &&
+                         request.resource.data.stallId != null &&
+                         (isAdmin() ||
+                          (isManagerRole() && isManagerOfSite(request.resource.data.siteId)) ||
+                          (isStaffRole() && isStaffAssignedTo(request.resource.data.siteId, request.resource.data.stallId))
+                         );
+      allow read: if isSignedIn() &&
+                     (isAdmin() ||
+                      (isManagerRole() && isManagerOfSite(resource.data.siteId)) ||
+                      (isStaffRole() && isStaffAssignedTo(resource.data.siteId, resource.data.stallId))
+                     );
+      allow delete: if isAdmin();
+    }
+
+    match /foodStallActivityLogs/{logId} {
+      allow create: if isSignedIn() &&
+                       request.resource.data.userId == request.auth.uid &&
+                       request.resource.data.siteId is string &&
+                       request.resource.data.stallId is string &&
+                       request.resource.data.type is string &&
+                       request.resource.data.relatedDocumentId is string &&
+                       request.resource.data.timestamp is string;
+      allow read: if isAdmin() || (isManagerRole() && isManagerOfSite(resource.data.siteId));
+      allow update, delete: if false;
+    }
+    match /foodStallActivityLogs {
+        allow list: if isAdmin() || isManagerRole();
+    }
+    
+    match /foodVendors/{vendorId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || isManagerRole();
+    }
+    match /foodVendors {
+      allow list: if isSignedIn();
+    }
+    
+    // --- Staff Management Specific Rules ---
+    match /staffDetails/{userId} {
+      function getStaffSiteId() {
+        return getUserData(userId).defaultSiteId;
+      }
+      allow read: if isUser(userId) || isAdmin() || (isManagerRole() && isManagerOfSite(getStaffSiteId()));
+      allow create, update: if isAdmin() || (isManagerRole() && isManagerOfSite(getStaffSiteId()));
+      allow delete: if isAdmin();
+    }
+    
+    match /staffAttendance/{attendanceId} {
+      allow create, update: if isSignedIn() &&
+                               request.resource.data.siteId != null &&
+                               (isAdmin() || (isManagerRole() && isManagerOfSite(request.resource.data.siteId)));
+      allow read: if isSignedIn() &&
+                     (isAdmin() || (isManagerRole() && isManagerOfSite(resource.data.siteId)));
+      allow delete: if isAdmin();
+    }
+    match /staffAttendance {
+        allow list: if isSignedIn() && (isAdmin() || isManagerRole());
+    }
+
+    match /advances/{advanceId} {
+      allow create: if isSignedIn() &&
+                      request.resource.data.recordedByUid == request.auth.uid &&
+                      request.resource.data.siteId != null &&
+                      (isAdmin() || (isManagerRole() && isManagerOfSite(request.resource.data.siteId)));
+      allow read: if isSignedIn() &&
+                     (isAdmin() || (isManagerRole() && isManagerOfSite(resource.data.siteId)));
+      allow delete: if isAdmin();
+    }
+    match /advances {
+      allow list: if isSignedIn() && (isAdmin() || isManagerRole());
+    }
+
+    match /holidays/{holidayId} {
+      allow read: if isSignedIn();
+      allow create, delete: if isAdmin();
+      allow update: if false;
+    }
+    match /holidays {
+      allow list: if isSignedIn();
+    }
+
+    match /staffActivityLogs/{logId} {
+        allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+        allow read, list: if isAdmin() || isManagerRole();
+        allow update, delete: if false;
+    }
+  }
+}
