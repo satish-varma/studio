@@ -55,17 +55,27 @@ export function StaffActivityLogTable({
   const getActivityBadgeVariant = (type: StaffActivityLog['type']): "default" | "secondary" | "destructive" | "outline" => {
     if (type === 'SALARY_ADVANCE_GIVEN') return "destructive";
     if (type === 'ATTENDANCE_MARKED') return "secondary";
+    if (type === 'SALARY_PAID') return "default";
     return "outline";
   };
 
   const formatDetails = (log: StaffActivityLog) => {
+    // New: Prioritize the more descriptive `notes` field for all log types if it exists.
+    // This allows bulk action logs to show their summary message.
+    if (log.details.notes) {
+        return log.details.notes;
+    }
+    // Fallback to original specific formatting if `notes` is empty.
     if (log.type === 'ATTENDANCE_MARKED') {
         return `Date: ${log.details.date}, Status: ${log.details.status}`;
     }
     if (log.type === 'SALARY_ADVANCE_GIVEN') {
         return `Amount: ₹${log.details.amount?.toFixed(2) || '0.00'}`;
     }
-    return log.details.notes || 'No details.';
+    if (log.type === 'SALARY_PAID') {
+        return `Paid: ₹${log.details.amount?.toFixed(2) || '0.00'}`;
+    }
+    return 'No details.';
   };
 
   if (logs.length === 0 && isFirstPage) {

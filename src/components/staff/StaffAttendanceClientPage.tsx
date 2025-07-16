@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
@@ -337,8 +338,8 @@ export default function StaffAttendanceClientPage() {
             siteId: activeSiteId,
             details: {
                 date: dateStr,
-                status,
-                notes: `Bulk attendance marked for ${validUpdates} staff member(s).`,
+                status: status,
+                notes: `Bulk updated ${validUpdates} staff member(s) to status '${status}'.`,
             }
         });
         toast({ title: "Bulk Update Successful", description: `Attendance for ${validUpdates} staff marked as ${status} for ${format(bulkUpdateDate, 'PPP')}.`});
@@ -402,7 +403,7 @@ export default function StaffAttendanceClientPage() {
             details: {
                 date: dateStr,
                 status: 'Cleared',
-                notes: `Bulk attendance cleared for ${validClears} staff member(s).`,
+                notes: `Bulk cleared attendance for ${validClears} staff member(s).`,
             }
         });
         toast({ title: "Bulk Clear Successful", description: `Attendance for ${validClears} staff cleared for ${format(bulkUpdateDate, 'PPP')}.`});

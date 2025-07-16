@@ -234,8 +234,8 @@ export function useUserManagement() {
   }, [currentUser, toast]);
 
   const handleBatchUpdateStaffDetails = useCallback(async (userIds: string[], updates: { salary?: number; joiningDate?: Date | null; }) => {
-    if (!currentUser || currentUser.role !== 'admin') {
-      toast({ title: "Permission Denied", description: "Only admins can perform batch updates.", variant: "destructive" });
+    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) {
+      toast({ title: "Permission Denied", description: "Only admins and managers can perform batch updates.", variant: "destructive" });
       return;
     }
     if (userIds.length === 0) {
@@ -260,12 +260,16 @@ export function useUserManagement() {
       if (Object.keys(updateData).length > 0) {
         batch.set(detailsDocRef, updateData, { merge: true });
         
+        const logNotesParts: string[] = [];
+        if (updates.salary !== undefined) logNotesParts.push(`Salary to ₹${updates.salary.toFixed(2)}`);
+        if (updates.joiningDate) logNotesParts.push(`Joining Date to ${updates.joiningDate.toLocaleDateString()}`);
+        
         logStaffActivity(currentUser, {
             type: 'STAFF_DETAILS_UPDATED',
             relatedStaffUid: userId,
             siteId: users.find(u => u.uid === userId)?.defaultSiteId || null,
             details: {
-                notes: `Batch update applied. Salary updated: ${updates.salary !== undefined}, Joining date updated: ${!!updates.joiningDate}`,
+                notes: `Batch Update: ${logNotesParts.join(', ')}.`,
             }
         });
 
