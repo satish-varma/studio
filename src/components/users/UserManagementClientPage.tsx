@@ -30,6 +30,8 @@ import { Button } from "@/components/ui/button";
 import CreateUserDialog from "@/components/users/CreateUserDialog";
 import { getAuth } from "firebase/auth"; // Import getAuth
 
+const LOG_PREFIX = "[UserManagementClientPage]";
+
 if (!getApps().length) {
   try {
     initializeApp(firebaseConfig);
