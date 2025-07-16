@@ -85,8 +85,10 @@ export default function FoodStallReportClientPage() {
       setLoadingReport(false);
       return;
     }
+    
+    const isAdminViewAll = user.role === 'admin' && !activeSiteId;
 
-    if (!activeSiteId) {
+    if (!activeSiteId && !isAdminViewAll) {
       setErrorReport("Please select an active site to view the report.");
       setLoadingReport(false);
       setSummaryData(null);
@@ -102,7 +104,7 @@ export default function FoodStallReportClientPage() {
       return;
     }
     
-    console.log(`${LOG_PREFIX} Starting report data fetch. Site: ${activeSiteId}, Stall: ${activeStallId || 'All'}, DateRange: ${dateRange.from.toISOString()} to ${dateRange.to.toISOString()}`);
+    console.log(`${LOG_PREFIX} Starting report data fetch. Site: ${activeSiteId || 'All (Admin)'}, Stall: ${activeStallId || 'All'}, DateRange: ${dateRange.from.toISOString()} to ${dateRange.to.toISOString()}`);
     setLoadingReport(true);
     setErrorReport(null);
     setSummaryData(null);
@@ -115,12 +117,14 @@ export default function FoodStallReportClientPage() {
       // --- Fetch Sales ---
       const salesCollectionRef = collection(db, "foodSaleTransactions");
       let salesQueryConstraints: QueryConstraint[] = [
-        where("siteId", "==", activeSiteId),
         where("saleDate", ">=", fromDate),
         where("saleDate", "<=", toDate),
       ];
-      if (activeStallId) {
-        salesQueryConstraints.push(where("stallId", "==", activeStallId));
+      if (activeSiteId) {
+        salesQueryConstraints.push(where("siteId", "==", activeSiteId));
+        if (activeStallId) {
+            salesQueryConstraints.push(where("stallId", "==", activeStallId));
+        }
       }
       const salesQuery = query(salesCollectionRef, ...salesQueryConstraints);
       const salesSnapshot = await getDocs(salesQuery);
@@ -143,12 +147,14 @@ export default function FoodStallReportClientPage() {
       // --- Fetch Expenses ---
       const expensesCollectionRef = collection(db, "foodItemExpenses");
       let expensesQueryConstraints: QueryConstraint[] = [
-        where("siteId", "==", activeSiteId),
         where("purchaseDate", ">=", fromDate),
         where("purchaseDate", "<=", toDate),
       ];
-      if (activeStallId) {
-        expensesQueryConstraints.push(where("stallId", "==", activeStallId));
+      if (activeSiteId) {
+        expensesQueryConstraints.push(where("siteId", "==", activeSiteId));
+        if (activeStallId) {
+            expensesQueryConstraints.push(where("stallId", "==", activeStallId));
+        }
       }
       const expensesQuery = query(expensesCollectionRef, ...expensesQueryConstraints);
       const expensesSnapshot = await getDocs(expensesQuery);
@@ -202,11 +208,16 @@ export default function FoodStallReportClientPage() {
 
   const pageHeaderDescription = useMemo(() => {
     if (!user) return "Analyze your food stall's financial performance.";
-    if (!activeSite) {
-        return user.role === 'admin' ? "Admin: Select a site to view its report." : "Manager: Select one of your managed sites to view its report.";
+    
+    let desc = `Financial performance report for `;
+    if (activeSite) {
+        desc += `Site: "${activeSite.name}"`;
+        desc += activeStall ? ` (Stall: "${activeStall.name}")` : " (All Food Stalls in Site)";
+    } else if (user.role === 'admin') {
+        desc += "All Sites";
+    } else { // Manager with no site selected
+        desc = "Manager: Select one of your managed sites to view its report.";
     }
-    let desc = `Financial performance report for Site: "${activeSite.name}"`;
-    desc += activeStall ? ` (Stall: "${activeStall.name}")` : " (All Food Stalls in Site)";
     desc += ".";
     return desc;
   }, [user, activeSite, activeStall]);
@@ -241,7 +252,7 @@ export default function FoodStallReportClientPage() {
         <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading report data...</p></div>
       ) : errorReport ? (
         <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error Loading Report</AlertTitle><AlertDescription>{errorReport}</AlertDescription></Alert>
-      ) : !activeSiteId ? (
+      ) : !activeSiteId && user.role !== 'admin' ? (
         <Alert variant="default" className="border-primary/50"><Info className="h-4 w-4" /><AlertTitle>Site Selection Required</AlertTitle><AlertDescription>{pageHeaderDescription}</AlertDescription></Alert>
       ) : summaryData && (
         <>

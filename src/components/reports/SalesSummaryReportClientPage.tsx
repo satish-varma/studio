@@ -83,7 +83,7 @@ export default function SalesSummaryReportClientPage() {
 
   const fetchReportData = useCallback(async () => {
     console.log(`${LOG_PREFIX} fetchReportData called. AuthLoading: ${authLoading}, User: ${!!user}`);
-    if (authLoading) return;
+    if (authLoading || !db) return;
 
     if (!user || (user.role !== 'admin' && user.role !== 'manager')) {
       console.warn(`${LOG_PREFIX} User not authorized to view reports. Role: ${user?.role}`);
@@ -91,9 +91,11 @@ export default function SalesSummaryReportClientPage() {
       setLoadingReport(false);
       return;
     }
+    
+    const isAdminViewAll = user.role === 'admin' && !activeSiteId;
 
-    if (!activeSiteId) {
-      const msg = user.role === 'admin' ? "Admin: Please select a site from the header to view its report." : "Manager: Please select one of your managed sites from the header to view its report.";
+    if (!activeSiteId && !isAdminViewAll) {
+      const msg = "Please select an active site to view the report.";
       console.warn(`${LOG_PREFIX} No active site selected for report. Message: ${msg}`);
       setErrorReport(msg);
       setLoadingReport(false);
@@ -112,7 +114,7 @@ export default function SalesSummaryReportClientPage() {
         setAiSummary(null);
         return;
     }
-    console.log(`${LOG_PREFIX} Starting report data fetch. Site: ${activeSiteId}, Stall: ${activeStallId || 'All'}, DateRange: ${dateRange.from.toISOString()} to ${dateRange.to.toISOString()}`);
+    console.log(`${LOG_PREFIX} Starting report data fetch. Site: ${activeSiteId || 'All (Admin)'}, Stall: ${activeStallId || 'All'}, DateRange: ${dateRange.from.toISOString()} to ${dateRange.to.toISOString()}`);
     setLoadingReport(true);
     setLoadingAiSummary(true);
     setErrorReport(null);
@@ -123,14 +125,16 @@ export default function SalesSummaryReportClientPage() {
     try {
       const salesCollectionRef = collection(db, "salesTransactions");
       let salesQueryConstraints: QueryConstraint[] = [
-        where("siteId", "==", activeSiteId),
         where("isDeleted", "==", false),
         where("transactionDate", ">=", Timestamp.fromDate(startOfDay(dateRange.from))),
         where("transactionDate", "<=", Timestamp.fromDate(endOfDay(dateRange.to))),
       ];
 
-      if (activeStallId) {
-        salesQueryConstraints.push(where("stallId", "==", activeStallId));
+      if (activeSiteId) {
+        salesQueryConstraints.push(where("siteId", "==", activeSiteId));
+         if (activeStallId) {
+          salesQueryConstraints.push(where("stallId", "==", activeStallId));
+        }
       }
 
       const salesQuery = query(salesCollectionRef, ...salesQueryConstraints);
@@ -157,9 +161,13 @@ export default function SalesSummaryReportClientPage() {
         setLoadingAiSummary(false);
         return;
       }
-
+      
       const stockItemsMap = new Map<string, StockItem>();
-      const stockItemsQuery = query(collection(db, "stockItems"), where("siteId", "==", activeSiteId));
+      let stockItemsQueryConstraints: QueryConstraint[] = [];
+      if(activeSiteId) {
+        stockItemsQueryConstraints.push(where("siteId", "==", activeSiteId));
+      }
+      const stockItemsQuery = query(collection(db, "stockItems"), ...stockItemsQueryConstraints);
       const stockItemsSnapshot = await getDocs(stockItemsQuery);
       stockItemsSnapshot.forEach(doc => {
         stockItemsMap.set(doc.id, { id: doc.id, ...doc.data() } as StockItem);
@@ -230,7 +238,7 @@ export default function SalesSummaryReportClientPage() {
           topSellingItems: sortedTopItems,
           dateRangeFrom: format(dateRange.from, "yyyy-MM-dd"),
           dateRangeTo: format(dateRange.to, "yyyy-MM-dd"),
-          siteName: activeSite?.name,
+          siteName: activeSite?.name || (isAdminViewAll ? "All Sites" : undefined),
           stallName: activeStall?.name,
         };
         const aiResult = await summarizeSalesTrends(aiInput);
@@ -257,11 +265,16 @@ export default function SalesSummaryReportClientPage() {
 
   const pageHeaderDescription = useMemo(() => {
     if (!user) return "Analyze your sales data, profit margins, and inventory performance.";
-    if (!activeSite) {
-        return user.role === 'admin' ? "Admin: Select a site from the header to view its report." : "Manager: Select one of your managed sites to view its report.";
+    
+    let desc = "Sales & Inventory analysis for ";
+    if (activeSite) {
+        desc += `Site: "${activeSite.name}"`;
+        desc += activeStall ? ` (Stall: "${activeStall.name}")` : " (All Stalls/Items for this site)";
+    } else if (user.role === 'admin') {
+        desc += "All Sites";
+    } else { // Manager with no site selected
+        desc = "Select one of your managed sites to view its report.";
     }
-    let desc = `Sales & Inventory analysis for Site: "${activeSite.name}"`;
-    desc += activeStall ? ` (Stall: "${activeStall.name}")` : " (All Stalls/Items for this site)";
     desc += ".";
     return desc;
   }, [user, activeSite, activeStall]);
@@ -294,11 +307,7 @@ export default function SalesSummaryReportClientPage() {
             title="Sales & Inventory Reports"
             description="Access to reports is restricted."
         />
-        <Alert variant="destructive">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>Access Denied</AlertTitle>
-          <AlertDescription>You do not have permission to view reports.</AlertDescription>
-        </Alert>
+        <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Access Denied</AlertTitle><AlertDescription>You do not have permission to view reports.</AlertDescription></Alert>
       </div>
     );
   }
@@ -319,12 +328,12 @@ export default function SalesSummaryReportClientPage() {
         </div>
       )}
 
-      {!activeSiteId && !loadingReport && (
+      {!activeSiteId && user.role !== 'admin' && !loadingReport && (
         <Alert variant="default" className="border-primary/50">
             <Info className="h-4 w-4" />
             <AlertTitle>Site Selection Required</AlertTitle>
             <AlertDescription>
-            {user.role === 'admin' ? "Admin: Please select a site from the header to view its report." : "Manager: Please select one of your managed sites from the header to view its report."}
+             Manager: Please select one of your managed sites from the header to view its report.
             </AlertDescription>
         </Alert>
       )}
@@ -338,7 +347,7 @@ export default function SalesSummaryReportClientPage() {
         </Alert>
       )}
 
-      {!loadingReport && !errorReport && activeSiteId && summaryData && (
+      {(!loadingReport && !errorReport && (activeSiteId || user.role === 'admin')) && summaryData && (
         <>
           <Card className="shadow-lg">
             <CardHeader>
@@ -370,7 +379,7 @@ export default function SalesSummaryReportClientPage() {
                   <CardTitle>Sales Performance Metrics</CardTitle>
                   <CardDescription>
                       Overview of sales performance for the selected period
-                      {activeSiteId ? ` at site: ${activeSite?.name || activeSiteId.substring(0,6)}...` : '.'}
+                      {activeSiteId ? ` at site: ${activeSite?.name || activeSiteId.substring(0,6)}...` : ' across all sites.'}
                       {activeStallId ? ` (Stall: ${activeStall?.name || activeStallId.substring(0,6)}...)` : activeSiteId ? ' (All Stalls).' : ''}
                   </CardDescription>
               </CardHeader>
@@ -456,5 +465,3 @@ export default function SalesSummaryReportClientPage() {
     </div>
   );
 }
-
-    
