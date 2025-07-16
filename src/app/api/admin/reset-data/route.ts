@@ -1,11 +1,24 @@
 
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { initializeApp, getApps, cert, App as AdminApp } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { getFirestore as getAdminFirestore, CollectionReference, Query, WriteBatch } from 'firebase-admin/firestore';
-import { initializeAdminSdk } from '@/lib/firebaseAdmin';
 
 const LOG_PREFIX = "[API:ResetData]";
+
+function initializeAdminApp(): AdminApp {
+    if (getApps().length > 0) {
+        return getApps()[0];
+    }
+    const serviceAccountJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+    if (!serviceAccountJson) {
+        throw new Error("GOOGLE_APPLICATION_CREDENTIALS_JSON is not set. Cannot initialize admin app.");
+    }
+    return initializeApp({
+        credential: cert(JSON.parse(serviceAccountJson)),
+    });
+}
 
 const COLLECTIONS_TO_DELETE = [
   "stockItems",
@@ -13,11 +26,12 @@ const COLLECTIONS_TO_DELETE = [
   "stockMovementLogs",
   "sites",
   "stalls",
-  // "userGoogleOAuthTokens", // This collection is no longer used
   "foodItemExpenses",
   "foodSaleTransactions",
   "foodStallActivityLogs",
   "foodVendors",
+  "advances",
+  "staffAttendance",
 ];
 const BATCH_SIZE = 500;
 
@@ -73,11 +87,14 @@ async function deleteQueryBatch(
 export async function POST(request: NextRequest) {
   console.log(`${LOG_PREFIX} POST request received.`);
   
-  const { adminApp, error } = initializeAdminSdk();
-  if (error || !adminApp) {
-    console.error(`${LOG_PREFIX} Critical Failure: ${error}`);
-    return NextResponse.json({ error: 'Server Configuration Error.', details: error }, { status: 500 });
+  let adminApp: AdminApp;
+  try {
+      adminApp = initializeAdminApp();
+  } catch (e: any) {
+      console.error(`${LOG_PREFIX} Critical Failure initializing admin app: ${e.message}`);
+      return NextResponse.json({ error: 'Server Configuration Error.', details: e.message }, { status: 500 });
   }
+
   const adminDbInstance = getAdminFirestore(adminApp);
 
 
