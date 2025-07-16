@@ -4,20 +4,21 @@
 import { useState, useEffect } from "react";
 import PageHeader from "@/components/shared/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, CalendarCheck, HandCoins, AlertTriangle, UserX, UserRoundCheck } from "lucide-react";
+import { Users, UserX, UserRoundCheck, HandCoins } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { getFirestore, collection, query, where, onSnapshot } from "firebase/firestore";
 import type { AppUser, StaffAttendance, SalaryAdvance } from "@/types";
-import { format, startOfMonth, endOfMonth, startOfDay, endOfDay } from "date-fns";
+import { format, startOfMonth, endOfMonth } from "date-fns";
 import { Loader2, Info } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 
 const db = getFirestore();
 
 export default function StaffDashboardPage() {
     const { user, activeSiteId, loading: authLoading } = useAuth();
-    const [stats, setStats] = useState({ totalStaff: 0, presentToday: 0, advancesThisMonth: 0 });
+    const [stats, setStats] = useState({ totalStaff: 0, presentToday: 0, advancesThisMonth: 0, notPresentToday: 0 });
     const [recentAdvances, setRecentAdvances] = useState<SalaryAdvance[]>([]);
     const [staffOnLeaveOrAbsent, setStaffOnLeaveOrAbsent] = useState<StaffAttendance[]>([]);
     const [staffList, setStaffList] = useState<AppUser[]>([]);
@@ -31,17 +32,16 @@ export default function StaffDashboardPage() {
 
         setLoading(true);
 
-        // Fetch staff for the active site
         const staffQuery = query(collection(db, "users"), where("defaultSiteId", "==", activeSiteId));
-        const unsubscribeStaff = onSnapshot(staffQuery, (snapshot) => {
-            const fetchedStaff = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser));
+        const unsubscribeStaff = onSnapshot(staffQuery, (staffSnapshot) => {
+            const fetchedStaff = staffSnapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser));
             setStaffList(fetchedStaff);
             setStats(prev => ({ ...prev, totalStaff: fetchedStaff.length }));
 
             const staffUids = fetchedStaff.map(s => s.uid);
             if (staffUids.length === 0) {
                 setLoading(false);
-                setStats({ totalStaff: 0, presentToday: 0, advancesThisMonth: 0 });
+                setStats({ totalStaff: 0, presentToday: 0, advancesThisMonth: 0, notPresentToday: 0 });
                 setRecentAdvances([]);
                 setStaffOnLeaveOrAbsent([]);
                 return;
@@ -57,12 +57,12 @@ export default function StaffDashboardPage() {
             );
             const unsubscribeAttendance = onSnapshot(attendanceQuery, (attSnapshot) => {
                 const presentCount = attSnapshot.docs.filter(doc => (doc.data() as StaffAttendance).status === 'Present').length;
-                const leaveOrAbsent = attSnapshot.docs
+                const notPresentRecords = attSnapshot.docs
                     .filter(doc => ['Leave', 'Absent', 'Half-day'].includes((doc.data() as StaffAttendance).status))
                     .map(doc => doc.data() as StaffAttendance);
                 
-                setStats(prev => ({ ...prev, presentToday: presentCount }));
-                setStaffOnLeaveOrAbsent(leaveOrAbsent);
+                setStats(prev => ({ ...prev, presentToday: presentCount, notPresentToday: notPresentRecords.length }));
+                setStaffOnLeaveOrAbsent(notPresentRecords);
             });
 
             // Fetch salary advances for this month for these staff members
@@ -76,18 +76,21 @@ export default function StaffDashboardPage() {
             );
             const unsubscribeAdvances = onSnapshot(advancesQuery, (advSnapshot) => {
                 const totalAdvance = advSnapshot.docs.reduce((sum, doc) => sum + (doc.data() as SalaryAdvance).amount, 0);
-                const fetchedAdvances = advSnapshot.docs.map(doc => ({id: doc.id, ...doc.data() } as SalaryAdvance)).slice(0, 5); // Take top 5 recent
+                const fetchedAdvances = advSnapshot.docs.map(doc => ({id: doc.id, ...doc.data() } as SalaryAdvance)).slice(0, 5); 
                 setStats(prev => ({ ...prev, advancesThisMonth: totalAdvance }));
                 setRecentAdvances(fetchedAdvances);
             });
 
-            setLoading(false);
+            setLoading(false); // Move setLoading to here, after all listeners are set up
+            
+            // Return cleanup functions for the nested listeners
             return () => {
                 unsubscribeAttendance();
                 unsubscribeAdvances();
             };
         });
 
+        // Return cleanup for the primary staff listener
         return () => unsubscribeStaff();
 
     }, [activeSiteId, authLoading]);
@@ -116,10 +119,23 @@ export default function StaffDashboardPage() {
         { title: "Total Staff", value: stats.totalStaff, icon: Users, description: "Active staff at this site." },
         { title: "Present Today", value: stats.presentToday, icon: UserRoundCheck, description: `${stats.presentToday} of ${stats.totalStaff} staff present.` },
         { title: "Advances this Month", value: `₹${stats.advancesThisMonth.toFixed(2)}`, icon: HandCoins, description: "Total salary advance this month." },
-        { title: "Leave/Absent Today", value: staffOnLeaveOrAbsent.length, icon: UserX, description: "Staff not fully present today." },
+        { title: "Leave/Absent Today", value: stats.notPresentToday, icon: UserX, description: "Staff not marked as 'Present'." },
     ];
 
     const getStaffName = (uid: string) => staffList.find(s => s.uid === uid)?.displayName || uid.substring(0, 8);
+
+    const getStatusBadge = (status: 'Leave' | 'Absent' | 'Half-day') => {
+        switch (status) {
+            case 'Absent':
+                return <Badge variant="destructive">Absent</Badge>;
+            case 'Leave':
+                return <Badge variant="outline" className="text-amber-600 border-amber-500">Leave</Badge>;
+            case 'Half-day':
+                return <Badge variant="secondary">Half-day</Badge>;
+            default:
+                return <Badge variant="outline">{status}</Badge>;
+        }
+    };
 
     return (
         <div className="space-y-6">
@@ -178,7 +194,7 @@ export default function StaffDashboardPage() {
                     </CardHeader>
                     <CardContent>
                        {staffOnLeaveOrAbsent.length === 0 ? (
-                           <p className="text-sm text-muted-foreground text-center py-4">All active staff are marked present.</p>
+                           <p className="text-sm text-muted-foreground text-center py-4">All staff are marked present.</p>
                         ) : (
                              <Table>
                                 <TableHeader>
@@ -191,15 +207,7 @@ export default function StaffDashboardPage() {
                                     {staffOnLeaveOrAbsent.map(att => (
                                         <TableRow key={att.id}>
                                             <TableCell>{getStaffName(att.staffUid)}</TableCell>
-                                            <TableCell>
-                                                <span className={`px-2 py-1 rounded-full text-xs ${
-                                                    att.status === 'Absent' ? 'bg-destructive/20 text-destructive' :
-                                                    att.status === 'Leave' ? 'bg-yellow-500/20 text-yellow-600' :
-                                                    'bg-blue-500/20 text-blue-600'
-                                                }`}>
-                                                    {att.status}
-                                                </span>
-                                            </TableCell>
+                                            <TableCell>{getStatusBadge(att.status as any)}</TableCell>
                                         </TableRow>
                                     ))}
                                 </TableBody>
