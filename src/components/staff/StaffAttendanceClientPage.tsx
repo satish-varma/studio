@@ -12,6 +12,7 @@ import {
   doc,
   setDoc,
   deleteDoc,
+  writeBatch
 } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
@@ -27,6 +28,7 @@ import { AttendanceRegisterTable } from "./AttendanceRegisterTable";
 import ManageHolidaysDialog from "./ManageHolidaysDialog";
 import { logStaffActivity } from "@/lib/staffLogger";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DatePicker } from "../ui/date-picker";
 
 const LOG_PREFIX = "[StaffAttendanceClientPage]";
 
@@ -56,6 +58,10 @@ export default function StaffAttendanceClientPage() {
   const [isHolidaysDialogOpen, setIsHolidaysDialogOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<UserStatus | 'all'>('active');
 
+  const [selectedStaffUids, setSelectedStaffUids] = useState<string[]>([]);
+  const [bulkUpdateDate, setBulkUpdateDate] = useState<Date>(new Date());
+  const [isBulkUpdating, setIsBulkUpdating] = useState(false);
+
   const isAllSitesView = user?.role === 'admin' && !activeSiteId;
 
   const handlePrevMonth = () => setCurrentMonth(prev => subMonths(prev, 1));
@@ -79,6 +85,12 @@ export default function StaffAttendanceClientPage() {
     }
     return allStaffForSite.filter(u => (u.status || 'active') === statusFilter);
   }, [allStaffForSite, statusFilter]);
+  
+  // Effect to clear selection when filters change
+  useEffect(() => {
+    setSelectedStaffUids([]);
+  }, [statusFilter, currentMonth, activeSiteId]);
+
 
   useEffect(() => {
     if (!staffQuery) {
@@ -272,6 +284,74 @@ export default function StaffAttendanceClientPage() {
     }
   }, [user, attendance, isHoliday, isAllSitesView, toast, staffDetailsMap]);
 
+  const handleBulkUpdate = async (status: AttendanceStatus) => {
+    if (!user || isAllSitesView) {
+        toast({title: "Action Denied", description: "Select a specific site to perform bulk actions."});
+        return;
+    }
+    if (selectedStaffUids.length === 0 || !bulkUpdateDate) {
+        toast({title: "Missing Info", description: "Please select staff members and a date for the bulk update."});
+        return;
+    }
+
+    setIsBulkUpdating(true);
+    const dateStr = format(bulkUpdateDate, 'yyyy-MM-dd');
+    const batch = writeBatch(db);
+    let validUpdates = 0;
+
+    for (const uid of selectedStaffUids) {
+        const staff = allStaffForSite.find(s => s.uid === uid);
+        const details = staffDetailsMap.get(uid);
+        if (!staff || !staff.defaultSiteId) continue;
+        
+        const joiningDate = details?.joiningDate ? startOfDay(new Date(details.joiningDate)) : null;
+        const exitDate = details?.exitDate ? startOfDay(new Date(details.exitDate)) : null;
+        if ((joiningDate && isBefore(bulkUpdateDate, joiningDate)) || (exitDate && isAfter(bulkUpdateDate, exitDate))) {
+            continue;
+        }
+
+        const docId = `${dateStr}_${uid}`;
+        const docRef = doc(db, "staffAttendance", docId);
+        batch.set(docRef, {
+            staffUid: uid,
+            date: dateStr,
+            status,
+            siteId: staff.defaultSiteId,
+            recordedByUid: user.uid,
+            recordedByName: user.displayName || user.email,
+            updatedAt: new Date().toISOString(),
+        }, { merge: true });
+        validUpdates++;
+    }
+    
+    if (validUpdates === 0) {
+        toast({ title: "No Valid Staff", description: "None of the selected staff were eligible for an update on the chosen date (check employment dates).", variant: "default"});
+        setIsBulkUpdating(false);
+        return;
+    }
+
+    try {
+        await batch.commit();
+        await logStaffActivity(user, {
+            type: 'ATTENDANCE_MARKED',
+            relatedStaffUid: 'MULTIPLE',
+            siteId: activeSiteId,
+            details: {
+                date: dateStr,
+                status,
+                notes: `Bulk attendance marked for ${validUpdates} staff member(s).`,
+            }
+        });
+        toast({ title: "Bulk Update Successful", description: `Attendance for ${validUpdates} staff marked as ${status} for ${format(bulkUpdateDate, 'PPP')}.`});
+        setSelectedStaffUids([]);
+    } catch(error: any) {
+        console.error("Bulk update failed:", error);
+        toast({ title: "Bulk Update Failed", description: error.message, variant: "destructive"});
+    } finally {
+        setIsBulkUpdating(false);
+    }
+  };
+
 
   if (authLoading) return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin" /></div>;
 
@@ -306,11 +386,25 @@ export default function StaffAttendanceClientPage() {
                 <SelectItem value="all">All Staff</SelectItem>
               </SelectContent>
             </Select>
-            <div className="text-xs text-muted-foreground p-2 bg-muted/50 rounded-md max-w-xs">
-              Click on a cell to cycle through: Present (P), Absent (A), Leave (L), Half-day (H), and cleared (-).
-            </div>
           </div>
         </div>
+      
+      {selectedStaffUids.length > 0 && (
+        <div className="p-3 bg-primary/10 border border-primary/20 rounded-md flex flex-col md:flex-row items-center gap-4">
+            <div className="flex-grow">
+                <p className="font-semibold text-primary">{selectedStaffUids.length} staff member(s) selected.</p>
+                <p className="text-xs text-muted-foreground">Select a date and status to mark attendance for all selected members.</p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+                <DatePicker date={bulkUpdateDate} onDateChange={(d) => d && setBulkUpdateDate(d)} />
+                <Button size="sm" variant="outline" className="bg-green-100 hover:bg-green-200" onClick={() => handleBulkUpdate('Present')} disabled={isBulkUpdating}>Mark Present</Button>
+                <Button size="sm" variant="outline" className="bg-red-100 hover:bg-red-200" onClick={() => handleBulkUpdate('Absent')} disabled={isBulkUpdating}>Mark Absent</Button>
+                <Button size="sm" variant="outline" className="bg-yellow-100 hover:bg-yellow-200" onClick={() => handleBulkUpdate('Leave')} disabled={isBulkUpdating}>Mark Leave</Button>
+                <Button size="sm" variant="outline" className="bg-blue-100 hover:bg-blue-200" onClick={() => handleBulkUpdate('Half-day')} disabled={isBulkUpdating}>Mark Half-day</Button>
+                {isBulkUpdating && <Loader2 className="h-5 w-5 animate-spin"/>}
+            </div>
+        </div>
+      )}
 
       {!isAllSitesView && !activeSiteId && !authLoading ? (
          <Alert variant="default" className="border-primary/50">
@@ -332,6 +426,8 @@ export default function StaffAttendanceClientPage() {
             holidays={holidays}
             onStatusChange={handleStatusChange}
             isHoliday={isHoliday}
+            selectedStaffUids={selectedStaffUids}
+            onSelectionChange={setSelectedStaffUids}
         />
       )}
       {user?.role === 'admin' && (

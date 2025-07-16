@@ -7,6 +7,7 @@ import { format, isBefore, isAfter, startOfDay } from 'date-fns';
 import { cn } from "@/lib/utils";
 import type { AppUser, StaffAttendance, AttendanceStatus, Holiday, StaffDetails } from "@/types";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Checkbox } from '../ui/checkbox';
 
 interface AttendanceRegisterTableProps {
   staffList: AppUser[];
@@ -18,6 +19,8 @@ interface AttendanceRegisterTableProps {
   holidays: Holiday[];
   onStatusChange: (staff: AppUser, date: Date) => void;
   isHoliday: (date: Date, staffSiteId?: string | null) => { holiday: boolean; name: string | null };
+  selectedStaffUids: string[];
+  onSelectionChange: (uids: string[]) => void;
 }
 
 const statusBadgeClasses: Record<AttendanceStatus, string> = {
@@ -36,7 +39,9 @@ export function AttendanceRegisterTable({
   sitesMap,
   holidays,
   onStatusChange,
-  isHoliday
+  isHoliday,
+  selectedStaffUids,
+  onSelectionChange
 }: AttendanceRegisterTableProps) {
   
   const daysArray = useMemo(() => {
@@ -44,6 +49,22 @@ export function AttendanceRegisterTable({
     const firstDayOfMonth = new Date(month.getFullYear(), month.getMonth(), 1);
     return Array.from({ length: daysInMonth }, (_, i) => new Date(firstDayOfMonth.getFullYear(), firstDayOfMonth.getMonth(), i + 1));
   }, [month]);
+  
+  const isAllSelected = useMemo(() => staffList.length > 0 && selectedStaffUids.length === staffList.length, [staffList, selectedStaffUids]);
+  const isIndeterminate = useMemo(() => selectedStaffUids.length > 0 && selectedStaffUids.length < staffList.length, [staffList, selectedStaffUids]);
+
+  const handleSelectAll = (checked: boolean | 'indeterminate') => {
+    onSelectionChange(checked === true ? staffList.map(u => u.uid) : []);
+  };
+  
+  const handleSelectOne = (userId: string, checked: boolean | 'indeterminate') => {
+    if (checked === true) {
+      onSelectionChange([...selectedStaffUids, userId]);
+    } else {
+      onSelectionChange(selectedStaffUids.filter(id => id !== userId));
+    }
+  };
+
 
   return (
     <TooltipProvider>
@@ -51,7 +72,17 @@ export function AttendanceRegisterTable({
       <Table className="min-w-full border-collapse">
         <TableHeader className="sticky top-0 bg-card z-10">
           <TableRow>
-            <TableHead className="sticky left-0 bg-card z-20 min-w-[200px] font-semibold text-foreground">Staff Member</TableHead>
+            <TableHead className="sticky left-0 bg-card z-20 min-w-[250px] font-semibold text-foreground">
+              <div className="flex items-center gap-4">
+                <Checkbox
+                    checked={isAllSelected}
+                    onCheckedChange={handleSelectAll}
+                    aria-label="Select all staff for bulk action"
+                    data-state={isIndeterminate ? 'indeterminate' : isAllSelected ? 'checked' : 'unchecked'}
+                />
+                Staff Member
+              </div>
+            </TableHead>
             {daysArray.map(day => {
               const { holiday } = isHoliday(day); // Check global holiday for header color
               return (
@@ -72,12 +103,21 @@ export function AttendanceRegisterTable({
             const exitDate = details?.exitDate ? startOfDay(new Date(details.exitDate)) : null;
 
             return (
-                <TableRow key={staff.uid}>
-                    <TableCell className="sticky left-0 bg-card z-10 border-r min-w-[200px]">
-                        <div className="font-medium text-foreground">{staff.displayName || staff.email}</div>
-                        {isAllSitesView && (
-                            <div className="text-xs text-muted-foreground">{staff.defaultSiteId ? (sitesMap[staff.defaultSiteId] || "Unknown Site") : "No site assigned"}</div>
-                        )}
+                <TableRow key={staff.uid} data-state={selectedStaffUids.includes(staff.uid) ? "selected" : ""}>
+                    <TableCell className="sticky left-0 bg-card z-10 border-r min-w-[250px] data-[state=selected]:bg-primary/10">
+                      <div className="flex items-center gap-4">
+                        <Checkbox
+                            checked={selectedStaffUids.includes(staff.uid)}
+                            onCheckedChange={(checked) => handleSelectOne(staff.uid, checked)}
+                            aria-label={`Select staff member ${staff.displayName}`}
+                        />
+                        <div>
+                          <div className="font-medium text-foreground">{staff.displayName || staff.email}</div>
+                          {isAllSitesView && (
+                              <div className="text-xs text-muted-foreground">{staff.defaultSiteId ? (sitesMap[staff.defaultSiteId] || "Unknown Site") : "No site assigned"}</div>
+                          )}
+                        </div>
+                      </div>
                     </TableCell>
                     {daysArray.map(day => {
                         const dateStr = format(day, 'yyyy-MM-dd');
