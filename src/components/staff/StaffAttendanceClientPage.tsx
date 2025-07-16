@@ -19,7 +19,6 @@ import { format, isValid } from 'date-fns';
 import { Button } from "@/components/ui/button";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { AppUser, StaffAttendance, AttendanceStatus, Site } from "@/types";
 import { attendanceStatuses } from "@/types/staff";
 import { Loader2, Info, UserCheck, UserX, CalendarClock, Users } from "lucide-react";
@@ -172,7 +171,7 @@ export default function StaffAttendanceClientPage() {
             staffUid,
             date: dateStr,
             status,
-            siteId: staffMember.defaultSiteId, // Correctly use the staff member's siteId
+            siteId: staffMember.defaultSiteId,
             recordedByUid: user.uid,
             recordedByName: user.displayName || user.email,
         }, { merge: true });
@@ -184,16 +183,6 @@ export default function StaffAttendanceClientPage() {
     }
   };
   
-  const getStatusBadgeVariant = (status?: AttendanceStatus) => {
-    switch (status) {
-        case 'Present': return 'default';
-        case 'Absent': return 'destructive';
-        case 'Leave': return 'outline';
-        case 'Half-day': return 'secondary';
-        default: return 'outline';
-    }
-  };
-
   if (authLoading) return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin" /></div>;
   if (!isAllSitesView && !activeSiteId) return (
     <Alert variant="default" className="border-primary/50">
@@ -241,7 +230,7 @@ export default function StaffAttendanceClientPage() {
                             <TableHeader>
                                 <TableRow>
                                     <TableHead>Staff Member</TableHead>
-                                    <TableHead className="w-[200px]">Status</TableHead>
+                                    <TableHead className="w-[380px]">Status</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -254,26 +243,29 @@ export default function StaffAttendanceClientPage() {
                                           )}
                                         </TableCell>
                                         <TableCell>
-                                            <Select
-                                                value={attendance[staff.uid] || ""}
-                                                onValueChange={(status) => handleStatusChange(staff.uid, status as AttendanceStatus)}
-                                                disabled={isAllSitesView}
-                                            >
-                                                <SelectTrigger className={cn("w-full sm:w-[160px]", 
-                                                  attendance[staff.uid] === "Present" && "bg-green-500/10 border-green-500/50 text-green-700 font-semibold",
-                                                  attendance[staff.uid] === "Absent" && "bg-red-500/10 border-red-500/50 text-red-700 font-semibold",
-                                                  attendance[staff.uid] === "Leave" && "bg-yellow-500/10 border-yellow-500/50 text-yellow-700",
-                                                )}
-                                                disabled={isAllSitesView}
-                                                >
-                                                    <SelectValue placeholder={isAllSitesView ? "Select a site" : "Mark attendance..."} />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {attendanceStatuses.map(status => (
-                                                        <SelectItem key={status} value={status}>{status}</SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
+                                            <div className="flex flex-wrap gap-2">
+                                                {(attendanceStatuses).map((status) => {
+                                                    const isActive = attendance[staff.uid] === status;
+                                                    return (
+                                                        <Button
+                                                            key={status}
+                                                            variant={isActive ? 'default' : 'outline'}
+                                                            size="sm"
+                                                            onClick={() => handleStatusChange(staff.uid, status)}
+                                                            className={cn(
+                                                                "text-xs h-8 px-3",
+                                                                isActive && status === 'Present' && "bg-green-600 hover:bg-green-700",
+                                                                isActive && status === 'Absent' && "bg-red-600 hover:bg-red-700",
+                                                                isActive && status === 'Leave' && "bg-yellow-500 hover:bg-yellow-600 text-white",
+                                                                isActive && status === 'Half-day' && "bg-blue-500 hover:bg-blue-600"
+                                                            )}
+                                                            disabled={isAllSitesView}
+                                                        >
+                                                            {status}
+                                                        </Button>
+                                                    )
+                                                })}
+                                            </div>
                                         </TableCell>
                                     </TableRow>
                                 ))}
