@@ -9,7 +9,8 @@ import {
   where, 
   doc, 
   setDoc,
-  onSnapshot
+  onSnapshot,
+  getDocs
 } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
@@ -19,7 +20,7 @@ import { Button } from "@/components/ui/button";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import type { AppUser, StaffAttendance, AttendanceStatus } from "@/types";
+import type { AppUser, StaffAttendance, AttendanceStatus, Site } from "@/types";
 import { attendanceStatuses } from "@/types/staff";
 import { Loader2, Info, UserCheck, UserX, CalendarClock, Users } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -53,6 +54,7 @@ export default function StaffAttendanceClientPage() {
   const [stats, setStats] = useState<AttendanceStats>({ totalStaff: 0, present: 0, absentOrLeave: 0 });
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
+  const [sitesMap, setSitesMap] = useState<Record<string, string>>({});
 
   const isAllSitesView = user?.role === 'admin' && !activeSiteId;
 
@@ -62,7 +64,6 @@ export default function StaffAttendanceClientPage() {
       setLoading(false);
       return;
     }
-    // If not an admin in all-sites view, a site must be selected
     if (!isAllSitesView && !activeSiteId) {
       setLoading(false);
       setStaffList([]);
@@ -73,11 +74,18 @@ export default function StaffAttendanceClientPage() {
 
     let usersQuery;
     if (isAllSitesView) {
-        console.log(`${LOG_PREFIX} Admin in All Sites view. Fetching all staff/managers.`);
+        console.log(`${LOG_PREFIX} Admin in All Sites view. Fetching all staff/managers and sites.`);
         usersQuery = query(
             collection(db, "users"),
             where("role", "in", ["staff", "manager"])
         );
+        // Fetch sites map for display
+        getDocs(collection(db, "sites")).then(sitesSnapshot => {
+            const newSitesMap: Record<string, string> = {};
+            sitesSnapshot.forEach(doc => { newSitesMap[doc.id] = (doc.data() as Site).name; });
+            setSitesMap(newSitesMap);
+        });
+
     } else {
         console.log(`${LOG_PREFIX} Fetching staff for active site: ${activeSiteId}`);
         usersQuery = query(
@@ -110,17 +118,16 @@ export default function StaffAttendanceClientPage() {
 
     const dateStr = format(selectedDate, 'yyyy-MM-dd');
     const uids = staffList.map(s => s.uid);
-    setAttendance({}); // Reset for new date/staff list
+    setAttendance({}); 
+    setStats(prev => ({...prev, present: 0, absentOrLeave: 0}));
     
     if (uids.length === 0) return;
 
-    // Firestore 'in' query is limited to 30 elements. If more staff, this needs batching.
     const uidsBatches: string[][] = [];
     for (let i = 0; i < uids.length; i += 30) {
         uidsBatches.push(uids.slice(i, i + 30));
     }
     
-    let allNewAttendance: Record<string, AttendanceStatus> = {};
     let unsubscribers: (()=>void)[] = [];
 
     uidsBatches.forEach(batch => {
@@ -131,16 +138,21 @@ export default function StaffAttendanceClientPage() {
         );
         
         const unsubscribe = onSnapshot(attendanceQuery, (snapshot) => {
-            let presentCount = 0;
-            let absentOrLeaveCount = 0;
+            let newAttendanceForBatch: Record<string, AttendanceStatus> = {};
+            let presentCountForBatch = 0;
+            let absentOrLeaveCountForBatch = 0;
             snapshot.forEach(doc => {
                 const data = doc.data() as StaffAttendance;
-                allNewAttendance[data.staffUid] = data.status;
-                if (data.status === 'Present') presentCount++;
-                if (data.status === 'Absent' || data.status === 'Leave') absentOrLeaveCount++;
+                newAttendanceForBatch[data.staffUid] = data.status;
+                if (data.status === 'Present') presentCountForBatch++;
+                if (['Absent', 'Leave', 'Half-day'].includes(data.status)) absentOrLeaveCountForBatch++;
             });
-            setAttendance(prev => ({...prev, ...allNewAttendance}));
-            setStats(prev => ({...prev, present: prev.present + presentCount, absentOrLeave: prev.absentOrLeave + absentOrLeaveCount}));
+            setAttendance(prev => ({...prev, ...newAttendanceForBatch}));
+            setStats(prev => ({
+                ...prev, 
+                present: Object.values({...prev, ...newAttendanceForBatch}).filter(s => s === 'Present').length,
+                absentOrLeave: Object.values({...prev, ...newAttendanceForBatch}).filter(s => ['Absent', 'Leave', 'Half-day'].includes(s)).length,
+            }));
         });
         unsubscribers.push(unsubscribe);
     });
@@ -163,7 +175,7 @@ export default function StaffAttendanceClientPage() {
             staffUid,
             date: dateStr,
             status,
-            siteId: staffMember.defaultSiteId, // Use staff member's own site
+            siteId: staffMember.defaultSiteId,
             recordedByUid: user.uid,
             recordedByName: user.displayName || user.email,
         }, { merge: true });
