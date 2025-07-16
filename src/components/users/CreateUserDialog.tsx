@@ -21,6 +21,7 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
+  FormDescription,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import {
@@ -51,7 +52,13 @@ const createUserFormSchema = z.object({
   defaultSiteId: z.string().nullable().optional(),
   defaultStallId: z.string().nullable().optional(),
   managedSiteIds: z.array(z.string()).optional().default([]),
-}).refine(data => data.password === data.confirmPassword, {
+}).refine(data => {
+    // Only validate passwords if password field is not undefined (i.e., has been touched)
+    if (data.password !== undefined) {
+      return data.password === data.confirmPassword;
+    }
+    return true;
+  }, {
   message: "Passwords don't match",
   path: ["confirmPassword"],
 }).refine(data => {
@@ -167,6 +174,17 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
         : `${values.displayName.toLowerCase().replace(/\s+/g, '')}@tgg.in`;
       
       const finalPassword = values.password || DEFAULT_PASSWORD;
+      
+      // Additional validation refinement for password before API call
+      if (finalPassword.length < 6) {
+          form.setError("password", { type: "manual", message: "Password must be at least 6 characters." });
+          throw new Error("Password must be at least 6 characters.");
+      }
+      if (finalPassword !== (values.confirmPassword || DEFAULT_PASSWORD)) {
+           form.setError("confirmPassword", { type: "manual", message: "Passwords don't match." });
+           throw new Error("Passwords don't match.");
+      }
+
 
       const response = await fetch('/api/admin/create-user', {
         method: 'POST',
@@ -188,7 +206,6 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
         apiErrorMsg = `API Error: ${result.error || `Failed to create auth user (Status: ${response.status})`}.`;
         if (result.details) apiErrorMsg += ` Details: ${result.details}.`;
         if (result.code) apiErrorMsg += ` Code: ${result.code}.`;
-        // Error will be caught by the outer catch block.
         throw new Error(apiErrorMsg);
       }
 
@@ -224,8 +241,6 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
         onClose();
       } else {
          console.error(`${LOG_PREFIX} Auth user ${authData.email} created, but Firestore doc creation FAILED.`);
-         // The onCreateUserFirestoreDoc should ideally throw an error if it fails, which would be caught below.
-         // If it returns false, we construct an error message.
          throw new Error(`Auth user ${authData.email} created, but Firestore doc creation FAILED.`);
       }
 
@@ -240,7 +255,7 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
             console.warn(`${LOG_PREFIX} User creation failed (handled): ${error.message}`);
             isHandledApiError = true;
           } else {
-            console.error(`${LOG_PREFIX} Error during user creation process: ${error.message}`);
+            console.error(`${LOG_PREFIX} Error during user creation process:`, error);
           }
       } else {
         console.error(`${LOG_PREFIX} Unexpected error during user creation process:`, error);
