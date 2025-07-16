@@ -113,34 +113,46 @@ export default function SalesHistoryClientPage() {
     if (user) fetchContextData();
   }, [user, isManagerOrAdmin, toast, db]);
 
+  const buildTransactionQuery = useCallback(() => {
+    if (!user || !dateRange?.from || !dateRange?.to) return null;
+    if (!activeSiteId && (user.role === 'staff' || user.role === 'manager')) return null;
+
+    let constraints: QueryConstraint[] = [orderBy("transactionDate", "desc"), where("isDeleted", "==", false)];
+    if (activeSiteId) constraints.push(where("siteId", "==", activeSiteId));
+    if (activeStallId) constraints.push(where("stallId", "==", activeStallId));
+    if (user.role === 'staff') constraints.push(where("staffId", "==", user.uid));
+    else if (isManagerOrAdmin && staffFilter !== "all") constraints.push(where("staffId", "==", staffFilter));
+    constraints.push(where("transactionDate", ">=", Timestamp.fromDate(startOfDay(dateRange.from))));
+    constraints.push(where("transactionDate", "<=", Timestamp.fromDate(endOfDay(dateRange.to))));
+    return constraints;
+  }, [user, activeSiteId, activeStallId, dateRange, staffFilter, isManagerOrAdmin]);
+
+
   const fetchTransactions = useCallback(async (direction: 'initial' | 'next' | 'prev' = 'initial') => {
     if (authLoading || !db) return;
-    if (!user || (!activeSiteId && (user.role === 'staff' || user.role === 'manager')) || (user.role === 'admin' && !activeSiteId)) {
+
+    const baseConstraints = buildTransactionQuery();
+    if (!baseConstraints) {
       setCurrentPageTransactions([]);
       setLoadingTransactions(false);
       return;
     }
-    if (!dateRange?.from || !dateRange?.to) return;
 
     if (direction === 'initial') setLoadingTransactions(true);
     if (direction === 'next') setIsLoadingNextPage(true);
     if (direction === 'prev') setIsLoadingPrevPage(true);
     setErrorTransactions(null);
 
+    let finalConstraints = [...baseConstraints];
+    
+    if (direction === 'next' && lastTransactionDoc) finalConstraints.push(startAfter(lastTransactionDoc));
+    else if (direction === 'prev' && firstTransactionDoc) finalConstraints.push(endBefore(firstTransactionDoc));
+    
+    finalConstraints.push(limit(TRANSACTIONS_PER_PAGE + 1));
+    
     const salesCollectionRef = collection(db, "salesTransactions");
-    let salesQueryConstraints: QueryConstraint[] = [orderBy("transactionDate", "desc"), where("isDeleted", "==", false)];
+    const q = query(salesCollectionRef, ...finalConstraints);
 
-    if (activeSiteId) salesQueryConstraints.push(where("siteId", "==", activeSiteId));
-    if (activeStallId) salesQueryConstraints.push(where("stallId", "==", activeStallId));
-    if (user.role === 'staff') salesQueryConstraints.push(where("staffId", "==", user.uid));
-    else if (isManagerOrAdmin && staffFilter !== "all") salesQueryConstraints.push(where("staffId", "==", staffFilter));
-    salesQueryConstraints.push(where("transactionDate", ">=", Timestamp.fromDate(startOfDay(dateRange.from))));
-    salesQueryConstraints.push(where("transactionDate", "<=", Timestamp.fromDate(endOfDay(dateRange.to))));
-    
-    if (direction === 'next' && lastTransactionDoc) salesQueryConstraints.push(startAfter(lastTransactionDoc));
-    else if (direction === 'prev' && firstTransactionDoc) salesQueryConstraints.push(endBefore(firstTransactionDoc), limit(TRANSACTIONS_PER_PAGE));
-    
-    const q = query(salesCollectionRef, ...salesQueryConstraints, limit(TRANSACTIONS_PER_PAGE + 1));
     const unsubscribe = onSnapshot(q,
       (snapshot: QuerySnapshot<DocumentData>) => {
         let fetchedTransactions: SaleTransaction[] = snapshot.docs.map(d => ({
@@ -156,7 +168,7 @@ export default function SalesHistoryClientPage() {
           if (direction === 'initial') setIsFirstPageReached(true);
           else if (direction === 'next') setIsFirstPageReached(false);
           setFirstTransactionDoc(snapshot.docs[0]);
-          setLastTransactionDoc(snapshot.docs[fetchedTransactions.length -1]);
+          setLastTransactionDoc(snapshot.docs[fetchedTransactions.length - 1]);
         } else {
           if (direction === 'initial') setIsFirstPageReached(true);
           if (direction === 'next') setIsLastPage(true);
@@ -173,7 +185,8 @@ export default function SalesHistoryClientPage() {
       }
     );
     return unsubscribe;
-  }, [user, activeSiteId, activeStallId, dateRange, staffFilter, isManagerOrAdmin, authLoading, db, lastTransactionDoc, firstTransactionDoc]);
+  }, [buildTransactionQuery, authLoading, db, lastTransactionDoc, firstTransactionDoc]);
+
 
   useEffect(() => {
     const unsubscribePromise = fetchTransactions('initial');
@@ -229,14 +242,34 @@ export default function SalesHistoryClientPage() {
   };
 
   const handleExport = async () => {
+    if (!db) {
+        toast({ title: "Export Error", description: "Database is not available.", variant: "destructive"});
+        return;
+    }
     setIsExporting(true);
-    const salesToExport = currentPageTransactions;
-    if (salesToExport.length === 0) {
-        toast({ title: "No Data", description: "No sales to export with current filters.", variant: "default" });
+    toast({ title: "Exporting...", description: "Fetching all matching sales for export. Please wait."});
+    
+    const exportConstraints = buildTransactionQuery();
+    if (!exportConstraints) {
+        toast({ title: "Export Error", description: "Cannot export without a valid context (site, date range).", variant: "destructive"});
         setIsExporting(false);
         return;
     }
+    
     try {
+        const salesCollectionRef = collection(db, "salesTransactions");
+        const exportQuery = query(salesCollectionRef, ...exportConstraints);
+        const querySnapshot = await getDocs(exportQuery);
+        const salesToExport: SaleTransaction[] = querySnapshot.docs.map(d => ({
+            id: d.id, ...d.data(), transactionDate: (d.data().transactionDate as Timestamp).toDate().toISOString()
+        } as SaleTransaction));
+
+        if (salesToExport.length === 0) {
+            toast({ title: "No Data", description: "No sales to export with current filters.", variant: "default" });
+            setIsExporting(false);
+            return;
+        }
+
         const headers = ["Transaction ID", "Date", "Staff Name", "Staff ID", "Total Amount (₹)", "Number of Item Types", "Total Quantity of Items", "Site Name", "Stall Name", "Items Sold (JSON)"];
         const csvRows = [headers.join(",")];
         salesToExport.forEach(sale => {
@@ -253,12 +286,13 @@ export default function SalesHistoryClientPage() {
         });
         downloadCsv(csvRows.join("\n"), `stallsync_sales_data_${getFormattedTimestamp()}.csv`);
         toast({ title: "Export Successful", description: `${salesToExport.length} sales transactions exported.` });
-    } catch (error) {
-        toast({ title: "Export Failed", description: "Could not export sales.", variant: "destructive" });
+    } catch (error: any) {
+        toast({ title: "Export Failed", description: `Could not export sales. ${error.message}`, variant: "destructive" });
     } finally {
         setIsExporting(false);
     }
   };
+
 
   const pageHeaderDescription = useMemo(() => {
     if (!user) return "View and filter all past sales transactions.";

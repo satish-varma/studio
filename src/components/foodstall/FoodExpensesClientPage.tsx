@@ -93,34 +93,15 @@ export default function FoodExpensesClientPage() {
     }
   }, [toast]);
   
-  const fetchExpenses = useCallback(async (direction: 'initial' | 'next' | 'prev' = 'initial') => {
-    if (authLoading || !db || !user) {
-      if (!authLoading) setLoadingExpenses(false);
-      return;
-    }
-    // Admin can view all, Manager/Staff need a site.
-    if (user.role !== 'admin' && !activeSiteId) {
-        if (!authLoading) setLoadingExpenses(false);
-        return;
-    }
-    
-    setLoadingExpenses(true);
-    if(direction === 'initial') {
-        setTotalExpensesAmount(0);
-        fetchContextMaps(); // Re-fetch maps on filter change just in case
-    }
-    setErrorExpenses(null);
+  const buildExpenseQuery = useCallback(() => {
+    if (authLoading || !db || !user) return null;
+    if (user.role !== 'admin' && !activeSiteId) return null;
 
-    const expensesCollectionRef = collection(db, "foodItemExpenses");
     let qConstraints: QueryConstraint[] = [];
-
     if (activeSiteId) {
       qConstraints.push(where("siteId", "==", activeSiteId));
-      if (activeStallId) {
-        qConstraints.push(where("stallId", "==", activeStallId));
-      }
+      if (activeStallId) qConstraints.push(where("stallId", "==", activeStallId));
     }
-    
     const now = new Date(); let startDate: Date | null = null; let endDate: Date | null = endOfDay(now);
     switch (dateFilter) {
         case 'today': startDate = startOfDay(now); break;
@@ -131,17 +112,39 @@ export default function FoodExpensesClientPage() {
     if(startDate) qConstraints.push(where("purchaseDate", ">=", Timestamp.fromDate(startDate)));
     if(endDate) qConstraints.push(where("purchaseDate", "<=", Timestamp.fromDate(endDate)));
     if (categoryFilter !== "all") qConstraints.push(where("category", "==", categoryFilter));
+
+    return qConstraints;
+  }, [authLoading, user, activeSiteId, activeStallId, db, dateFilter, categoryFilter]);
+
+
+  const fetchExpenses = useCallback(async (direction: 'initial' | 'next' | 'prev' = 'initial') => {
+    const baseConstraints = buildExpenseQuery();
+    if (!baseConstraints) {
+      if (!authLoading) setLoadingExpenses(false);
+      setExpenses([]);
+      return;
+    }
     
+    setLoadingExpenses(true);
+    if(direction === 'initial') {
+        setTotalExpensesAmount(0);
+        fetchContextMaps(); // Re-fetch maps on filter change just in case
+    }
+    setErrorExpenses(null);
+
+    const expensesCollectionRef = collection(db!, "foodItemExpenses");
+    let finalConstraints: QueryConstraint[] = [...baseConstraints];
+
     if (direction === 'prev' && firstVisibleDoc) {
-        qConstraints.push(orderBy("purchaseDate", "desc"), endBefore(firstVisibleDoc), limitToLast(EXPENSES_PER_PAGE));
+        finalConstraints.push(orderBy("purchaseDate", "desc"), endBefore(firstVisibleDoc), limitToLast(EXPENSES_PER_PAGE));
     } else {
-        qConstraints.push(orderBy("purchaseDate", "desc"));
-        if (direction === 'next' && lastVisibleDoc) qConstraints.push(startAfter(lastVisibleDoc));
-        qConstraints.push(limit(EXPENSES_PER_PAGE + 1));
+        finalConstraints.push(orderBy("purchaseDate", "desc"));
+        if (direction === 'next' && lastVisibleDoc) finalConstraints.push(startAfter(lastVisibleDoc));
+        finalConstraints.push(limit(EXPENSES_PER_PAGE + 1));
     }
     
     try {
-      const q = query(expensesCollectionRef, ...qConstraints);
+      const q = query(expensesCollectionRef, ...finalConstraints);
       const querySnapshot = await getDocs(q);
       let fetchedExpenses: FoodItemExpense[] = querySnapshot.docs.map(doc => ({
         id: doc.id, ...doc.data(), purchaseDate: (doc.data().purchaseDate as Timestamp).toDate(),
@@ -153,8 +156,7 @@ export default function FoodExpensesClientPage() {
       setExpenses(fetchedExpenses);
 
       if(direction === 'initial') {
-        const totalQueryConstraints = qConstraints.filter(c => c.type !== 'limit' && c.type !== 'startAfter' && c.type !== 'endBefore' && c.type !== 'limitToLast');
-        const totalQuery = query(expensesCollectionRef, ...totalQueryConstraints);
+        const totalQuery = query(expensesCollectionRef, ...baseConstraints);
         const totalSnapshot = await getDocs(totalQuery);
         const total = totalSnapshot.docs.reduce((sum, doc) => sum + (doc.data().totalCost || 0), 0);
         setTotalExpensesAmount(total);
@@ -175,14 +177,15 @@ export default function FoodExpensesClientPage() {
     } finally {
       setLoadingExpenses(false);
     }
-  }, [authLoading, user, activeSiteId, activeStallId, dateFilter, categoryFilter, firstVisibleDoc, lastVisibleDoc, fetchContextMaps]);
+  }, [buildExpenseQuery, authLoading, firstVisibleDoc, lastVisibleDoc, fetchContextMaps]);
+
 
   useEffect(() => {
     document.title = "Food Stall Expenses - StallSync";
     setFirstVisibleDoc(null); setLastVisibleDoc(null); setCurrentPage(1);
     fetchExpenses('initial');
     return () => { document.title = "StallSync - Stock Management"; }
-  }, [dateFilter, categoryFilter, user, activeSiteId, activeStallId]);
+  }, [dateFilter, categoryFilter, user, activeSiteId, activeStallId, fetchExpenses]);
 
   const escapeCsvCell = (cellData: any): string => {
     if (cellData === null || cellData === undefined) return "";
@@ -206,14 +209,34 @@ export default function FoodExpensesClientPage() {
   };
   
   const handleExport = async () => {
-    setIsExporting(true);
-    const itemsToExport = expenses;
-    if (itemsToExport.length === 0) {
-      toast({ title: "No Expenses to Export", description: "There are no expenses matching the current filters.", variant: "default" });
-      setIsExporting(false);
-      return;
+    if (!db) {
+        toast({ title: "Export Error", description: "Database is not available.", variant: "destructive"});
+        return;
     }
+    setIsExporting(true);
+    toast({ title: "Exporting...", description: "Fetching all matching expenses for export. Please wait."});
+    
+    const exportConstraints = buildExpenseQuery();
+    if (!exportConstraints) {
+        toast({ title: "Export Error", description: "Cannot export without a valid context.", variant: "destructive"});
+        setIsExporting(false);
+        return;
+    }
+
     try {
+      const expensesCollectionRef = collection(db, "foodItemExpenses");
+      const exportQuery = query(expensesCollectionRef, ...exportConstraints, orderBy("purchaseDate", "desc"));
+      const querySnapshot = await getDocs(exportQuery);
+      const itemsToExport: FoodItemExpense[] = querySnapshot.docs.map(doc => ({
+          id: doc.id, ...doc.data(), purchaseDate: (doc.data().purchaseDate as Timestamp).toDate(),
+      } as FoodItemExpense));
+
+      if (itemsToExport.length === 0) {
+        toast({ title: "No Expenses to Export", description: "There are no expenses matching the current filters.", variant: "default" });
+        setIsExporting(false);
+        return;
+      }
+      
       const headers = ["Expense ID", "Category", "Total Cost", "Payment Method", "Other Payment Details", "Purchase Date", "Vendor", "Other Vendor Details", "Notes", "Bill Image URL", "Site Name", "Stall Name", "Recorded By (Name)", "Recorded By (UID)"];
       const csvRows = [headers.join(',')];
       itemsToExport.forEach(expense => {
@@ -230,13 +253,14 @@ export default function FoodExpensesClientPage() {
         csvRows.push(row.join(','));
       });
       downloadCsv(csvRows.join("\n"), `stallsync_food_expenses_${getFormattedTimestamp()}.csv`);
-      toast({ title: "Export Successful", description: `${expenses.length} expenses exported.` });
+      toast({ title: "Export Successful", description: `${itemsToExport.length} expenses exported.` });
     } catch (error: any) {
-      toast({ title: "Export Failed", description: "Could not export expenses.", variant: "destructive" });
+      toast({ title: "Export Failed", description: `Could not export expenses. ${error.message}`, variant: "destructive" });
     } finally {
       setIsExporting(false);
     }
   };
+
 
   if (authLoading) {
     return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading user context...</p></div>;

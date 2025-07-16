@@ -261,34 +261,75 @@ export default function ItemsClientPage() {
   };
 
   const handleExport = async () => {
-    setIsExporting(true);
-    const itemsToExport = sortedAndFilteredItems; // Export currently filtered/sorted items
-    if (itemsToExport.length === 0) {
-      toast({ title: "No Data", description: "There are no items to export with the current filters.", variant: "default" });
-      setIsExporting(false);
-      return;
+    if (!db || !activeSiteId) {
+        toast({ title: "Export Error", description: "Cannot export without an active site context.", variant: "destructive"});
+        return;
     }
+    setIsExporting(true);
+    toast({ title: "Exporting...", description: "Fetching all matching items for export. Please wait."});
+    
     try {
-      const headers = ["ID", "Name", "Category", "Description", "Quantity", "Unit", "Cost Price (₹)", "Selling Price (₹)", "Low Stock Threshold", "Image URL", "Site Name", "Stall Name", "Original Master Item ID"];
-      const csvRows = [headers.join(",")];
-      itemsToExport.forEach(item => {
-        const row = [
-          escapeCsvCell(item.id), escapeCsvCell(item.name), escapeCsvCell(item.category),
-          escapeCsvCell(item.description), escapeCsvCell(item.quantity), escapeCsvCell(item.unit),
-          escapeCsvCell((item.costPrice ?? 0).toFixed(2)), escapeCsvCell(item.price.toFixed(2)),
-          escapeCsvCell(item.lowStockThreshold), escapeCsvCell(item.imageUrl || ""),
-          escapeCsvCell(item.siteId ? sitesMap[item.siteId] || item.siteId : "N/A"),
-          escapeCsvCell(item.stallId ? stallsMap[item.stallId] || item.stallId : "N/A"),
-          escapeCsvCell(item.originalMasterItemId || "")
-        ];
-        csvRows.push(row.join(","));
-      });
-      downloadCsv(csvRows.join("\n"), `stallsync_stock_items_${getFormattedTimestamp()}.csv`);
-      toast({ title: "Export Successful", description: `${itemsToExport.length} items exported to CSV.` });
+        const itemsCollectionRef = collection(db, "stockItems");
+        let qConstraints: QueryConstraint[] = [ where("siteId", "==", activeSiteId) ];
+
+        // Apply same filtering logic as the main view
+        let effectiveStallFilter = stallFilterOption;
+        if (user?.role === 'staff') {
+            effectiveStallFilter = activeStallId || "master"; 
+        }
+        if (effectiveStallFilter === "master") {
+            qConstraints.push(where("stallId", "==", null));
+        } else if (effectiveStallFilter !== "all") { 
+            qConstraints.push(where("stallId", "==", effectiveStallFilter));
+        }
+        // NOTE: Firestore does not support 'not-equal' or OR queries on different fields in a single query.
+        // Client-side filtering for search term, category, and stock status will be applied after fetching.
+        // This means we fetch all items for the site/stall context and then filter locally for the export.
+        const exportQuery = query(itemsCollectionRef, ...qConstraints);
+        const itemsSnapshot = await getDocs(exportQuery);
+        const allFetchedItems: StockItem[] = itemsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as StockItem));
+
+        // Now apply the remaining client-side filters
+        const itemsToExport = allFetchedItems.filter(item => {
+            const matchesSearchTerm = item.name.toLowerCase().includes(searchTerm.toLowerCase());
+            const matchesCategory = categoryFilter === "all" || !categoryFilter || item.category === categoryFilter;
+            let matchesStockStatus = true;
+            if (stockStatusFilter && stockStatusFilter !== "all") {
+                const isLowStock = item.quantity <= item.lowStockThreshold;
+                const isOutOfStock = item.quantity === 0;
+                if (stockStatusFilter === "in-stock") matchesStockStatus = !isLowStock && !isOutOfStock;
+                else if (stockStatusFilter === "low-stock") matchesStockStatus = isLowStock && !isOutOfStock;
+                else if (stockStatusFilter === "out-of-stock") matchesStockStatus = isOutOfStock;
+            }
+            return matchesSearchTerm && matchesCategory && matchesStockStatus;
+        });
+
+        if (itemsToExport.length === 0) {
+            toast({ title: "No Data", description: "No items match the current filters to export.", variant: "default" });
+            setIsExporting(false);
+            return;
+        }
+
+        const headers = ["ID", "Name", "Category", "Description", "Quantity", "Unit", "Cost Price (₹)", "Selling Price (₹)", "Low Stock Threshold", "Image URL", "Site Name", "Stall Name", "Original Master Item ID"];
+        const csvRows = [headers.join(",")];
+        itemsToExport.forEach(item => {
+            const row = [
+            escapeCsvCell(item.id), escapeCsvCell(item.name), escapeCsvCell(item.category),
+            escapeCsvCell(item.description), escapeCsvCell(item.quantity), escapeCsvCell(item.unit),
+            escapeCsvCell((item.costPrice ?? 0).toFixed(2)), escapeCsvCell(item.price.toFixed(2)),
+            escapeCsvCell(item.lowStockThreshold), escapeCsvCell(item.imageUrl || ""),
+            escapeCsvCell(item.siteId ? sitesMap[item.siteId] || item.siteId : "N/A"),
+            escapeCsvCell(item.stallId ? stallsMap[item.stallId] || item.stallId : "N/A"),
+            escapeCsvCell(item.originalMasterItemId || "")
+            ];
+            csvRows.push(row.join(","));
+        });
+        downloadCsv(csvRows.join("\n"), `stallsync_stock_items_${getFormattedTimestamp()}.csv`);
+        toast({ title: "Export Successful", description: `${itemsToExport.length} items exported to CSV.` });
     } catch (error: any) {
-      toast({ title: "Export Failed", description: "Could not export stock items.", variant: "destructive" });
+        toast({ title: "Export Failed", description: `Could not export stock items. ${error.message}`, variant: "destructive" });
     } finally {
-      setIsExporting(false);
+        setIsExporting(false);
     }
   };
 
