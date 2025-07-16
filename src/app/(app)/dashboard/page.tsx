@@ -73,6 +73,8 @@ export default function DashboardPage() {
   const [loadingStock, setLoadingStock] = useState(true);
   const [loadingSales, setLoadingSales] = useState(true);
 
+  const isStaffUser = user?.role === 'staff';
+
   useEffect(() => {
     document.title = "Dashboard - StallSync";
     return () => { document.title = "StallSync - Stock Management"; }
@@ -314,11 +316,11 @@ export default function DashboardPage() {
 
 
   const dashboardStatCards = [
-    { title: "Total Items", value: stats.totalItems.toString(), icon: Package, change: "In current context", color: "text-primary", testid: "stat-total-items" },
-    { title: "Total Sales (Last 7 Days)", value: `₹${stats.totalSalesLast7Days.toFixed(2)}`, icon: IndianRupee, change: "In current context", color: "text-accent", testid: "stat-total-sales" },
-    { title: "Items Sold (Today)", value: stats.itemsSoldToday.toString(), icon: TrendingUp, change: "In current context", color: "text-blue-500", testid: "stat-items-sold-today" },
-    { title: "Low Stock Alerts", value: stats.lowStockAlerts.toString(), icon: AlertTriangle, change: "Needs attention", color: "text-destructive", testid: "stat-low-stock-alerts" },
-  ];
+    { title: "Total Items in Context", value: stats.totalItems.toString(), icon: Package, change: "In your assigned stall/site", color: "text-primary", testid: "stat-total-items", roles: ['staff', 'manager', 'admin'] },
+    { title: "Total Sales (Last 7 Days)", value: `₹${stats.totalSalesLast7Days.toFixed(2)}`, icon: IndianRupee, change: "In current context", color: "text-accent", testid: "stat-total-sales", roles: ['manager', 'admin'] },
+    { title: "Items Sold By You (Today)", value: stats.itemsSoldToday.toString(), icon: TrendingUp, change: "Your personal sales", color: "text-blue-500", testid: "stat-items-sold-today", roles: ['staff', 'manager', 'admin'] },
+    { title: "Low Stock Alerts", value: stats.lowStockAlerts.toString(), icon: AlertTriangle, change: "Needs attention in your context", color: "text-destructive", testid: "stat-low-stock-alerts", roles: ['staff', 'manager', 'admin'] },
+  ].filter(card => card.roles.includes(user?.role || 'staff'));
 
   return (
     <div className="space-y-6">
@@ -344,6 +346,7 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-5">
+        {!isStaffUser && (
         <Card className="shadow-lg lg:col-span-3" data-testid="sales-chart-card">
           <CardHeader>
             <CardTitle className="flex items-center">
@@ -360,11 +363,14 @@ export default function DashboardPage() {
             )}
           </CardContent>
         </Card>
-        <div className="lg:col-span-2 space-y-6">
+        )}
+        <div className={isStaffUser ? "lg:col-span-5 grid grid-cols-1 md:grid-cols-2 gap-6" : "lg:col-span-2 space-y-6"}>
           <Card className="shadow-lg" data-testid="recent-sales-card">
             <CardHeader>
               <CardTitle>Recent Sales</CardTitle>
-              <CardDescription>A quick look at your most recent transactions.</CardDescription>
+              <CardDescription>
+                {isStaffUser ? "Your most recent transactions." : "A quick look at the most recent transactions."}
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {recentSales.length > 0 ? (
@@ -422,7 +428,7 @@ export default function DashboardPage() {
               <PackageSearch className="h-5 w-5 mr-2 text-destructive"/>
               Items Low on Stock
             </CardTitle>
-            <CardDescription>Top items that have reached or fallen below their low stock threshold.</CardDescription>
+            <CardDescription>Top items in your current context that need attention.</CardDescription>
           </div>
           <Button variant="outline" size="sm" onClick={() => router.push('/items')}>
              View All Items <ArrowRight className="ml-2 h-4 w-4" />
