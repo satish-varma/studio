@@ -16,10 +16,10 @@ import {
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
-import { format, startOfMonth, endOfMonth, addMonths, subMonths } from 'date-fns';
+import { format, startOfMonth, endOfMonth, addMonths, subMonths, isBefore, isAfter, startOfDay } from 'date-fns';
 import { Button } from "@/components/ui/button";
-import type { AppUser, StaffAttendance, Site, Holiday, AttendanceStatus } from "@/types";
-import { Loader2, Info, ChevronLeft, ChevronRight, CalendarDays, ThumbsUp } from "lucide-react";
+import type { AppUser, StaffAttendance, Site, Holiday, AttendanceStatus, StaffDetails } from "@/types";
+import { Loader2, Info, ChevronLeft, ChevronRight, CalendarDays } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import PageHeader from "@/components/shared/PageHeader";
@@ -45,6 +45,7 @@ export default function StaffAttendanceClientPage() {
   const { user, activeSiteId, loading: authLoading } = useAuth();
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [staffList, setStaffList] = useState<AppUser[]>([]);
+  const [staffDetailsMap, setStaffDetailsMap] = useState<Map<string, StaffDetails>>(new Map());
   const [attendance, setAttendance] = useState<Record<string, Record<string, StaffAttendance>> | null>(null);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [loading, setLoading] = useState(true);
@@ -77,9 +78,20 @@ export default function StaffAttendanceClientPage() {
       return;
     }
     setLoading(true);
-    const unsubscribe = onSnapshot(staffQuery, (snapshot) => {
+    const unsubscribe = onSnapshot(staffQuery, async (snapshot) => {
       const fetchedStaff = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser));
       setStaffList(fetchedStaff.sort((a, b) => (a.displayName || a.email || "").localeCompare(b.displayName || b.email || "")));
+      
+      // Fetch staff details as well
+      if(fetchedStaff.length > 0) {
+        const uids = fetchedStaff.map(s => s.uid);
+        const detailsQuery = query(collection(db, 'staffDetails'), where('__name__', 'in', uids));
+        const detailsSnapshot = await getDocs(detailsQuery);
+        const newDetailsMap = new Map<string, StaffDetails>();
+        detailsSnapshot.forEach(doc => newDetailsMap.set(doc.id, doc.data() as StaffDetails));
+        setStaffDetailsMap(newDetailsMap);
+      }
+
       setLoading(false);
     }, (error) => {
       console.error("Error fetching staff:", error);
@@ -181,6 +193,19 @@ export default function StaffAttendanceClientPage() {
       return;
     }
     
+    const details = staffDetailsMap.get(staff.uid);
+    const joiningDate = details?.joiningDate ? startOfDay(new Date(details.joiningDate)) : null;
+    const exitDate = details?.exitDate ? startOfDay(new Date(details.exitDate)) : null;
+
+    if (joiningDate && isBefore(date, joiningDate)) {
+        toast({ title: "Invalid Date", description: `${staff.displayName} had not joined yet.`, variant: "default" });
+        return;
+    }
+    if (exitDate && isAfter(date, exitDate)) {
+        toast({ title: "Invalid Date", description: `${staff.displayName} has already exited.`, variant: "default" });
+        return;
+    }
+    
     const dateStr = format(date, 'yyyy-MM-dd');
     const docId = `${dateStr}_${staff.uid}`;
     
@@ -191,7 +216,6 @@ export default function StaffAttendanceClientPage() {
     const docRef = doc(db, "staffAttendance", docId);
     const prevAttendance = JSON.parse(JSON.stringify(attendance || {}));
 
-    // Optimistic UI update
     setAttendance(prev => {
         const newAttendance = JSON.parse(JSON.stringify(prev || {}));
         if (!newAttendance[staff.uid]) newAttendance[staff.uid] = {};
@@ -235,9 +259,9 @@ export default function StaffAttendanceClientPage() {
     } catch(error: any) {
       console.error("Error saving attendance:", error);
       toast({ title: "Save Failed", description: `Failed to save status for ${staff.displayName}. Reverting change.`, variant: "destructive"});
-      setAttendance(prevAttendance); // Revert UI on failure
+      setAttendance(prevAttendance);
     }
-  }, [user, attendance, isHoliday, isAllSitesView, toast]);
+  }, [user, attendance, isHoliday, isAllSitesView, toast, staffDetailsMap]);
 
 
   if (authLoading) return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin" /></div>;
@@ -259,10 +283,10 @@ export default function StaffAttendanceClientPage() {
             <Button variant="outline" size="icon" onClick={handlePrevMonth} aria-label="Previous month"><ChevronLeft className="h-4 w-4" /></Button>
             <h2 className="text-xl font-semibold text-center min-w-[150px]">{format(currentMonth, "MMMM yyyy")}</h2>
             <Button variant="outline" size="icon" onClick={handleNextMonth} aria-label="Next month"><ChevronRight className="h-4 w-4" /></Button>
-            <Button variant="outline" onClick={handleGoToCurrentMonth}>Today</Button>
+            <Button variant="outline" onClick={handleGoToCurrentMonth}>Current Month</Button>
           </div>
           <div className="text-xs text-muted-foreground p-2 bg-muted/50 rounded-md">
-            Click on a cell to cycle through: Present (P), Absent (A), Leave (L), Half-day (H).
+            Click on a cell to cycle through: Present (P), Absent (A), Leave (L), Half-day (H), and cleared (-).
           </div>
         </div>
 
@@ -278,6 +302,7 @@ export default function StaffAttendanceClientPage() {
       ) : (
         <AttendanceRegisterTable
             staffList={staffList}
+            staffDetailsMap={staffDetailsMap}
             attendanceData={attendance}
             month={currentMonth}
             isAllSitesView={isAllSitesView}

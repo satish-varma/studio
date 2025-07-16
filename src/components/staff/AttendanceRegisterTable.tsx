@@ -3,13 +3,14 @@
 
 import { useMemo } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { format } from 'date-fns';
+import { format, isBefore, isAfter, startOfDay } from 'date-fns';
 import { cn } from "@/lib/utils";
-import type { AppUser, StaffAttendance, AttendanceStatus, Holiday } from "@/types";
+import type { AppUser, StaffAttendance, AttendanceStatus, Holiday, StaffDetails } from "@/types";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface AttendanceRegisterTableProps {
   staffList: AppUser[];
+  staffDetailsMap: Map<string, StaffDetails>;
   attendanceData: Record<string, Record<string, StaffAttendance>>;
   month: Date;
   isAllSitesView: boolean;
@@ -28,6 +29,7 @@ const statusBadgeClasses: Record<AttendanceStatus, string> = {
 
 export function AttendanceRegisterTable({
   staffList,
+  staffDetailsMap,
   attendanceData,
   month,
   isAllSitesView,
@@ -65,7 +67,10 @@ export function AttendanceRegisterTable({
         <TableBody>
           {staffList.map(staff => {
             let presentCount = 0; let absentCount = 0; let leaveCount = 0;
-            
+            const details = staffDetailsMap.get(staff.uid);
+            const joiningDate = details?.joiningDate ? startOfDay(new Date(details.joiningDate)) : null;
+            const exitDate = details?.exitDate ? startOfDay(new Date(details.exitDate)) : null;
+
             return (
                 <TableRow key={staff.uid}>
                     <TableCell className="sticky left-0 bg-card z-10 border-r min-w-[200px]">
@@ -78,8 +83,12 @@ export function AttendanceRegisterTable({
                         const dateStr = format(day, 'yyyy-MM-dd');
                         const status = attendanceData?.[staff.uid]?.[dateStr]?.status;
                         const { holiday, name: holidayName } = isHoliday(day, staff.defaultSiteId);
+                        
+                        const isBeforeJoining = joiningDate && isBefore(day, joiningDate);
+                        const isAfterExit = exitDate && isAfter(day, exitDate);
+                        const isUnemployedPeriod = isBeforeJoining || isAfterExit;
 
-                        if (!holiday) {
+                        if (!holiday && !isUnemployedPeriod) {
                             if (status === 'Present') presentCount++;
                             if (status === 'Absent') absentCount++;
                             if (status === 'Leave') leaveCount++;
@@ -93,6 +102,8 @@ export function AttendanceRegisterTable({
                                 </TooltipTrigger>
                                 <TooltipContent><p>{holidayName}</p></TooltipContent>
                             </Tooltip>
+                        ) : isUnemployedPeriod ? (
+                            <div className="h-full w-full flex items-center justify-center bg-gray-100 dark:bg-gray-800 cursor-not-allowed"></div>
                         ) : (
                             <div className={cn("h-full w-full flex items-center justify-center font-bold text-xs min-h-[40px]", 
                                 status ? statusBadgeClasses[status] : "hover:bg-muted/50 cursor-pointer"
@@ -104,7 +115,7 @@ export function AttendanceRegisterTable({
                         return (
                             <TableCell 
                                 key={dateStr} 
-                                className={cn("text-center p-0 border-l", holiday && "bg-muted/60")}
+                                className={cn("text-center p-0 border-l", (holiday || isUnemployedPeriod) && "bg-muted/60")}
                                 onClick={() => onStatusChange(staff, day)}
                             >
                                {cellContent}
