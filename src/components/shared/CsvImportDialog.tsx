@@ -9,6 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Loader2, Upload, FileText, CheckCircle, AlertTriangle } from "lucide-react";
 import { useAuth } from '@/contexts/AuthContext';
 import { Label } from "@/components/ui/label";
+import { auth } from '@/lib/firebaseConfig'; // Correctly import the auth instance
 
 const LOG_PREFIX = "[CsvImportDialog]";
 
@@ -22,7 +23,7 @@ export default function CsvImportDialog({ dataType, isOpen, onClose }: CsvImport
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const { toast } = useToast();
-  const { user, getAuth } = useAuth(); // Assuming getAuth returns the auth instance
+  const { user } = useAuth();
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files[0]) {
@@ -53,8 +54,8 @@ export default function CsvImportDialog({ dataType, isOpen, onClose }: CsvImport
       const csvData = e.target?.result as string;
       
       try {
-        const authInstance = getAuth();
-        if (!authInstance.currentUser) throw new Error("Firebase user not available for token retrieval.");
+        const authInstance = auth; // Use the imported auth instance
+        if (!authInstance || !authInstance.currentUser) throw new Error("Firebase user not available for token retrieval.");
         const idToken = await authInstance.currentUser.getIdToken(true);
 
         const response = await fetch('/api/csv-import', {
