@@ -19,17 +19,12 @@ function initializeAdminApp(): AdminApp {
     });
 }
 
-interface DeleteContext {
-  params: {
-    uid: string;
-  };
-}
-
+// Corrected function signature for Next.js App Router dynamic routes
 export async function DELETE(
   request: NextRequest,
-  context: DeleteContext
+  { params }: { params: { uid: string } }
 ) {
-  const uidToDelete = context.params.uid; 
+  const uidToDelete = params.uid; 
   console.log(`${LOG_PREFIX} DELETE request received for UID: ${uidToDelete}`);
   
   let adminApp: AdminApp;
