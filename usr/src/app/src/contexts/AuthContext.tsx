@@ -112,7 +112,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     console.log(`${LOG_PREFIX_CONTEXT} useEffect: Initializing auth state listener.`);
     
-    if (initializationError || !auth || !db) {
+    if (initializationError || !db) {
         setLoading(false);
         return;
     }
