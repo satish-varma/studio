@@ -114,7 +114,7 @@ export default function FoodExpensesClientPage() {
     if (categoryFilter !== "all") qConstraints.push(where("category", "==", categoryFilter));
 
     return qConstraints;
-  }, [authLoading, user, activeSiteId, activeStallId, db, dateFilter, categoryFilter]);
+  }, [authLoading, user, activeSiteId, activeStallId, dateFilter, categoryFilter]);
 
 
   const fetchExpenses = useCallback(async (direction: 'initial' | 'next' | 'prev' = 'initial') => {
@@ -127,11 +127,10 @@ export default function FoodExpensesClientPage() {
     
     setLoadingExpenses(true);
     if(direction === 'initial') {
-        // Optimization: Only calculate total if a site is selected.
         if (activeSiteId) {
-            setTotalExpensesAmount(0); // Reset for new calculation
+            setTotalExpensesAmount(0);
         } else {
-            setTotalExpensesAmount(null); // Set to null for "All Sites" view
+            setTotalExpensesAmount(null);
         }
         fetchContextMaps();
     }
@@ -160,7 +159,6 @@ export default function FoodExpensesClientPage() {
 
       setExpenses(fetchedExpenses);
 
-      // Optimization: Only run the total calculation if a site is selected.
       if (direction === 'initial' && activeSiteId) {
         const totalQuery = query(expensesCollectionRef, ...baseConstraints);
         const totalSnapshot = await getDocs(totalQuery);
@@ -178,7 +176,6 @@ export default function FoodExpensesClientPage() {
         if (direction === 'next') setIsLastPage(true);
         if (direction === 'initial') {
             setIsLastPage(true);
-            // Only set total to 0 if we actually ran the query for a site
             if (activeSiteId) setTotalExpensesAmount(0);
         }
       }
@@ -192,10 +189,15 @@ export default function FoodExpensesClientPage() {
 
   useEffect(() => {
     document.title = "Food Stall Expenses - StallSync";
-    setFirstVisibleDoc(null); setLastVisibleDoc(null); setCurrentPage(1);
-    fetchExpenses('initial');
+    setFirstVisibleDoc(null);
+    setLastVisibleDoc(null);
+    setCurrentPage(1);
+    const initialFetch = async () => {
+        await fetchExpenses('initial');
+    };
+    initialFetch();
     return () => { document.title = "StallSync - Stock Management"; }
-  }, [dateFilter, categoryFilter, user, activeSiteId, activeStallId, fetchExpenses]);
+  }, [dateFilter, categoryFilter, user, activeSiteId, activeStallId]);
 
   const escapeCsvCell = (cellData: any): string => {
     if (cellData === null || cellData === undefined) return "";
