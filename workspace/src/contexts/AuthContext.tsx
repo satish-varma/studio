@@ -45,7 +45,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUserState] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
   
-  // The initialization error is now sourced from firebaseConfig.ts
   const initializationError = firebaseInitializationError;
 
   const [activeSiteId, setActiveSiteState] = useState<string | null>(() => {
@@ -79,7 +78,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       } else {
         localStorage.removeItem('activeSiteId');
       }
-      localStorage.removeItem('activeStallId'); // Always remove stall from storage on site change
+      localStorage.removeItem('activeStallId');
     }
   }, []);
 
@@ -99,7 +98,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     console.log(`${LOG_PREFIX_CONTEXT} useEffect: Initializing auth state listener.`);
     
-    if (initializationError || !auth || !db) {
+    if (initializationError || !db) {
         setLoading(false);
         return;
     }
@@ -109,7 +108,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     let userDocUnsubscribe: (() => void) | null = null;
 
     const authUnsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
-      // Add a guard clause here. If auth is not defined, we cannot proceed.
       if (!auth) {
         console.error(`${LOG_PREFIX_CONTEXT} onAuthStateChanged: auth object is undefined, cannot proceed.`);
         setLoading(false);
@@ -150,7 +148,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
           if (appUserToSet.status === 'inactive') {
             console.warn(`${LOG_PREFIX_CONTEXT} Inactive user ${appUserToSet.uid} tried to log in. Signing out.`);
-            firebaseSignOut(auth); // This is now safe because of the guard clause above
+            if (auth) {
+              firebaseSignOut(auth);
+            }
             setUserState(null);
             setLoading(false);
             return;
@@ -267,7 +267,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.log(`${LOG_PREFIX_CONTEXT} Active site ID is null. Clearing active site object.`);
       setActiveSiteObject(null);
     }
-  }, [activeSiteId]);
+  }, [activeSiteId, db]);
 
   useEffect(() => {
     if (!db) return;
@@ -303,7 +303,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.log(`${LOG_PREFIX_CONTEXT} Active stall ID or site ID is null. Clearing active stall object.`);
       setActiveStallObject(null);
     }
-  }, [activeStallId, activeSiteId]);
+  }, [activeStallId, activeSiteId, db]);
 
   const mapFirestoreDataToAppUser = (firebaseUser: FirebaseUser, userDataFromFirestore: any = {}): AppUser => {
     return {
@@ -369,7 +369,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setLoading(false);
       throw error;
     }
-  }, []);
+  }, [auth, db]);
 
   const signUp = useCallback(async (email: string, pass: string, displayName: string): Promise<AppUser | null> => {
     if (!auth || !db) {
@@ -401,7 +401,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setLoading(false);
       throw error;
     }
-  }, []);
+  }, [auth, db]);
 
   const signOutUser = useCallback(async () => {
     if (!auth) {
@@ -415,7 +415,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     } catch (error: any) {
       console.error(`${LOG_PREFIX_CONTEXT}:signOutUser: Sign-out error:`, error.code, error.message);
     }
-  }, []);
+  }, [auth]);
 
   if (initializationError) {
     return (
