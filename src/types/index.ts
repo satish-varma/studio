@@ -7,6 +7,6 @@ export type { Stall, StallFormValues, STALL_TYPES } from './stall';
 export type { StockMovementLog, StockMovementType } from './log';
 export type { FoodVendor, FoodItemExpense, FoodSaleTransaction, FoodExpenseCategory, FoodSaleTransactionFormValues } from './food';
 export type { FoodStallActivityLog, FoodStallActivityType } from './food_log';
-export type { StaffDetails, StaffAttendance, SalaryAdvance, AttendanceStatus, SalaryPayment } from './staff';
+export type { StaffDetails, StaffAttendance, SalaryAdvance, AttendanceStatus, SalaryPayment, StaffDetailsFormValues } from './staff';
 export type { Holiday } from './holiday';
 export type { StaffActivityLog, StaffActivityType } from './staff_log';
