@@ -23,11 +23,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/contexts/AuthContext";
 import ManageVendorsDialog from "@/components/foodstall/ManageVendorsDialog";
+import { auth } from "@/lib/firebaseConfig"; // Correctly import the auth instance
 
 const LOG_PREFIX = "[SettingsPage]";
 
 export default function SettingsPage() {
-  const { user: appUser, getAuth } = useAuth();
+  const { user: appUser } = useAuth();
   const { toast } = useToast();
   
   const [showResetDataDialog, setShowResetDataDialog] = useState(false);
@@ -46,8 +47,7 @@ export default function SettingsPage() {
     toast({ title: "Resetting Data...", description: "Please wait, this may take a few moments.", duration: 10000 });
 
     try {
-      const auth = getAuth();
-      if (!auth.currentUser) throw new Error("User not authenticated.");
+      if (!auth || !auth.currentUser) throw new Error("User not authenticated.");
       const idToken = await auth.currentUser.getIdToken();
       const response = await fetch('/api/admin/reset-data', {
         method: 'POST',
