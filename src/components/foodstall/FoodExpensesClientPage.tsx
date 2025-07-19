@@ -63,7 +63,7 @@ export default function FoodExpensesClientPage() {
   
   const [dateFilter, setDateFilter] = useState<DateFilterOption>('today');
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
-  const [totalExpensesAmount, setTotalExpensesAmount] = useState(0);
+  const [totalExpensesAmount, setTotalExpensesAmount] = useState<number | null>(0); // Can be null now
 
   const [firstVisibleDoc, setFirstVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
   const [lastVisibleDoc, setLastVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
@@ -127,8 +127,13 @@ export default function FoodExpensesClientPage() {
     
     setLoadingExpenses(true);
     if(direction === 'initial') {
-        setTotalExpensesAmount(0);
-        fetchContextMaps(); // Re-fetch maps on filter change just in case
+        // Optimization: Only calculate total if a site is selected.
+        if (activeSiteId) {
+            setTotalExpensesAmount(0); // Reset for new calculation
+        } else {
+            setTotalExpensesAmount(null); // Set to null for "All Sites" view
+        }
+        fetchContextMaps();
     }
     setErrorExpenses(null);
 
@@ -155,7 +160,8 @@ export default function FoodExpensesClientPage() {
 
       setExpenses(fetchedExpenses);
 
-      if(direction === 'initial') {
+      // Optimization: Only run the total calculation if a site is selected.
+      if (direction === 'initial' && activeSiteId) {
         const totalQuery = query(expensesCollectionRef, ...baseConstraints);
         const totalSnapshot = await getDocs(totalQuery);
         const total = totalSnapshot.docs.reduce((sum, doc) => sum + (doc.data().totalCost || 0), 0);
@@ -170,14 +176,18 @@ export default function FoodExpensesClientPage() {
         setIsLastPage(!hasMore);
       } else {
         if (direction === 'next') setIsLastPage(true);
-        if (direction === 'initial') { setIsLastPage(true); setTotalExpensesAmount(0); }
+        if (direction === 'initial') {
+            setIsLastPage(true);
+            // Only set total to 0 if we actually ran the query for a site
+            if (activeSiteId) setTotalExpensesAmount(0);
+        }
       }
     } catch (error: any) {
       setErrorExpenses(error.message || "Failed to load expenses.");
     } finally {
       setLoadingExpenses(false);
     }
-  }, [buildExpenseQuery, authLoading, firstVisibleDoc, lastVisibleDoc, fetchContextMaps]);
+  }, [buildExpenseQuery, authLoading, firstVisibleDoc, lastVisibleDoc, fetchContextMaps, activeSiteId]);
 
 
   useEffect(() => {
@@ -292,9 +302,15 @@ export default function FoodExpensesClientPage() {
             </div>
             <div className="text-left sm:text-right">
               <p className="text-sm text-muted-foreground">Total Expenses</p>
-              <p className="text-2xl font-bold">
-                {loadingExpenses && totalExpensesAmount === 0 ? <Loader2 className="h-6 w-6 animate-spin"/> : `₹${totalExpensesAmount.toFixed(2)}`}
-              </p>
+              <div className="text-2xl font-bold">
+                {loadingExpenses && totalExpensesAmount === 0 ? (
+                  <Loader2 className="h-6 w-6 animate-spin"/>
+                ) : totalExpensesAmount === null ? (
+                  <span className="text-lg text-muted-foreground">Select a site for total</span>
+                ) : (
+                  `₹${totalExpensesAmount.toFixed(2)}`
+                )}
+              </div>
             </div>
           </div>
         </CardHeader>
