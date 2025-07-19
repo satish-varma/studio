@@ -17,7 +17,9 @@ import {
   QueryConstraint,
   DocumentSnapshot,
   DocumentData,
-  limitToLast
+  limitToLast,
+  sum,
+  getAggregateFromServer,
 } from "firebase/firestore";
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
@@ -63,7 +65,8 @@ export default function FoodExpensesClientPage() {
   
   const [dateFilter, setDateFilter] = useState<DateFilterOption>('today');
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
-  const [totalExpensesAmount, setTotalExpensesAmount] = useState<number | null>(0); // Can be null now
+  const [totalExpensesAmount, setTotalExpensesAmount] = useState<number>(0);
+  const [loadingTotal, setLoadingTotal] = useState(true);
 
   const [firstVisibleDoc, setFirstVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
   const [lastVisibleDoc, setLastVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
@@ -93,9 +96,9 @@ export default function FoodExpensesClientPage() {
     }
   }, [toast]);
   
-  const buildExpenseQuery = useCallback(() => {
+  const buildExpenseQuery = useCallback((isForTotal: boolean = false) => {
     if (authLoading || !db || !user) return null;
-    if (user.role !== 'admin' && !activeSiteId) return null;
+    if (user.role !== 'admin' && !activeSiteId && !isForTotal) return null;
 
     let qConstraints: QueryConstraint[] = [];
     if (activeSiteId) {
@@ -126,12 +129,7 @@ export default function FoodExpensesClientPage() {
     }
     
     setLoadingExpenses(true);
-    if(direction === 'initial') {
-        if (activeSiteId) {
-            setTotalExpensesAmount(0);
-        } else {
-            setTotalExpensesAmount(null);
-        }
+    if (direction === 'initial') {
         fetchContextMaps();
     }
     setErrorExpenses(null);
@@ -158,13 +156,6 @@ export default function FoodExpensesClientPage() {
       if (hasMore) fetchedExpenses.pop();
 
       setExpenses(fetchedExpenses);
-
-      if (direction === 'initial' && activeSiteId) {
-        const totalQuery = query(expensesCollectionRef, ...baseConstraints);
-        const totalSnapshot = await getDocs(totalQuery);
-        const total = totalSnapshot.docs.reduce((sum, doc) => sum + (doc.data().totalCost || 0), 0);
-        setTotalExpensesAmount(total);
-      }
       
       if (querySnapshot.docs.length > 0) {
         setFirstVisibleDoc(querySnapshot.docs[0]);
@@ -174,17 +165,41 @@ export default function FoodExpensesClientPage() {
         setIsLastPage(!hasMore);
       } else {
         if (direction === 'next') setIsLastPage(true);
-        if (direction === 'initial') {
-            setIsLastPage(true);
-            if (activeSiteId) setTotalExpensesAmount(0);
-        }
+        if (direction === 'initial') setIsLastPage(true);
       }
     } catch (error: any) {
       setErrorExpenses(error.message || "Failed to load expenses.");
     } finally {
       setLoadingExpenses(false);
     }
-  }, [buildExpenseQuery, authLoading, firstVisibleDoc, lastVisibleDoc, fetchContextMaps, activeSiteId]);
+  }, [buildExpenseQuery, authLoading, firstVisibleDoc, lastVisibleDoc, fetchContextMaps]);
+
+  // Separate effect to calculate total sum, using efficient aggregation
+  useEffect(() => {
+    const fetchTotal = async () => {
+        const totalQueryConstraints = buildExpenseQuery(true);
+        if (!totalQueryConstraints || !db) {
+            setTotalExpensesAmount(0);
+            setLoadingTotal(false);
+            return;
+        }
+        setLoadingTotal(true);
+        try {
+            const expensesCollectionRef = collection(db, "foodItemExpenses");
+            const q = query(expensesCollectionRef, ...totalQueryConstraints);
+            const snapshot = await getAggregateFromServer(q, {
+                totalCost: sum('totalCost')
+            });
+            setTotalExpensesAmount(snapshot.data().totalCost || 0);
+        } catch(error) {
+            console.error("Error calculating total expenses:", error);
+            setTotalExpensesAmount(0); // Set to 0 on error
+        } finally {
+            setLoadingTotal(false);
+        }
+    };
+    fetchTotal();
+  }, [buildExpenseQuery]);
 
 
   useEffect(() => {
@@ -305,10 +320,8 @@ export default function FoodExpensesClientPage() {
             <div className="text-left sm:text-right">
               <p className="text-sm text-muted-foreground">Total Expenses</p>
               <div className="text-2xl font-bold">
-                {loadingExpenses && totalExpensesAmount === 0 ? (
+                {loadingTotal ? (
                   <Loader2 className="h-6 w-6 animate-spin"/>
-                ) : totalExpensesAmount === null ? (
-                  <span className="text-lg text-muted-foreground">Select a site for total</span>
                 ) : (
                   `₹${totalExpensesAmount.toFixed(2)}`
                 )}
