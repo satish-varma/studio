@@ -112,7 +112,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     console.log(`${LOG_PREFIX_CONTEXT} useEffect: Initializing auth state listener.`);
     
-    if (initializationError || !db) {
+    // THE DEFINITIVE FIX: Guard the entire listener setup.
+    // Do not proceed if Firebase services are not ready.
+    if (initializationError || !auth || !db) {
         setLoading(false);
         return;
     }
@@ -122,12 +124,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     let userDocUnsubscribe: (() => void) | null = null;
 
     const authUnsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
-      if (!auth) {
-        console.error(`${LOG_PREFIX_CONTEXT} onAuthStateChanged: auth object is undefined, cannot proceed.`);
-        setLoading(false);
-        return;
-      }
-
       console.log(`${LOG_PREFIX_CONTEXT} onAuthStateChanged triggered. FirebaseUser UID:`, firebaseUser?.uid);
       if (userDocUnsubscribe) {
         console.log(`${LOG_PREFIX_CONTEXT} Unsubscribing from previous user document listener.`);
@@ -251,7 +247,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         userDocUnsubscribe();
       }
     };
-  }, [initializationError, auth, db]); 
+  }, []); // Dependency array is now empty. signOutUser is stable via useCallback.
 
   useEffect(() => {
     if (!db) return;
