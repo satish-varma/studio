@@ -61,7 +61,7 @@ export default function StaffListClientPage() {
   const sitesMap: Record<string, string> = sites.reduce((acc, site) => {
     acc[site.id] = site.name;
     return acc;
-  }, {});
+  }, {} as Record<string, string>);
 
   const handleBatchUpdateConfirm = async (updates: { salary?: number; joiningDate?: Date | null; }) => {
     await handleBatchUpdateStaffDetails(selectedUserIds, updates);
