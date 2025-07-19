@@ -45,7 +45,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUserState] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
   
-  // The initialization error is now sourced from firebaseConfig.ts
   const initializationError = firebaseInitializationError;
 
   const [activeSiteId, setActiveSiteState] = useState<string | null>(() => {
@@ -58,6 +57,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   });
   const [activeSite, setActiveSiteObject] = useState<Site | null>(null);
   const [activeStall, setActiveStallObject] = useState<Stall | null>(null);
+
+  const signOutUser = useCallback(async () => {
+    if (!auth) {
+      console.error(`${LOG_PREFIX_CONTEXT}:signOutUser: Firebase Auth not initialized.`);
+      return;
+    }
+    console.log(`${LOG_PREFIX_CONTEXT}:signOutUser: Attempting sign-out.`);
+    try {
+      await firebaseSignOut(auth);
+      console.log(`${LOG_PREFIX_CONTEXT}:signOutUser: Firebase sign-out successful. State updates handled by onAuthStateChanged.`);
+    } catch (error: any) {
+      console.error(`${LOG_PREFIX_CONTEXT}:signOutUser: Sign-out error:`, error.code, error.message);
+    }
+  }, []);
 
   const setUser: React.Dispatch<React.SetStateAction<AppUser | null>> = (newUser) => {
     if (typeof newUser === 'function') {
@@ -79,7 +92,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       } else {
         localStorage.removeItem('activeSiteId');
       }
-      localStorage.removeItem('activeStallId'); // Always remove stall from storage on site change
+      localStorage.removeItem('activeStallId');
     }
   }, []);
 
@@ -109,6 +122,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     let userDocUnsubscribe: (() => void) | null = null;
 
     const authUnsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
+      if (!auth) {
+        console.error(`${LOG_PREFIX_CONTEXT} onAuthStateChanged: auth object is undefined, cannot proceed.`);
+        setLoading(false);
+        return;
+      }
+
       console.log(`${LOG_PREFIX_CONTEXT} onAuthStateChanged triggered. FirebaseUser UID:`, firebaseUser?.uid);
       if (userDocUnsubscribe) {
         console.log(`${LOG_PREFIX_CONTEXT} Unsubscribing from previous user document listener.`);
@@ -143,9 +162,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
           if (appUserToSet.status === 'inactive') {
             console.warn(`${LOG_PREFIX_CONTEXT} Inactive user ${appUserToSet.uid} tried to log in. Signing out.`);
-            if (auth) { // Definitive check right before usage
-              firebaseSignOut(auth);
-            }
+            signOutUser();
             setUserState(null);
             setLoading(false);
             return;
@@ -234,7 +251,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         userDocUnsubscribe();
       }
     };
-  }, [initializationError, auth, db]); 
+  }, [initializationError, auth, db, signOutUser]); 
 
   useEffect(() => {
     if (!db) return;
@@ -385,7 +402,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         defaultStallId: null, managedSiteIds: [], defaultItemSearchTerm: null,
         defaultItemCategoryFilter: null, defaultItemStockStatusFilter: null,
         defaultItemStallFilterOption: null, defaultSalesDateRangeFrom: null,
-        defaultSalesDateRangeTo: null, defaultSalesStaffFilter: null,
+        defaultSalesDateRangeTo: null,
+        defaultSalesStaffFilter: null,
       };
       const userDocRef = doc(db as Firestore, "users", firebaseUser.uid);
       await setDoc(userDocRef, newUserDocData);
@@ -397,20 +415,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       throw error;
     }
   }, [auth, db]);
-
-  const signOutUser = useCallback(async () => {
-    if (!auth) {
-      console.error(`${LOG_PREFIX_CONTEXT}:signOutUser: Firebase Auth not initialized.`);
-      return;
-    }
-    console.log(`${LOG_PREFIX_CONTEXT}:signOutUser: Attempting sign-out.`);
-    try {
-      await firebaseSignOut(auth);
-      console.log(`${LOG_PREFIX_CONTEXT}:signOutUser: Firebase sign-out successful. State updates handled by onAuthStateChanged.`);
-    } catch (error: any) {
-      console.error(`${LOG_PREFIX_CONTEXT}:signOutUser: Sign-out error:`, error.code, error.message);
-    }
-  }, [auth]);
 
   if (initializationError) {
     return (
@@ -467,5 +471,3 @@ export const useAuth = (): AuthContextType => {
   }
   return context;
 };
-
-    
