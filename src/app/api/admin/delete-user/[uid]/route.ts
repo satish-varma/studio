@@ -19,11 +19,17 @@ function initializeAdminApp(): AdminApp {
     });
 }
 
+interface DeleteContext {
+  params: {
+    uid: string;
+  };
+}
+
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { uid: string } }
+  context: DeleteContext
 ) {
-  const uidToDelete = params.uid; 
+  const uidToDelete = context.params.uid; 
   console.log(`${LOG_PREFIX} DELETE request received for UID: ${uidToDelete}`);
   
   let adminApp: AdminApp;
