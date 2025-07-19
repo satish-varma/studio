@@ -20,7 +20,7 @@ import PageHeader from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import CreateUserDialog from "@/components/users/CreateUserDialog";
 import { useUserManagement } from "@/hooks/use-user-management";
-import BatchUpdateStaffDialog from "./BatchUpdateStaffDialog";
+import BatchUpdateStaffDialog from "@/components/staff/BatchUpdateStaffDialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
