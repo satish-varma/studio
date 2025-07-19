@@ -266,11 +266,16 @@ export default function FoodExpensesClientPage() {
       
       const headers = ["Expense ID", "Category", "Total Cost", "Payment Method", "Other Payment Details", "Purchase Date", "Vendor", "Other Vendor Details", "Notes", "Bill Image URL", "Site Name", "Stall Name", "Recorded By (Name)", "Recorded By (UID)"];
       const csvRows = [headers.join(',')];
+      
+      const toDateSafe = (date: Date | Timestamp) => {
+        return (date as Timestamp)?.toDate ? (date as Timestamp).toDate() : new Date(date as string | Date);
+      }
+
       itemsToExport.forEach(expense => {
         const row = [
           escapeCsvCell(expense.id), escapeCsvCell(expense.category), escapeCsvCell(expense.totalCost.toFixed(2)),
           escapeCsvCell(expense.paymentMethod), escapeCsvCell(expense.otherPaymentMethodDetails || ""),
-          escapeCsvCell(format(new Date(expense.purchaseDate), "yyyy-MM-dd")),
+          escapeCsvCell(format(toDateSafe(expense.purchaseDate), "yyyy-MM-dd")),
           escapeCsvCell(expense.vendor || ""), escapeCsvCell(expense.otherVendorDetails || ""),
           escapeCsvCell(expense.notes || ""), escapeCsvCell(expense.billImageUrl || ""),
           escapeCsvCell(expense.siteId ? sitesMap[expense.siteId] || expense.siteId : "N/A"),
