@@ -109,6 +109,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     let userDocUnsubscribe: (() => void) | null = null;
 
     const authUnsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
+      // Add a guard clause here. If auth is not defined, we cannot proceed.
+      if (!auth) {
+        console.error(`${LOG_PREFIX_CONTEXT} onAuthStateChanged: auth object is undefined, cannot proceed.`);
+        setLoading(false);
+        return;
+      }
+
       console.log(`${LOG_PREFIX_CONTEXT} onAuthStateChanged triggered. FirebaseUser UID:`, firebaseUser?.uid);
       if (userDocUnsubscribe) {
         console.log(`${LOG_PREFIX_CONTEXT} Unsubscribing from previous user document listener.`);
@@ -143,9 +150,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
           if (appUserToSet.status === 'inactive') {
             console.warn(`${LOG_PREFIX_CONTEXT} Inactive user ${appUserToSet.uid} tried to log in. Signing out.`);
-            if (auth) { // Add a guard clause here
-              firebaseSignOut(auth);
-            }
+            firebaseSignOut(auth); // This is now safe because of the guard clause above
             setUserState(null);
             setLoading(false);
             return;
