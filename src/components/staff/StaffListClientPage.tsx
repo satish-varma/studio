@@ -20,7 +20,7 @@ import PageHeader from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import CreateUserDialog from "@/components/users/CreateUserDialog";
 import { useUserManagement } from "@/hooks/use-user-management";
-import BatchUpdateStaffDialog from "./BatchUpdateStaffDialog";
+import BatchUpdateStaffDialog from "@/components/staff/BatchUpdateStaffDialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -61,7 +61,7 @@ export default function StaffListClientPage() {
   const sitesMap: Record<string, string> = sites.reduce((acc, site) => {
     acc[site.id] = site.name;
     return acc;
-  }, {});
+  }, {} as Record<string, string>);
 
   const handleBatchUpdateConfirm = async (updates: { salary?: number; joiningDate?: Date | null; }) => {
     await handleBatchUpdateStaffDetails(selectedUserIds, updates);
