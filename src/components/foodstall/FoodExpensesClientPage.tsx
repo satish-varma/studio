@@ -2,16 +2,16 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import type { FoodItemExpense, Site, Stall } from "@/types/food";
-import { 
-  getFirestore, 
-  collection, 
-  query, 
-  where, 
-  orderBy, 
-  limit, 
-  startAfter, 
-  endBefore, 
+import type { FoodItemExpense, Site, Stall } from "@/types";
+import {
+  getFirestore,
+  collection,
+  query,
+  where,
+  orderBy,
+  limit,
+  startAfter,
+  endBefore,
   getDocs,
   Timestamp,
   QueryConstraint,
@@ -212,7 +212,7 @@ export default function FoodExpensesClientPage() {
     };
     initialFetch();
     return () => { document.title = "StallSync - Stock Management"; }
-  }, [dateFilter, categoryFilter, user, activeSiteId, activeStallId]);
+  }, [dateFilter, categoryFilter, user, activeSiteId, activeStallId, fetchExpenses]);
 
   const escapeCsvCell = (cellData: any): string => {
     if (cellData === null || cellData === undefined) return "";
