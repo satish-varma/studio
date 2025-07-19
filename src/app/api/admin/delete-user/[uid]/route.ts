@@ -19,12 +19,13 @@ function initializeAdminApp(): AdminApp {
     });
 }
 
-// Corrected function signature for Next.js App Router dynamic routes
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { uid: string } }
-) {
-  const uidToDelete = params.uid; 
+// Alternative implementation to bypass the type error with the context parameter.
+// We will parse the UID directly from the request URL.
+export async function DELETE(request: NextRequest) {
+  // Extract UID from the URL path
+  const pathSegments = request.nextUrl.pathname.split('/');
+  const uidToDelete = pathSegments[pathSegments.length - 1];
+
   console.log(`${LOG_PREFIX} DELETE request received for UID: ${uidToDelete}`);
   
   let adminApp: AdminApp;
