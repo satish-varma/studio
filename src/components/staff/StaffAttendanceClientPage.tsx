@@ -29,6 +29,7 @@ import ManageHolidaysDialog from "./ManageHolidaysDialog";
 import { logStaffActivity } from "@/lib/staffLogger";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DatePicker } from "../ui/date-picker";
+import { useUserManagement } from "@/hooks/use-user-management";
 
 const LOG_PREFIX = "[StaffAttendanceClientPage]";
 
@@ -47,14 +48,9 @@ const statusCycle: (AttendanceStatus | null)[] = ["Present", "Absent", "Leave", 
 export default function StaffAttendanceClientPage() {
   const { user, activeSiteId, loading: authLoading } = useAuth();
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [allStaffForSite, setAllStaffForSite] = useState<AppUser[]>([]);
-  const [staffDetailsMap, setStaffDetailsMap] = useState<Map<string, StaffDetails>>(new Map());
   const [attendance, setAttendance] = useState<Record<string, Record<string, StaffAttendance>> | null>(null);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
-  const [loading, setLoading] = useState(true);
   const { toast } = useToast();
-  const [sitesMap, setSitesMap] = useState<Record<string, string>>({});
-  const [sites, setSites] = useState<Site[]>([]);
   const [isHolidaysDialogOpen, setIsHolidaysDialogOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<UserStatus | 'all'>('active');
 
@@ -62,22 +58,25 @@ export default function StaffAttendanceClientPage() {
   const [bulkUpdateDate, setBulkUpdateDate] = useState<Date>(new Date());
   const [isBulkUpdating, setIsBulkUpdating] = useState(false);
 
+  // Use the optimized hook to fetch users and related data
+  const {
+    users: allStaffForSite,
+    sites,
+    staffDetails: staffDetailsMap,
+    loading: userManagementLoading,
+    error: userManagementError,
+  } = useUserManagement();
+
+  const sitesMap: Record<string, string> = useMemo(() => sites.reduce((acc, site) => {
+    acc[site.id] = site.name;
+    return acc;
+  }, {} as Record<string, string>), [sites]);
+
   const isAllSitesView = user?.role === 'admin' && !activeSiteId;
 
   const handlePrevMonth = () => setCurrentMonth(prev => subMonths(prev, 1));
   const handleNextMonth = () => setCurrentMonth(prev => addMonths(prev, 1));
   const handleGoToCurrentMonth = () => setCurrentMonth(new Date());
-
-  const staffQuery = useMemo(() => {
-    if (authLoading || !user) return null;
-    if (user.role !== 'manager' && user.role !== 'admin') return null;
-    
-    let q = query(collection(db, "users"), where("role", "in", ["staff", "manager"]));
-    if (activeSiteId) {
-      q = query(q, where("defaultSiteId", "==", activeSiteId));
-    }
-    return q;
-  }, [activeSiteId, authLoading, user]);
 
   const filteredStaffList = useMemo(() => {
     if (statusFilter === 'all') {
@@ -86,62 +85,16 @@ export default function StaffAttendanceClientPage() {
     return allStaffForSite.filter(u => (u.status || 'active') === statusFilter);
   }, [allStaffForSite, statusFilter]);
   
-  // Effect to clear selection when filters change
   useEffect(() => {
     setSelectedStaffUids([]);
   }, [statusFilter, currentMonth, activeSiteId]);
-
-
-  useEffect(() => {
-    if (!staffQuery) {
-      if (!authLoading) setLoading(false);
-      setAllStaffForSite([]);
-      return;
-    }
-    setLoading(true);
-    const unsubscribe = onSnapshot(staffQuery, async (snapshot) => {
-      const fetchedStaff = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser));
-      setAllStaffForSite(fetchedStaff.sort((a, b) => (a.displayName || a.email || "").localeCompare(b.displayName || b.email || "")));
-      
-      // Fetch staff details as well
-      if(fetchedStaff.length > 0) {
-        const uids = fetchedStaff.map(s => s.uid);
-        const detailsQuery = query(collection(db, 'staffDetails'), where('__name__', 'in', uids));
-        const detailsSnapshot = await getDocs(detailsQuery);
-        const newDetailsMap = new Map<string, StaffDetails>();
-        detailsSnapshot.forEach(doc => newDetailsMap.set(doc.id, doc.data() as StaffDetails));
-        setStaffDetailsMap(newDetailsMap);
-      }
-
-      setLoading(false);
-    }, (error) => {
-      console.error("Error fetching staff:", error);
-      toast({ title: "Error", description: "Could not fetch staff list.", variant: "destructive" });
-      setLoading(false);
-    });
-    return () => unsubscribe();
-  }, [staffQuery, toast]);
   
-  useEffect(() => {
-      getDocs(collection(db, "sites")).then(sitesSnapshot => {
-        const newSitesMap: Record<string, string> = {};
-        const sitesList: Site[] = [];
-        sitesSnapshot.forEach(doc => {
-            const siteData = { id: doc.id, ...doc.data() } as Site;
-            newSitesMap[doc.id] = siteData.name;
-            sitesList.push(siteData);
-        });
-        setSitesMap(newSitesMap);
-        setSites(sitesList);
-    });
-  }, []);
-
   useEffect(() => {
     const firstDay = startOfMonth(currentMonth);
     const lastDay = endOfMonth(currentMonth);
 
     const uids = allStaffForSite.map(s => s.uid);
-    setAttendance({});
+    setAttendance({}); // Reset attendance when staff list or month changes
 
     if (uids.length > 0) {
         const uidsBatches: string[][] = [];
@@ -385,7 +338,6 @@ export default function StaffAttendanceClientPage() {
     try {
         await batch.commit();
         
-        // Optimistically update local state
         setAttendance(prev => {
             const newAttendance = JSON.parse(JSON.stringify(prev || {}));
             selectedStaffUids.forEach(uid => {
@@ -417,7 +369,7 @@ export default function StaffAttendanceClientPage() {
   };
 
 
-  if (authLoading) return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin" /></div>;
+  if (authLoading || userManagementLoading) return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin" /></div>;
 
   return (
     <div className="space-y-6">
@@ -471,12 +423,14 @@ export default function StaffAttendanceClientPage() {
         </div>
       )}
 
-      {!isAllSitesView && !activeSiteId && !authLoading ? (
+      {userManagementError ? (
+         <Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{userManagementError}</AlertDescription></Alert>
+      ) : !activeSiteId && !isAllSitesView ? (
          <Alert variant="default" className="border-primary/50">
             <Info className="h-4 w-4" /><AlertTitle>Site Selection Required</AlertTitle>
-            <AlertDescription>Please select a site from the header to manage staff attendance, or select "All Sites" if you are an admin.</AlertDescription>
+            <AlertDescription>Please select a site from the header to manage staff attendance.</AlertDescription>
         </Alert>
-      ) : loading || attendance === null ? (
+      ) : userManagementLoading || attendance === null ? (
         <div className="flex justify-center items-center py-10"><Loader2 className="h-6 w-6 animate-spin" /><p className="ml-2">Loading staff and attendance data...</p></div>
       ) : filteredStaffList.length === 0 ? (
         <div className="text-center py-10 text-muted-foreground">No staff matching the current filters found for the selected context.</div>
