@@ -90,34 +90,57 @@ export default function SalaryAdvanceClientPage() {
   });
 
   useEffect(() => {
-    if (userManagementLoading) {
+    if (userManagementLoading || authLoading) {
       setLoading(true);
       return;
     }
-
-    if (staffList.length > 0) {
-        const staffUids = staffList.map(s => s.uid);
-        const advancesQuery = query(collection(db, "advances"), where("staffUid", "in", staffUids), orderBy("date", "desc"));
-        const unsubscribeAdvances = onSnapshot(advancesQuery, (advSnapshot) => {
-            setAdvances(advSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SalaryAdvance)));
-            setLoading(false);
-        }, (error) => {
-            console.error("Error fetching salary advances:", error);
-            toast({ title: "Error", description: "Could not fetch salary advances.", variant: "destructive" });
-            setLoading(false);
-        });
-        return () => unsubscribeAdvances();
-    } else {
-        setAdvances([]);
-        setLoading(false);
+  
+    // Determine the UIDs to query for based on the view (all sites or single site)
+    const staffToQuery = staffList;
+    if (staffToQuery.length === 0) {
+      setAdvances([]);
+      setLoading(false);
+      return;
     }
-  }, [staffList, userManagementLoading, toast]);
+  
+    const staffUids = staffToQuery.map(s => s.uid);
+  
+    // Batch UIDs for 'in' query limitation (max 30 values per 'in' query)
+    const uidsBatches: string[][] = [];
+    for (let i = 0; i < staffUids.length; i += 30) {
+      uidsBatches.push(staffUids.slice(i, i + 30));
+    }
+  
+    const unsubscribers = uidsBatches.map(batch => {
+      const advancesQuery = query(collection(db, "advances"), where("staffUid", "in", batch), orderBy("date", "desc"));
+      return onSnapshot(advancesQuery, (snapshot) => {
+        const batchAdvances = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SalaryAdvance));
+        setAdvances(prev => {
+          // Filter out old advances for this batch and add new ones
+          const otherAdvances = prev.filter(adv => !batch.includes(adv.staffUid));
+          return [...otherAdvances, ...batchAdvances].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        });
+        setLoading(false);
+      }, (error) => {
+        console.error("Error fetching salary advances:", error);
+        toast({ title: "Error", description: "Could not fetch salary advances.", variant: "destructive" });
+        setLoading(false);
+      });
+    });
+  
+    return () => unsubscribers.forEach(unsub => unsub());
+  }, [staffList, userManagementLoading, authLoading, toast]);
 
 
   const handleAddAdvance = async (values: SalaryAdvanceFormValues) => {
     const staffMember = staffList.find(s => s.uid === selectedStaff);
-    if (!user || !activeSiteId || !staffMember) {
-        toast({ title: "Error", description: "User context or selected staff is missing.", variant: "destructive"});
+    if (!user || !staffMember) {
+        toast({ title: "Error", description: "Current user or selected staff is missing.", variant: "destructive"});
+        return;
+    }
+
+    if (!staffMember.defaultSiteId) {
+        toast({ title: "Error", description: `${staffMember.displayName} is not assigned to a site. Cannot record advance.`, variant: "destructive"});
         return;
     }
 
@@ -125,7 +148,7 @@ export default function SalaryAdvanceClientPage() {
         const advanceData = {
             ...values,
             staffUid: staffMember.uid,
-            siteId: activeSiteId,
+            siteId: staffMember.defaultSiteId, // Use staff's assigned site
             date: values.date.toISOString(),
             recordedByUid: user.uid,
             recordedByName: user.displayName || user.email,
@@ -135,7 +158,7 @@ export default function SalaryAdvanceClientPage() {
         await logStaffActivity(user, {
             type: 'SALARY_ADVANCE_GIVEN',
             relatedStaffUid: staffMember.uid,
-            siteId: activeSiteId,
+            siteId: staffMember.defaultSiteId,
             details: {
                 amount: values.amount,
                 notes: `Advance given to ${staffMember.displayName || staffMember.email} on ${format(values.date, 'PPP')}.`,
@@ -155,13 +178,14 @@ export default function SalaryAdvanceClientPage() {
 
   if (authLoading || userManagementLoading) return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin" /></div>;
   
-  if (!activeSiteId && user?.role !== 'admin') {
-     return (
-        <Alert variant="default" className="border-primary/50">
-            <Info className="h-4 w-4" /><AlertTitle>Site Selection Required</AlertTitle>
-            <AlertDescription>Please select a site from the header to manage salary advances.</AlertDescription>
-        </Alert>
-     );
+  if (!activeSiteId && user?.role === 'manager') {
+    // This message is now informational, the page is functional
+    // return (
+    //     <Alert variant="default" className="border-primary/50 mb-4">
+    //         <Info className="h-4 w-4" /><AlertTitle>All Sites View</AlertTitle>
+    //         <AlertDescription>You are viewing advances for all staff across all your managed sites. Select a staff member to record a new advance for their assigned site.</AlertDescription>
+    //     </Alert>
+    // );
   }
 
   return (
@@ -170,7 +194,9 @@ export default function SalaryAdvanceClientPage() {
         <div className="flex justify-between items-center">
             <div>
                 <CardTitle>Salary Advance History</CardTitle>
-                <CardDescription>All advances recorded for staff at this site.</CardDescription>
+                <CardDescription>
+                  {activeSiteId ? "Advances recorded for staff at this site." : "Advances for staff across all managed sites."}
+                </CardDescription>
             </div>
             <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
                 <DialogTrigger asChild>
@@ -213,7 +239,7 @@ export default function SalaryAdvanceClientPage() {
         {loading ? (
              <div className="flex justify-center items-center py-10"><Loader2 className="h-6 w-6 animate-spin" /></div>
         ) : advances.length === 0 ? (
-            <p className="text-center text-muted-foreground py-6">No salary advances recorded for staff at this site.</p>
+            <p className="text-center text-muted-foreground py-6">No salary advances recorded for staff in the current view.</p>
         ) : (
             <div className="rounded-md border">
             <Table>
