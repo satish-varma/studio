@@ -63,39 +63,24 @@ export function useUserManagement() {
 
     setLoading(true);
 
-    let usersQuery;
-    const isManagerAllSitesView = currentUser.role === 'manager' && !activeSiteId;
-
-    if (isManagerAllSitesView && currentUser.managedSiteIds && currentUser.managedSiteIds.length > 0) {
-      // For manager in "All Sites" view, fetch users from all their managed sites.
-      usersQuery = query(collection(db, "users"), where("defaultSiteId", "in", currentUser.managedSiteIds));
-    } else if (activeSiteId) {
-      // For a specific site view (for both admin and manager)
-      usersQuery = query(collection(db, "users"), where("defaultSiteId", "==", activeSiteId));
-    } else { // Admin "All Sites" view or manager with no sites
-      usersQuery = query(collection(db, "users"), orderBy("displayName", "asc"));
-    }
-
+    const usersQuery = query(collection(db, "users"), orderBy("displayName", "asc"));
     const sitesQuery = query(collection(db, "sites"), orderBy("name", "asc"));
     const stallsQuery = query(collection(db, "stalls"), orderBy("name", "asc"));
+    const staffDetailsQuery = query(collection(db, "staffDetails"));
 
     const unsubUsers = onSnapshot(usersQuery, (snapshot) => {
       let fetchedUsers = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser));
-      // For Admin "All Sites", filter client-side. For Manager "All Sites", data is pre-filtered by query.
-      if (currentUser.role === 'admin' && !activeSiteId) {
-        // No filter needed for admin, show all
-      } else if (currentUser.role === 'manager' && !activeSiteId) {
-        // Already filtered by query
-      } else if(activeSiteId) {
-        // Already filtered by query
+      
+      if (currentUser.role === 'manager') {
+        const managerSiteIds = currentUser.managedSiteIds || [];
+        fetchedUsers = fetchedUsers.filter(u => u.defaultSiteId && managerSiteIds.includes(u.defaultSiteId));
       }
-      setUsers(fetchedUsers.sort((a,b) => (a.displayName || "").localeCompare(b.displayName || "")));
+      setUsers(fetchedUsers);
     }, (err) => {
       console.error(`${LOG_PREFIX} Error fetching users:`, err);
       setError("Failed to load users list.");
     });
     
-    // Fetch all sites and stalls for context mapping
     const unsubSites = onSnapshot(sitesQuery, (snapshot) => {
       setSites(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Site)));
     }, (err) => {
@@ -110,8 +95,6 @@ export function useUserManagement() {
       setError("Failed to load stalls list.");
     });
     
-    // Fetch all staff details
-    const staffDetailsQuery = query(collection(db, "staffDetails"));
     const unsubStaffDetails = onSnapshot(staffDetailsQuery, (snapshot) => {
         const newDetailsMap = new Map<string, StaffDetails>();
         snapshot.forEach(doc => newDetailsMap.set(doc.id, doc.data() as StaffDetails));
@@ -140,7 +123,7 @@ export function useUserManagement() {
       unsubStalls();
       unsubStaffDetails();
     };
-  }, [currentUser, authLoading, activeSiteId]);
+  }, [currentUser, authLoading]);
 
   const handleCreateUserFirestoreDoc = useCallback(async (uid: string, newUserData: Omit<AppUser, 'createdAt' | 'uid'>): Promise<boolean> => {
     if (!currentUser || currentUser.role !== 'admin') {
@@ -246,17 +229,32 @@ export function useUserManagement() {
       const updates: Record<string, any> = { status: newStatus };
       await updateDoc(userDocRef, updates);
 
-      if (exitDate) {
-        const detailsDocRef = doc(db, "staffDetails", userId);
-        await setDoc(detailsDocRef, { exitDate: exitDate.toISOString() }, { merge: true });
-        toast({ title: "Status & Exit Date Updated", description: `User set to ${newStatus} with exit date.` });
-      } else {
-        toast({ title: "Status Updated", description: `User has been set to ${newStatus}.` });
+      const detailsDocRef = doc(db, "staffDetails", userId);
+      const detailsUpdate: Record<string, any> = {};
+      if (newStatus === 'inactive' && exitDate) {
+        detailsUpdate.exitDate = exitDate.toISOString();
+      } else if (newStatus === 'active') {
+        detailsUpdate.exitDate = null; // Clear exit date on reactivation
       }
+      if (Object.keys(detailsUpdate).length > 0) {
+        await setDoc(detailsDocRef, detailsUpdate, { merge: true });
+      }
+
+      await logStaffActivity(currentUser, {
+        type: 'USER_STATUS_CHANGED',
+        relatedStaffUid: userId,
+        siteId: users.find(u => u.uid === userId)?.defaultSiteId || null,
+        details: {
+            status: newStatus,
+            notes: `User status changed to ${newStatus}. ${exitDate ? `Exit date set to ${exitDate.toLocaleDateString()}` : ''}`
+        }
+      });
+      
+      toast({ title: "Status Updated", description: `User has been set to ${newStatus}.` });
     } catch (error: any) {
       toast({ title: "Update Failed", description: `Could not update status: ${error.message}`, variant: "destructive" });
     }
-  }, [currentUser, toast]);
+  }, [currentUser, toast, users]);
 
   const handleBatchUpdateStaffDetails = useCallback(async (userIds: string[], updates: { salary?: number; joiningDate?: Date | null; }) => {
     if (!currentUser || currentUser.role !== 'admin') {
@@ -287,7 +285,7 @@ export function useUserManagement() {
         
         const logNotesParts: string[] = [];
         if (updates.salary !== undefined) logNotesParts.push(`Salary to ₹${updates.salary.toFixed(2)}`);
-        if (updates.joiningDate) logNotesParts.push(`Joining Date to ${updates.joiningDate.toLocaleDateString()}`);
+        if (updates.joiningDate) logNotesParts.push(`Joining date to ${updates.joiningDate.toLocaleDateString()}`);
         
         logStaffActivity(currentUser, {
             type: 'STAFF_DETAILS_UPDATED',

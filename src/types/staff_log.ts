@@ -3,7 +3,8 @@ export type StaffActivityType =
   | 'ATTENDANCE_MARKED'
   | 'SALARY_ADVANCE_GIVEN'
   | 'STAFF_DETAILS_UPDATED'
-  | 'SALARY_PAID';
+  | 'SALARY_PAID'
+  | 'USER_STATUS_CHANGED';
 
 export interface StaffActivityLog {
   id?: string; // Firestore document ID

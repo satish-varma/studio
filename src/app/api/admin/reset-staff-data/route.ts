@@ -5,7 +5,7 @@ import { initializeApp, getApps, cert, App as AdminApp } from 'firebase-admin/ap
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { getFirestore as getAdminFirestore, CollectionReference, Query, WriteBatch } from 'firebase-admin/firestore';
 
-const LOG_PREFIX = "[API:ResetData]";
+const LOG_PREFIX = "[API:ResetStaffData]";
 
 function initializeAdminApp(): AdminApp {
     if (getApps().length > 0) {
@@ -20,17 +20,12 @@ function initializeAdminApp(): AdminApp {
     });
 }
 
-// Staff-related data is now excluded and handled by its own API endpoint.
 const COLLECTIONS_TO_DELETE = [
-  "stockItems",
-  "salesTransactions",
-  "stockMovementLogs",
-  "sites",
-  "stalls",
-  "foodItemExpenses",
-  "foodSaleTransactions",
-  "foodStallActivityLogs",
-  "foodVendors",
+  "staffDetails",
+  "staffAttendance",
+  "advances",
+  "salaryPayments",
+  "staffActivityLogs",
 ];
 const BATCH_SIZE = 500;
 
@@ -82,7 +77,6 @@ async function deleteQueryBatch(
   }
 }
 
-
 export async function POST(request: NextRequest) {
   console.log(`${LOG_PREFIX} POST request received.`);
   
@@ -94,30 +88,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Server Configuration Error.', details: e.message }, { status: 500 });
   }
 
-  const adminDbInstance = getAdminFirestore(adminApp);
-
+  const adminDb = getAdminFirestore(adminApp);
 
   let callingUserUid: string | undefined;
   try {
     const authorization = request.headers.get('Authorization');
     if (!authorization?.startsWith('Bearer ')) {
-      console.warn(`${LOG_PREFIX} Authorization header missing or malformed.`);
       return NextResponse.json({ error: 'Unauthorized: Missing or invalid token format.' }, { status: 401 });
     }
     const idToken = authorization.split('Bearer ')[1];
     const decodedToken = await getAdminAuth(adminApp).verifyIdToken(idToken);
     callingUserUid = decodedToken.uid;
 
-    const adminUserDocRef = adminDbInstance.collection('users').doc(callingUserUid);
+    const adminUserDocRef = adminDb.collection('users').doc(callingUserUid);
     const adminUserDoc = await adminUserDocRef.get();
 
     if (!adminUserDoc.exists || adminUserDoc.data()?.role !== 'admin') {
-      console.warn(`${LOG_PREFIX} Forbidden. Caller UID ${callingUserUid} is not an admin. Role: ${adminUserDoc.data()?.role ?? 'not found'}`);
       return NextResponse.json({ error: 'Forbidden: Caller is not an admin.' }, { status: 403 });
     }
 
     const { confirmation } = await request.json();
-    if (confirmation !== "RESET APP DATA") { // Updated confirmation phrase
+    if (confirmation !== "RESET STAFF DATA") {
         return NextResponse.json({ error: 'Reset confirmation phrase is incorrect.' }, { status: 400 });
     }
 
@@ -126,7 +117,7 @@ export async function POST(request: NextRequest) {
 
     for (const collectionPath of COLLECTIONS_TO_DELETE) {
       try {
-        await deleteCollection(adminDbInstance, collectionPath, BATCH_SIZE);
+        await deleteCollection(adminDb, collectionPath, BATCH_SIZE);
         collectionsSuccessfullyReset++;
       } catch (error: any) {
         errorsEncountered++;
@@ -136,30 +127,16 @@ export async function POST(request: NextRequest) {
 
     if (errorsEncountered > 0) {
         return NextResponse.json({ 
-            message: `Application data reset process completed with ${errorsEncountered} error(s). Some collections might not be fully cleared. Check server logs.`,
+            message: `Staff data reset process completed with ${errorsEncountered} error(s).`,
             errors: errorsEncountered,
             successes: collectionsSuccessfullyReset 
-        }, { status: 207 }); // 207 Multi-Status
+        }, { status: 207 });
     }
 
-    return NextResponse.json({ message: 'Application data (excluding users and staff management data) has been reset successfully.' }, { status: 200 });
+    return NextResponse.json({ message: 'All staff management data has been reset successfully.' }, { status: 200 });
 
   } catch (error: any) {
-    console.error(`${LOG_PREFIX} Error during data reset process (Caller UID: ${callingUserUid || 'unknown'}):`, error.message, error.stack);
-    let errorMessage = 'Internal Server Error';
-    let statusCode = 500;
-
-    if (error.code === 'auth/id-token-expired' || error.code === 'auth/argument-error') {
-      errorMessage = 'Unauthorized: Invalid or expired token.';
-      statusCode = 401;
-    } else if (error instanceof SyntaxError && error.message.includes("JSON")) {
-      errorMessage = "Invalid JSON in request body (expected confirmation).";
-      statusCode = 400;
-    } else if (error.message?.includes("UNAUTHENTICATED")) {
-      errorMessage = `Firebase service reported an UNAUTHENTICATED error. This usually means the service account used by the Admin SDK lacks the necessary IAM permissions. Please check its roles in Google Cloud Console. Original error: ${error.message}`;
-      statusCode = 403;
-    }
-    
-    return NextResponse.json({ error: errorMessage, details: error.message || 'Unknown server error' }, { status: statusCode });
+    console.error(`${LOG_PREFIX} Error during staff data reset process:`, error.message, error.stack);
+    return NextResponse.json({ error: `An unexpected error occurred: ${error.message}` }, { status: 500 });
   }
 }
