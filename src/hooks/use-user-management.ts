@@ -13,7 +13,9 @@ import {
   getDoc,
   query,
   orderBy,
-  writeBatch
+  writeBatch,
+  where,
+  QueryConstraint
 } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { getAuth } from "firebase/auth";
@@ -36,7 +38,7 @@ const db = getFirestore();
 const auth = getAuth(getApp());
 
 export function useUserManagement() {
-  const { user: currentUser, loading: authLoading } = useAuth();
+  const { user: currentUser, loading: authLoading, activeSiteId } = useAuth();
   const { toast } = useToast();
 
   const [users, setUsers] = useState<AppUser[]>([]);
@@ -61,18 +63,39 @@ export function useUserManagement() {
 
     setLoading(true);
 
-    const usersQuery = query(collection(db, "users"), orderBy("displayName", "asc"));
+    let usersQuery;
+    const isManagerAllSitesView = currentUser.role === 'manager' && !activeSiteId;
+
+    if (isManagerAllSitesView && currentUser.managedSiteIds && currentUser.managedSiteIds.length > 0) {
+      // For manager in "All Sites" view, fetch users from all their managed sites.
+      usersQuery = query(collection(db, "users"), where("defaultSiteId", "in", currentUser.managedSiteIds));
+    } else if (activeSiteId) {
+      // For a specific site view (for both admin and manager)
+      usersQuery = query(collection(db, "users"), where("defaultSiteId", "==", activeSiteId));
+    } else { // Admin "All Sites" view or manager with no sites
+      usersQuery = query(collection(db, "users"), orderBy("displayName", "asc"));
+    }
+
     const sitesQuery = query(collection(db, "sites"), orderBy("name", "asc"));
     const stallsQuery = query(collection(db, "stalls"), orderBy("name", "asc"));
-    const staffDetailsQuery = query(collection(db, "staffDetails"));
 
     const unsubUsers = onSnapshot(usersQuery, (snapshot) => {
-      setUsers(snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser)));
+      let fetchedUsers = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser));
+      // For Admin "All Sites", filter client-side. For Manager "All Sites", data is pre-filtered by query.
+      if (currentUser.role === 'admin' && !activeSiteId) {
+        // No filter needed for admin, show all
+      } else if (currentUser.role === 'manager' && !activeSiteId) {
+        // Already filtered by query
+      } else if(activeSiteId) {
+        // Already filtered by query
+      }
+      setUsers(fetchedUsers.sort((a,b) => (a.displayName || "").localeCompare(b.displayName || "")));
     }, (err) => {
       console.error(`${LOG_PREFIX} Error fetching users:`, err);
       setError("Failed to load users list.");
     });
-
+    
+    // Fetch all sites and stalls for context mapping
     const unsubSites = onSnapshot(sitesQuery, (snapshot) => {
       setSites(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Site)));
     }, (err) => {
@@ -86,7 +109,9 @@ export function useUserManagement() {
       console.error(`${LOG_PREFIX} Error fetching stalls:`, err);
       setError("Failed to load stalls list.");
     });
-
+    
+    // Fetch all staff details
+    const staffDetailsQuery = query(collection(db, "staffDetails"));
     const unsubStaffDetails = onSnapshot(staffDetailsQuery, (snapshot) => {
         const newDetailsMap = new Map<string, StaffDetails>();
         snapshot.forEach(doc => newDetailsMap.set(doc.id, doc.data() as StaffDetails));
@@ -115,7 +140,7 @@ export function useUserManagement() {
       unsubStalls();
       unsubStaffDetails();
     };
-  }, [currentUser, authLoading]);
+  }, [currentUser, authLoading, activeSiteId]);
 
   const handleCreateUserFirestoreDoc = useCallback(async (uid: string, newUserData: Omit<AppUser, 'createdAt' | 'uid'>): Promise<boolean> => {
     if (!currentUser || currentUser.role !== 'admin') {
@@ -234,8 +259,8 @@ export function useUserManagement() {
   }, [currentUser, toast]);
 
   const handleBatchUpdateStaffDetails = useCallback(async (userIds: string[], updates: { salary?: number; joiningDate?: Date | null; }) => {
-    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) {
-      toast({ title: "Permission Denied", description: "Only admins and managers can perform batch updates.", variant: "destructive" });
+    if (!currentUser || currentUser.role !== 'admin') {
+      toast({ title: "Permission Denied", description: "Only admins can perform batch updates.", variant: "destructive" });
       return;
     }
     if (userIds.length === 0) {
