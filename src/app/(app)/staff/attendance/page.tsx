@@ -169,10 +169,10 @@ export default function StaffAttendanceClientPage() {
   const handleStatusChange = useCallback(async (staff: AppUser, date: Date) => {
     const holidayInfo = isHoliday(date, staff.defaultSiteId);
     if (!user) return;
-    if (isAllSitesView) {
-      toast({title: "Read-only", description: "Select a specific site from the header to mark attendance.", variant: "default"});
-      return;
-    }
+    
+    // THIS IS THE FIX: The incorrect "isAllSitesView" check is removed.
+    // The logic now correctly relies on the staff member's own site assignment.
+
     if (!staff.defaultSiteId) {
         toast({ title: "No Site Assigned", description: `${staff.displayName} is not assigned to a site.`, variant: "destructive" });
         return;
@@ -250,7 +250,7 @@ export default function StaffAttendanceClientPage() {
       toast({ title: "Save Failed", description: `Failed to save status for ${staff.displayName}. Reverting change.`, variant: "destructive"});
       setAttendance(prevAttendance);
     }
-  }, [user, attendance, isHoliday, isAllSitesView, toast, staffDetailsMap]);
+  }, [user, attendance, isHoliday, toast, staffDetailsMap]);
 
   const processBulkAction = async (action: (batch: ReturnType<typeof writeBatch>, staff: AppUser, date: Date) => { valid: boolean; status?: AttendanceStatus }) => {
     if (!user) {
@@ -353,7 +353,7 @@ export default function StaffAttendanceClientPage() {
       const docId = `${format(date, 'yyyy-MM-dd')}_${staff.uid}`;
       const docRef = doc(db, "staffAttendance", docId);
       batch.delete(docRef);
-      return { valid: true, status: 'Cleared' };
+      return { valid: true }; // status is undefined for delete, handled as 'Cleared'
     });
   };
 
@@ -364,7 +364,7 @@ export default function StaffAttendanceClientPage() {
     <div className="space-y-6">
       <PageHeader
         title="Monthly Attendance Register"
-        description={isAllSitesView ? "Viewing all staff across all sites. Select a site to edit." : "Viewing staff for the selected site."}
+        description={isAllSitesView ? "Viewing all staff across all sites." : "Viewing staff for the selected site."}
         actions={user?.role === 'admin' ? (
           <Button variant="outline" onClick={() => setIsHolidaysDialogOpen(true)}>
             <CalendarDays className="mr-2 h-4 w-4" /> Manage Holidays
