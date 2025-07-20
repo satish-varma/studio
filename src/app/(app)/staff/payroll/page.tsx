@@ -16,7 +16,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Info, ChevronLeft, ChevronRight } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { format, startOfMonth, endOfMonth, subMonths, addMonths, getDaysInMonth, isBefore, isAfter, max, min } from "date-fns";
+import { format, startOfMonth, endOfMonth, subMonths, addMonths, getDaysInMonth, isBefore, isAfter, max, min, startOfDay } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { PayrollTable } from "@/components/staff/PayrollTable";
 import { useUserManagement } from "@/hooks/use-user-management";
@@ -78,7 +78,7 @@ export default function PayrollClientPage() {
     if (isAfter(effectiveStartDate, effectiveEndDate)) return 0;
 
     let workingDays = 0;
-    let currentDate = effectiveStartDate;
+    let currentDate = new Date(effectiveStartDate); // Clone the date to avoid mutation
 
     while(currentDate <= effectiveEndDate) {
       const dayOfWeek = currentDate.getDay();
@@ -91,7 +91,7 @@ export default function PayrollClientPage() {
       if (!isWeekend && !isGlobalHoliday && !isSiteHoliday) {
         workingDays++;
       }
-      currentDate = new Date(currentDate.setDate(currentDate.getDate() + 1));
+      currentDate.setDate(currentDate.getDate() + 1);
     }
     
     return workingDays;
@@ -112,7 +112,6 @@ export default function PayrollClientPage() {
     setLoadingPayrollCalcs(true);
     const uids = staffList.map(s => s.uid);
     
-    // Batch UIDs for 'in' queries
     const uidsBatches: string[][] = [];
     for (let i = 0; i < uids.length; i += 30) {
         uidsBatches.push(uids.slice(i, i + 30));
@@ -123,21 +122,35 @@ export default function PayrollClientPage() {
 
     const fetchPayrollDependencies = async () => {
         try {
-            const [advancesDocs, paymentsDocs, holidaysDocs, attendanceDocs] = await Promise.all([
-                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "advances"), where("staffUid", "in", batch), where("date", ">=", firstDayOfMonth.toISOString()), where("date", "<=", lastDayOfMonth.toISOString()))))),
-                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", batch), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear()))))),
-                getDocs(query(collection(db, "holidays"), where("date", ">=", format(firstDayOfMonth, 'yyyy-MM-dd')), where("date", "<=", format(lastDayOfMonth, 'yyyy-MM-dd')))),
-                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "staffAttendance"), where("staffUid", "in", batch), where("date", ">=", format(firstDayOfMonth, 'yyyy-MM-dd')), where("date", "<=", format(lastDayOfMonth, 'yyyy-MM-dd'))))))
+            const advancesQueryPromises = uidsBatches.map(batch =>
+                getDocs(query(collection(db, "advances"), where("staffUid", "in", batch), where("date", ">=", firstDayOfMonth.toISOString()), where("date", "<=", lastDayOfMonth.toISOString())))
+            );
+
+            const paymentsQueryPromises = uidsBatches.map(batch =>
+                getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", batch), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear())))
+            );
+
+            const attendanceQueryPromises = uidsBatches.map(batch => 
+                getDocs(query(collection(db, "staffAttendance"), where("staffUid", "in", batch), where("date", ">=", format(firstDayOfMonth, 'yyyy-MM-dd')), where("date", "<=", format(lastDayOfMonth, 'yyyy-MM-dd'))))
+            );
+            
+            const holidaysQuery = query(collection(db, "holidays"), where("date", ">=", format(firstDayOfMonth, 'yyyy-MM-dd')), where("date", "<=", format(lastDayOfMonth, 'yyyy-MM-dd')));
+
+            const [advancesSnapshots, paymentsSnapshots, holidaysDocs, attendanceSnapshots] = await Promise.all([
+                Promise.all(advancesQueryPromises),
+                Promise.all(paymentsQueryPromises),
+                getDocs(holidaysQuery),
+                Promise.all(attendanceQueryPromises)
             ]);
 
             const advancesMap = new Map<string, number>();
-            advancesDocs.flat().forEach(snapshot => snapshot.forEach(doc => {
+            advancesSnapshots.flat().forEach(snapshot => snapshot.forEach(doc => {
                 const advance = doc.data() as SalaryAdvance;
                 advancesMap.set(advance.staffUid, (advancesMap.get(advance.staffUid) || 0) + advance.amount);
             }));
             
             const paymentsMap = new Map<string, number>();
-            paymentsDocs.flat().forEach(snapshot => snapshot.forEach(doc => {
+            paymentsSnapshots.flat().forEach(snapshot => snapshot.forEach(doc => {
                 const payment = doc.data() as SalaryPayment;
                 paymentsMap.set(payment.staffUid, (paymentsMap.get(payment.staffUid) || 0) + payment.amountPaid);
             }));
@@ -145,7 +158,7 @@ export default function PayrollClientPage() {
             const fetchedHolidays = holidaysDocs.docs.map(doc => doc.data() as Holiday);
             
             const attendanceMap = new Map<string, { present: number, halfDay: number }>();
-            attendanceDocs.flat().forEach(snapshot => snapshot.forEach(doc => {
+            attendanceSnapshots.flat().forEach(snapshot => snapshot.forEach(doc => {
                 const att = doc.data() as StaffAttendance;
                 const current = attendanceMap.get(att.staffUid) || { present: 0, halfDay: 0 };
                 if (att.status === 'Present') current.present++;
