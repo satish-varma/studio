@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { Loader2, LogOut } from 'lucide-react'; 
 import { motion } from "framer-motion";
@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button';
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, loading, signOutUser } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     if (!loading && !user) {
@@ -100,7 +101,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <AppHeaderContent />
         <main className="flex-1 overflow-y-auto bg-background">
           <motion.div
-            key={router.pathname}
+            key={pathname}
             initial="initial"
             animate="in"
             variants={pageVariants}
