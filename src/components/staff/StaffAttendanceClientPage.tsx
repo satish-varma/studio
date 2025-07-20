@@ -19,7 +19,7 @@ import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
 import { format, startOfMonth, endOfMonth, addMonths, subMonths, isBefore, isAfter, startOfDay } from 'date-fns';
 import { Button } from "@/components/ui/button";
-import type { AppUser, StaffAttendance, Site, Holiday, AttendanceStatus, StaffDetails, UserStatus } from "@/types";
+import type { AppUser, StaffAttendance, Site, Holiday, AttendanceStatus, UserStatus, StaffDetails } from "@/types";
 import { Loader2, Info, ChevronLeft, ChevronRight, CalendarDays, Filter, XCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
@@ -161,9 +161,17 @@ export default function StaffAttendanceClientPage() {
 
   const handleStatusChange = useCallback(async (staff: AppUser, date: Date) => {
     const holidayInfo = isHoliday(date, staff.defaultSiteId);
-    if (!user || !staff.defaultSiteId || isAllSitesView || holidayInfo.holiday) {
-      if(isAllSitesView) toast({title: "Read-only", description: "Select a specific site to mark attendance."});
-      if(holidayInfo.holiday) toast({ title: "Holiday", description: `Cannot mark attendance on ${holidayInfo.name}.`, variant: "default" });
+    if (!user) return;
+    if (isAllSitesView) {
+      toast({title: "Read-only", description: "Select a specific site from the header to mark attendance.", variant: "default"});
+      return;
+    }
+    if (!staff.defaultSiteId) {
+        toast({ title: "No Site Assigned", description: `${staff.displayName} is not assigned to a site.`, variant: "destructive" });
+        return;
+    }
+    if (holidayInfo.holiday) {
+      toast({ title: "Holiday", description: `Cannot mark attendance on ${holidayInfo.name}.`, variant: "default" });
       return;
     }
     
@@ -238,8 +246,8 @@ export default function StaffAttendanceClientPage() {
   }, [user, attendance, isHoliday, isAllSitesView, toast, staffDetailsMap]);
 
   const handleBulkUpdate = async (status: AttendanceStatus) => {
-    if (!user || isAllSitesView) {
-        toast({title: "Action Denied", description: "Select a specific site to perform bulk actions."});
+    if (!user) {
+        toast({title: "Not Authenticated", description: "You must be logged in to perform this action."});
         return;
     }
     if (selectedStaffUids.length === 0 || !bulkUpdateDate) {
@@ -251,15 +259,22 @@ export default function StaffAttendanceClientPage() {
     const dateStr = format(bulkUpdateDate, 'yyyy-MM-dd');
     const batch = writeBatch(db);
     let validUpdates = 0;
+    let skippedCount = 0;
 
     for (const uid of selectedStaffUids) {
         const staff = allStaffForSite.find(s => s.uid === uid);
         const details = staffDetailsMap.get(uid);
-        if (!staff || !staff.defaultSiteId) continue;
+        if (!staff || !staff.defaultSiteId) {
+            skippedCount++;
+            continue;
+        };
         
+        const holidayInfo = isHoliday(bulkUpdateDate, staff.defaultSiteId);
         const joiningDate = details?.joiningDate ? startOfDay(new Date(details.joiningDate)) : null;
         const exitDate = details?.exitDate ? startOfDay(new Date(details.exitDate)) : null;
-        if ((joiningDate && isBefore(bulkUpdateDate, joiningDate)) || (exitDate && isAfter(bulkUpdateDate, exitDate))) {
+
+        if (holidayInfo.holiday || (joiningDate && isBefore(bulkUpdateDate, joiningDate)) || (exitDate && isAfter(bulkUpdateDate, exitDate))) {
+            skippedCount++;
             continue;
         }
 
@@ -278,7 +293,7 @@ export default function StaffAttendanceClientPage() {
     }
     
     if (validUpdates === 0) {
-        toast({ title: "No Valid Staff", description: "None of the selected staff were eligible for an update on the chosen date (check employment dates).", variant: "default"});
+        toast({ title: "No Valid Staff", description: `Could not update any of the selected staff for the chosen date (check employment dates, holidays, or site assignments).`, variant: "default"});
         setIsBulkUpdating(false);
         return;
     }
@@ -292,10 +307,10 @@ export default function StaffAttendanceClientPage() {
             details: {
                 date: dateStr,
                 status: status,
-                notes: `Bulk updated ${validUpdates} staff member(s) to status '${status}'.`,
+                notes: `Bulk updated ${validUpdates} staff member(s) to status '${status}'. Skipped ${skippedCount} due to ineligibility.`,
             }
         });
-        toast({ title: "Bulk Update Successful", description: `Attendance for ${validUpdates} staff marked as ${status} for ${format(bulkUpdateDate, 'PPP')}.`});
+        toast({ title: "Bulk Update Successful", description: `Attendance for ${validUpdates} staff marked as ${status} for ${format(bulkUpdateDate, 'PPP')}. ${skippedCount > 0 ? `${skippedCount} skipped.` : ''}`});
         setSelectedStaffUids([]);
     } catch(error: any) {
         console.error("Bulk update failed:", error);
@@ -306,8 +321,8 @@ export default function StaffAttendanceClientPage() {
   };
 
   const handleBulkClear = async () => {
-    if (!user || isAllSitesView) {
-        toast({title: "Action Denied", description: "Select a specific site to perform bulk actions."});
+     if (!user) {
+        toast({title: "Not Authenticated", description: "You must be logged in to perform this action."});
         return;
     }
     if (selectedStaffUids.length === 0 || !bulkUpdateDate) {
@@ -459,3 +474,4 @@ export default function StaffAttendanceClientPage() {
     </div>
   );
 }
+
