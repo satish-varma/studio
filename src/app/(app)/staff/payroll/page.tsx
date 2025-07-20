@@ -9,7 +9,7 @@ import {
   query, 
   where, 
   getDocs,
-  QueryConstraint
+  onSnapshot
 } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
@@ -17,7 +17,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Info, ChevronLeft, ChevronRight } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { format, startOfMonth, endOfMonth, subMonths, addMonths, getDaysInMonth, isBefore, isAfter, max, min, startOfDay } from "date-fns";
+import { format, startOfMonth, endOfMonth, subMonths, addMonths, isAfter, isBefore, max, min, startOfDay } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { PayrollTable } from "@/components/staff/PayrollTable";
 import { useUserManagement } from "@/hooks/use-user-management";
@@ -118,7 +118,6 @@ export default function PayrollClientPage() {
     setLoadingPayrollCalcs(true);
     const uids = staffList.map(s => s.uid);
     
-    // Batch UIDs for 'in' queries
     const uidsBatches: string[][] = [];
     if (uids.length > 0) {
         for (let i = 0; i < uids.length; i += 30) {
@@ -133,91 +132,94 @@ export default function PayrollClientPage() {
     const firstDayOfMonth = startOfMonth(currentMonth);
     const lastDayOfMonth = endOfMonth(currentMonth);
 
-    const fetchPayrollDependencies = async () => {
+    const fetchAndListen = async () => {
         try {
-            const advancesQueryPromises = uidsBatches.map(batch =>
-                getDocs(query(collection(db, "advances"), where("staffUid", "in", batch), where("date", ">=", firstDayOfMonth.toISOString()), where("date", "<=", lastDayOfMonth.toISOString())))
-            );
-
-            const paymentsQueryPromises = uidsBatches.map(batch =>
-                getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", batch), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear())))
-            );
-
-            const attendanceQueryPromises = uidsBatches.map(batch => 
-                getDocs(query(collection(db, "staffAttendance"), where("staffUid", "in", batch), where("date", ">=", format(firstDayOfMonth, 'yyyy-MM-dd')), where("date", "<=", format(lastDayOfMonth, 'yyyy-MM-dd'))))
-            );
-            
-            const holidaysQuery = query(collection(db, "holidays"), where("date", ">=", format(firstDayOfMonth, 'yyyy-MM-dd')), where("date", "<=", format(lastDayOfMonth, 'yyyy-MM-dd')));
-
-            const [advancesSnapshots, paymentsSnapshots, holidaysDocs, attendanceSnapshots] = await Promise.all([
-                Promise.all(advancesQueryPromises),
-                Promise.all(paymentsQueryPromises),
-                getDocs(holidaysQuery),
-                Promise.all(attendanceQueryPromises)
+            // Data that can be fetched once per month change
+            const [advancesDocs, paymentsDocs, holidaysDocs] = await Promise.all([
+                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "advances"), where("staffUid", "in", batch), where("date", ">=", firstDayOfMonth.toISOString()), where("date", "<=", lastDayOfMonth.toISOString()))))),
+                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", batch), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear()))))),
+                getDocs(query(collection(db, "holidays"), where("date", ">=", format(firstDayOfMonth, 'yyyy-MM-dd')), where("date", "<=", format(lastDayOfMonth, 'yyyy-MM-dd'))))
             ]);
 
             const advancesMap = new Map<string, number>();
-            advancesSnapshots.flat().forEach(snapshot => snapshot.forEach(doc => {
+            advancesDocs.flat().forEach(snapshot => snapshot.forEach(doc => {
                 const advance = doc.data() as SalaryAdvance;
                 advancesMap.set(advance.staffUid, (advancesMap.get(advance.staffUid) || 0) + advance.amount);
             }));
             
             const paymentsMap = new Map<string, number>();
-            paymentsSnapshots.flat().forEach(snapshot => snapshot.forEach(doc => {
+            paymentsDocs.flat().forEach(snapshot => snapshot.forEach(doc => {
                 const payment = doc.data() as SalaryPayment;
                 paymentsMap.set(payment.staffUid, (paymentsMap.get(payment.staffUid) || 0) + payment.amountPaid);
             }));
             
             const fetchedHolidays = holidaysDocs.docs.map(doc => doc.data() as Holiday);
+
+            // Set up real-time listener for attendance
+            const attendanceQueryConstraints = [
+                where("date", ">=", format(firstDayOfMonth, 'yyyy-MM-dd')),
+                where("date", "<=", format(lastDayOfMonth, 'yyyy-MM-dd')),
+                where("staffUid", "in", uids.length > 0 ? uids : ['placeholder-for-empty-query'])
+            ];
             
-            const attendanceMap = new Map<string, { present: number, halfDay: number }>();
-            attendanceSnapshots.flat().forEach(snapshot => snapshot.forEach(doc => {
-                const att = doc.data() as StaffAttendance;
-                const current = attendanceMap.get(att.staffUid) || { present: 0, halfDay: 0 };
-                if (att.status === 'Present') current.present++;
-                if (att.status === 'Half-day') current.halfDay++;
-                attendanceMap.set(att.staffUid, current);
-            }));
+            const unsubAttendance = onSnapshot(query(collection(db, "staffAttendance"), ...attendanceQueryConstraints), (snapshot) => {
+                const attendanceMap = new Map<string, { present: number, halfDay: number }>();
+                snapshot.forEach(doc => {
+                    const att = doc.data() as StaffAttendance;
+                    const current = attendanceMap.get(att.staffUid) || { present: 0, halfDay: 0 };
+                    if (att.status === 'Present') current.present++;
+                    if (att.status === 'Half-day') current.halfDay++;
+                    attendanceMap.set(att.staffUid, current);
+                });
 
-            const newPayrollData = staffList.map(u => {
-                const details = staffDetailsMap.get(u.uid) || null;
-                const salary = details?.salary || 0;
-                const advances = advancesMap.get(u.uid) || 0;
-                const paidAmount = paymentsMap.get(u.uid) || 0;
-                
-                const workingDays = calculateWorkingDaysForEmployee(currentMonth, fetchedHolidays, u, details);
-                const attendance = attendanceMap.get(u.uid) || { present: 0, halfDay: 0 };
-                const presentDays = attendance.present + (attendance.halfDay * 0.5);
-                
-                const perDaySalary = workingDays > 0 ? salary / workingDays : 0;
-                const earnedSalary = perDaySalary * presentDays;
-                
-                const netPayable = earnedSalary - advances;
+                const newPayrollData = staffList.map(u => {
+                    const details = staffDetailsMap.get(u.uid) || null;
+                    const salary = details?.salary || 0;
+                    const advances = advancesMap.get(u.uid) || 0;
+                    const paidAmount = paymentsMap.get(u.uid) || 0;
+                    
+                    const workingDays = calculateWorkingDaysForEmployee(currentMonth, fetchedHolidays, u, details);
+                    const attendance = attendanceMap.get(u.uid) || { present: 0, halfDay: 0 };
+                    const presentDays = attendance.present + (attendance.halfDay * 0.5);
+                    
+                    const perDaySalary = workingDays > 0 ? salary / workingDays : 0;
+                    const earnedSalary = perDaySalary * presentDays;
+                    
+                    const netPayable = earnedSalary - advances;
 
-                return {
-                    user: u,
-                    details,
-                    advances,
-                    netPayable,
-                    paidAmount,
-                    isPaid: paidAmount >= netPayable && netPayable > 0,
-                    workingDays,
-                    presentDays,
-                    earnedSalary,
-                };
-            }).sort((a,b) => (a.user.displayName || "").localeCompare(b.user.displayName || ""));
-
-            setPayrollData(newPayrollData);
-
+                    return {
+                        user: u,
+                        details,
+                        advances,
+                        netPayable,
+                        paidAmount,
+                        isPaid: paidAmount >= netPayable && netPayable > 0,
+                        workingDays,
+                        presentDays,
+                        earnedSalary,
+                    };
+                }).sort((a,b) => (a.user.displayName || "").localeCompare(b.user.displayName || ""));
+                setPayrollData(newPayrollData);
+                setLoadingPayrollCalcs(false);
+            }, (error) => {
+                 console.error("Error fetching attendance details:", error);
+                 toast({ title: "Error", description: `Could not load attendance data for payroll: ${error.message}`, variant: "destructive" });
+                 setLoadingPayrollCalcs(false);
+            });
+            
+            // Return the unsubscribe function for cleanup
+            return unsubAttendance;
         } catch (error: any) {
-             console.error("Error fetching payroll details:", error);
+            console.error("Error fetching payroll details:", error);
             toast({ title: "Error", description: `Could not calculate payroll: ${error.message}`, variant: "destructive" });
-        } finally {
             setLoadingPayrollCalcs(false);
         }
     };
     
-    fetchPayrollDependencies();
+    const unsubPromise = fetchAndListen();
+    return () => {
+      unsubPromise.then(unsub => unsub && unsub());
+    };
 
   }, [staffList, staffDetailsMap, currentMonth, toast, calculateWorkingDaysForEmployee, userManagementLoading]);
 
