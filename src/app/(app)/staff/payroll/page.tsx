@@ -8,7 +8,8 @@ import {
   collection, 
   query, 
   where, 
-  getDocs
+  getDocs,
+  QueryConstraint
 } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
@@ -50,11 +51,15 @@ export default function PayrollClientPage() {
   const { toast } = useToast();
   
   const {
-    users: staffList,
+    users: allUsersForContext,
     staffDetails: staffDetailsMap,
     loading: userManagementLoading,
     error: userManagementError,
   } = useUserManagement();
+
+  const staffList = useMemo(() => {
+    return allUsersForContext.filter(u => u.role === 'staff' || u.role === 'manager');
+  }, [allUsersForContext]);
   
   const [payrollData, setPayrollData] = useState<PayrollData[]>([]);
   const [loadingPayrollCalcs, setLoadingPayrollCalcs] = useState(true);
@@ -78,7 +83,8 @@ export default function PayrollClientPage() {
     if (isAfter(effectiveStartDate, effectiveEndDate)) return 0;
 
     let workingDays = 0;
-    let currentDate = new Date(effectiveStartDate); // Clone the date to avoid mutation
+    // Important: Create a new Date object for the loop to avoid mutating the original
+    let currentDate = new Date(effectiveStartDate); 
 
     while(currentDate <= effectiveEndDate) {
       const dayOfWeek = currentDate.getDay();
@@ -91,7 +97,7 @@ export default function PayrollClientPage() {
       if (!isWeekend && !isGlobalHoliday && !isSiteHoliday) {
         workingDays++;
       }
-      currentDate.setDate(currentDate.getDate() + 1);
+      currentDate.setDate(currentDate.getDate() + 1); // Move to the next day
     }
     
     return workingDays;
@@ -112,9 +118,16 @@ export default function PayrollClientPage() {
     setLoadingPayrollCalcs(true);
     const uids = staffList.map(s => s.uid);
     
+    // Batch UIDs for 'in' queries
     const uidsBatches: string[][] = [];
-    for (let i = 0; i < uids.length; i += 30) {
-        uidsBatches.push(uids.slice(i, i + 30));
+    if (uids.length > 0) {
+        for (let i = 0; i < uids.length; i += 30) {
+            uidsBatches.push(uids.slice(i, i + 30));
+        }
+    } else {
+        setPayrollData([]);
+        setLoadingPayrollCalcs(false);
+        return;
     }
     
     const firstDayOfMonth = startOfMonth(currentMonth);
