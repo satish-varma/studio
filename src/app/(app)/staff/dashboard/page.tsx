@@ -13,11 +13,20 @@ import { Loader2, Info, IndianRupee } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { useUserManagement } from "@/hooks/use-user-management";
 
 const db = getFirestore();
 
 export default function StaffDashboardPage() {
     const { user, activeSiteId, loading: authLoading } = useAuth();
+    
+    const {
+        users: staffList,
+        staffDetails: staffDetailsMap,
+        loading: userManagementLoading,
+        error: userManagementError,
+    } = useUserManagement();
+    
     const [stats, setStats] = useState({ 
         totalStaff: 0, 
         presentToday: 0, 
@@ -28,8 +37,7 @@ export default function StaffDashboardPage() {
     });
     const [recentAdvances, setRecentAdvances] = useState<SalaryAdvance[]>([]);
     const [staffOnLeaveOrAbsent, setStaffOnLeaveOrAbsent] = useState<StaffAttendance[]>([]);
-    const [staffList, setStaffList] = useState<AppUser[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [loadingCalculations, setLoadingCalculations] = useState(true);
 
     const isHoliday = useCallback((date: Date, holidays: Holiday[], staffSiteId?: string | null) => {
         const dayOfWeek = date.getDay();
@@ -61,59 +69,55 @@ export default function StaffDashboardPage() {
 
 
     useEffect(() => {
-        if (authLoading || !activeSiteId) {
-            if (!authLoading) setLoading(false);
+        if (userManagementLoading) {
+            setLoadingCalculations(true);
+            return;
+        }
+        
+        if (staffList.length === 0) {
+            setLoadingCalculations(false);
+            setStats({ totalStaff: 0, presentToday: 0, advancesThisMonth: 0, notPresentToday: 0, salaryToday: 0, salaryThisMonth: 0 });
+            setRecentAdvances([]);
+            setStaffOnLeaveOrAbsent([]);
             return;
         }
 
-        setLoading(true);
+        setLoadingCalculations(true);
+        const staffUids = staffList.map(s => s.uid);
+        
+        const uidsBatches: string[][] = [];
+        for (let i = 0; i < staffUids.length; i += 30) {
+            uidsBatches.push(staffUids.slice(i, i + 30));
+        }
+        
+        const todayStr = format(new Date(), 'yyyy-MM-dd');
+        const monthStart = startOfMonth(new Date());
+        const monthEnd = endOfMonth(new Date());
 
-        const staffQuery = query(collection(db, "users"), where("defaultSiteId", "==", activeSiteId));
-        const unsubscribeStaff = onSnapshot(staffQuery, async (staffSnapshot) => {
-            const fetchedStaff = staffSnapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser));
-            setStaffList(fetchedStaff);
-            setStats(prev => ({ ...prev, totalStaff: fetchedStaff.length }));
-
-            if (fetchedStaff.length === 0) {
-                setLoading(false);
-                setStats({ totalStaff: 0, presentToday: 0, advancesThisMonth: 0, notPresentToday: 0, salaryToday: 0, salaryThisMonth: 0 });
-                setRecentAdvances([]);
-                setStaffOnLeaveOrAbsent([]);
-                return;
-            }
-
-            const staffUids = fetchedStaff.map(s => s.uid);
-            
-            // --- Parallel Data Fetching ---
-            const todayStr = format(new Date(), 'yyyy-MM-dd');
-            const monthStart = startOfMonth(new Date());
-            const monthEnd = endOfMonth(new Date());
-
+        const fetchDependencies = async () => {
             const [
-                detailsSnapshot, 
-                advancesSnapshot, 
-                attendanceTodaySnapshot,
-                attendanceMonthSnapshot,
+                advancesSnapshots, 
+                attendanceTodaySnapshots,
+                attendanceMonthSnapshots,
                 holidaysSnapshot
             ] = await Promise.all([
-                getDocs(query(collection(db, "staffDetails"), where("__name__", "in", staffUids))),
-                getDocs(query(collection(db, "advances"), where("date", ">=", monthStart.toISOString()), where("date", "<=", monthEnd.toISOString()), where("staffUid", "in", staffUids))),
-                getDocs(query(collection(db, "staffAttendance"), where("siteId", "==", activeSiteId), where("date", "==", todayStr), where("staffUid", "in", staffUids))),
-                getDocs(query(collection(db, "staffAttendance"), where("siteId", "==", activeSiteId), where("date", ">=", format(monthStart, 'yyyy-MM-dd')), where("date", "<=", format(monthEnd, 'yyyy-MM-dd')), where("staffUid", "in", staffUids))),
+                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "advances"), where("date", ">=", monthStart.toISOString()), where("date", "<=", monthEnd.toISOString()), where("staffUid", "in", batch))))),
+                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "staffAttendance"), where("date", "==", todayStr), where("staffUid", "in", batch))))),
+                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "staffAttendance"), where("date", ">=", format(monthStart, 'yyyy-MM-dd')), where("date", "<=", format(monthEnd, 'yyyy-MM-dd')), where("staffUid", "in", batch))))),
                 getDocs(query(collection(db, "holidays")))
             ]);
             
-            const staffDetailsMap = new Map<string, StaffDetails>();
-            detailsSnapshot.forEach(doc => staffDetailsMap.set(doc.id, doc.data() as StaffDetails));
-
             // --- Advances ---
-            const totalAdvance = advancesSnapshot.docs.reduce((sum, doc) => sum + (doc.data() as SalaryAdvance).amount, 0);
-            const fetchedAdvances = advancesSnapshot.docs.map(doc => ({id: doc.id, ...doc.data() } as SalaryAdvance)).slice(0, 5); 
+            const totalAdvance = advancesSnapshots.flat().reduce((sum, snapshot) => {
+                return sum + snapshot.docs.reduce((docSum, doc) => docSum + (doc.data() as SalaryAdvance).amount, 0);
+            }, 0);
+            const fetchedAdvances = advancesSnapshots.flat().flatMap(s => s.docs).map(doc => ({id: doc.id, ...doc.data() } as SalaryAdvance)).slice(0, 5); 
             setRecentAdvances(fetchedAdvances);
 
             // --- Today's Attendance & Salary ---
-            const presentCount = attendanceTodaySnapshot.docs.filter(doc => (doc.data() as StaffAttendance).status === 'Present').length;
-            const notPresentRecords = attendanceTodaySnapshot.docs
+            const attendanceTodayDocs = attendanceTodaySnapshots.flat().flatMap(s => s.docs);
+            const presentCount = attendanceTodayDocs.filter(doc => (doc.data() as StaffAttendance).status === 'Present').length;
+            const notPresentRecords = attendanceTodayDocs
                 .filter(doc => ['Leave', 'Absent', 'Half-day'].includes((doc.data() as StaffAttendance).status))
                 .map(doc => doc.data() as StaffAttendance);
             setStaffOnLeaveOrAbsent(notPresentRecords);
@@ -121,7 +125,7 @@ export default function StaffDashboardPage() {
             const holidays = holidaysSnapshot.docs.map(d => d.data() as Holiday);
             const workingDaysInMonth = calculateWorkingDays(new Date(), holidays);
             let salaryToday = 0;
-            attendanceTodaySnapshot.forEach(doc => {
+            attendanceTodayDocs.forEach(doc => {
                 const att = doc.data() as StaffAttendance;
                 const details = staffDetailsMap.get(att.staffUid);
                 if (details?.salary && workingDaysInMonth > 0) {
@@ -133,16 +137,16 @@ export default function StaffDashboardPage() {
 
             // --- Monthly Salary Bill ---
             const monthlyAttendanceMap = new Map<string, {present: number, halfDay: number}>();
-            attendanceMonthSnapshot.forEach(doc => {
+            attendanceMonthSnapshots.flat().forEach(snapshot => snapshot.forEach(doc => {
                 const att = doc.data() as StaffAttendance;
                 const current = monthlyAttendanceMap.get(att.staffUid) || { present: 0, halfDay: 0 };
                 if (att.status === 'Present') current.present++;
                 if (att.status === 'Half-day') current.halfDay++;
                 monthlyAttendanceMap.set(att.staffUid, current);
-            });
+            }));
 
             let salaryThisMonth = 0;
-            fetchedStaff.forEach(staff => {
+            staffList.forEach(staff => {
                 const details = staffDetailsMap.get(staff.uid);
                 const attendance = monthlyAttendanceMap.get(staff.uid);
                 if (details?.salary && attendance && workingDaysInMonth > 0) {
@@ -153,24 +157,29 @@ export default function StaffDashboardPage() {
             });
 
             setStats({ 
-                totalStaff: fetchedStaff.length, 
+                totalStaff: staffList.length, 
                 presentToday: presentCount, 
                 advancesThisMonth: totalAdvance, 
                 notPresentToday: notPresentRecords.length,
                 salaryToday: salaryToday,
                 salaryThisMonth: salaryThisMonth
             });
-            setLoading(false);
+            setLoadingCalculations(false);
+        };
+        fetchDependencies().catch(err => {
+            console.error("Failed to fetch dashboard dependencies:", err);
+            setLoadingCalculations(false);
         });
         
-        return () => unsubscribeStaff();
-    }, [activeSiteId, authLoading, calculateWorkingDays]);
+    }, [staffList, staffDetailsMap, userManagementLoading, calculateWorkingDays]);
 
-    if (authLoading) {
+    const loading = authLoading || userManagementLoading || loadingCalculations;
+
+    if (authLoading || userManagementLoading) {
       return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin" /></div>;
     }
   
-    if (!activeSiteId && !authLoading) {
+    if (!activeSiteId && user?.role !== 'admin') {
       return (
         <div className="space-y-6">
           <PageHeader title="Staff Dashboard" description="Overview of staff attendance, advances, and key metrics." />
