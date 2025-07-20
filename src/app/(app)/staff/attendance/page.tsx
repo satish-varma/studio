@@ -351,10 +351,14 @@ export default function StaffAttendanceClientPage() {
         await batch.commit();
         
         setAttendance(prev => {
-            const newAttendance = JSON.parse(JSON.stringify(prev || {}));
+            if (!prev) return null;
+            const newAttendance = { ...prev };
             selectedStaffUids.forEach(uid => {
-                if (newAttendance[uid] && newAttendance[uid][dateStr]) {
+                if (newAttendance[uid]?.[dateStr]) {
                     delete newAttendance[uid][dateStr];
+                    if (Object.keys(newAttendance[uid]).length === 0) {
+                        delete newAttendance[uid];
+                    }
                 }
             });
             return newAttendance;
