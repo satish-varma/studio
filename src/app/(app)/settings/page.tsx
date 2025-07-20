@@ -139,16 +139,20 @@ export default function SettingsPage() {
               <AlertDialogContent>
                 <AlertDialogHeader>
                   <AlertDialogTitle>Confirm Staff Data Reset</AlertDialogTitle>
-                  <AlertDialogDescription>This will permanently delete all staff management data but leave main app data (inventory, sales, etc.) and user accounts intact.</AlertDialogDescription>
+                  <AlertDialogDescription>This will permanently delete all staff transactional data but leave main app data (inventory, sales, etc.) and core staff profiles intact.</AlertDialogDescription>
                    <div className="text-sm text-muted-foreground space-y-2 pt-2">
                     <div>You are about to delete:</div>
                     <ul className="list-disc list-inside text-sm text-destructive pl-4">
-                      <li>All Staff Details (Phone, Address, Salary)</li>
                       <li>All Staff Attendance Records</li>
                       <li>All Salary Advances & Payments</li>
                       <li>All Staff Activity Logs</li>
                     </ul>
-                    <div className="font-bold text-foreground">The main application data (stock, sales, sites, etc.) and user accounts WILL NOT be deleted.</div>
+                    <div className="font-bold text-foreground">The following will NOT be deleted:</div>
+                     <ul className="list-disc list-inside text-sm text-primary pl-4">
+                      <li>User Accounts & Roles</li>
+                      <li>Core Staff Details (Phone, Address, Salary)</li>
+                      <li>Main application data (stock, sales, sites, etc.)</li>
+                    </ul>
                     <div>To proceed, type "<strong className="text-foreground">{STAFF_RESET_PHRASE}</strong>" below.</div>
                   </div>
                 </AlertDialogHeader>

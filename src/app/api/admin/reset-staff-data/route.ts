@@ -21,7 +21,6 @@ function initializeAdminApp(): AdminApp {
 }
 
 const COLLECTIONS_TO_DELETE = [
-  "staffDetails",
   "staffAttendance",
   "advances",
   "salaryPayments",
