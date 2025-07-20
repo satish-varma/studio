@@ -40,13 +40,13 @@ body {
     --radius: 0.75rem;
 
     /* Sidebar specific colors */
-    --sidebar-background: 210 30% 96%; /* Slightly darker light cool gray for sidebar */
-    --sidebar-foreground: 210 10% 25%; /* UPDATED: Dark text for sidebar */
-    --sidebar-primary: 217 91% 60%; /* Main primary blue for active items */
-    --sidebar-primary-foreground: 0 0% 100%; /* White text on active sidebar items */
-    --sidebar-accent: 210 30% 92%; /* Hover state - slightly darker than sidebar bg */
-    --sidebar-accent-foreground: 217 91% 60%; /* Main primary blue text on hover */
-    --sidebar-border: 210 30% 88%; /* Border color for sidebar elements */
+    --sidebar-background: 215 28% 15%; /* Darker, slightly desaturated blue */
+    --sidebar-foreground: 210 40% 90%; /* Light gray text */
+    --sidebar-primary: 0 0% 100%; /* White for active item text */
+    --sidebar-primary-foreground: 215 28% 15%; /* Dark text for on the active item bg */
+    --sidebar-accent: 215 28% 25%; /* Hover state - slightly lighter blue */
+    --sidebar-accent-foreground: 0 0% 100%; /* White text on hover */
+    --sidebar-border: 215 28% 22%; /* Border color for sidebar elements */
     --sidebar-ring: 217 91% 60%; /* Focus ring for sidebar */
 
     --chart-1: 12 76% 61%;
@@ -88,8 +88,8 @@ body {
     /* Dark Sidebar specific colors */
     --sidebar-background: 210 10% 10%; /* Very dark sidebar */
     --sidebar-foreground: 210 40% 85%; /* Light text for dark sidebar - KEPT */
-    --sidebar-primary: 217 91% 60%;
-    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-primary: 0 0% 100%;
+    --sidebar-primary-foreground: 210 10% 10%;
     --sidebar-accent: 210 10% 20%; /* Hover state for dark sidebar */
     --sidebar-accent-foreground: 170 65% 55%; /* Accent color text on hover */
     --sidebar-border: 210 10% 18%;

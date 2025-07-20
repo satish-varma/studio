@@ -5,6 +5,7 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { Loader2, LogOut } from 'lucide-react'; 
+import { motion } from "framer-motion";
 import { 
   SidebarProvider, 
   Sidebar, 
@@ -40,6 +41,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (!user) {
     return null; 
   }
+
+  const pageVariants = {
+    initial: { opacity: 0, y: 10 },
+    in: { opacity: 1, y: 0 },
+    out: { opacity: 0, y: -10 },
+  };
+
+  const pageTransition = {
+    type: "tween",
+    ease: "anticipate",
+    duration: 0.4,
+  };
 
   return (
     <SidebarProvider defaultOpen>
@@ -85,8 +98,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </Sidebar>
       <SidebarInset className="flex flex-col">
         <AppHeaderContent />
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 bg-background">
-          {children}
+        <main className="flex-1 overflow-y-auto bg-background">
+          <motion.div
+            key={router.pathname}
+            initial="initial"
+            animate="in"
+            variants={pageVariants}
+            transition={pageTransition}
+            className="p-4 sm:p-6 lg:p-8"
+          >
+           {children}
+          </motion.div>
         </main>
       </SidebarInset>
     </SidebarProvider>
