@@ -17,9 +17,10 @@ import { useToast } from "@/hooks/use-toast";
 import { Loader2, Info, ChevronLeft, ChevronRight } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { format, startOfMonth, endOfMonth, subMonths, addMonths, getDaysInMonth } from "date-fns";
-import { Button } from "../ui/button";
+import { Button } from "@/components/ui/button";
 import { PayrollTable } from "./PayrollTable";
 import { useUserManagement } from "@/hooks/use-user-management";
+import PageHeader from "@/components/shared/PageHeader";
 
 const LOG_PREFIX = "[PayrollClientPage]";
 
@@ -41,6 +42,7 @@ export interface PayrollData {
     isPaid: boolean;
     workingDays: number;
     presentDays: number;
+    earnedSalary: number;
 }
 
 export default function PayrollClientPage() {
@@ -162,6 +164,7 @@ export default function PayrollClientPage() {
                     isPaid: paidAmount >= netPayable && netPayable > 0,
                     workingDays,
                     presentDays,
+                    earnedSalary,
                 };
             }).sort((a,b) => (a.user.displayName || "").localeCompare(b.user.displayName || ""));
 
@@ -186,14 +189,18 @@ export default function PayrollClientPage() {
   if (error) return <Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>;
 
   if (!activeSiteId && user?.role !== 'admin') return (
-    <Alert variant="default" className="border-primary/50">
-        <Info className="h-4 w-4" /><AlertTitle>Site Selection Required</AlertTitle>
-        <AlertDescription>Please select a site to manage payroll, or select "All Sites" if you are an administrator.</AlertDescription>
-    </Alert>
+    <div className="space-y-6">
+        <PageHeader title="Staff Payroll" description="Calculate net payable salary for staff members."/>
+        <Alert variant="default" className="border-primary/50">
+            <Info className="h-4 w-4" /><AlertTitle>Site Selection Required</AlertTitle>
+            <AlertDescription>Please select a site to manage payroll, or select "All Sites" if you are an administrator.</AlertDescription>
+        </Alert>
+    </div>
   );
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+        <PageHeader title="Staff Payroll" description="Calculate net payable salary for the current month and record payments."/>
         <div className="flex items-center gap-2">
             <Button variant="outline" size="icon" onClick={handlePrevMonth} aria-label="Previous month" disabled={loading}><ChevronLeft className="h-4 w-4" /></Button>
             <h2 className="text-xl font-semibold text-center min-w-[150px]">{format(currentMonth, "MMMM yyyy")}</h2>

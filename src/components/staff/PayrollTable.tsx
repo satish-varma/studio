@@ -116,6 +116,7 @@ export function PayrollTable({ data, month, year }: PayrollTableProps) {
             <TableHead className="text-center">Working Days</TableHead>
             <TableHead className="text-center">Present</TableHead>
             <TableHead className="text-right">Base Salary</TableHead>
+            <TableHead className="text-right">Earned Salary</TableHead>
             <TableHead className="text-right">Advances</TableHead>
             <TableHead className="text-right">Net Payable</TableHead>
             <TableHead className="text-right">Paid Amount</TableHead>
@@ -130,6 +131,7 @@ export function PayrollTable({ data, month, year }: PayrollTableProps) {
               <TableCell className="text-center text-muted-foreground">{item.workingDays}</TableCell>
               <TableCell className="text-center text-muted-foreground">{item.presentDays}</TableCell>
               <TableCell className="text-right">{formatCurrency(item.details?.salary || 0)}</TableCell>
+              <TableCell className="text-right font-semibold text-primary">{formatCurrency(item.earnedSalary)}</TableCell>
               <TableCell className="text-right text-orange-600">{formatCurrency(item.advances)}</TableCell>
               <TableCell className="text-right font-semibold">{formatCurrency(item.netPayable)}</TableCell>
               <TableCell className="text-right text-green-600">{formatCurrency(item.paidAmount)}</TableCell>
