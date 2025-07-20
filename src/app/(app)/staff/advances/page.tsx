@@ -191,7 +191,9 @@ export default function SalaryAdvanceClientPage() {
                                          </SelectTrigger>
                                      </FormControl>
                                      <SelectContent>
-                                         {staffList.map(s => <SelectItem key={s.uid} value={s.uid}>{s.displayName}</SelectItem>)}
+                                         {staffList
+                                            .filter(s => s.uid && s.uid.trim() !== "")
+                                            .map(s => <SelectItem key={s.uid} value={s.uid}>{s.displayName}</SelectItem>)}
                                      </SelectContent>
                                  </Select>
                              </FormItem>
