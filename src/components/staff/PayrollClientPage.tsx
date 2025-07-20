@@ -8,7 +8,6 @@ import {
   collection, 
   query, 
   where, 
-  onSnapshot, 
   getDocs
 } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
@@ -20,6 +19,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { format, startOfMonth, endOfMonth, subMonths, addMonths, getDaysInMonth } from "date-fns";
 import { Button } from "../ui/button";
 import { PayrollTable } from "./PayrollTable";
+import { useUserManagement } from "@/hooks/use-user-management";
 
 const LOG_PREFIX = "[PayrollClientPage]";
 
@@ -46,24 +46,22 @@ export interface PayrollData {
 export default function PayrollClientPage() {
   const { user, activeSiteId, loading: authLoading } = useAuth();
   const { toast } = useToast();
+  
+  const {
+    users: staffList,
+    staffDetails: staffDetailsMap,
+    loading: userManagementLoading,
+    error: userManagementError,
+  } = useUserManagement();
+  
   const [payrollData, setPayrollData] = useState<PayrollData[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingPayrollCalcs, setLoadingPayrollCalcs] = useState(true);
   const [currentMonth, setCurrentMonth] = useState(new Date());
 
   const handlePrevMonth = () => setCurrentMonth(prev => subMonths(prev, 1));
   const handleNextMonth = () => setCurrentMonth(prev => addMonths(prev, 1));
   const handleGoToCurrentMonth = () => setCurrentMonth(new Date());
 
-  const staffQuery = useMemo(() => {
-    if (authLoading || !user) return null;
-    if (user.role !== 'manager' && user.role !== 'admin') return null;
-    
-    let q = query(collection(db, "users"), where("role", "in", ["staff", "manager"]));
-    if (activeSiteId) {
-      q = query(q, where("defaultSiteId", "==", activeSiteId));
-    }
-    return q;
-  }, [activeSiteId, authLoading, user]);
 
   const calculateWorkingDays = useCallback((month: Date, holidays: Holiday[], staffSiteId?: string | null) => {
     const totalDays = getDaysInMonth(month);
@@ -85,64 +83,63 @@ export default function PayrollClientPage() {
   }, []);
 
   useEffect(() => {
-    if (!staffQuery) {
-        if (!authLoading) setLoading(false);
+    if (userManagementLoading) {
+        setLoadingPayrollCalcs(true);
         return;
     }
 
-    setLoading(true);
+    if (staffList.length === 0) {
+        setPayrollData([]);
+        setLoadingPayrollCalcs(false);
+        return;
+    }
 
-    const unsubscribe = onSnapshot(staffQuery, async (staffSnapshot) => {
-        const staffList = staffSnapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser));
-        
-        if (staffList.length === 0) {
-            setPayrollData([]);
-            setLoading(false);
-            return;
-        }
+    setLoadingPayrollCalcs(true);
+    const uids = staffList.map(s => s.uid);
+    
+    // Batch UIDs for 'in' queries
+    const uidsBatches: string[][] = [];
+    for (let i = 0; i < uids.length; i += 30) {
+        uidsBatches.push(uids.slice(i, i + 30));
+    }
+    
+    const firstDayOfMonth = startOfMonth(currentMonth);
+    const lastDayOfMonth = endOfMonth(currentMonth);
 
+    const fetchPayrollDependencies = async () => {
         try {
-            const uids = staffList.map(s => s.uid);
-            
-            const firstDayOfMonth = startOfMonth(currentMonth);
-            const lastDayOfMonth = endOfMonth(currentMonth);
-
-            const [detailsDocs, advancesDocs, paymentsDocs, holidaysDocs, attendanceDocs] = await Promise.all([
-                getDocs(query(collection(db, "staffDetails"), where("__name__", "in", uids))),
-                getDocs(query(collection(db, "advances"), where("staffUid", "in", uids), where("date", ">=", firstDayOfMonth.toISOString()), where("date", "<=", lastDayOfMonth.toISOString()))),
-                getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", uids), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear()))),
+            const [advancesDocs, paymentsDocs, holidaysDocs, attendanceDocs] = await Promise.all([
+                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "advances"), where("staffUid", "in", batch), where("date", ">=", firstDayOfMonth.toISOString()), where("date", "<=", lastDayOfMonth.toISOString()))))),
+                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", batch), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear()))))),
                 getDocs(query(collection(db, "holidays"), where("date", ">=", format(firstDayOfMonth, 'yyyy-MM-dd')), where("date", "<=", format(lastDayOfMonth, 'yyyy-MM-dd')))),
-                getDocs(query(collection(db, "staffAttendance"), where("staffUid", "in", uids), where("date", ">=", format(firstDayOfMonth, 'yyyy-MM-dd')), where("date", "<=", format(lastDayOfMonth, 'yyyy-MM-dd'))))
+                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "staffAttendance"), where("staffUid", "in", batch), where("date", ">=", format(firstDayOfMonth, 'yyyy-MM-dd')), where("date", "<=", format(lastDayOfMonth, 'yyyy-MM-dd'))))))
             ]);
 
-            const detailsMap = new Map<string, StaffDetails>();
-            detailsDocs.forEach(doc => detailsMap.set(doc.id, { uid: doc.id, ...doc.data() } as StaffDetails));
-
             const advancesMap = new Map<string, number>();
-            advancesDocs.forEach(doc => {
+            advancesDocs.flat().forEach(snapshot => snapshot.forEach(doc => {
                 const advance = doc.data() as SalaryAdvance;
                 advancesMap.set(advance.staffUid, (advancesMap.get(advance.staffUid) || 0) + advance.amount);
-            });
+            }));
             
             const paymentsMap = new Map<string, number>();
-            paymentsDocs.forEach(doc => {
+            paymentsDocs.flat().forEach(snapshot => snapshot.forEach(doc => {
                 const payment = doc.data() as SalaryPayment;
                 paymentsMap.set(payment.staffUid, (paymentsMap.get(payment.staffUid) || 0) + payment.amountPaid);
-            });
+            }));
             
             const fetchedHolidays = holidaysDocs.docs.map(doc => doc.data() as Holiday);
             
             const attendanceMap = new Map<string, { present: number, halfDay: number }>();
-            attendanceDocs.forEach(doc => {
+            attendanceDocs.flat().forEach(snapshot => snapshot.forEach(doc => {
                 const att = doc.data() as StaffAttendance;
                 const current = attendanceMap.get(att.staffUid) || { present: 0, halfDay: 0 };
                 if (att.status === 'Present') current.present++;
                 if (att.status === 'Half-day') current.halfDay++;
                 attendanceMap.set(att.staffUid, current);
-            });
+            }));
 
             const newPayrollData = staffList.map(u => {
-                const details = detailsMap.get(u.uid) || null;
+                const details = staffDetailsMap.get(u.uid) || null;
                 const salary = details?.salary || 0;
                 const advances = advancesMap.get(u.uid) || 0;
                 const paidAmount = paymentsMap.get(u.uid) || 0;
@@ -169,39 +166,42 @@ export default function PayrollClientPage() {
             }).sort((a,b) => (a.user.displayName || "").localeCompare(b.user.displayName || ""));
 
             setPayrollData(newPayrollData);
+
         } catch (error: any) {
-            console.error("Error fetching payroll details:", error);
+             console.error("Error fetching payroll details:", error);
             toast({ title: "Error", description: `Could not calculate payroll: ${error.message}`, variant: "destructive" });
         } finally {
-            setLoading(false);
+            setLoadingPayrollCalcs(false);
         }
-    }, (error) => {
-        console.error("Error fetching staff for payroll:", error);
-        setLoading(false);
-    });
+    };
     
-    return () => unsubscribe();
+    fetchPayrollDependencies();
 
-  }, [staffQuery, currentMonth, toast, calculateWorkingDays]);
+  }, [staffList, staffDetailsMap, currentMonth, toast, calculateWorkingDays, userManagementLoading]);
 
-  if (authLoading) return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin" /></div>;
+  const loading = authLoading || userManagementLoading || loadingPayrollCalcs;
+  const error = userManagementError;
+
+  if (loading && payrollData.length === 0) return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin" /><p className="ml-2">Loading Payroll Data...</p></div>;
+  if (error) return <Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>;
+
   if (!activeSiteId && user?.role !== 'admin') return (
     <Alert variant="default" className="border-primary/50">
         <Info className="h-4 w-4" /><AlertTitle>Site Selection Required</AlertTitle>
-        <AlertDescription>Please select a site to manage payroll.</AlertDescription>
+        <AlertDescription>Please select a site to manage payroll, or select "All Sites" if you are an administrator.</AlertDescription>
     </Alert>
   );
 
   return (
     <div className="space-y-4">
         <div className="flex items-center gap-2">
-            <Button variant="outline" size="icon" onClick={handlePrevMonth} aria-label="Previous month"><ChevronLeft className="h-4 w-4" /></Button>
+            <Button variant="outline" size="icon" onClick={handlePrevMonth} aria-label="Previous month" disabled={loading}><ChevronLeft className="h-4 w-4" /></Button>
             <h2 className="text-xl font-semibold text-center min-w-[150px]">{format(currentMonth, "MMMM yyyy")}</h2>
-            <Button variant="outline" size="icon" onClick={handleNextMonth} aria-label="Next month"><ChevronRight className="h-4 w-4" /></Button>
-            <Button variant="outline" onClick={handleGoToCurrentMonth}>Current Month</Button>
+            <Button variant="outline" size="icon" onClick={handleNextMonth} aria-label="Next month" disabled={loading}><ChevronRight className="h-4 w-4" /></Button>
+            <Button variant="outline" onClick={handleGoToCurrentMonth} disabled={loading}>Current Month</Button>
         </div>
         {loading ? (
-            <div className="flex justify-center items-center py-10"><Loader2 className="h-6 w-6 animate-spin" /><p className="ml-2">Calculating payroll...</p></div>
+            <div className="flex justify-center items-center py-10"><Loader2 className="h-6 w-6 animate-spin" /><p className="ml-2">Recalculating payroll...</p></div>
         ) : (
             <PayrollTable data={payrollData} month={currentMonth.getMonth()+1} year={currentMonth.getFullYear()} />
         )}
