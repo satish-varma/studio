@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import type { AppUser, Site, Stall, UserStatus } from "@/types";
 import { 
   getFirestore
