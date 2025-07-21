@@ -11,13 +11,12 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import type { AppUser, Site, StaffDetails } from "@/types";
-import { Users as UsersIcon, Edit, IndianRupee, MoreHorizontal } from "lucide-react";
+import { Users as UsersIcon, Edit, IndianRupee } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useRouter } from "next/navigation";
 import { useMemo } from 'react';
 import { Checkbox } from "@/components/ui/checkbox";
 import { format } from 'date-fns';
-import UpdateStatusDialog from "@/components/users/UpdateStatusDialog";
 
 interface StaffListTableProps {
   users: AppUser[];
@@ -52,7 +51,7 @@ export function StaffListTable({ users, sitesMap, staffDetailsMap, selectedUserI
         <UsersIcon className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
         <p className="text-xl font-semibold text-foreground mb-2">No Staff Members Found</p>
         <p className="text-muted-foreground">
-          There are no staff or managers in the system yet.
+          No staff members match the current filter.
         </p>
       </div>
     );
@@ -116,7 +115,11 @@ export function StaffListTable({ users, sitesMap, staffDetailsMap, selectedUserI
                 </TableCell>
                 <TableCell className="font-medium">
                   <div>{user.displayName || "N/A"}</div>
-                  <div className="text-xs text-muted-foreground capitalize">{user.status || 'active'}</div>
+                  <div className="text-xs text-muted-foreground capitalize">
+                     <Badge variant={(user.status || 'active') === 'active' ? "secondary" : "outline"} className={(user.status || 'active') === 'inactive' ? 'border-destructive text-destructive' : ''}>
+                        {user.status || 'active'}
+                    </Badge>
+                  </div>
                 </TableCell>
                 <TableCell>
                     <Badge variant={user.role === 'manager' ? 'default' : (user.role === 'admin' ? 'destructive' : 'secondary')}>{user.role}</Badge>

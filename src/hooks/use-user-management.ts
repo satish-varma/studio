@@ -62,66 +62,28 @@ export function useUserManagement() {
     }
 
     setLoading(true);
-    let userUnsubscribers: (()=>void)[] = [];
-
-    const handleUserSnapshots = (snapshots: any[], role: UserRole, managedSiteIds: string[] | null) => {
-        let allUsers: AppUser[] = [];
-        snapshots.forEach(snapshot => {
-            snapshot.docs.forEach((doc: any) => {
-                allUsers.push({ uid: doc.id, ...doc.data() } as AppUser);
-            });
-        });
-        
-        // Remove duplicates if a user is somehow fetched twice (e.g., from different queries)
-        const uniqueUsers = Array.from(new Map(allUsers.map(u => [u.uid, u])).values());
-
-        // For managers, we do an additional client-side filter to be absolutely sure.
-        if (role === 'manager') {
-            const siteIds = managedSiteIds || [];
-            const filteredUsers = uniqueUsers.filter(u => u.defaultSiteId && siteIds.includes(u.defaultSiteId));
-            setUsers(filteredUsers.sort((a,b) => (a.displayName || "").localeCompare(b.displayName || "")));
-        } else {
-            setUsers(uniqueUsers.sort((a,b) => (a.displayName || "").localeCompare(b.displayName || "")));
-        }
-    };
+    let userUnsubscriber: (() => void) | null = null;
     
-    // Admins fetch all users
-    if (currentUser.role === 'admin') {
-        const usersQuery = query(collection(db, "users"), orderBy("displayName", "asc"));
-        const unsub = onSnapshot(usersQuery, (snapshot) => handleUserSnapshots([snapshot], 'admin', null), (err) => {
-            console.error(`${LOG_PREFIX} Error fetching users for admin:`, err);
-            setError("Failed to load users list.");
-        });
-        userUnsubscribers.push(unsub);
-    }
-
-    // Managers fetch users per managed site
-    if (currentUser.role === 'manager') {
-        const managedSiteIds = currentUser.managedSiteIds || [];
-        if (managedSiteIds.length > 0) {
-            const snapshots: any[] = [];
-            let receivedSnapshots = 0;
-            
-            managedSiteIds.forEach(siteId => {
-                const q = query(collection(db, "users"), where("defaultSiteId", "==", siteId));
-                const unsub = onSnapshot(q, (snapshot) => {
-                    const existingIndex = snapshots.findIndex(s => s.query.siteId === siteId);
-                    if(existingIndex > -1) snapshots[existingIndex] = snapshot;
-                    else snapshots.push(snapshot);
-                    
-                    if(++receivedSnapshots >= managedSiteIds.length) {
-                       handleUserSnapshots(snapshots, 'manager', managedSiteIds);
-                    }
-                }, (err) => {
-                    console.error(`${LOG_PREFIX} Error fetching users for manager site ${siteId}:`, err);
-                    setError(`Failed to load users for site ${siteId}.`);
-                });
-                userUnsubscribers.push(unsub);
-            });
+    const usersQuery = query(collection(db, "users"), orderBy("displayName", "asc"));
+    userUnsubscriber = onSnapshot(usersQuery, (snapshot) => {
+        const allUsers = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser));
+        
+        if (currentUser.role === 'manager') {
+            const managedSiteIds = currentUser.managedSiteIds || [];
+            // For a manager, filter users based on their default site assignment
+            const filteredUsers = allUsers.filter(u => u.defaultSiteId && managedSiteIds.includes(u.defaultSiteId));
+            setUsers(filteredUsers);
+        } else if (currentUser.role === 'admin') {
+            // Admin sees all users regardless of active site context
+            setUsers(allUsers);
         } else {
-            setUsers([]); // No sites, no users.
+            // Default case, e.g., staff (though this hook is guarded)
+            setUsers([]);
         }
-    }
+    }, (err) => {
+        console.error(`${LOG_PREFIX} Error fetching users:`, err);
+        setError("Failed to load users list.");
+    });
 
 
     const sitesQuery = query(collection(db, "sites"), orderBy("name", "asc"));
@@ -151,15 +113,25 @@ export function useUserManagement() {
         setError("Failed to load staff details.");
     });
 
-    setLoading(false); // Set loading false after initial listeners are set up
+    Promise.all([
+      new Promise(resolve => onSnapshot(usersQuery, () => resolve(true))),
+      new Promise(resolve => onSnapshot(sitesQuery, () => resolve(true))),
+      new Promise(resolve => onSnapshot(stallsQuery, () => resolve(true))),
+      new Promise(resolve => onSnapshot(staffDetailsQuery, () => resolve(true))),
+    ]).then(() => {
+        setLoading(false);
+    }).catch(err => {
+        setError("Error loading initial data.");
+        setLoading(false);
+    });
 
     return () => {
-      userUnsubscribers.forEach(unsub => unsub());
+      if (userUnsubscriber) userUnsubscriber();
       unsubSites();
       unsubStalls();
       unsubStaffDetails();
     };
-  }, [currentUser, authLoading]);
+  }, [currentUser, authLoading, activeSiteId]);
 
   const handleCreateUserFirestoreDoc = useCallback(async (uid: string, newUserData: Omit<AppUser, 'createdAt' | 'uid'>): Promise<boolean> => {
     if (!currentUser || currentUser.role !== 'admin') {
