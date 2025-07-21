@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
-import type { AppUser, StaffDetails, SalaryAdvance, SalaryPayment, Site, Holiday, StaffAttendance } from "@/types";
+import type { AppUser, StaffDetails, SalaryAdvance, SalaryPayment, Site, Holiday, StaffAttendance, UserStatus } from "@/types";
 import { 
   getFirestore, 
   collection, 
@@ -15,13 +15,15 @@ import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Info, ChevronLeft, ChevronRight } from "lucide-react";
+import { Loader2, Info, ChevronLeft, ChevronRight, Filter } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { format, startOfMonth, endOfMonth, subMonths, addMonths, isAfter, isBefore, max, min, startOfDay } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { PayrollTable } from "@/components/staff/PayrollTable";
 import { useUserManagement } from "@/hooks/use-user-management";
 import PageHeader from "@/components/shared/PageHeader";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
 
 const LOG_PREFIX = "[PayrollClientPage]";
 
@@ -57,13 +59,19 @@ export default function PayrollClientPage() {
     error: userManagementError,
   } = useUserManagement();
 
-  const staffList = useMemo(() => {
-    return allUsersForContext.filter(u => u.role === 'staff' || u.role === 'manager');
-  }, [allUsersForContext]);
-  
   const [payrollData, setPayrollData] = useState<PayrollData[]>([]);
   const [loadingPayrollCalcs, setLoadingPayrollCalcs] = useState(true);
   const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [statusFilter, setStatusFilter] = useState<UserStatus | 'all'>('active');
+
+  const staffList = useMemo(() => {
+    const baseList = allUsersForContext.filter(u => u.role === 'staff' || u.role === 'manager');
+    if (statusFilter === 'all') {
+      return baseList;
+    }
+    return baseList.filter(u => (u.status || 'active') === statusFilter);
+  }, [allUsersForContext, statusFilter]);
+  
 
   // State for fetched data
   const [monthlyAdvances, setMonthlyAdvances] = useState<Map<string, number>>(new Map());
@@ -107,7 +115,7 @@ export default function PayrollClientPage() {
     return workingDays;
   }, []);
   
-  // Effect for one-time fetches (holidays) and real-time listeners for data that changes (advances, payments, attendance)
+  // Effect for one-time fetches per month (advances, payments, holidays)
   useEffect(() => {
     if (userManagementLoading || staffList.length === 0) {
         if(!userManagementLoading) setLoadingPayrollCalcs(false);
@@ -124,77 +132,85 @@ export default function PayrollClientPage() {
     const firstDayOfMonth = startOfMonth(currentMonth);
     const lastDayOfMonth = endOfMonth(currentMonth);
 
-    let allUnsubscribers: (() => void)[] = [];
+    const fetchStaticData = async () => {
+        try {
+            const [advancesDocs, paymentsDocs, holidaysDocs] = await Promise.all([
+                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "advances"), where("staffUid", "in", batch), where("date", ">=", firstDayOfMonth.toISOString()), where("date", "<=", lastDayOfMonth.toISOString()))))),
+                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", batch), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear()))))),
+                getDocs(query(collection(db, "holidays"), where("date", ">=", format(firstDayOfMonth, 'yyyy-MM-dd')), where("date", "<=", format(lastDayOfMonth, 'yyyy-MM-dd'))))
+            ]);
 
-    // Fetch holidays once
-    const holidaysQuery = query(collection(db, "holidays"), where("date", ">=", format(firstDayOfMonth, 'yyyy-MM-dd')), where("date", "<=", format(lastDayOfMonth, 'yyyy-MM-dd')));
-    getDocs(holidaysQuery).then(holidaysDocs => {
-      setMonthlyHolidays(holidaysDocs.docs.map(doc => doc.data() as Holiday));
-    }).catch(error => {
-       console.error("Error fetching holidays:", error);
-       toast({ title: "Error", description: `Could not load holidays: ${error.message}`, variant: "destructive" });
-    });
+            const advancesMap = new Map<string, number>();
+            advancesDocs.flat().forEach(snapshot => snapshot.forEach(doc => {
+                const advance = doc.data() as SalaryAdvance;
+                advancesMap.set(advance.staffUid, (advancesMap.get(advance.staffUid) || 0) + advance.amount);
+            }));
+            setMonthlyAdvances(advancesMap);
 
-    // Listener for Advances
-    uidsBatches.forEach(batch => {
-      if (batch.length === 0) return;
-      const advancesQuery = query(collection(db, "advances"), where("staffUid", "in", batch), where("date", ">=", firstDayOfMonth.toISOString()), where("date", "<=", lastDayOfMonth.toISOString()));
-      const unsubAdvances = onSnapshot(advancesQuery, (snapshot) => {
-        const advancesMap = new Map<string, number>();
-        snapshot.forEach(doc => {
-            const advance = doc.data() as SalaryAdvance;
-            advancesMap.set(advance.staffUid, (advancesMap.get(advance.staffUid) || 0) + advance.amount);
-        });
-        setMonthlyAdvances(prev => new Map([...Array.from(prev.entries()), ...Array.from(advancesMap.entries())]));
-      });
-      allUnsubscribers.push(unsubAdvances);
-    });
+            const paymentsMap = new Map<string, number>();
+            paymentsDocs.flat().forEach(snapshot => snapshot.forEach(doc => {
+                const payment = doc.data() as SalaryPayment;
+                paymentsMap.set(payment.staffUid, (paymentsMap.get(payment.staffUid) || 0) + payment.amountPaid);
+            }));
+            setMonthlyPayments(paymentsMap);
 
-    // Listener for Payments - THIS IS THE FIX
-    uidsBatches.forEach(batch => {
-      if (batch.length === 0) return;
-      const paymentsQuery = query(collection(db, "salaryPayments"), where("staffUid", "in", batch), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear()));
-      const unsubPayments = onSnapshot(paymentsQuery, (snapshot) => {
-          const paymentsMap = new Map<string, number>();
-          snapshot.forEach(doc => {
-              const payment = doc.data() as SalaryPayment;
-              paymentsMap.set(payment.staffUid, (paymentsMap.get(payment.staffUid) || 0) + payment.amountPaid);
-          });
-          setMonthlyPayments(prev => new Map([...Array.from(prev.entries()), ...Array.from(paymentsMap.entries())]));
-      });
-      allUnsubscribers.push(unsubPayments);
-    });
+            setMonthlyHolidays(holidaysDocs.docs.map(doc => doc.data() as Holiday));
+        } catch (error: any) {
+            console.error("Error fetching payroll static details:", error);
+            toast({ title: "Error", description: `Could not load advances/payments: ${error.message}`, variant: "destructive" });
+        }
+    };
+    fetchStaticData();
+  }, [staffList, currentMonth, toast, userManagementLoading]);
 
-    // Listener for Attendance
-    uidsBatches.forEach(batch => {
-      if (batch.length === 0) return;
-      const attendanceQuery = query(collection(db, "staffAttendance"), 
+  // Dedicated real-time effect for attendance
+  useEffect(() => {
+    if (userManagementLoading || staffList.length === 0) return;
+
+    setLoadingPayrollCalcs(true);
+    const uids = staffList.map(s => s.uid);
+    const uidsBatches: string[][] = [];
+    for (let i = 0; i < uids.length; i += 30) {
+        uidsBatches.push(uids.slice(i, i + 30));
+    }
+    
+    const firstDayOfMonth = startOfMonth(currentMonth);
+    const lastDayOfMonth = endOfMonth(currentMonth);
+
+    const unsubscribers = uidsBatches.map(batch => {
+      if (batch.length === 0) return () => {};
+      const q = query(collection(db, "staffAttendance"), 
         where("staffUid", "in", batch),
         where("date", ">=", format(firstDayOfMonth, 'yyyy-MM-dd')),
         where("date", "<=", format(lastDayOfMonth, 'yyyy-MM-dd'))
       );
-      const unsubAttendance = onSnapshot(attendanceQuery, (snapshot) => {
-          const batchAttendanceMap = new Map<string, { present: number, halfDay: number }>();
-          snapshot.forEach(doc => {
-              const att = doc.data() as StaffAttendance;
-              const current = batchAttendanceMap.get(att.staffUid) || { present: 0, halfDay: 0 };
-              if (att.status === 'Present') current.present++;
-              if (att.status === 'Half-day') current.halfDay++;
-              batchAttendanceMap.set(att.staffUid, current);
-          });
-           setMonthlyAttendance(prev => {
-              const newMap = new Map(prev);
-              batch.forEach(uid => newMap.set(uid, {present: 0, halfDay: 0})); // Reset for batch
+      return onSnapshot(q, (snapshot) => {
+          setMonthlyAttendance(prevMap => {
+              const newMap = new Map(prevMap);
+              // First, clear old entries for this batch to handle deletions
+              batch.forEach(uid => newMap.delete(uid));
+              // Then, process new data
+              const batchAttendanceMap = new Map<string, { present: number, halfDay: number }>();
+              snapshot.forEach(doc => {
+                  const att = doc.data() as StaffAttendance;
+                  const current = batchAttendanceMap.get(att.staffUid) || { present: 0, halfDay: 0 };
+                  if (att.status === 'Present') current.present++;
+                  if (att.status === 'Half-day') current.halfDay++;
+                  batchAttendanceMap.set(att.staffUid, current);
+              });
               batchAttendanceMap.forEach((value, key) => newMap.set(key, value));
               return newMap;
           });
+          setLoadingPayrollCalcs(false); // Mark loading as false once listener is active
+      }, (error) => {
+          console.error("Error on attendance snapshot:", error);
+          toast({ title: "Real-time Error", description: "Could not get live attendance updates.", variant: "destructive" });
+          setLoadingPayrollCalcs(false);
       });
-      allUnsubscribers.push(unsubAttendance);
     });
 
-    return () => {
-        allUnsubscribers.forEach(unsub => unsub());
-    };
+    return () => unsubscribers.forEach(unsub => unsub());
+
   }, [staffList, currentMonth, toast, userManagementLoading]);
 
 
@@ -248,11 +264,26 @@ export default function PayrollClientPage() {
   return (
     <div className="space-y-6">
         <PageHeader title="Staff Payroll" description="Calculate net payable salary for the current month and record payments."/>
-        <div className="flex items-center gap-2">
-            <Button variant="outline" size="icon" onClick={handlePrevMonth} aria-label="Previous month" disabled={loading}><ChevronLeft className="h-4 w-4" /></Button>
-            <h2 className="text-xl font-semibold text-center min-w-[150px]">{format(currentMonth, "MMMM yyyy")}</h2>
-            <Button variant="outline" size="icon" onClick={handleNextMonth} aria-label="Next month" disabled={loading}><ChevronRight className="h-4 w-4" /></Button>
-            <Button variant="outline" onClick={handleGoToCurrentMonth} disabled={loading}>Current Month</Button>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+                <Button variant="outline" size="icon" onClick={handlePrevMonth} aria-label="Previous month" disabled={loading}><ChevronLeft className="h-4 w-4" /></Button>
+                <h2 className="text-xl font-semibold text-center min-w-[150px]">{format(currentMonth, "MMMM yyyy")}</h2>
+                <Button variant="outline" size="icon" onClick={handleNextMonth} aria-label="Next month" disabled={loading}><ChevronRight className="h-4 w-4" /></Button>
+                <Button variant="outline" onClick={handleGoToCurrentMonth} disabled={loading}>Current Month</Button>
+            </div>
+             <div className="flex items-center gap-2">
+                <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as any)}>
+                  <SelectTrigger className="w-[180px] bg-input">
+                    <Filter className="mr-2 h-4 w-4 text-muted-foreground"/>
+                    <SelectValue placeholder="Filter by status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active Staff</SelectItem>
+                    <SelectItem value="inactive">Inactive Staff</SelectItem>
+                    <SelectItem value="all">All Staff</SelectItem>
+                  </SelectContent>
+                </Select>
+            </div>
         </div>
         {loading ? (
             <div className="flex justify-center items-center py-10"><Loader2 className="h-6 w-6 animate-spin" /><p className="ml-2">Recalculating payroll...</p></div>
