@@ -51,7 +51,7 @@ export function AttendanceRegisterTable({
   }, [month]);
   
   const isAllSelected = useMemo(() => staffList.length > 0 && selectedStaffUids.length === staffList.length, [staffList, selectedStaffUids]);
-  const isIndeterminate = useMemo(() => selectedStaffUids.length > 0 && selectedStaffUids.length < staffList.length, [staffList, selectedUserIds]);
+  const isIndeterminate = useMemo(() => selectedStaffUids.length > 0 && selectedStaffUids.length < staffList.length, [staffList, selectedStaffUids]);
 
   const handleSelectAll = (checked: boolean | 'indeterminate') => {
     onSelectionChange(checked === true ? staffList.map(u => u.uid) : []);
