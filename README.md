@@ -1,7 +1,7 @@
 
 # StallSync - Stock & Sales Management
 
-StallSync is a comprehensive stock and sales management application designed for businesses operating multiple sites and stalls (e.g., retail counters, market stands, storage areas). It empowers users to efficiently track inventory, record sales transactions, manage staff roles and assignments, and gain valuable insights into their business operations through detailed reporting.
+StallSync is a comprehensive business management application designed for organizations operating multiple sites and stalls. It empowers users to efficiently track inventory, record sales, manage staff attendance and payroll, and gain valuable insights into their business operations through detailed reporting.
 
 The application features role-based access control (Admin, Manager, Staff) to ensure appropriate data access and functionality for different user types. It also leverages AI for features like product description generation and sales trend summarization.
 
@@ -17,20 +17,14 @@ The application features role-based access control (Admin, Manager, Staff) to en
 
 ## Core Features
 
-*   Role-Based Authentication (Admin, Manager, Staff)
-*   Comprehensive Dashboard with KPIs and Quick Actions
-*   Multi-Site and Multi-Stall Inventory Management
-    *   Master Stock & Stall-Specific Stock Tracking
-    *   Allocations, Transfers, and Returns between Master/Stall
-*   Sales Recording and Detailed History
-*   User Management (Admin-controlled)
-*   Site and Stall Creation/Management (Admin-controlled)
-*   Stock Movement Activity Logging
-*   Sales & Inventory Reporting with AI Summaries
-*   Profile Management with User Preferences
-*   Data Export (CSV)
-*   Google Sheets Integration (Import/Export stock & sales)
-*   AI-Powered Product Description Generation
+*   **Role-Based Authentication:** Admin, Manager, and Staff roles with distinct permissions.
+*   **Multi-Module System:**
+    *   **Stock & Sales:** Manage multi-site inventory, master/stall stock, allocations, transfers, sales recording, and reporting.
+    *   **Food Stall Management:** Dedicated module for tracking food-related expenses, daily sales by mealtime, and financial reports.
+    *   **Staff Management:** Track attendance, manage salary advances, and process monthly payroll based on attendance and deductions.
+*   **Admin Controls:** Manage users, sites, and stalls. Reset application data securely.
+*   **Data Management:** Import/Export stock and expense data via CSV.
+*   **AI-Powered Features:** Generate product descriptions and sales summaries automatically.
 
 ## Getting Started
 
@@ -68,12 +62,6 @@ NEXT_PUBLIC_FIREBASE_APP_ID=1:...:web:...
 # See documentation for how to get this JSON from Firebase Console -> Service Accounts
 GOOGLE_APPLICATION_CREDENTIALS_JSON='{"type": "service_account", ...}'
 
-# Google OAuth Credentials (for Google Sheets feature)
-# See documentation for how to get these from Google Cloud Console
-GOOGLE_CLIENT_ID=...
-GOOGLE_CLIENT_SECRET=...
-GOOGLE_REDIRECT_URI=http://localhost:9002/api/auth/google/callback
-
 # Genkit/Google AI (if applicable)
 # GEMINI_API_KEY=...
 ```
@@ -85,7 +73,7 @@ Follow the detailed steps in the **"Firebase Project Setup"** section of [DOCUME
 *   Creating a Firebase project.
 *   Registering your Web App.
 *   Enabling Firebase Authentication (Email/Password).
-*   Setting up Firestore Database and configuring Security Rules (`firestore.rules`) and Indexes (`firestore.indexes.json`).
+*   Setting up Firestore Database and deploying Security Rules (`firestore.rules`) and Indexes (`firestore.indexes.json`).
 *   Enabling Cloud Functions.
 
 ### 4. Install Dependencies
@@ -117,7 +105,7 @@ npm run start
 
 ## Detailed Documentation
 
-For an in-depth understanding of the application architecture, all features, advanced setup (like Google Sheets integration), data models, and user journeys, please refer to the **[DOCUMENTATION.md](DOCUMENTATION.md)** file.
+For an in-depth understanding of the application architecture, all features, advanced setup, data models, and user journeys, please refer to the **[DOCUMENTATION.md](DOCUMENTATION.md)** file.
 
 ## Deployment
 
