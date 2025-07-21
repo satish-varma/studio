@@ -25,7 +25,7 @@ import { getFirestore, doc, setDoc, updateDoc } from "firebase/firestore";
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp } from 'firebase/app';
 import { useState } from "react";
-import { DatePicker } from "../ui/date-picker";
+import { DatePicker } from "@/components/ui/date-picker";
 import { logStaffActivity } from "@/lib/staffLogger";
 import { useAuth } from "@/contexts/AuthContext";
 
