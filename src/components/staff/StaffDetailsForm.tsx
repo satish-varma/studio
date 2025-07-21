@@ -3,7 +3,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
-import type { StaffDetailsFormValues, AppUser } from "@/types";
+import type { StaffDetailsFormValues, AppUser, StaffDetails } from "@/types";
 import { staffDetailsFormSchema } from "@/types/staff";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,7 +26,6 @@ import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp } from 'firebase/app';
 import { useState } from "react";
 import { DatePicker } from "../ui/date-picker";
-import type { StaffDetails } from "@/types";
 import { logStaffActivity } from "@/lib/staffLogger";
 import { useAuth } from "@/contexts/AuthContext";
 
