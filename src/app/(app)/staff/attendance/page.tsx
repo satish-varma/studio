@@ -86,10 +86,11 @@ export default function StaffAttendanceClientPage() {
   const handleGoToCurrentMonth = () => setCurrentMonth(new Date());
 
   const filteredStaffList = useMemo(() => {
+    const operationalStaff = allStaffForSite.filter(u => u.role !== 'admin');
     if (statusFilter === 'all') {
-      return allStaffForSite;
+      return operationalStaff;
     }
-    return allStaffForSite.filter(u => (u.status || 'active') === statusFilter);
+    return operationalStaff.filter(u => (u.status || 'active') === statusFilter);
   }, [allStaffForSite, statusFilter]);
   
   useEffect(() => {
@@ -539,3 +540,5 @@ export default function StaffAttendanceClientPage() {
     </div>
   );
 }
+
+    
