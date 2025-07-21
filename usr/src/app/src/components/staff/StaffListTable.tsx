@@ -17,6 +17,7 @@ import { useRouter } from "next/navigation";
 import { useMemo } from 'react';
 import { Checkbox } from "@/components/ui/checkbox";
 import { format } from 'date-fns';
+import UpdateStatusDialog from "@/components/users/UpdateStatusDialog";
 
 interface StaffListTableProps {
   users: AppUser[];
