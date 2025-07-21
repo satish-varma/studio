@@ -94,10 +94,10 @@ export default function StaffActivityLogClientPage() {
       const newUsersMap: Record<string, string> = {};
       const fetchedAdminsManagers: AppUser[] = [];
       usersSnapshot.forEach(doc => {
-        const userData = doc.data() as AppUser;
+        const userData = doc.data() as Omit<AppUser, 'uid'>;
         newUsersMap[doc.id] = userData.displayName || userData.email || doc.id;
         if (userData.role === 'admin' || userData.role === 'manager') {
-            fetchedAdminsManagers.push({ uid: doc.id, ...userData });
+            fetchedAdminsManagers.push({ uid: doc.id, ...userData } as AppUser);
         }
       });
       setUsersMap(newUsersMap);
