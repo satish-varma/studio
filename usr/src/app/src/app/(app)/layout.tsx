@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useEffect, useState } from 'react'; // Added useState
+import { useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { Loader2, LogOut } from 'lucide-react'; 
@@ -24,9 +24,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, loading, signOutUser } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
-
-  // THE FIX: Manage mobile sidebar state here
-  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(true);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -59,11 +56,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    // THE FIX: Control SidebarProvider state from here
-    <SidebarProvider
-      openMobile={isMobileSidebarOpen}
-      onOpenMobileChange={setIsMobileSidebarOpen}
-    >
+    <SidebarProvider>
       <Sidebar collapsible="icon" variant="sidebar" className="border-r border-sidebar-border">
         <SidebarHeader className="p-4 flex flex-col items-center group-data-[collapsible=icon]:hidden">
            <Link href="/dashboard" className="flex items-center gap-2 mb-4">

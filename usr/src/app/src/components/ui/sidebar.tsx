@@ -54,9 +54,6 @@ const SidebarProvider = React.forwardRef<
     defaultOpen?: boolean
     open?: boolean
     onOpenChange?: (open: boolean) => void
-    // THE FIX: Make mobile state controlled from the outside
-    openMobile: boolean
-    onOpenMobileChange: (open: boolean) => void
   }
 >(
   (
@@ -64,8 +61,6 @@ const SidebarProvider = React.forwardRef<
       defaultOpen = true,
       open: openProp,
       onOpenChange: setOpenProp,
-      openMobile, // Get state from props
-      onOpenMobileChange: setOpenMobile, // Get state setter from props
       className,
       style,
       children,
@@ -74,6 +69,7 @@ const SidebarProvider = React.forwardRef<
     ref
   ) => {
     const isMobile = useIsMobile()
+    const [openMobile, setOpenMobile] = React.useState(false); // Default mobile to closed
 
     const [_open, _setOpen] = React.useState(defaultOpen)
     const open = openProp ?? _open
@@ -92,9 +88,9 @@ const SidebarProvider = React.forwardRef<
 
     const toggleSidebar = React.useCallback(() => {
       return isMobile
-        ? setOpenMobile(!openMobile)
-        : setOpen((open) => !open)
-    }, [isMobile, setOpen, openMobile, setOpenMobile])
+        ? setOpenMobile((current) => !current)
+        : setOpen((current) => !current)
+    }, [isMobile, setOpen, setOpenMobile])
 
     React.useEffect(() => {
       const handleKeyDown = (event: KeyboardEvent) => {
@@ -646,6 +642,7 @@ const SidebarMenuSkeleton = React.forwardRef<
     showIcon?: boolean
   }
 >(({ className, showIcon = false, ...props }, ref) => {
+  // Random width between 50 to 90%.
   const width = React.useMemo(() => {
     return `${Math.floor(Math.random() * 40) + 50}%`
   }, [])
