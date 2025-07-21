@@ -21,7 +21,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { format, startOfMonth, endOfMonth, addMonths, subMonths, isBefore, isAfter, startOfDay, eachDayOfInterval } from 'date-fns';
 import { Button } from "@/components/ui/button";
 import type { AppUser, StaffAttendance, Site, Holiday, AttendanceStatus, UserStatus, StaffDetails } from "@/types";
-import { Loader2, Info, ChevronLeft, ChevronRight, CalendarDays, Filter, XCircle, Calendar as CalendarIcon } from "lucide-react";
+import { Loader2, Info, ChevronLeft, ChevronRight, CalendarDays, Filter, XCircle, Calendar as CalendarIcon, Check } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import PageHeader from "@/components/shared/PageHeader";
@@ -170,9 +170,6 @@ export default function StaffAttendanceClientPage() {
     const holidayInfo = isHoliday(date, staff.defaultSiteId);
     if (!user) return;
     
-    // THIS IS THE FIX: The incorrect "isAllSitesView" check is removed.
-    // The logic now correctly relies on the staff member's own site assignment.
-
     if (!staff.defaultSiteId) {
         toast({ title: "No Site Assigned", description: `${staff.displayName} is not assigned to a site.`, variant: "destructive" });
         return;
@@ -311,7 +308,6 @@ export default function StaffAttendanceClientPage() {
       });
       toast({ title: "Bulk Action Successful", description: `${validOperations} attendance records updated.` });
       setSelectedStaffUids([]);
-      // Optimistically update local state to reflect change without a full refetch
       setAttendance(prev => {
         const newAttendance = JSON.parse(JSON.stringify(prev || {}));
         for (const uid of selectedStaffUids) {
@@ -353,10 +349,77 @@ export default function StaffAttendanceClientPage() {
       const docId = `${format(date, 'yyyy-MM-dd')}_${staff.uid}`;
       const docRef = doc(db, "staffAttendance", docId);
       batch.delete(docRef);
-      return { valid: true }; // status is undefined for delete, handled as 'Cleared'
+      return { valid: true };
     });
   };
 
+  const handleMarkTodayAttendance = async () => {
+    if (!user) {
+      toast({ title: "Not Authenticated", description: "You must be logged in." });
+      return;
+    }
+    const today = new Date();
+    const todayStr = format(today, 'yyyy-MM-dd');
+
+    const holidayInfo = isHoliday(today);
+    if (holidayInfo.holiday) {
+      toast({ title: "Today is a Holiday", description: `Cannot mark attendance on ${holidayInfo.name}.`, variant: "default" });
+      return;
+    }
+    
+    setIsBulkUpdating(true);
+    const activeStaff = allStaffForSite.filter(s => (s.status || 'active') === 'active');
+    const todayAttendanceQuery = query(collection(db, "staffAttendance"), where("date", "==", todayStr));
+    
+    try {
+      const todayAttendanceSnapshot = await getDocs(todayAttendanceQuery);
+      const staffWithAttendanceToday = new Set(todayAttendanceSnapshot.docs.map(d => d.data().staffUid));
+
+      const staffToMark = activeStaff.filter(staff => {
+        if (!staff.defaultSiteId) return false; // Must be assigned to a site
+        if (staffWithAttendanceToday.has(staff.uid)) return false; // Skip if already marked
+
+        const details = staffDetailsMap.get(staff.uid);
+        const joiningDate = details?.joiningDate ? startOfDay(new Date(details.joiningDate)) : null;
+        const exitDate = details?.exitDate ? startOfDay(new Date(details.exitDate)) : null;
+
+        if ((joiningDate && isBefore(today, joiningDate)) || (exitDate && isAfter(today, exitDate))) {
+          return false;
+        }
+        return true;
+      });
+
+      if (staffToMark.length === 0) {
+        toast({ title: "No Action Needed", description: "All active staff have their attendance marked for today or are not eligible.", variant: "default" });
+        setIsBulkUpdating(false);
+        return;
+      }
+
+      const batch = writeBatch(db);
+      staffToMark.forEach(staff => {
+        const docId = `${todayStr}_${staff.uid}`;
+        const docRef = doc(db, "staffAttendance", docId);
+        batch.set(docRef, {
+          staffUid: staff.uid, date: todayStr, status: 'Present',
+          siteId: staff.defaultSiteId, recordedByUid: user.uid,
+          recordedByName: user.displayName || user.email, updatedAt: new Date().toISOString(),
+        }, { merge: true });
+      });
+
+      await batch.commit();
+      await logStaffActivity(user, {
+        type: 'ATTENDANCE_MARKED', relatedStaffUid: 'MULTIPLE', siteId: activeSiteId,
+        details: { date: todayStr, status: 'Present', notes: `Marked today's attendance for ${staffToMark.length} staff.` }
+      });
+      toast({ title: "Attendance Marked", description: `Successfully marked ${staffToMark.length} staff member(s) as present for today.` });
+
+    } catch (error: any) {
+      console.error("Mark Today's Attendance failed:", error);
+      toast({ title: "Action Failed", description: error.message, variant: "destructive" });
+    } finally {
+      setIsBulkUpdating(false);
+    }
+  };
 
   if (authLoading || userManagementLoading) return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin" /></div>;
 
@@ -373,11 +436,15 @@ export default function StaffAttendanceClientPage() {
       />
 
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Button variant="outline" size="icon" onClick={handlePrevMonth} aria-label="Previous month"><ChevronLeft className="h-4 w-4" /></Button>
             <h2 className="text-xl font-semibold text-center min-w-[150px]">{format(currentMonth, "MMMM yyyy")}</h2>
             <Button variant="outline" size="icon" onClick={handleNextMonth} aria-label="Next month"><ChevronRight className="h-4 w-4" /></Button>
             <Button variant="outline" onClick={handleGoToCurrentMonth}>Current Month</Button>
+            <Button variant="secondary" onClick={handleMarkTodayAttendance} disabled={isBulkUpdating}>
+                {isBulkUpdating ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Check className="mr-2 h-4 w-4"/>}
+                Mark Today's Attendance
+            </Button>
           </div>
           <div className="flex items-center gap-2">
             <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as any)}>
@@ -426,10 +493,10 @@ export default function StaffAttendanceClientPage() {
                     </PopoverContent>
                   </Popover>
 
-                <Button size="sm" variant="outline" className="bg-green-100 hover:bg-green-200" onClick={() => handleBulkUpdate('Present')} disabled={isBulkUpdating}>Mark Present</Button>
-                <Button size="sm" variant="outline" className="bg-red-100 hover:bg-red-200" onClick={() => handleBulkUpdate('Absent')} disabled={isBulkUpdating}>Mark Absent</Button>
-                <Button size="sm" variant="outline" className="bg-yellow-100 hover:bg-yellow-200" onClick={() => handleBulkUpdate('Leave')} disabled={isBulkUpdating}>Mark Leave</Button>
-                <Button size="sm" variant="outline" className="bg-blue-100 hover:bg-blue-200" onClick={() => handleBulkUpdate('Half-day')} disabled={isBulkUpdating}>Mark Half-day</Button>
+                <Button size="sm" variant="outline" className="bg-green-50 text-green-800 border-green-200 hover:bg-green-100 dark:bg-green-900/50 dark:text-green-300 dark:border-green-800" onClick={() => handleBulkUpdate('Present')} disabled={isBulkUpdating}>Mark Present</Button>
+                <Button size="sm" variant="outline" className="bg-red-100 text-red-800 border-red-200 hover:bg-red-200 dark:bg-red-900/50 dark:text-red-300 dark:border-red-800" onClick={() => handleBulkUpdate('Absent')} disabled={isBulkUpdating}>Mark Absent</Button>
+                <Button size="sm" variant="outline" className="bg-yellow-100 text-yellow-800 border-yellow-200 hover:bg-yellow-200 dark:bg-yellow-900/50 dark:text-yellow-400 dark:border-yellow-800" onClick={() => handleBulkUpdate('Leave')} disabled={isBulkUpdating}>Mark Leave</Button>
+                <Button size="sm" variant="outline" className="bg-blue-100 text-blue-800 border-blue-200 hover:bg-blue-200 dark:bg-blue-900/50 dark:text-blue-300 dark:border-blue-800" onClick={() => handleBulkUpdate('Half-day')} disabled={isBulkUpdating}>Mark Half-day</Button>
                 <Button size="sm" variant="destructive" onClick={handleBulkClear} disabled={isBulkUpdating}><XCircle className="h-4 w-4 mr-1"/>Clear</Button>
                 {isBulkUpdating && <Loader2 className="h-5 w-5 animate-spin"/>}
             </div>
