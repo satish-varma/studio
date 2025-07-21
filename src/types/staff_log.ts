@@ -1,10 +1,14 @@
 
-export type StaffActivityType =
-  | 'ATTENDANCE_MARKED'
-  | 'SALARY_ADVANCE_GIVEN'
-  | 'STAFF_DETAILS_UPDATED'
-  | 'SALARY_PAID'
-  | 'USER_STATUS_CHANGED';
+
+export const staffActivityTypes = [
+  'ATTENDANCE_MARKED',
+  'SALARY_ADVANCE_GIVEN',
+  'STAFF_DETAILS_UPDATED',
+  'SALARY_PAID',
+  'USER_STATUS_CHANGED'
+] as const;
+
+export type StaffActivityType = (typeof staffActivityTypes)[number];
 
 export interface StaffActivityLog {
   id?: string; // Firestore document ID
