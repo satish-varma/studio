@@ -119,7 +119,7 @@ export default function StaffDashboardPage() {
             const presentCount = attendanceTodayDocs.filter(doc => (doc.data() as StaffAttendance).status === 'Present').length;
             const notPresentRecords = attendanceTodayDocs
                 .filter(doc => ['Leave', 'Absent', 'Half-day'].includes((doc.data() as StaffAttendance).status))
-                .map(doc => doc.data() as StaffAttendance);
+                .map(doc => ({ id: doc.id, ...doc.data() } as StaffAttendance));
             setStaffOnLeaveOrAbsent(notPresentRecords);
             
             const holidays = holidaysSnapshot.docs.map(d => d.data() as Holiday);
@@ -156,8 +156,11 @@ export default function StaffDashboardPage() {
                 }
             });
 
+            // Filter for only active staff for the "Total Staff" count
+            const activeStaffCount = staffList.filter(s => s.role === 'staff' && (s.status === 'active' || !s.status)).length;
+            
             setStats({ 
-                totalStaff: staffList.length, 
+                totalStaff: activeStaffCount, 
                 presentToday: presentCount, 
                 advancesThisMonth: totalAdvance, 
                 notPresentToday: notPresentRecords.length,
