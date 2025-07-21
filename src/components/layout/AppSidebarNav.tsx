@@ -18,6 +18,8 @@ import {
   Briefcase,
   FileText,
   IndianRupee,
+  CalendarCheck,
+  HandCoins,
 } from "lucide-react";
 import {
   SidebarMenu,
@@ -51,6 +53,12 @@ interface NavItem {
 const navItems: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ['staff', 'manager', 'admin'], exactMatch: true },
   
+  // Quick Access Links
+  { href: "/foodstall/expenses/record", label: "Add Expense", icon: PlusCircle, roles: ['staff', 'manager', 'admin'] },
+  { href: "/staff/attendance", label: "Attendance", icon: CalendarCheck, roles: ['manager', 'admin'] },
+  { href: "/staff/advances", label: "Pay Advance", icon: HandCoins, roles: ['manager', 'admin'] },
+
+
   { 
     href: "/items", 
     label: "Stock & Sales", 
