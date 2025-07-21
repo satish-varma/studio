@@ -33,6 +33,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import type { UserRole } from "@/types";
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
+import { useSidebar } from "@/components/ui/sidebar"; // Import useSidebar hook
 
 interface NavSubItem {
   href: string;
@@ -124,6 +125,7 @@ const navItems: NavItem[] = [
 export function AppSidebarNav() {
   const pathname = usePathname();
   const { user } = useAuth();
+  const { setOpenMobile } = useSidebar(); // Get function to close mobile sidebar
   
   const [openMenus, setOpenMenus] = useState<Set<string>>(new Set());
 
@@ -196,7 +198,7 @@ export function AppSidebarNav() {
                     return (
                       <SidebarMenuSubItem key={subItem.href}>
                         <Link href={subItem.href} passHref legacyBehavior>
-                          <SidebarMenuSubButton isActive={isSubActive}>
+                          <SidebarMenuSubButton isActive={isSubActive} onClick={() => setOpenMobile(false)}>
                             {subItem.icon && <subItem.icon className="mr-2 h-4 w-4 shrink-0" />}
                             <span>{subItem.label}</span>
                           </SidebarMenuSubButton>
@@ -217,6 +219,7 @@ export function AppSidebarNav() {
                 isActive={isActive}
                 tooltip={{ children: item.label, className: "bg-primary text-primary-foreground" }}
                 className="justify-start"
+                onClick={() => setOpenMobile(false)} // Close sidebar on click
               >
                 <item.icon />
                 <span>{item.label}</span>
