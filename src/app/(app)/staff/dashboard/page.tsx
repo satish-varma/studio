@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback } from "react";
 import PageHeader from "@/components/shared/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, UserX, UserRoundCheck, HandCoins, CalendarDays } from "lucide-react";
+import { Users, UserX, UserRoundCheck, HandCoins, CalendarDays, Wallet } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { getFirestore, collection, query, where, onSnapshot, getDocs } from "firebase/firestore";
 import type { AppUser, StaffAttendance, SalaryAdvance, Holiday, StaffDetails } from "@/types";
@@ -34,6 +34,7 @@ export default function StaffDashboardPage() {
         notPresentToday: 0,
         salaryToday: 0,
         salaryThisMonth: 0,
+        projectedSalary: 0,
     });
     const [recentAdvances, setRecentAdvances] = useState<SalaryAdvance[]>([]);
     const [staffOnLeaveOrAbsent, setStaffOnLeaveOrAbsent] = useState<StaffAttendance[]>([]);
@@ -76,7 +77,7 @@ export default function StaffDashboardPage() {
         
         if (staffList.length === 0) {
             setLoadingCalculations(false);
-            setStats({ totalStaff: 0, presentToday: 0, advancesThisMonth: 0, notPresentToday: 0, salaryToday: 0, salaryThisMonth: 0 });
+            setStats({ totalStaff: 0, presentToday: 0, advancesThisMonth: 0, notPresentToday: 0, salaryToday: 0, salaryThisMonth: 0, projectedSalary: 0 });
             setRecentAdvances([]);
             setStaffOnLeaveOrAbsent([]);
             return;
@@ -116,7 +117,9 @@ export default function StaffDashboardPage() {
 
             // --- Today's Attendance & Salary ---
             const attendanceTodayDocs = attendanceTodaySnapshots.flat().flatMap(s => s.docs);
-            const activeStaffCount = staffList.filter(s => s.role === 'staff' && (s.status === 'active' || !s.status)).length;
+            
+            const activeStaffList = staffList.filter(s => s.role === 'staff' && (s.status === 'active' || !s.status));
+            const activeStaffCount = activeStaffList.length;
 
             const notPresentRecords = attendanceTodayDocs
                 .filter(doc => ['Leave', 'Absent', 'Half-day'].includes((doc.data() as StaffAttendance).status))
@@ -150,8 +153,12 @@ export default function StaffDashboardPage() {
             }));
 
             let salaryThisMonth = 0;
-            staffList.forEach(staff => {
+            let projectedSalary = 0;
+            
+            activeStaffList.forEach(staff => {
                 const details = staffDetailsMap.get(staff.uid);
+                projectedSalary += details?.salary || 0;
+
                 const attendance = monthlyAttendanceMap.get(staff.uid);
                 if (details?.salary && attendance && workingDaysInMonth > 0) {
                     const perDaySalary = details.salary / workingDaysInMonth;
@@ -166,7 +173,8 @@ export default function StaffDashboardPage() {
                 advancesThisMonth: totalAdvance, 
                 notPresentToday: notPresentRecords.length,
                 salaryToday: salaryToday,
-                salaryThisMonth: salaryThisMonth
+                salaryThisMonth: salaryThisMonth,
+                projectedSalary: projectedSalary,
             });
             setLoadingCalculations(false);
         };
@@ -200,11 +208,11 @@ export default function StaffDashboardPage() {
     }
 
     const statCards = [
-        { title: "Total Staff", value: stats.totalStaff, icon: Users, description: "Active staff at this site." },
+        { title: "Active Staff", value: stats.totalStaff, icon: Users, description: "Total active staff members." },
+        { title: "Projected Salary", value: `₹${stats.projectedSalary.toFixed(2)}`, icon: Wallet, description: "Total base salary of active staff." },
+        { title: "Salary Bill (This Month)", value: `₹${stats.salaryThisMonth.toFixed(2)}`, icon: CalendarDays, description: "Earned salary based on attendance." },
         { title: "Present Today", value: stats.presentToday, icon: UserRoundCheck, description: `${stats.presentToday} of ${stats.totalStaff} staff present.` },
-        { title: "Salary Today", value: `₹${stats.salaryToday.toFixed(2)}`, icon: IndianRupee, description: "Calculated from today's attendance." },
-        { title: "Salary Bill this Month", value: `₹${stats.salaryThisMonth.toFixed(2)}`, icon: CalendarDays, description: "Total earned salary this month." },
-        { title: "Advances this Month", value: `₹${stats.advancesThisMonth.toFixed(2)}`, icon: HandCoins, description: "Total salary advance this month." },
+        { title: "Advances (This Month)", value: `₹${stats.advancesThisMonth.toFixed(2)}`, icon: HandCoins, description: "Total salary advance this month." },
         { title: "Leave/Absent Today", value: stats.notPresentToday, icon: UserX, description: "Staff not marked as 'Present'." },
     ];
 
