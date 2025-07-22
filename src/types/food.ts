@@ -11,19 +11,19 @@ export interface FoodVendor {
 
 // --------------- Food Expense Tracking ---------------
 export const foodExpenseCategories = [
-  "Bakery",
-  "Beverages (Raw Material)",
-  "Chat",
-  "Cleaning Supplies",
-  "Dairy Products",
-  "Delivery Costs",
-  "Fruits",
   "Groceries",
-  "Meat & Poultry",
-  "Miscellaneous",
-  "MRP",
-  "Rent & Utilities",
   "Vegetables",
+  "MRP",
+  "Chat",
+  "Fruits",
+  "Dairy Products",
+  "Bakery",
+  "Delivery Costs",
+  "Meat & Poultry",
+  "Beverages (Raw Material)",
+  "Cleaning Supplies",
+  "Rent & Utilities",
+  "Miscellaneous",
   "Other",
 ] as const;
 
