@@ -147,10 +147,10 @@ export function FoodExpensesTable({
             <TableRow>
               <TableHead className="w-[150px]">Category</TableHead>
               <TableHead className="w-[120px]">Purchase Date</TableHead>
+              <TableHead className="w-[150px] hidden md:table-cell">Site</TableHead>
               <TableHead className="w-[120px] text-right">Total Cost</TableHead>
               <TableHead className="w-[130px]">Payment Method</TableHead>
               <TableHead className="w-[130px] hidden md:table-cell">Vendor</TableHead>
-              <TableHead className="w-[150px] hidden md:table-cell">Site</TableHead>
               <TableHead className="min-w-[180px]">Notes</TableHead>
               <TableHead className="w-[80px]">Actions</TableHead>
             </TableRow>
@@ -166,6 +166,12 @@ export function FoodExpensesTable({
                 <TableCell className="text-muted-foreground">
                   {formatDateForDisplay(expense.purchaseDate)}
                 </TableCell>
+                <TableCell className="text-muted-foreground hidden md:table-cell">
+                   <div className="flex items-center">
+                    <Building size={12} className="mr-1.5 text-primary/70 flex-shrink-0" />
+                    <span>{sitesMap[expense.siteId] || expense.siteId.substring(0,10)}</span>
+                  </div>
+                </TableCell>
                 <TableCell className="text-right font-semibold text-accent">
                   {formatCurrency(expense.totalCost)}
                 </TableCell>
@@ -174,12 +180,6 @@ export function FoodExpensesTable({
                 </TableCell>
                 <TableCell className="text-muted-foreground hidden md:table-cell">
                   {getVendorName(expense)}
-                </TableCell>
-                <TableCell className="text-muted-foreground hidden md:table-cell">
-                   <div className="flex items-center">
-                    <Building size={12} className="mr-1.5 text-primary/70 flex-shrink-0" />
-                    <span>{sitesMap[expense.siteId] || expense.siteId.substring(0,10)}</span>
-                  </div>
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate">
                   {expense.notes ? (
