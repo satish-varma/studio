@@ -27,6 +27,7 @@ import {
   paymentMethods,
   type FoodItemExpense
 } from "@/types/food";
+import * as z from "zod"; // Fix: Added Zod import
 import type { Site, Stall } from '@/types';
 import { ArrowLeft, Loader2, Info, Building } from "lucide-react";
 import Link from "next/link";
@@ -54,7 +55,8 @@ import {
   Timestamp,
   query,
   where,
-  onSnapshot
+  onSnapshot,
+  orderBy
 } from "firebase/firestore";
 import { firebaseConfig } from "@/lib/firebaseConfig";
 import { getApps, initializeApp, getApp } from 'firebase/app';
