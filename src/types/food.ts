@@ -34,7 +34,7 @@ export type PaymentMethod = (typeof paymentMethods)[number];
 
 export const foodExpenseFormSchema = z.object({
   category: z.enum(foodExpenseCategories, { required_error: "Category is required" }),
-  otherCategoryDetails: z.string().optional().nullable(), // New field for custom category
+  otherCategoryDetails: z.string().optional().nullable(),
   totalCost: z.coerce.number().positive("Total cost must be a positive number"),
   paymentMethod: z.enum(paymentMethods, { required_error: "Payment method is required." }),
   otherPaymentMethodDetails: z.string().optional().nullable(),
@@ -60,7 +60,6 @@ export const foodExpenseFormSchema = z.object({
     message: "Please specify the vendor name.",
     path: ["otherVendorDetails"],
 }).refine(data => {
-    // New refinement for custom category
     if (data.category === "Other" && (!data.otherCategoryDetails || data.otherCategoryDetails.trim() === "")) {
         return false;
     }
@@ -70,8 +69,16 @@ export const foodExpenseFormSchema = z.object({
     path: ["otherCategoryDetails"],
 });
 
+// New schema for the edit form
+export const foodExpenseEditFormSchema = foodExpenseFormSchema.extend({
+    siteId: z.string().min(1, "Site is required."),
+    stallId: z.string().min(1, "Stall is required."),
+});
+
 
 export type FoodItemExpenseFormValues = z.infer<typeof foodExpenseFormSchema>;
+export type FoodItemExpenseEditFormValues = z.infer<typeof foodExpenseEditFormSchema>;
+
 
 export interface FoodItemExpense {
   id: string; // Firestore document ID

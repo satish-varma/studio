@@ -21,13 +21,12 @@ import {
 } from "@/components/ui/select";
 import { DatePicker } from "@/components/ui/date-picker";
 import {
-  foodExpenseFormSchema,
-  type FoodItemExpenseFormValues,
+  foodExpenseEditFormSchema, // Use the new extended schema
+  type FoodItemExpenseEditFormValues, // Use the new type for the edit form
   foodExpenseCategories,
   paymentMethods,
   type FoodItemExpense
 } from "@/types/food";
-import * as z from "zod"; // Fix: Added Zod import
 import type { Site, Stall } from '@/types';
 import { ArrowLeft, Loader2, Info, Building } from "lucide-react";
 import Link from "next/link";
@@ -91,11 +90,8 @@ export default function EditFoodExpensePage() {
   const [allSites, setAllSites] = useState<Site[]>([]);
   const [stallsForSite, setStallsForSite] = useState<Stall[]>([]);
 
-  const form = useForm<FoodItemExpenseFormValues & { siteId: string, stallId: string }>({
-    resolver: zodResolver(foodExpenseFormSchema.extend({
-        siteId: z.string().min(1, "Site is required."),
-        stallId: z.string().min(1, "Stall is required."),
-    })),
+  const form = useForm<FoodItemExpenseEditFormValues>({
+    resolver: zodResolver(foodExpenseEditFormSchema),
     defaultValues: {
       category: undefined,
       otherCategoryDetails: "",
@@ -162,7 +158,7 @@ export default function EditFoodExpensePage() {
     }).finally(() => setIsLoading(false));
   }, [db, expenseId, form, router, toast, vendors]);
 
-  async function onSubmit(values: FoodItemExpenseFormValues & { siteId: string, stallId: string }) {
+  async function onSubmit(values: FoodItemExpenseEditFormValues) {
     if (!user || !expenseId || !db) {
       toast({ title: "Error", description: "Cannot update expense. Context is missing.", variant: "destructive" });
       return;
