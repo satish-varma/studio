@@ -35,13 +35,7 @@ import { useRouter } from "next/navigation";
 
 interface FoodExpensesTableProps {
   expenses: FoodItemExpense[];
-  onNextPage: () => void;
-  onPrevPage: () => void;
-  isLastPage: boolean;
-  isFirstPage: boolean;
-  currentPage: number;
-  itemsPerPage: number;
-  isLoading: boolean; // For showing skeletons
+  isLoading: boolean;
 }
 
 const TableRowSkeleton = () => (
@@ -75,12 +69,6 @@ const TableRowSkeleton = () => (
 
 export function FoodExpensesTable({
   expenses,
-  onNextPage,
-  onPrevPage,
-  isLastPage,
-  isFirstPage,
-  currentPage,
-  itemsPerPage,
   isLoading,
 }: FoodExpensesTableProps) {
   const router = useRouter();
@@ -154,7 +142,7 @@ export function FoodExpensesTable({
 
   return (
     <TooltipProvider>
-      <ScrollArea className="rounded-lg border shadow-sm bg-card">
+      <ScrollArea className="rounded-lg border shadow-sm bg-card h-[60vh]">
         <Table className="min-w-full">
           <TableHeader className="sticky top-0 bg-card z-10">
             <TableRow>
@@ -232,39 +220,9 @@ export function FoodExpensesTable({
           </TableBody>
         </Table>
       </ScrollArea>
-      {(expenses.length > 0 || !isFirstPage || !isLastPage) && (
-        <div className="flex items-center justify-end space-x-2 py-4 px-2 border-t">
-          <span className="text-sm text-muted-foreground">
-            Page {currentPage}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onPrevPage}
-            disabled={isFirstPage || isLoading}
-          >
-            {isLoading && currentPage > 1 ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <ChevronLeft className="h-4 w-4" />
-            )}
-            <span className="ml-1 hidden sm:inline">Previous</span>
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onNextPage}
-            disabled={isLastPage || isLoading}
-          >
-            <span className="mr-1 hidden sm:inline">Next</span>
-            {isLoading && !isLastPage ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <ChevronRight className="h-4 w-4" />
-            )}
-          </Button>
-        </div>
-      )}
+      <div className="text-center text-xs text-muted-foreground pt-2">
+        Showing up to 50 latest results matching filters.
+      </div>
     </TooltipProvider>
   );
 }

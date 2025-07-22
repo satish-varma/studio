@@ -17,7 +17,7 @@ import {
   QueryConstraint,
   DocumentSnapshot,
   DocumentData,
-  limitToLast,
+  onSnapshot, // Import onSnapshot
   sum,
   getAggregateFromServer,
 } from "firebase/firestore";
@@ -68,39 +68,20 @@ export default function FoodExpensesClientPage() {
   const [totalExpensesAmount, setTotalExpensesAmount] = useState<number>(0);
   const [loadingTotal, setLoadingTotal] = useState(true);
 
-  const [firstVisibleDoc, setFirstVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
-  const [lastVisibleDoc, setLastVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
-  const [isLastPage, setIsLastPage] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [isExporting, setIsExporting] = useState(false);
+  // Note: Pagination with real-time listeners is complex.
+  // For simplicity, this component will now show the latest 50 results in real-time.
+  // Full pagination is removed to favor real-time updates.
   const [showImportDialog, setShowImportDialog] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [sitesMap, setSitesMap] = useState<Record<string, string>>({});
   const [stallsMap, setStallsMap] = useState<Record<string, string>>({});
 
-  const fetchContextMaps = useCallback(async () => {
-    if (!db) return false;
-    try {
-      const sitesSnapshot = await getDocs(query(collection(db, "sites")));
-      const newSitesMap: Record<string, string> = {};
-      sitesSnapshot.forEach(doc => { newSitesMap[doc.id] = (doc.data() as Site).name; });
-      setSitesMap(newSitesMap);
 
-      const stallsSnapshot = await getDocs(query(collection(db, "stalls")));
-      const newStallsMap: Record<string, string> = {};
-      stallsSnapshot.forEach(doc => { newStallsMap[doc.id] = (doc.data() as Stall).name; });
-      setStallsMap(newStallsMap);
-      return true;
-    } catch (error) {
-      toast({ title: "Error", description: "Could not load site/stall data for export.", variant: "destructive" });
-      return false;
-    }
-  }, [toast]);
-  
-  const buildExpenseQuery = useCallback((isForTotal: boolean = false) => {
+  const buildExpenseQuery = useCallback(() => {
     if (authLoading || !db || !user) return null;
-    if (user.role !== 'admin' && !activeSiteId && !isForTotal) return null;
+    if (user.role !== 'admin' && !activeSiteId) return null;
 
-    let qConstraints: QueryConstraint[] = [];
+    let qConstraints: QueryConstraint[] = [orderBy("purchaseDate", "desc")];
     if (activeSiteId) {
       qConstraints.push(where("siteId", "==", activeSiteId));
       if (activeStallId) qConstraints.push(where("stallId", "==", activeStallId));
@@ -120,74 +101,60 @@ export default function FoodExpensesClientPage() {
   }, [authLoading, user, activeSiteId, activeStallId, dateFilter, categoryFilter]);
 
 
-  const fetchExpenses = useCallback(async (direction: 'initial' | 'next' | 'prev' = 'initial') => {
+  useEffect(() => {
+    const fetchContextData = async () => {
+      if (!db) return;
+      try {
+        const sitesSnapshot = await getDocs(collection(db, "sites"));
+        const newSitesMap: Record<string, string> = {};
+        sitesSnapshot.forEach(doc => { newSitesMap[doc.id] = (doc.data() as Site).name; });
+        setSitesMap(newSitesMap);
+
+        const stallsSnapshot = await getDocs(collection(db, "stalls"));
+        const newStallsMap: Record<string, string> = {};
+        stallsSnapshot.forEach(doc => { newStallsMap[doc.id] = (doc.data() as Stall).name; });
+        setStallsMap(newStallsMap);
+      } catch (error) {
+        toast({ title: "Error", description: "Could not load site/stall data.", variant: "destructive" });
+      }
+    };
+    fetchContextData();
+  }, [toast]);
+  
+
+  useEffect(() => {
     const baseConstraints = buildExpenseQuery();
-    if (!baseConstraints) {
-      if (!authLoading) setLoadingExpenses(false);
-      setExpenses([]);
-      return;
+    if (!baseConstraints || !db) {
+        setExpenses([]);
+        setLoadingExpenses(false);
+        return;
     }
-    
     setLoadingExpenses(true);
-    if (direction === 'initial') {
-        fetchContextMaps();
-    }
     setErrorExpenses(null);
 
-    const expensesCollectionRef = collection(db!, "foodItemExpenses");
-    let finalConstraints: QueryConstraint[] = [...baseConstraints];
+    const expensesCollectionRef = collection(db, "foodItemExpenses");
+    const q = query(expensesCollectionRef, ...baseConstraints, limit(50)); // Real-time listener for latest 50
 
-    if (direction === 'prev' && firstVisibleDoc) {
-        finalConstraints.push(orderBy("purchaseDate", "desc"), endBefore(firstVisibleDoc), limitToLast(EXPENSES_PER_PAGE));
-    } else {
-        finalConstraints.push(orderBy("purchaseDate", "desc"));
-        if (direction === 'next' && lastVisibleDoc) finalConstraints.push(startAfter(lastVisibleDoc));
-        finalConstraints.push(limit(EXPENSES_PER_PAGE + 1));
-    }
-    
-    try {
-      const q = query(expensesCollectionRef, ...finalConstraints);
-      const querySnapshot = await getDocs(q);
-      let fetchedExpenses: FoodItemExpense[] = querySnapshot.docs.map(doc => ({
-        id: doc.id, ...doc.data(), purchaseDate: (doc.data().purchaseDate as Timestamp).toDate(),
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedExpenses = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        purchaseDate: (doc.data().purchaseDate as Timestamp).toDate(),
       } as FoodItemExpense));
-      
-      const hasMore = direction !== 'prev' && fetchedExpenses.length > EXPENSES_PER_PAGE;
-      if (hasMore) fetchedExpenses.pop();
-
       setExpenses(fetchedExpenses);
-      
-      if (querySnapshot.docs.length > 0) {
-        setFirstVisibleDoc(querySnapshot.docs[0]);
-        setLastVisibleDoc(querySnapshot.docs[querySnapshot.docs.length - (hasMore ? 2 : 1)]);
-        if (direction === 'next') setCurrentPage(prev => prev + 1);
-        if (direction === 'prev') setCurrentPage(prev => Math.max(1, prev - 1));
-        setIsLastPage(!hasMore);
-      } else {
-        if (direction === 'next') setIsLastPage(true);
-        if (direction === 'initial') setIsLastPage(true);
-      }
-    } catch (error: any) {
-      setErrorExpenses(error.message || "Failed to load expenses.");
-    } finally {
       setLoadingExpenses(false);
-    }
-  }, [buildExpenseQuery, authLoading, firstVisibleDoc, lastVisibleDoc, fetchContextMaps]);
-
-  // Separate effect to calculate total sum, using efficient aggregation
-  useEffect(() => {
+    }, (error) => {
+      console.error(`${LOG_PREFIX} Real-time expenses fetch error:`, error);
+      setErrorExpenses(error.message || "Failed to load expenses in real-time.");
+      setLoadingExpenses(false);
+    });
+    
+    // Also update total sum when filters change
     const fetchTotal = async () => {
-        const totalQueryConstraints = buildExpenseQuery(true);
-        if (!totalQueryConstraints || !db) {
-            setTotalExpensesAmount(0);
-            setLoadingTotal(false);
-            return;
-        }
         setLoadingTotal(true);
         try {
-            const expensesCollectionRef = collection(db, "foodItemExpenses");
-            const q = query(expensesCollectionRef, ...totalQueryConstraints);
-            const snapshot = await getAggregateFromServer(q, {
+            const totalQuery = query(expensesCollectionRef, ...baseConstraints);
+            const snapshot = await getAggregateFromServer(totalQuery, {
                 totalCost: sum('totalCost')
             });
             setTotalExpensesAmount(snapshot.data().totalCost || 0);
@@ -199,20 +166,10 @@ export default function FoodExpensesClientPage() {
         }
     };
     fetchTotal();
-  }, [buildExpenseQuery]);
 
+    return () => unsubscribe();
+  }, [buildExpenseQuery, db]);
 
-  useEffect(() => {
-    document.title = "Food Stall Expenses - StallSync";
-    setFirstVisibleDoc(null);
-    setLastVisibleDoc(null);
-    setCurrentPage(1);
-    const initialFetch = async () => {
-        await fetchExpenses('initial');
-    };
-    initialFetch();
-    return () => { document.title = "StallSync - Stock Management"; }
-  }, [dateFilter, categoryFilter, user, activeSiteId, activeStallId, fetchExpenses]);
 
   const escapeCsvCell = (cellData: any): string => {
     if (cellData === null || cellData === undefined) return "";
@@ -368,8 +325,7 @@ export default function FoodExpensesClientPage() {
       )}
       {!loadingExpenses && !errorExpenses && (
         <FoodExpensesTable 
-          expenses={expenses} onNextPage={() => fetchExpenses('next')} onPrevPage={() => fetchExpenses('prev')}
-          isLastPage={isLastPage} isFirstPage={currentPage === 1} currentPage={currentPage} itemsPerPage={EXPENSES_PER_PAGE}
+          expenses={expenses}
           isLoading={loadingExpenses}
         />
       )}
@@ -378,7 +334,7 @@ export default function FoodExpensesClientPage() {
         isOpen={showImportDialog}
         onClose={() => {
           setShowImportDialog(false);
-          fetchExpenses('initial'); // Refresh data after import attempt
+          // The real-time listener will handle the refresh automatically
         }}
       />
     </div>
