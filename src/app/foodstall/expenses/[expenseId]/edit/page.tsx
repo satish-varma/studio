@@ -21,18 +21,19 @@ import {
 } from "@/components/ui/select";
 import { DatePicker } from "@/components/ui/date-picker";
 import {
-  foodExpenseEditFormSchema, // Use the new extended schema
-  type FoodItemExpenseEditFormValues, // Use the new type for the edit form
+  foodExpenseEditFormSchema,
+  type FoodItemExpenseEditFormValues,
   foodExpenseCategories,
   paymentMethods,
   type FoodItemExpense
 } from "@/types/food";
 import type { Site, Stall } from '@/types';
-import { ArrowLeft, Loader2, Info, Building } from "lucide-react";
+import { ArrowLeft, Loader2, Info, Building, Store } from "lucide-react";
 import Link from "next/link";
 import { useState, useEffect, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import * as z from "zod";
 import {
   Form,
   FormControl,
@@ -86,77 +87,88 @@ export default function EditFoodExpensePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [vendors, setVendors] = useState<string[]>([]);
-  const [loadingVendors, setLoadingVendors] = useState(true);
   const [allSites, setAllSites] = useState<Site[]>([]);
+  const [allStalls, setAllStalls] = useState<Stall[]>([]);
   const [stallsForSite, setStallsForSite] = useState<Stall[]>([]);
 
   const form = useForm<FoodItemExpenseEditFormValues>({
     resolver: zodResolver(foodExpenseEditFormSchema),
     defaultValues: {
-      category: undefined,
-      otherCategoryDetails: "",
+      category: "Other", // Default value to prevent uncontrolled component warnings
       totalCost: 0,
-      paymentMethod: undefined,
-      otherPaymentMethodDetails: "",
+      paymentMethod: "Cash",
       purchaseDate: new Date(),
-      vendor: undefined,
-      otherVendorDetails: "",
-      notes: "",
-      billImageUrl: "",
       siteId: "",
       stallId: "",
     },
   });
 
+  const selectedSiteId = form.watch("siteId");
   const paymentMethod = form.watch("paymentMethod");
   const vendor = form.watch("vendor");
   const category = form.watch("category");
-  const selectedSiteId = form.watch("siteId");
   
-  // Fetch Sites, Stalls, Vendors
-  useEffect(() => {
-    if (!db) return;
-    Promise.all([
-        getDocs(query(collection(db, "sites"), orderBy("name"))),
-        getDocs(query(collection(db, "stalls"), orderBy("name"))),
-        getDocs(query(collection(db, "foodVendors"), orderBy("name"))),
-    ]).then(([sitesSnapshot, stallsSnapshot, vendorsSnapshot]) => {
-        setAllSites(sitesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Site)));
-        const allStallsData = stallsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Stall));
-        if (selectedSiteId) {
-            setStallsForSite(allStallsData.filter(s => s.siteId === selectedSiteId));
-        }
-        setVendors(vendorsSnapshot.docs.map(doc => doc.data().name as string));
-        setLoadingVendors(false);
-    }).catch(error => {
-        toast({ title: "Error", description: "Could not load necessary data for editing.", variant: "destructive" });
-    });
-  }, [db, toast, selectedSiteId]);
-
-  // Fetch expense data
+  // Fetch Sites, Stalls, Vendors, and the Expense itself
   useEffect(() => {
     if (!db || !expenseId) return;
     setIsLoading(true);
-    const docRef = doc(db, "foodItemExpenses", expenseId);
-    getDoc(docRef).then(docSnap => {
-        if (docSnap.exists()) {
-            const data = docSnap.data() as FoodItemExpense;
-            form.reset({
-                ...data,
-                purchaseDate: (data.purchaseDate as Timestamp).toDate(),
-                vendor: vendors.includes(data.vendor || '') || !data.vendor ? data.vendor : 'Other',
-                otherVendorDetails: vendors.includes(data.vendor || '') ? '' : data.vendor,
-                category: foodExpenseCategories.includes(data.category as any) ? data.category as any : 'Other',
-                otherCategoryDetails: foodExpenseCategories.includes(data.category as any) ? '' : data.category,
-            });
-        } else {
-            toast({ title: "Not Found", description: "The requested expense could not be found.", variant: "destructive" });
-            router.push('/foodstall/expenses');
+
+    const fetchInitialData = async () => {
+        try {
+            const [sitesSnapshot, stallsSnapshot, vendorsSnapshot, expenseDocSnap] = await Promise.all([
+                getDocs(query(collection(db, "sites"), orderBy("name"))),
+                getDocs(query(collection(db, "stalls"), orderBy("name"))),
+                getDocs(query(collection(db, "foodVendors"), orderBy("name"))),
+                getDoc(doc(db, "foodItemExpenses", expenseId))
+            ]);
+            
+            const sitesData = sitesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Site));
+            setAllSites(sitesData);
+            
+            const stallsData = stallsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Stall));
+            setAllStalls(stallsData);
+            
+            const vendorsData = vendorsSnapshot.docs.map(doc => doc.data().name as string);
+            setVendors(vendorsData);
+
+            if (expenseDocSnap.exists()) {
+                const data = expenseDocSnap.data() as FoodItemExpense;
+                form.reset({
+                    ...data,
+                    purchaseDate: (data.purchaseDate as Timestamp).toDate(),
+                    vendor: vendorsData.includes(data.vendor || '') || !data.vendor ? data.vendor : 'Other',
+                    otherVendorDetails: vendorsData.includes(data.vendor || '') ? '' : data.vendor,
+                    category: foodExpenseCategories.includes(data.category as any) ? data.category as any : 'Other',
+                    otherCategoryDetails: foodExpenseCategories.includes(data.category as any) ? '' : data.category,
+                });
+                // Set initial stall list based on fetched expense siteId
+                setStallsForSite(stallsData.filter(s => s.siteId === data.siteId));
+            } else {
+                toast({ title: "Not Found", description: "The requested expense could not be found.", variant: "destructive" });
+                router.push('/foodstall/expenses');
+            }
+        } catch (error) {
+             toast({ title: "Error", description: "Failed to load expense data.", variant: "destructive" });
+        } finally {
+            setIsLoading(false);
         }
-    }).catch(error => {
-        toast({ title: "Error", description: "Failed to load expense data.", variant: "destructive" });
-    }).finally(() => setIsLoading(false));
-  }, [db, expenseId, form, router, toast, vendors]);
+    };
+    fetchInitialData();
+  }, [db, expenseId, form, router, toast]);
+  
+  // Effect to update stall dropdown when site changes
+  useEffect(() => {
+    if (selectedSiteId) {
+        setStallsForSite(allStalls.filter(s => s.siteId === selectedSiteId));
+        // Reset stall if it's not in the new list of stalls for the selected site
+        if (!allStalls.some(s => s.siteId === selectedSiteId && s.id === form.getValues('stallId'))) {
+             form.setValue('stallId', '');
+        }
+    } else {
+        setStallsForSite([]);
+        form.setValue('stallId', '');
+    }
+  }, [selectedSiteId, allStalls, form]);
 
   async function onSubmit(values: FoodItemExpenseEditFormValues) {
     if (!user || !expenseId || !db) {
@@ -166,16 +178,21 @@ export default function EditFoodExpensePage() {
     setIsSubmitting(true);
     try {
       const categoryToSave = values.category === 'Other' ? (values.otherCategoryDetails || "Other") : values.category;
+      const vendorToSave = values.vendor === 'Other' ? (values.otherVendorDetails || "Other") : values.vendor;
+      
       const expenseDocRef = doc(db, "foodItemExpenses", expenseId);
       
       const expenseDataToUpdate = {
         ...values,
         category: categoryToSave,
+        vendor: vendorToSave,
         purchaseDate: Timestamp.fromDate(values.purchaseDate),
         updatedAt: new Date().toISOString(),
       };
       
       delete (expenseDataToUpdate as any).otherCategoryDetails;
+      delete (expenseDataToUpdate as any).otherVendorDetails;
+
 
       await setDoc(expenseDocRef, expenseDataToUpdate, { merge: true });
       
@@ -221,7 +238,7 @@ export default function EditFoodExpensePage() {
                     )}/>
                     <FormField control={form.control} name="stallId" render={({field}) => (
                         <FormItem><FormLabel>Stall *</FormLabel>
-                            <Select onValueChange={field.onChange} value={field.value} disabled={!selectedSiteId || stallsForSite.length === 0}><FormControl><SelectTrigger><SelectValue placeholder={!selectedSiteId ? "Select site first" : "Select stall..."}/></SelectTrigger></FormControl>
+                            <Select onValueChange={field.onChange} value={field.value} disabled={!selectedSiteId || stallsForSite.length === 0}><FormControl><SelectTrigger><Store className="h-4 w-4 mr-2 text-muted-foreground"/><SelectValue placeholder={!selectedSiteId ? "Select site first" : "Select stall..."}/></SelectTrigger></FormControl>
                                 <SelectContent>{stallsForSite.map(stall => <SelectItem key={stall.id} value={stall.id}>{stall.name}</SelectItem>)}</SelectContent>
                             </Select><FormMessage/>
                         </FormItem>
@@ -237,7 +254,7 @@ export default function EditFoodExpensePage() {
                 <FormField control={form.control} name="totalCost" render={({ field }) => (<FormItem><FormLabel>Total Cost * (₹)</FormLabel><FormControl><Input type="number" step="0.01" {...field} value={field.value ?? ""} /></FormControl><FormMessage/></FormItem>)}/>
               </div>
               <FormField control={form.control} name="vendor" render={({ field }) => (<FormItem><FormLabel>Vendor *</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value} disabled={isSubmitting || loadingVendors}><FormControl><SelectTrigger><SelectValue placeholder={loadingVendors ? "Loading..." : "Select vendor"} /></SelectTrigger></FormControl>
+                  <Select onValueChange={field.onChange} value={field.value} disabled={isSubmitting}><FormControl><SelectTrigger><SelectValue placeholder={"Select vendor"} /></SelectTrigger></FormControl>
                       <SelectContent>{vendors.map((v) => (<SelectItem key={v} value={v}>{v}</SelectItem>))}<SelectItem value="Other">Other</SelectItem></SelectContent>
                   </Select><FormMessage/></FormItem>
               )}/>
