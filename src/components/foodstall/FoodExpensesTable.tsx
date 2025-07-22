@@ -25,11 +25,13 @@ import {
   ChevronRight,
   Loader2,
   Link as LinkIcon,
+  Edit,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import Link from "next/link";
 import type { Timestamp } from "firebase/firestore";
+import { useRouter } from "next/navigation";
 
 interface FoodExpensesTableProps {
   expenses: FoodItemExpense[];
@@ -65,6 +67,9 @@ const TableRowSkeleton = () => (
     <TableCell>
       <Skeleton className="h-4 w-8" />
     </TableCell>
+    <TableCell>
+      <Skeleton className="h-8 w-8" />
+    </TableCell>
   </TableRow>
 );
 
@@ -78,6 +83,12 @@ export function FoodExpensesTable({
   itemsPerPage,
   isLoading,
 }: FoodExpensesTableProps) {
+  const router = useRouter();
+
+  const handleEdit = (expenseId: string) => {
+    router.push(`/foodstall/expenses/${expenseId}/edit`);
+  };
+
   const formatDateForDisplay = (date: Date | string | Timestamp) => {
     if (!date) return "N/A";
     try {
@@ -114,6 +125,7 @@ export function FoodExpensesTable({
               <TableHead className="hidden md:table-cell">Recorded By</TableHead>
               <TableHead>Notes</TableHead>
               <TableHead>Bill</TableHead>
+              <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -154,6 +166,7 @@ export function FoodExpensesTable({
               <TableHead className="w-[130px] hidden md:table-cell">Recorded By</TableHead>
               <TableHead className="min-w-[180px]">Notes</TableHead>
               <TableHead className="w-[60px]">Bill</TableHead>
+              <TableHead className="w-[80px]">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -207,6 +220,12 @@ export function FoodExpensesTable({
                   ) : (
                     <span className="text-xs text-muted-foreground">N/A</span>
                   )}
+                </TableCell>
+                <TableCell>
+                  <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => handleEdit(expense.id)}>
+                      <Edit className="h-4 w-4" />
+                      <span className="sr-only">Edit Expense</span>
+                  </Button>
                 </TableCell>
               </TableRow>
             ))}
