@@ -28,6 +28,7 @@ export const foodExpenseCategories = [
   "Delivery Costs",
   "Licenses & Permits",
   "Miscellaneous",
+  "Other", // Added "Other"
 ] as const;
 
 export type FoodExpenseCategory = (typeof foodExpenseCategories)[number];
@@ -37,6 +38,7 @@ export type PaymentMethod = (typeof paymentMethods)[number];
 
 export const foodExpenseFormSchema = z.object({
   category: z.enum(foodExpenseCategories, { required_error: "Category is required" }),
+  otherCategoryDetails: z.string().optional().nullable(), // New field for custom category
   totalCost: z.coerce.number().positive("Total cost must be a positive number"),
   paymentMethod: z.enum(paymentMethods, { required_error: "Payment method is required." }),
   otherPaymentMethodDetails: z.string().optional().nullable(),
@@ -61,6 +63,15 @@ export const foodExpenseFormSchema = z.object({
 }, {
     message: "Please specify the vendor name.",
     path: ["otherVendorDetails"],
+}).refine(data => {
+    // New refinement for custom category
+    if (data.category === "Other" && (!data.otherCategoryDetails || data.otherCategoryDetails.trim() === "")) {
+        return false;
+    }
+    return true;
+}, {
+    message: "Please specify the 'other' category name.",
+    path: ["otherCategoryDetails"],
 });
 
 
@@ -68,7 +79,7 @@ export type FoodItemExpenseFormValues = z.infer<typeof foodExpenseFormSchema>;
 
 export interface FoodItemExpense {
   id: string; // Firestore document ID
-  category: FoodExpenseCategory;
+  category: FoodExpenseCategory | string; // Allow custom strings
   totalCost: number;
   paymentMethod: PaymentMethod;
   otherPaymentMethodDetails?: string | null;

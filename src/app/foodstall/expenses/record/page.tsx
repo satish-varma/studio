@@ -80,6 +80,7 @@ export default function RecordFoodExpensePage() {
     resolver: zodResolver(foodExpenseFormSchema),
     defaultValues: {
       category: undefined,
+      otherCategoryDetails: "",
       totalCost: undefined, // Let placeholder show
       paymentMethod: undefined,
       otherPaymentMethodDetails: "",
@@ -93,6 +94,7 @@ export default function RecordFoodExpensePage() {
 
   const paymentMethod = form.watch("paymentMethod");
   const vendor = form.watch("vendor");
+  const category = form.watch("category");
   
   useEffect(() => {
     if (!db) return;
@@ -124,8 +126,11 @@ export default function RecordFoodExpensePage() {
     }
     setIsSubmitting(true);
     try {
+      const categoryToSave = values.category === 'Other' ? (values.otherCategoryDetails || "Other") : values.category;
+
       const expenseData = {
         ...values,
+        category: categoryToSave,
         siteId: activeSiteId,
         stallId: activeStallId,
         recordedByUid: user.uid,
@@ -134,6 +139,9 @@ export default function RecordFoodExpensePage() {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
+
+      // Remove the temporary 'other' fields before saving
+      delete (expenseData as any).otherCategoryDetails;
 
       const docRef = await addDoc(collection(db, "foodItemExpenses"), expenseData);
       
@@ -145,7 +153,7 @@ export default function RecordFoodExpensePage() {
         type: 'EXPENSE_RECORDED',
         relatedDocumentId: docRef.id,
         details: {
-            expenseCategory: values.category,
+            expenseCategory: categoryToSave,
             totalCost: values.totalCost,
             notes: `Vendor: ${vendorNameForLog || 'N/A'}. Payment: ${values.paymentMethod}${values.paymentMethod === 'Other' ? ` (${values.otherPaymentMethodDetails})` : ''}`
         }
@@ -153,12 +161,11 @@ export default function RecordFoodExpensePage() {
       
       toast({
         title: "Expense Recorded",
-        description: `A ${
-          values.category
-        } expense of ₹${values.totalCost.toFixed(2)} has been recorded.`,
+        description: `An expense for ${categoryToSave} of ₹${values.totalCost.toFixed(2)} has been recorded.`,
       });
       form.reset({
         category: undefined,
+        otherCategoryDetails: "",
         totalCost: undefined,
         paymentMethod: undefined,
         otherPaymentMethodDetails: "",
@@ -258,6 +265,27 @@ export default function RecordFoodExpensePage() {
                     </FormItem>
                   )}
                 />
+                 {category === 'Other' && (
+                    <FormField
+                      control={form.control}
+                      name="otherCategoryDetails"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Specify Other Category *</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="Enter category name"
+                              {...field}
+                              value={field.value ?? ""}
+                              disabled={isSubmitting}
+                              className="bg-input"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
                 <FormField
                   control={form.control}
                   name="totalCost"
