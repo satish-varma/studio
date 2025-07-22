@@ -11,24 +11,20 @@ export interface FoodVendor {
 
 // --------------- Food Expense Tracking ---------------
 export const foodExpenseCategories = [
-  "Groceries",
-  "Vegetables",
-  "Fruits",
-  "Dairy Products",
-  "Meat & Poultry",
   "Bakery",
   "Beverages (Raw Material)",
-  "Spices & Condiments",
-  "Packaging Supplies",
+  "Chat",
   "Cleaning Supplies",
-  "Equipment Maintenance",
-  "Rent & Utilities",
-  "Staff Salaries",
-  "Marketing & Promotion",
+  "Dairy Products",
   "Delivery Costs",
-  "Licenses & Permits",
+  "Fruits",
+  "Groceries",
+  "Meat & Poultry",
   "Miscellaneous",
-  "Other", // Added "Other"
+  "MRP",
+  "Rent & Utilities",
+  "Vegetables",
+  "Other",
 ] as const;
 
 export type FoodExpenseCategory = (typeof foodExpenseCategories)[number];
