@@ -24,18 +24,18 @@ import {
   ChevronLeft,
   ChevronRight,
   Loader2,
-  Link as LinkIcon,
   Edit,
+  Building,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import Link from "next/link";
-import type { Timestamp } from "firebase/firestore";
 import { useRouter } from "next/navigation";
+import type { Timestamp } from "firebase/firestore";
 
 interface FoodExpensesTableProps {
   expenses: FoodItemExpense[];
   isLoading: boolean;
+  sitesMap: Record<string, string>;
 }
 
 const TableRowSkeleton = () => (
@@ -70,6 +70,7 @@ const TableRowSkeleton = () => (
 export function FoodExpensesTable({
   expenses,
   isLoading,
+  sitesMap,
 }: FoodExpensesTableProps) {
   const router = useRouter();
 
@@ -80,7 +81,6 @@ export function FoodExpensesTable({
   const formatDateForDisplay = (date: Date | string | Timestamp) => {
     if (!date) return "N/A";
     try {
-      // Check if it's a Firestore Timestamp and convert it, otherwise create a new Date
       const dateObj = (date as Timestamp)?.toDate ? (date as Timestamp).toDate() : new Date(date as string | Date);
       return format(dateObj, "MMM dd, yyyy");
     } catch (e) {
@@ -110,9 +110,8 @@ export function FoodExpensesTable({
               <TableHead className="text-right">Total Cost</TableHead>
               <TableHead>Payment Method</TableHead>
               <TableHead className="hidden md:table-cell">Vendor</TableHead>
-              <TableHead className="hidden md:table-cell">Recorded By</TableHead>
+              <TableHead className="hidden md:table-cell">Site</TableHead>
               <TableHead>Notes</TableHead>
-              <TableHead>Bill</TableHead>
               <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -151,9 +150,8 @@ export function FoodExpensesTable({
               <TableHead className="w-[120px] text-right">Total Cost</TableHead>
               <TableHead className="w-[130px]">Payment Method</TableHead>
               <TableHead className="w-[130px] hidden md:table-cell">Vendor</TableHead>
-              <TableHead className="w-[130px] hidden md:table-cell">Recorded By</TableHead>
+              <TableHead className="w-[150px] hidden md:table-cell">Site</TableHead>
               <TableHead className="min-w-[180px]">Notes</TableHead>
-              <TableHead className="w-[60px]">Bill</TableHead>
               <TableHead className="w-[80px]">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -177,8 +175,11 @@ export function FoodExpensesTable({
                 <TableCell className="text-muted-foreground hidden md:table-cell">
                   {getVendorName(expense)}
                 </TableCell>
-                <TableCell className="text-muted-foreground text-xs hidden md:table-cell">
-                  {expense.recordedByName || expense.recordedByUid.substring(0, 8)}
+                <TableCell className="text-muted-foreground hidden md:table-cell">
+                   <div className="flex items-center">
+                    <Building size={12} className="mr-1.5 text-primary/70 flex-shrink-0" />
+                    <span>{sitesMap[expense.siteId] || expense.siteId.substring(0,10)}</span>
+                  </div>
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate">
                   {expense.notes ? (
@@ -195,18 +196,6 @@ export function FoodExpensesTable({
                     </Tooltip>
                   ) : (
                     "N/A"
-                  )}
-                </TableCell>
-                 <TableCell>
-                  {expense.billImageUrl ? (
-                    <Button asChild variant="ghost" size="icon" className="h-8 w-8">
-                        <Link href={expense.billImageUrl} target="_blank" rel="noopener noreferrer">
-                            <LinkIcon className="h-4 w-4 text-primary" />
-                            <span className="sr-only">View Bill</span>
-                        </Link>
-                    </Button>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">N/A</span>
                   )}
                 </TableCell>
                 <TableCell>

@@ -17,7 +17,7 @@ import {
   QueryConstraint,
   DocumentSnapshot,
   DocumentData,
-  onSnapshot, // Import onSnapshot
+  onSnapshot,
   sum,
   getAggregateFromServer,
 } from "firebase/firestore";
@@ -25,7 +25,7 @@ import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Info, ListFilter, DollarSign, Upload, Download } from "lucide-react";
+import { Loader2, Info, ListFilter, DollarSign, Upload, Download, Building, ShoppingCart } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { FoodExpensesTable } from "./FoodExpensesTable";
 import { foodExpenseCategories } from "@/types/food";
@@ -65,12 +65,14 @@ export default function FoodExpensesClientPage() {
   
   const [dateFilter, setDateFilter] = useState<DateFilterOption>('today');
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [vendorFilter, setVendorFilter] = useState<string>("all");
+  const [siteFilter, setSiteFilter] = useState<string>('all');
+  
   const [totalExpensesAmount, setTotalExpensesAmount] = useState<number>(0);
   const [loadingTotal, setLoadingTotal] = useState(true);
 
-  // Note: Pagination with real-time listeners is complex.
-  // For simplicity, this component will now show the latest 50 results in real-time.
-  // Full pagination is removed to favor real-time updates.
+  const [allSites, setAllSites] = useState<Site[]>([]);
+  const [allVendors, setAllVendors] = useState<string[]>([]);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [sitesMap, setSitesMap] = useState<Record<string, string>>({});
@@ -82,10 +84,16 @@ export default function FoodExpensesClientPage() {
     if (user.role !== 'admin' && !activeSiteId) return null;
 
     let qConstraints: QueryConstraint[] = [orderBy("purchaseDate", "desc")];
-    if (activeSiteId) {
+    
+    // Site filter logic
+    if (user.role === 'admin' && siteFilter !== 'all') {
+      qConstraints.push(where("siteId", "==", siteFilter));
+    } else if (activeSiteId) { // For managers or admins with a selected site
       qConstraints.push(where("siteId", "==", activeSiteId));
-      if (activeStallId) qConstraints.push(where("stallId", "==", activeStallId));
     }
+    
+    if (activeStallId) qConstraints.push(where("stallId", "==", activeStallId));
+    
     const now = new Date(); let startDate: Date | null = null; let endDate: Date | null = endOfDay(now);
     switch (dateFilter) {
         case 'today': startDate = startOfDay(now); break;
@@ -96,26 +104,37 @@ export default function FoodExpensesClientPage() {
     if(startDate) qConstraints.push(where("purchaseDate", ">=", Timestamp.fromDate(startDate)));
     if(endDate) qConstraints.push(where("purchaseDate", "<=", Timestamp.fromDate(endDate)));
     if (categoryFilter !== "all") qConstraints.push(where("category", "==", categoryFilter));
+    if (vendorFilter !== "all") qConstraints.push(where("vendor", "==", vendorFilter));
 
     return qConstraints;
-  }, [authLoading, user, activeSiteId, activeStallId, dateFilter, categoryFilter]);
+  }, [authLoading, user, activeSiteId, activeStallId, dateFilter, categoryFilter, siteFilter, vendorFilter]);
 
 
   useEffect(() => {
     const fetchContextData = async () => {
       if (!db) return;
       try {
-        const sitesSnapshot = await getDocs(collection(db, "sites"));
+        const sitesSnapshot = await getDocs(query(collection(db, "sites"), orderBy("name")));
         const newSitesMap: Record<string, string> = {};
-        sitesSnapshot.forEach(doc => { newSitesMap[doc.id] = (doc.data() as Site).name; });
+        const fetchedSites: Site[] = [];
+        sitesSnapshot.forEach(doc => { 
+            const siteData = { id: doc.id, ...doc.data() } as Site;
+            newSitesMap[doc.id] = siteData.name;
+            fetchedSites.push(siteData);
+        });
         setSitesMap(newSitesMap);
+        setAllSites(fetchedSites);
 
         const stallsSnapshot = await getDocs(collection(db, "stalls"));
         const newStallsMap: Record<string, string> = {};
         stallsSnapshot.forEach(doc => { newStallsMap[doc.id] = (doc.data() as Stall).name; });
         setStallsMap(newStallsMap);
+        
+        const vendorsSnapshot = await getDocs(query(collection(db, "foodVendors"), orderBy("name")));
+        setAllVendors(vendorsSnapshot.docs.map(doc => doc.data().name as string));
+        
       } catch (error) {
-        toast({ title: "Error", description: "Could not load site/stall data.", variant: "destructive" });
+        toast({ title: "Error", description: "Could not load context data.", variant: "destructive" });
       }
     };
     fetchContextData();
@@ -133,7 +152,7 @@ export default function FoodExpensesClientPage() {
     setErrorExpenses(null);
 
     const expensesCollectionRef = collection(db, "foodItemExpenses");
-    const q = query(expensesCollectionRef, ...baseConstraints, limit(50)); // Real-time listener for latest 50
+    const q = query(expensesCollectionRef, ...baseConstraints, limit(50));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const fetchedExpenses = snapshot.docs.map(doc => ({
@@ -149,7 +168,6 @@ export default function FoodExpensesClientPage() {
       setLoadingExpenses(false);
     });
     
-    // Also update total sum when filters change
     const fetchTotal = async () => {
         setLoadingTotal(true);
         try {
@@ -160,7 +178,7 @@ export default function FoodExpensesClientPage() {
             setTotalExpensesAmount(snapshot.data().totalCost || 0);
         } catch(error) {
             console.error("Error calculating total expenses:", error);
-            setTotalExpensesAmount(0); // Set to 0 on error
+            setTotalExpensesAmount(0);
         } finally {
             setLoadingTotal(false);
         }
@@ -299,17 +317,19 @@ export default function FoodExpensesClientPage() {
             <Button variant={dateFilter === 'all_time' ? 'default' : 'outline'} onClick={() => setDateFilter('all_time')}>All Time</Button>
           </div>
           <div className="flex-1 flex flex-col sm:flex-row gap-2 justify-end">
+            {user?.role === 'admin' && (
+                <Select value={siteFilter} onValueChange={setSiteFilter}>
+                    <SelectTrigger className="w-full md:w-[220px] bg-input"><Building className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by site" /></SelectTrigger>
+                    <SelectContent><SelectItem value="all">All Sites</SelectItem>{allSites.map(site => (<SelectItem key={site.id} value={site.id}>{site.name}</SelectItem>))}</SelectContent>
+                </Select>
+            )}
+             <Select value={vendorFilter} onValueChange={setVendorFilter}>
+              <SelectTrigger className="w-full md:w-[220px] bg-input"><ShoppingCart className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by vendor" /></SelectTrigger>
+              <SelectContent><SelectItem value="all">All Vendors</SelectItem>{allVendors.map(v => (<SelectItem key={v} value={v}>{v}</SelectItem>))}<SelectItem value="Other">Other</SelectItem></SelectContent>
+            </Select>
             <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger className="w-full md:w-[220px] bg-input">
-                <ListFilter className="mr-2 h-4 w-4 text-muted-foreground" />
-                <SelectValue placeholder="Filter by category" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Categories</SelectItem>
-                {foodExpenseCategories.map(cat => (
-                  <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-                ))}
-              </SelectContent>
+              <SelectTrigger className="w-full md:w-[220px] bg-input"><ListFilter className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by category" /></SelectTrigger>
+              <SelectContent><SelectItem value="all">All Categories</SelectItem>{foodExpenseCategories.map(cat => (<SelectItem key={cat} value={cat}>{cat}</SelectItem>))}</SelectContent>
             </Select>
             <Button variant="outline" onClick={() => setShowImportDialog(true)}><Upload className="mr-2 h-4 w-4" />Import</Button>
             <Button variant="outline" onClick={handleExport} disabled={isExporting}>{isExporting ? <Download className="mr-2 h-4 w-4 animate-spin"/> : <Download className="mr-2 h-4 w-4" />}Export</Button>
@@ -327,6 +347,7 @@ export default function FoodExpensesClientPage() {
         <FoodExpensesTable 
           expenses={expenses}
           isLoading={loadingExpenses}
+          sitesMap={sitesMap}
         />
       )}
       <CsvImportDialog
@@ -334,7 +355,6 @@ export default function FoodExpensesClientPage() {
         isOpen={showImportDialog}
         onClose={() => {
           setShowImportDialog(false);
-          // The real-time listener will handle the refresh automatically
         }}
       />
     </div>
