@@ -27,12 +27,14 @@ export const foodExpenseCategories = [
   "Other",
 ] as const;
 
+
 export type FoodExpenseCategory = (typeof foodExpenseCategories)[number];
 
 export const paymentMethods = ["Cash", "Card", "UPI", "Other"] as const;
 export type PaymentMethod = (typeof paymentMethods)[number];
 
-export const foodExpenseFormSchema = z.object({
+// Define a base object schema without refinements
+const baseFoodExpenseSchema = z.object({
   category: z.enum(foodExpenseCategories, { required_error: "Category is required" }),
   otherCategoryDetails: z.string().optional().nullable(),
   totalCost: z.coerce.number().positive("Total cost must be a positive number"),
@@ -43,7 +45,11 @@ export const foodExpenseFormSchema = z.object({
   otherVendorDetails: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
   billImageUrl: z.string().url({ message: "Please enter a valid URL." }).optional().or(z.literal("")),
-}).refine(data => {
+});
+
+
+// Now, apply refinements for the creation form schema
+export const foodExpenseFormSchema = baseFoodExpenseSchema.refine(data => {
     if (data.paymentMethod === "Other" && (!data.otherPaymentMethodDetails || data.otherPaymentMethodDetails.trim() === "")) {
         return false;
     }
@@ -69,8 +75,9 @@ export const foodExpenseFormSchema = z.object({
     path: ["otherCategoryDetails"],
 });
 
-// New schema for the edit form
-export const foodExpenseEditFormSchema = foodExpenseFormSchema.extend({
+
+// New schema for the edit form, extending the BASE schema before refinements
+export const foodExpenseEditFormSchema = baseFoodExpenseSchema.extend({
     siteId: z.string().min(1, "Site is required."),
     stallId: z.string().min(1, "Stall is required."),
 });
