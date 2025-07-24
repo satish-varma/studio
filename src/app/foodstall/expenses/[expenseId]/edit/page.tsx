@@ -141,6 +141,7 @@ export default function EditFoodExpensePage() {
                     otherVendorDetails: vendorsData.includes(data.vendor || '') ? '' : data.vendor,
                     category: foodExpenseCategories.includes(data.category as any) ? data.category as any : 'Other',
                     otherCategoryDetails: foodExpenseCategories.includes(data.category as any) ? '' : data.category,
+                    billImageUrl: data.billImageUrl ?? "", // Fix: Coalesce null/undefined to empty string
                 });
                 // Set initial stall list based on fetched expense siteId
                 setStallsForSite(stallsData.filter(s => s.siteId === data.siteId));
