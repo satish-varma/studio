@@ -58,7 +58,7 @@ import {
   onSnapshot,
   orderBy
 } from "firebase/firestore";
-import { firebaseConfig } from "@/lib/firebaseConfig";
+import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Textarea } from "@/components/ui/textarea";
@@ -100,6 +100,7 @@ export default function EditFoodExpensePage() {
       purchaseDate: new Date(),
       siteId: "",
       stallId: "",
+      vendor: "",
     },
   });
 
@@ -136,7 +137,7 @@ export default function EditFoodExpensePage() {
                 form.reset({
                     ...data,
                     purchaseDate: (data.purchaseDate as Timestamp).toDate(),
-                    vendor: vendorsData.includes(data.vendor || '') || !data.vendor ? data.vendor : 'Other',
+                    vendor: vendorsData.includes(data.vendor || '') || !data.vendor ? (data.vendor || '') : 'Other',
                     otherVendorDetails: vendorsData.includes(data.vendor || '') ? '' : data.vendor,
                     category: foodExpenseCategories.includes(data.category as any) ? data.category as any : 'Other',
                     otherCategoryDetails: foodExpenseCategories.includes(data.category as any) ? '' : data.category,
