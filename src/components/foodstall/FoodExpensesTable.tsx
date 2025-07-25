@@ -36,6 +36,7 @@ interface FoodExpensesTableProps {
   expenses: FoodItemExpense[];
   isLoading: boolean;
   sitesMap: Record<string, string>;
+  usersMap: Record<string, string>;
 }
 
 const TableRowSkeleton = () => (
@@ -58,6 +59,9 @@ const TableRowSkeleton = () => (
     <TableCell className="hidden md:table-cell">
       <Skeleton className="h-4 w-32" />
     </TableCell>
+     <TableCell className="hidden lg:table-cell">
+      <Skeleton className="h-4 w-28" />
+    </TableCell>
     <TableCell>
       <Skeleton className="h-4 w-8" />
     </TableCell>
@@ -71,6 +75,7 @@ export function FoodExpensesTable({
   expenses,
   isLoading,
   sitesMap,
+  usersMap,
 }: FoodExpensesTableProps) {
   const router = useRouter();
 
@@ -107,10 +112,11 @@ export function FoodExpensesTable({
             <TableRow>
               <TableHead>Category</TableHead>
               <TableHead>Date</TableHead>
+              <TableHead className="hidden md:table-cell">Site</TableHead>
               <TableHead className="text-right">Total Cost</TableHead>
               <TableHead>Payment Method</TableHead>
               <TableHead className="hidden md:table-cell">Vendor</TableHead>
-              <TableHead className="hidden md:table-cell">Site</TableHead>
+              <TableHead className="hidden lg:table-cell">Recorded By</TableHead>
               <TableHead>Notes</TableHead>
               <TableHead>Actions</TableHead>
             </TableRow>
@@ -151,6 +157,7 @@ export function FoodExpensesTable({
               <TableHead className="w-[120px] text-right">Total Cost</TableHead>
               <TableHead className="w-[130px]">Payment Method</TableHead>
               <TableHead className="w-[130px] hidden md:table-cell">Vendor</TableHead>
+              <TableHead className="w-[150px] hidden lg:table-cell">Recorded By</TableHead>
               <TableHead className="min-w-[180px]">Notes</TableHead>
               <TableHead className="w-[80px]">Actions</TableHead>
             </TableRow>
@@ -181,6 +188,9 @@ export function FoodExpensesTable({
                 <TableCell className="text-muted-foreground hidden md:table-cell">
                   {getVendorName(expense)}
                 </TableCell>
+                <TableCell className="text-muted-foreground hidden lg:table-cell">
+                    {usersMap[expense.recordedByUid] || 'N/A'}
+                </TableCell>
                 <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate">
                   {expense.notes ? (
                     <Tooltip>
@@ -210,7 +220,7 @@ export function FoodExpensesTable({
         </Table>
       </ScrollArea>
       <div className="text-center text-xs text-muted-foreground pt-2">
-        Showing up to 50 latest results matching filters.
+        Showing up to {EXPENSES_PER_PAGE} latest results matching filters.
       </div>
     </TooltipProvider>
   );

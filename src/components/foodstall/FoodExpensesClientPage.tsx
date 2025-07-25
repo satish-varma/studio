@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import type { FoodItemExpense, Site, Stall } from "@/types";
+import type { FoodItemExpense, Site, Stall, AppUser } from "@/types";
 import {
   getFirestore,
   collection,
@@ -25,7 +25,7 @@ import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Info, ListFilter, DollarSign, Upload, Download, Building, ShoppingCart } from "lucide-react";
+import { Loader2, Info, ListFilter, DollarSign, Upload, Download, Building, ShoppingCart, Users } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { FoodExpensesTable } from "./FoodExpensesTable";
 import { foodExpenseCategories } from "@/types/food";
@@ -42,7 +42,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/com
 import CsvImportDialog from "@/components/shared/CsvImportDialog";
 
 const LOG_PREFIX = "[FoodExpensesClientPage]";
-const EXPENSES_PER_PAGE = 15;
+const EXPENSES_PER_PAGE = 50;
 
 if (!getApps().length) {
   try {
@@ -67,16 +67,19 @@ export default function FoodExpensesClientPage() {
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [vendorFilter, setVendorFilter] = useState<string>("all");
   const [siteFilter, setSiteFilter] = useState<string>('all');
+  const [userFilter, setUserFilter] = useState<string>('all');
   
   const [totalExpensesAmount, setTotalExpensesAmount] = useState<number>(0);
   const [loadingTotal, setLoadingTotal] = useState(true);
 
   const [allSites, setAllSites] = useState<Site[]>([]);
   const [allVendors, setAllVendors] = useState<string[]>([]);
+  const [allUsers, setAllUsers] = useState<AppUser[]>([]);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [sitesMap, setSitesMap] = useState<Record<string, string>>({});
   const [stallsMap, setStallsMap] = useState<Record<string, string>>({});
+  const [usersMap, setUsersMap] = useState<Record<string, string>>({});
 
 
   const buildExpenseQuery = useCallback(() => {
@@ -105,9 +108,10 @@ export default function FoodExpensesClientPage() {
     if(endDate) qConstraints.push(where("purchaseDate", "<=", Timestamp.fromDate(endDate)));
     if (categoryFilter !== "all") qConstraints.push(where("category", "==", categoryFilter));
     if (vendorFilter !== "all") qConstraints.push(where("vendor", "==", vendorFilter));
+    if (userFilter !== "all") qConstraints.push(where("recordedByUid", "==", userFilter));
 
     return qConstraints;
-  }, [authLoading, user, activeSiteId, activeStallId, dateFilter, categoryFilter, siteFilter, vendorFilter]);
+  }, [authLoading, user, activeSiteId, activeStallId, dateFilter, categoryFilter, siteFilter, vendorFilter, userFilter]);
 
 
   useEffect(() => {
@@ -133,6 +137,17 @@ export default function FoodExpensesClientPage() {
         const vendorsSnapshot = await getDocs(query(collection(db, "foodVendors"), orderBy("name")));
         setAllVendors(vendorsSnapshot.docs.map(doc => doc.data().name as string));
         
+        const usersSnapshot = await getDocs(query(collection(db, "users"), orderBy("displayName")));
+        const newUsersMap: Record<string, string> = {};
+        const fetchedUsers: AppUser[] = [];
+        usersSnapshot.forEach(doc => {
+            const userData = { uid: doc.id, ...doc.data() } as AppUser;
+            newUsersMap[doc.id] = userData.displayName || userData.email || 'Unknown User';
+            fetchedUsers.push(userData);
+        });
+        setUsersMap(newUsersMap);
+        setAllUsers(fetchedUsers);
+        
       } catch (error) {
         toast({ title: "Error", description: "Could not load context data.", variant: "destructive" });
       }
@@ -152,7 +167,7 @@ export default function FoodExpensesClientPage() {
     setErrorExpenses(null);
 
     const expensesCollectionRef = collection(db, "foodItemExpenses");
-    const q = query(expensesCollectionRef, ...baseConstraints, limit(50));
+    const q = query(expensesCollectionRef, ...baseConstraints, limit(EXPENSES_PER_PAGE));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const fetchedExpenses = snapshot.docs.map(doc => ({
@@ -319,17 +334,21 @@ export default function FoodExpensesClientPage() {
           <div className="flex-1 flex flex-col sm:flex-row gap-2 justify-end">
             {user?.role === 'admin' && (
                 <Select value={siteFilter} onValueChange={setSiteFilter}>
-                    <SelectTrigger className="w-full md:w-[220px] bg-input"><Building className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by site" /></SelectTrigger>
+                    <SelectTrigger className="w-full md:w-[180px] bg-input"><Building className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by site" /></SelectTrigger>
                     <SelectContent><SelectItem value="all">All Sites</SelectItem>{allSites.map(site => (<SelectItem key={site.id} value={site.id}>{site.name}</SelectItem>))}</SelectContent>
                 </Select>
             )}
              <Select value={vendorFilter} onValueChange={setVendorFilter}>
-              <SelectTrigger className="w-full md:w-[220px] bg-input"><ShoppingCart className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by vendor" /></SelectTrigger>
+              <SelectTrigger className="w-full md:w-[180px] bg-input"><ShoppingCart className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by vendor" /></SelectTrigger>
               <SelectContent><SelectItem value="all">All Vendors</SelectItem>{allVendors.map(v => (<SelectItem key={v} value={v}>{v}</SelectItem>))}<SelectItem value="Other">Other</SelectItem></SelectContent>
             </Select>
             <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger className="w-full md:w-[220px] bg-input"><ListFilter className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by category" /></SelectTrigger>
+              <SelectTrigger className="w-full md:w-[180px] bg-input"><ListFilter className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by category" /></SelectTrigger>
               <SelectContent><SelectItem value="all">All Categories</SelectItem>{foodExpenseCategories.map(cat => (<SelectItem key={cat} value={cat}>{cat}</SelectItem>))}</SelectContent>
+            </Select>
+            <Select value={userFilter} onValueChange={setUserFilter}>
+              <SelectTrigger className="w-full md:w-[180px] bg-input"><Users className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by user" /></SelectTrigger>
+              <SelectContent><SelectItem value="all">All Users</SelectItem>{allUsers.map(u => (<SelectItem key={u.uid} value={u.uid}>{u.displayName}</SelectItem>))}</SelectContent>
             </Select>
             <Button variant="outline" onClick={() => setShowImportDialog(true)}><Upload className="mr-2 h-4 w-4" />Import</Button>
             <Button variant="outline" onClick={handleExport} disabled={isExporting}>{isExporting ? <Download className="mr-2 h-4 w-4 animate-spin"/> : <Download className="mr-2 h-4 w-4" />}Export</Button>
@@ -348,6 +367,7 @@ export default function FoodExpensesClientPage() {
           expenses={expenses}
           isLoading={loadingExpenses}
           sitesMap={sitesMap}
+          usersMap={usersMap}
         />
       )}
       <CsvImportDialog
