@@ -227,7 +227,7 @@ export default function FoodExpensesClientPage() {
 
     try {
       const expensesCollectionRef = collection(db, "foodItemExpenses");
-      const exportQuery = query(expensesCollectionRef, ...exportConstraints, orderBy("purchaseDate", "desc"));
+      const exportQuery = query(expensesCollectionRef, ...exportConstraints);
       const querySnapshot = await getDocs(exportQuery);
       const itemsToExport: FoodItemExpense[] = querySnapshot.docs.map(doc => ({
           id: doc.id, ...doc.data(), purchaseDate: (doc.data().purchaseDate as Timestamp).toDate(),
