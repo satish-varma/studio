@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback } from "react";
 import PageHeader from "@/components/shared/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, UserX, UserRoundCheck, HandCoins, CalendarDays, Wallet, BarChart, IndianRupee } from "lucide-react";
+import { Users, UserX, UserRoundCheck, HandCoins, CalendarDays, Wallet, BarChart, IndianRupee, UserCheck } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { getFirestore, collection, query, where, onSnapshot, getDocs } from "firebase/firestore";
 import type { AppUser, StaffAttendance, SalaryAdvance, Holiday, StaffDetails } from "@/types";
@@ -19,7 +19,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 
 const db = getFirestore();
-type SummaryViewOption = 'by_projected_salary' | 'by_advances';
+type SummaryViewOption = 'by_projected_salary' | 'by_advances' | 'by_attendance';
+
+interface AttendanceSummary {
+    uid: string;
+    name: string;
+    present: number;
+    halfDay: number;
+}
 
 export default function StaffDashboardPage() {
     const { user, activeSiteId, loading: authLoading } = useAuth();
@@ -42,9 +49,14 @@ export default function StaffDashboardPage() {
     });
     const [recentAdvances, setRecentAdvances] = useState<SalaryAdvance[]>([]);
     const [advancesSummary, setAdvancesSummary] = useState<{uid: string, name: string, totalAmount: number}[]>([]);
+    const [attendanceSummary, setAttendanceSummary] = useState<AttendanceSummary[]>([]);
     const [staffOnLeaveOrAbsent, setStaffOnLeaveOrAbsent] = useState<StaffAttendance[]>([]);
     const [loadingCalculations, setLoadingCalculations] = useState(true);
     const [summaryView, setSummaryView] = useState<SummaryViewOption>('by_projected_salary');
+
+    const getStaffName = useCallback((uid: string) => {
+        return staffList.find(s => s.uid === uid)?.displayName || uid.substring(0, 8);
+    }, [staffList]);
 
     const isHoliday = useCallback((date: Date, holidays: Holiday[], staffSiteId?: string | null) => {
         const dayOfWeek = date.getDay();
@@ -74,9 +86,6 @@ export default function StaffDashboardPage() {
         return workingDays;
     }, [isHoliday]);
 
-    const getStaffName = useCallback((uid: string) => {
-        return staffList.find(s => s.uid === uid)?.displayName || uid.substring(0, 8);
-    }, [staffList]);
 
     useEffect(() => {
         if (userManagementLoading) {
@@ -89,6 +98,7 @@ export default function StaffDashboardPage() {
             setStats({ totalStaff: 0, presentToday: 0, advancesThisMonth: 0, notPresentToday: 0, salaryToday: 0, salaryThisMonth: 0, projectedSalary: 0 });
             setRecentAdvances([]);
             setAdvancesSummary([]);
+            setAttendanceSummary([]);
             setStaffOnLeaveOrAbsent([]);
             return;
         }
@@ -160,7 +170,7 @@ export default function StaffDashboardPage() {
                 }
             });
 
-            // --- Monthly Salary Bill ---
+            // --- Monthly Salary Bill & Attendance Summary ---
             const monthlyAttendanceMap = new Map<string, {present: number, halfDay: number}>();
             attendanceMonthSnapshots.flat().forEach(snapshot => snapshot.forEach(doc => {
                 const att = doc.data() as StaffAttendance;
@@ -169,6 +179,15 @@ export default function StaffDashboardPage() {
                 if (att.status === 'Half-day') current.halfDay++;
                 monthlyAttendanceMap.set(att.staffUid, current);
             }));
+
+            const attendanceSummaryData = Array.from(monthlyAttendanceMap.entries()).map(([uid, data]) => ({
+                uid,
+                name: getStaffName(uid),
+                present: data.present,
+                halfDay: data.halfDay
+            })).sort((a,b) => b.present - a.present || b.halfDay - a.halfDay);
+            setAttendanceSummary(attendanceSummaryData);
+
 
             let salaryThisMonth = 0;
             let projectedSalary = 0;
@@ -285,6 +304,21 @@ export default function StaffDashboardPage() {
                         </TableBody>
                     </Table>
                 );
+            case 'by_attendance':
+                return (
+                    <Table>
+                        <TableHeader><TableRow><TableHead>Staff Member</TableHead><TableHead className="text-center">Present Days</TableHead><TableHead className="text-center">Half Days</TableHead></TableRow></TableHeader>
+                        <TableBody>
+                            {attendanceSummary.length > 0 ? attendanceSummary.map(item => (
+                                <TableRow key={item.uid}>
+                                    <TableCell>{item.name}</TableCell>
+                                    <TableCell className="text-center font-medium text-green-600">{item.present}</TableCell>
+                                    <TableCell className="text-center font-medium text-blue-600">{item.halfDay}</TableCell>
+                                </TableRow>
+                            )) : <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground">No attendance data for this month.</TableCell></TableRow>}
+                        </TableBody>
+                    </Table>
+                );
             default:
                 return null;
         }
@@ -319,6 +353,7 @@ export default function StaffDashboardPage() {
                                 <SelectContent>
                                     <SelectItem value="by_projected_salary"><Wallet className="mr-2 h-4 w-4" />Projected Salary</SelectItem>
                                     <SelectItem value="by_advances"><HandCoins className="mr-2 h-4 w-4" />Advances by Staff</SelectItem>
+                                    <SelectItem value="by_attendance"><UserCheck className="mr-2 h-4 w-4" />Attendance Summary</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
