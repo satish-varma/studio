@@ -19,7 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 
 const db = getFirestore();
-type SummaryViewOption = 'by_projected_salary' | 'by_advances' | 'by_attendance' | 'by_earned_salary';
+type SummaryViewOption = 'by_projected_salary' | 'by_advances' | 'by_attendance' | 'by_earned_salary' | 'by_today_status';
 
 interface AttendanceSummary {
     uid: string;
@@ -346,6 +346,20 @@ export default function StaffDashboardPage() {
                         </TableBody>
                     </Table>
                 );
+            case 'by_today_status':
+                 return (
+                    <Table>
+                        <TableHeader><TableRow><TableHead>Staff Member</TableHead><TableHead className="text-center">Status Today</TableHead></TableRow></TableHeader>
+                        <TableBody>
+                            {staffOnLeaveOrAbsent.length > 0 ? staffOnLeaveOrAbsent.map(item => (
+                                <TableRow key={item.id}>
+                                    <TableCell>{getStaffName(item.staffUid)}</TableCell>
+                                    <TableCell className="text-center">{getStatusBadge(item.status as any)}</TableCell>
+                                </TableRow>
+                            )) : <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground">All active staff are present today.</TableCell></TableRow>}
+                        </TableBody>
+                    </Table>
+                );
             default:
                 return null;
         }
@@ -382,6 +396,7 @@ export default function StaffDashboardPage() {
                                     <SelectItem value="by_earned_salary"><IndianRupee className="mr-2 h-4 w-4" />Earned Salary Bill</SelectItem>
                                     <SelectItem value="by_advances"><HandCoins className="mr-2 h-4 w-4" />Advances by Staff</SelectItem>
                                     <SelectItem value="by_attendance"><UserCheck className="mr-2 h-4 w-4" />Attendance Summary</SelectItem>
+                                    <SelectItem value="by_today_status"><UserX className="mr-2 h-4 w-4" />Today's Absences/Leaves</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
@@ -460,3 +475,4 @@ export default function StaffDashboardPage() {
         </div>
     );
 }
+
