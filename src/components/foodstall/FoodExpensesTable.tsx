@@ -37,6 +37,7 @@ interface FoodExpensesTableProps {
   isLoading: boolean;
   sitesMap: Record<string, string>;
   usersMap: Record<string, string>;
+  expensesPerPage: number;
 }
 
 const TableRowSkeleton = () => (
@@ -47,6 +48,9 @@ const TableRowSkeleton = () => (
     <TableCell>
       <Skeleton className="h-4 w-20" />
     </TableCell>
+    <TableCell className="hidden md:table-cell">
+      <Skeleton className="h-4 w-32" />
+    </TableCell>
     <TableCell className="text-right">
       <Skeleton className="h-4 w-20 inline-block" />
     </TableCell>
@@ -55,9 +59,6 @@ const TableRowSkeleton = () => (
     </TableCell>
     <TableCell className="hidden md:table-cell">
       <Skeleton className="h-4 w-20" />
-    </TableCell>
-    <TableCell className="hidden md:table-cell">
-      <Skeleton className="h-4 w-32" />
     </TableCell>
      <TableCell className="hidden lg:table-cell">
       <Skeleton className="h-4 w-28" />
@@ -76,6 +77,7 @@ export function FoodExpensesTable({
   isLoading,
   sitesMap,
   usersMap,
+  expensesPerPage,
 }: FoodExpensesTableProps) {
   const router = useRouter();
 
@@ -220,7 +222,7 @@ export function FoodExpensesTable({
         </Table>
       </ScrollArea>
       <div className="text-center text-xs text-muted-foreground pt-2">
-        Showing up to {EXPENSES_PER_PAGE} latest results matching filters.
+        Showing up to {expensesPerPage} latest results matching filters.
       </div>
     </TooltipProvider>
   );

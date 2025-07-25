@@ -368,6 +368,7 @@ export default function FoodExpensesClientPage() {
           isLoading={loadingExpenses}
           sitesMap={sitesMap}
           usersMap={usersMap}
+          expensesPerPage={EXPENSES_PER_PAGE}
         />
       )}
       <CsvImportDialog
