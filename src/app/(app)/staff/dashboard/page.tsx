@@ -74,6 +74,9 @@ export default function StaffDashboardPage() {
         return workingDays;
     }, [isHoliday]);
 
+    const getStaffName = useCallback((uid: string) => {
+        return staffList.find(s => s.uid === uid)?.displayName || uid.substring(0, 8);
+    }, [staffList]);
 
     useEffect(() => {
         if (userManagementLoading) {
@@ -198,7 +201,7 @@ export default function StaffDashboardPage() {
             setLoadingCalculations(false);
         });
         
-    }, [staffList, staffDetailsMap, userManagementLoading, calculateWorkingDays]);
+    }, [staffList, staffDetailsMap, userManagementLoading, calculateWorkingDays, getStaffName]);
 
     const loading = authLoading || userManagementLoading || loadingCalculations;
 
@@ -230,8 +233,6 @@ export default function StaffDashboardPage() {
         { title: "Advances (This Month)", value: `₹${stats.advancesThisMonth.toFixed(2)}`, icon: HandCoins, description: "Total salary advance this month." },
         { title: "Leave/Absent Today", value: stats.notPresentToday, icon: UserX, description: "Staff not marked as 'Present'." },
     ];
-
-    const getStaffName = (uid: string) => staffList.find(s => s.uid === uid)?.displayName || uid.substring(0, 8);
 
     const getStatusBadge = (status: 'Leave' | 'Absent' | 'Half-day') => {
         switch (status) {
@@ -396,6 +397,3 @@ export default function StaffDashboardPage() {
         </div>
     );
 }
-
-
-    
