@@ -15,9 +15,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { useUserManagement } from "@/hooks/use-user-management";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 
 const db = getFirestore();
+type SummaryViewOption = 'by_projected_salary' | 'by_advances';
 
 export default function StaffDashboardPage() {
     const { user, activeSiteId, loading: authLoading } = useAuth();
@@ -39,8 +41,10 @@ export default function StaffDashboardPage() {
         projectedSalary: 0,
     });
     const [recentAdvances, setRecentAdvances] = useState<SalaryAdvance[]>([]);
+    const [advancesSummary, setAdvancesSummary] = useState<{uid: string, name: string, totalAmount: number}[]>([]);
     const [staffOnLeaveOrAbsent, setStaffOnLeaveOrAbsent] = useState<StaffAttendance[]>([]);
     const [loadingCalculations, setLoadingCalculations] = useState(true);
+    const [summaryView, setSummaryView] = useState<SummaryViewOption>('by_projected_salary');
 
     const isHoliday = useCallback((date: Date, holidays: Holiday[], staffSiteId?: string | null) => {
         const dayOfWeek = date.getDay();
@@ -81,6 +85,7 @@ export default function StaffDashboardPage() {
             setLoadingCalculations(false);
             setStats({ totalStaff: 0, presentToday: 0, advancesThisMonth: 0, notPresentToday: 0, salaryToday: 0, salaryThisMonth: 0, projectedSalary: 0 });
             setRecentAdvances([]);
+            setAdvancesSummary([]);
             setStaffOnLeaveOrAbsent([]);
             return;
         }
@@ -111,11 +116,19 @@ export default function StaffDashboardPage() {
             ]);
             
             // --- Advances ---
-            const totalAdvance = advancesSnapshots.flat().reduce((sum, snapshot) => {
-                return sum + snapshot.docs.reduce((docSum, doc) => docSum + (doc.data() as SalaryAdvance).amount, 0);
-            }, 0);
-            const fetchedAdvances = advancesSnapshots.flat().flatMap(s => s.docs).map(doc => ({id: doc.id, ...doc.data() } as SalaryAdvance)).slice(0, 5); 
-            setRecentAdvances(fetchedAdvances);
+            const allAdvances = advancesSnapshots.flat().flatMap(s => s.docs.map(doc => ({id: doc.id, ...doc.data()} as SalaryAdvance)));
+            const totalAdvance = allAdvances.reduce((sum, adv) => sum + adv.amount, 0);
+            
+            const advancesByStaff: Record<string, number> = {};
+            allAdvances.forEach(adv => {
+                advancesByStaff[adv.staffUid] = (advancesByStaff[adv.staffUid] || 0) + adv.amount;
+            });
+            const advancesSummaryData = Object.entries(advancesByStaff).map(([uid, totalAmount]) => ({
+                uid, name: getStaffName(uid), totalAmount
+            })).sort((a,b) => b.totalAmount - a.totalAmount);
+            setAdvancesSummary(advancesSummaryData);
+            
+            setRecentAdvances(allAdvances.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 5));
 
             // --- Today's Attendance & Salary ---
             const attendanceTodayDocs = attendanceTodaySnapshots.flat().flatMap(s => s.docs);
@@ -240,6 +253,41 @@ export default function StaffDashboardPage() {
             salary: staffDetailsMap.get(s.uid)?.salary || 0
         }))
         .sort((a,b) => b.salary - a.salary);
+        
+    const renderPivotTable = () => {
+        switch(summaryView) {
+            case 'by_projected_salary':
+                return (
+                    <Table>
+                        <TableHeader><TableRow><TableHead>Staff Member</TableHead><TableHead className="text-right">Projected Monthly Salary</TableHead></TableRow></TableHeader>
+                        <TableBody>
+                            {projectedSalaryList.length > 0 ? projectedSalaryList.map(item => (
+                                <TableRow key={item.uid}>
+                                    <TableCell>{item.displayName}</TableCell>
+                                    <TableCell className="text-right font-medium">₹{item.salary.toFixed(2)}</TableCell>
+                                </TableRow>
+                            )) : <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground">No active staff with salary data.</TableCell></TableRow>}
+                        </TableBody>
+                    </Table>
+                );
+            case 'by_advances':
+                 return (
+                    <Table>
+                        <TableHeader><TableRow><TableHead>Staff Member</TableHead><TableHead className="text-right">Total Advances (This Month)</TableHead></TableRow></TableHeader>
+                        <TableBody>
+                           {advancesSummary.length > 0 ? advancesSummary.map(item => (
+                                <TableRow key={item.uid}>
+                                    <TableCell>{item.name}</TableCell>
+                                    <TableCell className="text-right font-medium">₹{item.totalAmount.toFixed(2)}</TableCell>
+                                </TableRow>
+                            )) : <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground">No advances recorded this month.</TableCell></TableRow>}
+                        </TableBody>
+                    </Table>
+                );
+            default:
+                return null;
+        }
+    };
 
     return (
         <div className="space-y-6">
@@ -263,24 +311,23 @@ export default function StaffDashboardPage() {
             <div className="grid gap-6 lg:grid-cols-5">
                  <Card className="lg:col-span-3">
                     <CardHeader>
-                        <CardTitle className="flex items-center"><BarChart className="mr-2 h-5 w-5 text-primary"/>Dynamic Summary</CardTitle>
+                         <div className="flex items-center justify-between">
+                            <CardTitle className="flex items-center"><BarChart className="mr-2 h-5 w-5 text-primary"/>Dynamic Summary</CardTitle>
+                             <Select value={summaryView} onValueChange={(v) => setSummaryView(v as SummaryViewOption)}>
+                                <SelectTrigger className="w-[240px] bg-input"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="by_projected_salary"><Wallet className="mr-2 h-4 w-4" />Projected Salary</SelectItem>
+                                    <SelectItem value="by_advances"><HandCoins className="mr-2 h-4 w-4" />Advances by Staff</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
                          <CardDescription>
                             A dynamic breakdown of staff data.
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
                         <ScrollArea className="h-72">
-                             <Table>
-                                <TableHeader><TableRow><TableHead>Staff Member</TableHead><TableHead className="text-right">Projected Monthly Salary</TableHead></TableRow></TableHeader>
-                                <TableBody>
-                                    {projectedSalaryList.length > 0 ? projectedSalaryList.map(item => (
-                                        <TableRow key={item.uid}>
-                                            <TableCell>{item.displayName}</TableCell>
-                                            <TableCell className="text-right font-medium">₹{item.salary.toFixed(2)}</TableCell>
-                                        </TableRow>
-                                    )) : <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground">No active staff with salary data.</TableCell></TableRow>}
-                                </TableBody>
-                            </Table>
+                             {renderPivotTable()}
                         </ScrollArea>
                     </CardContent>
                 </Card>
@@ -349,3 +396,6 @@ export default function StaffDashboardPage() {
         </div>
     );
 }
+
+
+    
