@@ -19,13 +19,19 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 
 const db = getFirestore();
-type SummaryViewOption = 'by_projected_salary' | 'by_advances' | 'by_attendance';
+type SummaryViewOption = 'by_projected_salary' | 'by_advances' | 'by_attendance' | 'by_earned_salary';
 
 interface AttendanceSummary {
     uid: string;
     name: string;
     present: number;
     halfDay: number;
+}
+
+interface EarnedSalarySummary {
+    uid: string;
+    name: string;
+    earnedSalary: number;
 }
 
 export default function StaffDashboardPage() {
@@ -50,6 +56,7 @@ export default function StaffDashboardPage() {
     const [recentAdvances, setRecentAdvances] = useState<SalaryAdvance[]>([]);
     const [advancesSummary, setAdvancesSummary] = useState<{uid: string, name: string, totalAmount: number}[]>([]);
     const [attendanceSummary, setAttendanceSummary] = useState<AttendanceSummary[]>([]);
+    const [earnedSalarySummary, setEarnedSalarySummary] = useState<EarnedSalarySummary[]>([]);
     const [staffOnLeaveOrAbsent, setStaffOnLeaveOrAbsent] = useState<StaffAttendance[]>([]);
     const [loadingCalculations, setLoadingCalculations] = useState(true);
     const [summaryView, setSummaryView] = useState<SummaryViewOption>('by_projected_salary');
@@ -99,6 +106,7 @@ export default function StaffDashboardPage() {
             setRecentAdvances([]);
             setAdvancesSummary([]);
             setAttendanceSummary([]);
+            setEarnedSalarySummary([]);
             setStaffOnLeaveOrAbsent([]);
             return;
         }
@@ -191,6 +199,7 @@ export default function StaffDashboardPage() {
 
             let salaryThisMonth = 0;
             let projectedSalary = 0;
+            const earnedSalarySummaryData: EarnedSalarySummary[] = [];
             
             activeStaffList.forEach(staff => {
                 const details = staffDetailsMap.get(staff.uid);
@@ -200,9 +209,13 @@ export default function StaffDashboardPage() {
                 if (details?.salary && attendance && workingDaysInMonth > 0) {
                     const perDaySalary = details.salary / workingDaysInMonth;
                     const presentDays = attendance.present + (attendance.halfDay * 0.5);
-                    salaryThisMonth += perDaySalary * presentDays;
+                    const earned = perDaySalary * presentDays;
+                    salaryThisMonth += earned;
+                    earnedSalarySummaryData.push({ uid: staff.uid, name: getStaffName(staff.uid), earnedSalary: earned });
                 }
             });
+
+            setEarnedSalarySummary(earnedSalarySummaryData.sort((a, b) => b.earnedSalary - a.earnedSalary));
             
             setStats({ 
                 totalStaff: activeStaffCount, 
@@ -290,6 +303,20 @@ export default function StaffDashboardPage() {
                         </TableBody>
                     </Table>
                 );
+            case 'by_earned_salary':
+                return (
+                    <Table>
+                        <TableHeader><TableRow><TableHead>Staff Member</TableHead><TableHead className="text-right">Earned Salary (This Month)</TableHead></TableRow></TableHeader>
+                        <TableBody>
+                            {earnedSalarySummary.length > 0 ? earnedSalarySummary.map(item => (
+                                <TableRow key={item.uid}>
+                                    <TableCell>{item.name}</TableCell>
+                                    <TableCell className="text-right font-medium">₹{item.earnedSalary.toFixed(2)}</TableCell>
+                                </TableRow>
+                            )) : <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground">No salary data for this month.</TableCell></TableRow>}
+                        </TableBody>
+                    </Table>
+                );
             case 'by_advances':
                  return (
                     <Table>
@@ -352,6 +379,7 @@ export default function StaffDashboardPage() {
                                 <SelectTrigger className="w-[240px] bg-input"><SelectValue /></SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="by_projected_salary"><Wallet className="mr-2 h-4 w-4" />Projected Salary</SelectItem>
+                                    <SelectItem value="by_earned_salary"><IndianRupee className="mr-2 h-4 w-4" />Earned Salary Bill</SelectItem>
                                     <SelectItem value="by_advances"><HandCoins className="mr-2 h-4 w-4" />Advances by Staff</SelectItem>
                                     <SelectItem value="by_attendance"><UserCheck className="mr-2 h-4 w-4" />Attendance Summary</SelectItem>
                                 </SelectContent>
