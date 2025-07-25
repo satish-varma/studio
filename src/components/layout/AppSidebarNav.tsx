@@ -20,6 +20,7 @@ import {
   IndianRupee,
   CalendarCheck,
   HandCoins,
+  History,
 } from "lucide-react";
 import {
   SidebarMenu,
@@ -58,6 +59,8 @@ const navItems: NavItem[] = [
   { href: "/foodstall/expenses/record", label: "Add Expense", icon: PlusCircle, roles: ['staff', 'manager', 'admin'] },
   { href: "/staff/attendance", label: "Attendance", icon: CalendarCheck, roles: ['manager', 'admin'] },
   { href: "/staff/advances", label: "Pay Advance", icon: HandCoins, roles: ['manager', 'admin'] },
+  { href: "/foodstall/expenses", label: "Expense History", icon: History, roles: ['manager', 'admin'] },
+  { href: "/foodstall/activity-log", label: "Food Stall Activity", icon: FileText, roles: ['admin'] },
 
 
   { 
