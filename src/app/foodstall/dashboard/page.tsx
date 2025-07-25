@@ -5,16 +5,19 @@ import { useState, useEffect } from "react";
 import PageHeader from "@/components/shared/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { DollarSign, ShoppingBag, Utensils, ArrowRight, LineChart, ClipboardList, Loader2, Info, Percent } from "lucide-react";
+import { DollarSign, ShoppingBag, Utensils, ArrowRight, LineChart, ClipboardList, Loader2, Info, Percent, BarChart } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { getFirestore, collection, query, where, onSnapshot, Timestamp, QueryConstraint } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { startOfDay, endOfDay, subDays, startOfMonth } from "date-fns";
-import type { FoodItemExpense, FoodSaleTransaction } from "@/types";
+import type { FoodItemExpense, FoodSaleTransaction, PaymentBreakdown } from "@/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 let db: ReturnType<typeof getFirestore> | undefined;
 if (!getApps().length) {
@@ -29,6 +32,17 @@ if (!getApps().length) {
 }
 
 type DateFilterOption = 'today' | 'last_7_days' | 'this_month' | 'all_time';
+type SummaryViewOption = 'by_expense_category' | 'by_payment_method';
+
+interface ExpenseCategorySummary {
+  category: string;
+  totalCost: number;
+}
+
+interface PaymentMethodSummary {
+  method: string;
+  totalAmount: number;
+}
 
 export default function FoodStallDashboardPage() {
   const { user, activeSiteId, activeStallId, loading: authLoading } = useAuth();
@@ -36,8 +50,13 @@ export default function FoodStallDashboardPage() {
   const [totalExpenses, setTotalExpenses] = useState(0);
   const [commission, setCommission] = useState(0);
   const [hungerboxSales, setHungerboxSales] = useState(0);
+  
+  const [expenseSummary, setExpenseSummary] = useState<ExpenseCategorySummary[]>([]);
+  const [paymentSummary, setPaymentSummary] = useState<PaymentMethodSummary[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [dateFilter, setDateFilter] = useState<DateFilterOption>('today');
+  const [summaryView, setSummaryView] = useState<SummaryViewOption>('by_expense_category');
 
   useEffect(() => {
     if (authLoading || !db || !user) {
@@ -45,7 +64,6 @@ export default function FoodStallDashboardPage() {
         return;
     }
     
-    // Allow admins to view all sites, but managers/staff need a site context
     if (user.role !== 'admin' && !activeSiteId) {
         setLoading(false);
         setTotalSales(0); setTotalExpenses(0); setCommission(0); setHungerboxSales(0);
@@ -68,7 +86,7 @@ export default function FoodStallDashboardPage() {
     const fromTimestamp = startDate ? Timestamp.fromDate(startDate) : null;
     const toTimestamp = endDate ? Timestamp.fromDate(endDate) : null;
     
-    // --- Sales Fetch ---
+    // --- Sales Fetch & Summary Calculation ---
     const salesCollectionRef = collection(db, "foodSaleTransactions");
     let salesQueryConstraints: QueryConstraint[] = [];
     if (activeSiteId) {
@@ -82,22 +100,38 @@ export default function FoodStallDashboardPage() {
 
     const salesQuery = query(salesCollectionRef, ...salesQueryConstraints);
     const unsubscribeSales = onSnapshot(salesQuery, (snapshot) => {
-        let salesTotal = 0; let hbSalesTotal = 0;
+        let salesTotal = 0;
+        let hbSalesTotal = 0;
+        const paymentMethodTotals: Record<string, number> = { HungerBox: 0, UPI: 0, Other: 0 };
+        
         snapshot.forEach(doc => {
             const sale = doc.data() as FoodSaleTransaction;
             salesTotal += sale.totalAmount;
-            if (sale.breakfast) hbSalesTotal += sale.breakfast.hungerbox || 0;
-            if (sale.lunch) hbSalesTotal += sale.lunch.hungerbox || 0;
-            if (sale.dinner) hbSalesTotal += sale.dinner.hungerbox || 0;
-            if (sale.snacks) hbSalesTotal += sale.snacks.hungerbox || 0;
+            
+            const processMeal = (meal?: PaymentBreakdown) => {
+                if (!meal) return;
+                hbSalesTotal += meal.hungerbox || 0;
+                paymentMethodTotals.HungerBox += meal.hungerbox || 0;
+                paymentMethodTotals.UPI += meal.upi || 0;
+                paymentMethodTotals.Other += meal.other || 0;
+            };
+
+            processMeal(sale.breakfast);
+            processMeal(sale.lunch);
+            processMeal(sale.dinner);
+            processMeal(sale.snacks);
         });
-        setTotalSales(salesTotal); setHungerboxSales(hbSalesTotal); setCommission(hbSalesTotal * 0.20);
+
+        setTotalSales(salesTotal);
+        setHungerboxSales(hbSalesTotal);
+        setCommission(hbSalesTotal * 0.20);
+        setPaymentSummary(Object.entries(paymentMethodTotals).map(([method, totalAmount]) => ({ method, totalAmount })));
         setLoading(false);
     }, (error) => {
         console.error("Error fetching food sales:", error); setLoading(false);
     });
 
-    // --- Expenses Fetch ---
+    // --- Expenses Fetch & Summary Calculation ---
     const expensesCollectionRef = collection(db, "foodItemExpenses");
     let expensesQueryConstraints: QueryConstraint[] = [];
     if (activeSiteId) {
@@ -112,8 +146,14 @@ export default function FoodStallDashboardPage() {
     const expensesQuery = query(expensesCollectionRef, ...expensesQueryConstraints);
     const unsubscribeExpenses = onSnapshot(expensesQuery, (snapshot) => {
         let total = 0;
-        snapshot.forEach(doc => { total += (doc.data() as FoodItemExpense).totalCost; });
+        const categoryTotals: Record<string, number> = {};
+        snapshot.forEach(doc => {
+            const expense = doc.data() as FoodItemExpense;
+            total += expense.totalCost;
+            categoryTotals[expense.category] = (categoryTotals[expense.category] || 0) + expense.totalCost;
+        });
         setTotalExpenses(total);
+        setExpenseSummary(Object.entries(categoryTotals).map(([category, totalCost]) => ({ category, totalCost })));
         setLoading(false);
     }, (error) => {
         console.error("Error fetching food expenses:", error); setLoading(false);
@@ -153,6 +193,33 @@ export default function FoodStallDashboardPage() {
         </div>
     );
   }
+
+  const renderPivotTable = () => {
+    if (summaryView === 'by_expense_category') {
+        return (
+            <Table>
+                <TableHeader><TableRow><TableHead>Expense Category</TableHead><TableHead className="text-right">Total Cost</TableHead></TableRow></TableHeader>
+                <TableBody>
+                    {expenseSummary.length > 0 ? expenseSummary.sort((a,b) => b.totalCost - a.totalCost).map(item => (
+                        <TableRow key={item.category}><TableCell>{item.category}</TableCell><TableCell className="text-right font-medium">₹{item.totalCost.toFixed(2)}</TableCell></TableRow>
+                    )) : <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground">No expense data for this period.</TableCell></TableRow>}
+                </TableBody>
+            </Table>
+        );
+    }
+    if (summaryView === 'by_payment_method') {
+        return (
+             <Table>
+                <TableHeader><TableRow><TableHead>Payment Method</TableHead><TableHead className="text-right">Total Received</TableHead></TableRow></TableHeader>
+                <TableBody>
+                   {paymentSummary.length > 0 ? paymentSummary.sort((a,b) => b.totalAmount - a.totalAmount).map(item => (
+                        <TableRow key={item.method}><TableCell>{item.method}</TableCell><TableCell className="text-right font-medium">₹{item.totalAmount.toFixed(2)}</TableCell></TableRow>
+                    )) : <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground">No sales data for this period.</TableCell></TableRow>}
+                </TableBody>
+            </Table>
+        );
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -198,18 +265,44 @@ export default function FoodStallDashboardPage() {
         </Card>
       </div>
 
-      <Card className="shadow-lg">
-        <CardHeader><CardTitle className="flex items-center"><ClipboardList className="mr-2 h-5 w-5 text-primary" />Quick Navigation</CardTitle><CardDescription>Easily access key areas of your food stall management.</CardDescription></CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-3">
-            {quickNavItems.map((item) => (
-            <Card key={item.title} className="flex flex-col hover:shadow-md transition-shadow">
-                <CardHeader className="pb-3"><CardTitle className="text-lg flex items-center"><item.icon className="h-5 w-5 mr-2 text-primary/80" />{item.title}</CardTitle></CardHeader>
-                <CardContent className="flex-grow"><p className="text-sm text-muted-foreground">{item.description}</p></CardContent>
-                <CardFooter><Button asChild className="w-full" disabled={item.disabled || (!activeStallId && user?.role !== 'admin')}><Link href={item.href}>{item.cta} <ArrowRight className="ml-2 h-4 w-4" /></Link></Button></CardFooter>
+       <div className="grid gap-6 lg:grid-cols-2">
+            <Card className="shadow-lg">
+                <CardHeader>
+                    <div className="flex items-center justify-between">
+                        <CardTitle className="flex items-center"><BarChart className="mr-2 h-5 w-5 text-primary"/>Dynamic Summary</CardTitle>
+                        <Select value={summaryView} onValueChange={(v) => setSummaryView(v as SummaryViewOption)}>
+                            <SelectTrigger className="w-[220px] bg-input"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="by_expense_category">Summary by Expense Category</SelectItem>
+                                <SelectItem value="by_payment_method">Summary by Payment Method</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <CardDescription>
+                        A dynamic breakdown of your sales or expenses for the selected period.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <ScrollArea className="h-72">
+                        {loading ? <div className="flex items-center justify-center h-full"><Loader2 className="h-6 w-6 animate-spin"/></div> : renderPivotTable()}
+                    </ScrollArea>
+                </CardContent>
             </Card>
-            ))}
-        </CardContent>
-      </Card>
+
+            <Card className="shadow-lg">
+                <CardHeader><CardTitle className="flex items-center"><ClipboardList className="mr-2 h-5 w-5 text-primary" />Quick Navigation</CardTitle><CardDescription>Easily access key areas of your food stall management.</CardDescription></CardHeader>
+                <CardContent className="grid gap-4 md:grid-cols-1">
+                    {quickNavItems.map((item) => (
+                    <Card key={item.title} className="flex flex-col hover:shadow-md transition-shadow">
+                        <CardHeader className="pb-3"><CardTitle className="text-lg flex items-center"><item.icon className="h-5 w-5 mr-2 text-primary/80" />{item.title}</CardTitle></CardHeader>
+                        <CardContent className="flex-grow"><p className="text-sm text-muted-foreground">{item.description}</p></CardContent>
+                        <CardFooter><Button asChild className="w-full" disabled={item.disabled || (!activeStallId && user?.role !== 'admin')}><Link href={item.href}>{item.cta} <ArrowRight className="ml-2 h-4 w-4" /></Link></Button></CardFooter>
+                    </Card>
+                    ))}
+                </CardContent>
+            </Card>
+        </div>
     </div>
   );
 }
+
