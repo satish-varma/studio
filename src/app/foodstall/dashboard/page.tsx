@@ -5,7 +5,7 @@ import { useState, useEffect } from "react";
 import PageHeader from "@/components/shared/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { DollarSign, ShoppingBag, Utensils, ArrowRight, LineChart, ClipboardList, Loader2, Info, Percent, BarChart, Soup, Truck } from "lucide-react";
+import { DollarSign, ShoppingBag, Utensils, ArrowRight, LineChart, ClipboardList, Loader2, Info, Percent, BarChart, Soup, Truck, WalletCards } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { getFirestore, collection, query, where, onSnapshot, Timestamp, QueryConstraint } from "firebase/firestore";
@@ -32,7 +32,7 @@ if (!getApps().length) {
 }
 
 type DateFilterOption = 'today' | 'last_7_days' | 'this_month' | 'all_time';
-type SummaryViewOption = 'by_expense_category' | 'by_payment_method' | 'by_meal_time' | 'by_vendor';
+type SummaryViewOption = 'by_expense_category' | 'by_payment_method' | 'by_meal_time' | 'by_vendor' | 'by_expense_payment_method';
 
 interface ExpenseCategorySummary {
   category: string;
@@ -54,6 +54,11 @@ interface VendorSummary {
   totalCost: number;
 }
 
+interface ExpensePaymentMethodSummary {
+  method: string;
+  totalCost: number;
+}
+
 
 export default function FoodStallDashboardPage() {
   const { user, activeSiteId, activeStallId, loading: authLoading } = useAuth();
@@ -66,6 +71,8 @@ export default function FoodStallDashboardPage() {
   const [paymentSummary, setPaymentSummary] = useState<PaymentMethodSummary[]>([]);
   const [mealTimeSummary, setMealTimeSummary] = useState<MealTimeSummary[]>([]);
   const [vendorSummary, setVendorSummary] = useState<VendorSummary[]>([]);
+  const [expensePaymentSummary, setExpensePaymentSummary] = useState<ExpensePaymentMethodSummary[]>([]);
+
 
   const [loading, setLoading] = useState(true);
   const [dateFilter, setDateFilter] = useState<DateFilterOption>('today');
@@ -167,6 +174,7 @@ export default function FoodStallDashboardPage() {
         let total = 0;
         const categoryTotals: Record<string, number> = {};
         const vendorTotals: Record<string, number> = {};
+        const expensePaymentMethodTotals: Record<string, number> = {};
 
         snapshot.forEach(doc => {
             const expense = doc.data() as FoodItemExpense;
@@ -175,10 +183,13 @@ export default function FoodStallDashboardPage() {
             total += expense.totalCost;
             categoryTotals[expense.category] = (categoryTotals[expense.category] || 0) + expense.totalCost;
             vendorTotals[vendorName] = (vendorTotals[vendorName] || 0) + expense.totalCost;
+            const paymentMethodKey = expense.paymentMethod === 'Other' ? (expense.otherPaymentMethodDetails || 'Other') : expense.paymentMethod;
+            expensePaymentMethodTotals[paymentMethodKey] = (expensePaymentMethodTotals[paymentMethodKey] || 0) + expense.totalCost;
         });
         setTotalExpenses(total);
         setExpenseSummary(Object.entries(categoryTotals).map(([category, totalCost]) => ({ category, totalCost })));
         setVendorSummary(Object.entries(vendorTotals).map(([vendor, totalCost]) => ({ vendor, totalCost })));
+        setExpensePaymentSummary(Object.entries(expensePaymentMethodTotals).map(([method, totalCost]) => ({ method, totalCost })));
         setLoading(false);
     }, (error) => {
         console.error("Error fetching food expenses:", error); setLoading(false);
@@ -233,9 +244,9 @@ export default function FoodStallDashboardPage() {
                 </Table>
             );
         case 'by_payment_method':
-            return (
+             return (
                  <Table>
-                    <TableHeader><TableRow><TableHead>Payment Method</TableHead><TableHead className="text-right">Total Received</TableHead></TableRow></TableHeader>
+                    <TableHeader><TableRow><TableHead>Sales Payment Method</TableHead><TableHead className="text-right">Total Received</TableHead></TableRow></TableHeader>
                     <TableBody>
                        {paymentSummary.length > 0 ? paymentSummary.sort((a,b) => b.totalAmount - a.totalAmount).map(item => (
                             <TableRow key={item.method}><TableCell>{item.method}</TableCell><TableCell className="text-right font-medium">₹{item.totalAmount.toFixed(2)}</TableCell></TableRow>
@@ -261,6 +272,17 @@ export default function FoodStallDashboardPage() {
                     <TableBody>
                        {vendorSummary.length > 0 ? vendorSummary.sort((a,b) => b.totalCost - a.totalCost).map(item => (
                             <TableRow key={item.vendor}><TableCell>{item.vendor}</TableCell><TableCell className="text-right font-medium">₹{item.totalCost.toFixed(2)}</TableCell></TableRow>
+                        )) : <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground">No expense data for this period.</TableCell></TableRow>}
+                    </TableBody>
+                </Table>
+            );
+        case 'by_expense_payment_method':
+             return (
+                 <Table>
+                    <TableHeader><TableRow><TableHead>Expense Payment Method</TableHead><TableHead className="text-right">Total Spent</TableHead></TableRow></TableHeader>
+                    <TableBody>
+                       {expensePaymentSummary.length > 0 ? expensePaymentSummary.sort((a,b) => b.totalCost - a.totalCost).map(item => (
+                            <TableRow key={item.method}><TableCell>{item.method}</TableCell><TableCell className="text-right font-medium">₹{item.totalCost.toFixed(2)}</TableCell></TableRow>
                         )) : <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground">No expense data for this period.</TableCell></TableRow>}
                     </TableBody>
                 </Table>
@@ -321,7 +343,8 @@ export default function FoodStallDashboardPage() {
                             <SelectTrigger className="w-[240px] bg-input"><SelectValue /></SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="by_expense_category"><ShoppingBag className="mr-2 h-4 w-4" />Summary by Expense Category</SelectItem>
-                                <SelectItem value="by_payment_method"><DollarSign className="mr-2 h-4 w-4" />Summary by Payment Method</SelectItem>
+                                <SelectItem value="by_payment_method"><DollarSign className="mr-2 h-4 w-4" />Summary by Sales Payment</SelectItem>
+                                <SelectItem value="by_expense_payment_method"><WalletCards className="mr-2 h-4 w-4" />Summary by Expense Payment</SelectItem>
                                 <SelectItem value="by_meal_time"><Soup className="mr-2 h-4 w-4" />Summary by Meal Time</SelectItem>
                                 <SelectItem value="by_vendor"><Truck className="mr-2 h-4 w-4" />Summary by Vendor</SelectItem>
                             </SelectContent>
