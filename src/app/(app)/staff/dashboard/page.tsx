@@ -4,16 +4,18 @@
 import { useState, useEffect, useCallback } from "react";
 import PageHeader from "@/components/shared/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, UserX, UserRoundCheck, HandCoins, CalendarDays, Wallet } from "lucide-react";
+import { Users, UserX, UserRoundCheck, HandCoins, CalendarDays, Wallet, BarChart, IndianRupee } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { getFirestore, collection, query, where, onSnapshot, getDocs } from "firebase/firestore";
 import type { AppUser, StaffAttendance, SalaryAdvance, Holiday, StaffDetails } from "@/types";
 import { format, startOfMonth, endOfMonth, getDaysInMonth } from "date-fns";
-import { Loader2, Info, IndianRupee } from "lucide-react";
+import { Loader2, Info } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { useUserManagement } from "@/hooks/use-user-management";
+import { ScrollArea } from "@/components/ui/scroll-area";
+
 
 const db = getFirestore();
 
@@ -230,6 +232,14 @@ export default function StaffDashboardPage() {
                 return <Badge variant="outline">{status}</Badge>;
         }
     };
+    
+    const projectedSalaryList = staffList
+        .filter(s => (s.status === 'active' || !s.status))
+        .map(s => ({
+            ...s,
+            salary: staffDetailsMap.get(s.uid)?.salary || 0
+        }))
+        .sort((a,b) => b.salary - a.salary);
 
     return (
         <div className="space-y-6">
@@ -250,65 +260,91 @@ export default function StaffDashboardPage() {
                 ))}
             </div>
 
-            <div className="grid gap-6 lg:grid-cols-2">
-                <Card>
+            <div className="grid gap-6 lg:grid-cols-5">
+                 <Card className="lg:col-span-3">
                     <CardHeader>
-                        <CardTitle>Recent Salary Advances</CardTitle>
-                        <CardDescription>Last 5 salary advances recorded this month.</CardDescription>
+                        <CardTitle className="flex items-center"><BarChart className="mr-2 h-5 w-5 text-primary"/>Dynamic Summary</CardTitle>
+                         <CardDescription>
+                            A dynamic breakdown of staff data.
+                        </CardDescription>
                     </CardHeader>
                     <CardContent>
-                        {recentAdvances.length === 0 ? (
-                           <p className="text-sm text-muted-foreground text-center py-4">No advances recorded this month.</p>
-                        ) : (
+                        <ScrollArea className="h-72">
                              <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead>Date</TableHead>
-                                        <TableHead>Staff</TableHead>
-                                        <TableHead className="text-right">Amount</TableHead>
-                                    </TableRow>
-                                </TableHeader>
+                                <TableHeader><TableRow><TableHead>Staff Member</TableHead><TableHead className="text-right">Projected Monthly Salary</TableHead></TableRow></TableHeader>
                                 <TableBody>
-                                    {recentAdvances.map(adv => (
-                                        <TableRow key={adv.id}>
-                                            <TableCell>{format(new Date(adv.date), 'MMM dd, yyyy')}</TableCell>
-                                            <TableCell>{getStaffName(adv.staffUid)}</TableCell>
-                                            <TableCell className="text-right font-medium">₹{adv.amount.toFixed(2)}</TableCell>
+                                    {projectedSalaryList.length > 0 ? projectedSalaryList.map(item => (
+                                        <TableRow key={item.uid}>
+                                            <TableCell>{item.displayName}</TableCell>
+                                            <TableCell className="text-right font-medium">₹{item.salary.toFixed(2)}</TableCell>
                                         </TableRow>
-                                    ))}
+                                    )) : <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground">No active staff with salary data.</TableCell></TableRow>}
                                 </TableBody>
                             </Table>
-                        )}
+                        </ScrollArea>
                     </CardContent>
                 </Card>
-                 <Card>
-                    <CardHeader>
-                        <CardTitle>Staff on Leave/Absent Today</CardTitle>
-                        <CardDescription>Attendance status for staff not marked as "Present".</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                       {staffOnLeaveOrAbsent.length === 0 ? (
-                           <p className="text-sm text-muted-foreground text-center py-4">All staff are marked present.</p>
-                        ) : (
-                             <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead>Staff</TableHead>
-                                        <TableHead>Status</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {staffOnLeaveOrAbsent.map(att => (
-                                        <TableRow key={att.id}>
-                                            <TableCell>{getStaffName(att.staffUid)}</TableCell>
-                                            <TableCell>{getStatusBadge(att.status as any)}</TableCell>
+
+                <div className="lg:col-span-2 space-y-6">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Recent Salary Advances</CardTitle>
+                            <CardDescription>Last 5 salary advances recorded this month.</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            {recentAdvances.length === 0 ? (
+                            <p className="text-sm text-muted-foreground text-center py-4">No advances recorded this month.</p>
+                            ) : (
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead>Date</TableHead>
+                                            <TableHead>Staff</TableHead>
+                                            <TableHead className="text-right">Amount</TableHead>
                                         </TableRow>
-                                    ))}
-                                </TableBody>
-                            </Table>
-                        )}
-                    </CardContent>
-                </Card>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {recentAdvances.map(adv => (
+                                            <TableRow key={adv.id}>
+                                                <TableCell>{format(new Date(adv.date), 'MMM dd, yyyy')}</TableCell>
+                                                <TableCell>{getStaffName(adv.staffUid)}</TableCell>
+                                                <TableCell className="text-right font-medium">₹{adv.amount.toFixed(2)}</TableCell>
+                                            </TableRow>
+                                        ))}
+                                    </TableBody>
+                                </Table>
+                            )}
+                        </CardContent>
+                    </Card>
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Staff on Leave/Absent Today</CardTitle>
+                            <CardDescription>Attendance status for staff not marked as "Present".</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                        {staffOnLeaveOrAbsent.length === 0 ? (
+                            <p className="text-sm text-muted-foreground text-center py-4">All staff are marked present.</p>
+                            ) : (
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead>Staff</TableHead>
+                                            <TableHead>Status</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {staffOnLeaveOrAbsent.map(att => (
+                                            <TableRow key={att.id}>
+                                                <TableCell>{getStaffName(att.staffUid)}</TableCell>
+                                                <TableCell>{getStatusBadge(att.status as any)}</TableCell>
+                                            </TableRow>
+                                        ))}
+                                    </TableBody>
+                                </Table>
+                            )}
+                        </CardContent>
+                    </Card>
+                </div>
             </div>
         </div>
     );
