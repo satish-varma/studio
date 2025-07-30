@@ -81,13 +81,13 @@ export default function RecordFoodExpensePage() {
   const form = useForm<FoodItemExpenseFormValues>({
     resolver: zodResolver(foodExpenseFormSchema),
     defaultValues: {
-      category: undefined,
+      category: "",
       otherCategoryDetails: "",
-      totalCost: undefined, // Let placeholder show
-      paymentMethod: undefined,
+      totalCost: undefined,
+      paymentMethod: "",
       otherPaymentMethodDetails: "",
       purchaseDate: new Date(),
-      vendor: undefined,
+      vendor: "",
       otherVendorDetails: "",
       notes: "",
       billImageUrl: "",
@@ -98,7 +98,6 @@ export default function RecordFoodExpensePage() {
   const vendor = form.watch("vendor");
   const category = form.watch("category");
   
-  // This state now controls the visibility of conditional fields
   const [showOther, setShowOther] = useState({
       category: false,
       vendor: false,
@@ -186,18 +185,17 @@ export default function RecordFoodExpensePage() {
       });
       
       form.reset({
-        category: undefined,
+        category: "", // THE FIX: Reset to empty string
         otherCategoryDetails: "",
         totalCost: undefined,
-        paymentMethod: undefined,
+        paymentMethod: "", // THE FIX: Reset to empty string
         otherPaymentMethodDetails: "",
         purchaseDate: new Date(),
-        vendor: undefined,
+        vendor: "", // THE FIX: Reset to empty string
         otherVendorDetails: "",
         notes: "",
         billImageUrl: "",
       });
-      setShowOther({ category: false, vendor: false, paymentMethod: false });
 
     } catch (error: any) {
       console.error("Error recording food expense:", error);
@@ -269,7 +267,7 @@ export default function RecordFoodExpensePage() {
                       <FormLabel>Category *</FormLabel>
                       <Select
                         onValueChange={field.onChange}
-                        value={field.value}
+                        value={field.value || ""}
                         disabled={isSubmitting}
                       >
                         <FormControl>
@@ -341,7 +339,7 @@ export default function RecordFoodExpensePage() {
                       <FormLabel>Vendor *</FormLabel>
                       <Select
                         onValueChange={field.onChange}
-                        value={field.value}
+                        value={field.value || ""}
                         disabled={isSubmitting || loadingVendors}
                       >
                         <FormControl>
@@ -394,7 +392,7 @@ export default function RecordFoodExpensePage() {
                       <FormLabel>Payment Method *</FormLabel>
                       <Select
                         onValueChange={field.onChange}
-                        value={field.value}
+                        value={field.value || ""}
                         disabled={isSubmitting}
                       >
                         <FormControl>
@@ -516,5 +514,3 @@ export default function RecordFoodExpensePage() {
     </div>
   );
 }
-
-    
