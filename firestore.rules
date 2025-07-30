@@ -269,6 +269,13 @@ service cloud.firestore {
       allow write: if isAdmin() || isManagerRole();
     }
     
+    match /foodExpensePresets/{presetId} {
+      // Any signed-in user can read the presets to use them in forms.
+      allow read: if isSignedIn();
+      // Only managers and admins can create, update, or delete presets.
+      allow write: if isAdmin() || isManagerRole();
+    }
+    
     // --- Staff Management Specific Rules ---
     
     match /staffDetails/{userId} {
