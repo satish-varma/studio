@@ -151,8 +151,6 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
     try {
       const newQuantity = Number(values.quantity);
       
-      // Construct the data object explicitly to ensure correct types.
-      // values.costPrice is guaranteed to be 'number' by Zod schema's .default(0).
       const dataForFirestore: Omit<StockItem, 'id'> = {
         name: values.name,
         category: values.category,
@@ -160,11 +158,10 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
         quantity: newQuantity,
         unit: values.unit,
         price: Number(values.price),
-        costPrice: values.costPrice, // Directly use Zod validated value
+        costPrice: values.costPrice, 
         lowStockThreshold: Number(values.lowStockThreshold),
         imageUrl: values.imageUrl || "",
         lastUpdated: new Date().toISOString(),
-        // Site, Stall, and OriginalMasterItemId are set based on mode
         siteId: isEditMode && initialData ? initialData.siteId : activeSiteId,
         stallId: isEditMode && initialData ? initialData.stallId : activeStallId,
         originalMasterItemId: isEditMode && initialData ? (initialData.originalMasterItemId ?? null) : null,
@@ -197,6 +194,8 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
           title: "Item Updated",
           description: `${values.name} has been successfully updated.`,
         });
+        router.push("/items");
+        router.refresh();
       } else {
         if (!activeSiteId) {
           console.warn(`${LOG_PREFIX} Site context missing for new item. ActiveSiteId: ${activeSiteId}`);
@@ -224,9 +223,19 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
           title: "Item Added",
           description: `${values.name} has been successfully added. ${activeStallId ? 'To stall.' : 'To site master stock.'}`,
         });
+        
+        // Reset form but keep category and unit
+        form.reset({
+            ...values,
+            name: "",
+            description: "",
+            quantity: 0,
+            price: 0,
+            costPrice: 0,
+            imageUrl: "",
+            // category and unit are preserved from 'values'
+        });
       }
-      router.push("/items");
-      router.refresh();
     } catch (error: any) {
       console.error(`${LOG_PREFIX} Error saving item:`, error.message, error.stack);
       toast({
