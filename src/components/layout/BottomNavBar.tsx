@@ -4,14 +4,13 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  LayoutDashboard,
-  ShoppingCart,
-  Users,
   LucideIcon,
   Plus,
-  UtensilsCrossed,
   IndianRupee,
-  Briefcase
+  ClipboardPlus,
+  CalendarCheck,
+  HandCoins,
+  FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -31,11 +30,11 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ['staff', 'manager', 'admin'] },
-  { href: "/items", label: "Inventory", icon: ShoppingCart, roles: ['staff', 'manager', 'admin'] },
-  { href: "/foodstall/sales", label: "Sales", icon: IndianRupee, roles: ['staff', 'manager', 'admin'] },
-  { href: "/staff/list", label: "Staff", icon: Briefcase, roles: ['manager', 'admin'] },
-  { href: "/foodstall/expenses", label: "Expenses", icon: UtensilsCrossed, roles: ['staff', 'manager', 'admin'] },
+  { href: "/foodstall/expenses/record", label: "Add Expense", icon: ClipboardPlus, roles: ['staff', 'manager', 'admin'] },
+  { href: "/staff/attendance", label: "Attendance", icon: CalendarCheck, roles: ['manager', 'admin'] },
+  { href: "/staff/advances", label: "Advance", icon: HandCoins, roles: ['manager', 'admin'] },
+  { href: "/staff/payroll", label: "Payroll", icon: IndianRupee, roles: ['manager', 'admin'] },
+  { href: "/foodstall/activity-log", label: "FS Activity", icon: FileText, roles: ['admin'] },
 ];
 
 const FAB_ITEMS = [
@@ -64,9 +63,9 @@ export default function BottomNavBar() {
         {filteredNavItems.map((item) => {
           const isActive = pathname.startsWith(item.href) && (item.href !== '/dashboard' || pathname === '/dashboard');
           return (
-            <Link key={item.href} href={item.href} className="flex flex-col items-center justify-center flex-1 h-full">
+            <Link key={item.href} href={item.href} className="flex flex-col items-center justify-center flex-1 h-full p-1 text-center">
               <item.icon className={cn("h-6 w-6 mb-1 transition-colors", isActive ? "text-primary" : "text-muted-foreground")} />
-              <span className={cn("text-xs transition-colors", isActive ? "text-primary font-semibold" : "text-muted-foreground")}>
+              <span className={cn("text-xs transition-colors leading-tight", isActive ? "text-primary font-semibold" : "text-muted-foreground")}>
                 {item.label}
               </span>
             </Link>
