@@ -86,21 +86,21 @@ export function FoodActivityLogTable({
         <Table>
           <TableHeader className="sticky top-0 bg-card z-10">
             <TableRow>
-              <TableHead className="w-[180px]">Timestamp</TableHead>
-              <TableHead>User</TableHead>
-              <TableHead>Location</TableHead>
-              <TableHead>Activity Type</TableHead>
-              <TableHead>Details</TableHead>
-              <TableHead>Notes</TableHead>
-              <TableHead>Related Doc</TableHead>
+              <TableHead className="w-[180px] p-2 sm:p-4">Timestamp</TableHead>
+              <TableHead className="p-2 sm:p-4">User</TableHead>
+              <TableHead className="p-2 sm:p-4">Location</TableHead>
+              <TableHead className="p-2 sm:p-4">Activity Type</TableHead>
+              <TableHead className="p-2 sm:p-4">Details</TableHead>
+              <TableHead className="p-2 sm:p-4 hidden md:table-cell">Notes</TableHead>
+              <TableHead className="p-2 sm:p-4 hidden sm:table-cell">Related Doc</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {logs.map((log) => (
               <TableRow key={log.id}>
-                <TableCell className="text-xs text-muted-foreground">{formatDate(log.timestamp)}</TableCell>
-                <TableCell className="text-sm">{usersMap[log.userId] || log.userName || log.userId.substring(0, 8) + "..."}</TableCell>
-                <TableCell className="text-xs">
+                <TableCell className="text-xs text-muted-foreground p-2 sm:p-4">{formatDate(log.timestamp)}</TableCell>
+                <TableCell className="text-sm p-2 sm:p-4">{usersMap[log.userId] || log.userName || log.userId.substring(0, 8) + "..."}</TableCell>
+                <TableCell className="text-xs p-2 sm:p-4">
                   <div className="flex items-center">
                     <Building size={12} className="mr-1 text-primary/70 flex-shrink-0" />
                     <span>{sitesMap[log.siteId] || log.siteId.substring(0,8)}</span>
@@ -110,13 +110,13 @@ export function FoodActivityLogTable({
                     <span>{stallsMap[log.stallId] || log.stallId.substring(0,8)}</span>
                   </div>
                 </TableCell>
-                <TableCell>
-                  <Badge variant={getActivityBadgeVariant(log.type)} className="text-xs whitespace-nowrap">
+                <TableCell className="p-2 sm:p-4">
+                  <Badge variant={getActivityBadgeVariant(log.type)} className="text-xs">
                     {formatActivityType(log.type)}
                   </Badge>
                 </TableCell>
-                <TableCell className="text-sm font-medium">{formatDetails(log)}</TableCell>
-                <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate">
+                <TableCell className="text-sm font-medium p-2 sm:p-4">{formatDetails(log)}</TableCell>
+                <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate p-2 sm:p-4 hidden md:table-cell">
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <span className="cursor-help">{log.details.notes || "N/A"}</span>
@@ -124,7 +124,7 @@ export function FoodActivityLogTable({
                     <TooltipContent><p>{log.details.notes}</p></TooltipContent>
                   </Tooltip>
                 </TableCell>
-                <TableCell>
+                <TableCell className="p-2 sm:p-4 hidden sm:table-cell">
                     <Link
                         href={log.type.startsWith('SALE') ? `/foodstall/sales/record?date=${log.relatedDocumentId.split('_')[0]}` : '#'}
                         passHref
