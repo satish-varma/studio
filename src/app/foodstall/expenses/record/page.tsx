@@ -51,7 +51,7 @@ import {
   orderBy,
   onSnapshot
 } from "firebase/firestore";
-import { firebaseConfig } from "@/lib/firebaseConfig";
+import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Textarea } from "@/components/ui/textarea";
@@ -127,10 +127,12 @@ export default function RecordFoodExpensePage() {
     setIsSubmitting(true);
     try {
       const categoryToSave = values.category === 'Other' ? (values.otherCategoryDetails || "Other") : values.category;
+      const vendorToSave = values.vendor === 'Other' ? (values.otherVendorDetails || "Other") : values.vendor;
 
       const expenseData = {
         ...values,
         category: categoryToSave,
+        vendor: vendorToSave,
         siteId: activeSiteId,
         stallId: activeStallId,
         recordedByUid: user.uid,
@@ -142,10 +144,12 @@ export default function RecordFoodExpensePage() {
 
       // Remove the temporary 'other' fields before saving
       delete (expenseData as any).otherCategoryDetails;
+      delete (expenseData as any).otherVendorDetails;
+
 
       const docRef = await addDoc(collection(db, "foodItemExpenses"), expenseData);
       
-      const vendorNameForLog = values.vendor === 'Other' ? values.otherVendorDetails : values.vendor;
+      const vendorNameForLog = vendorToSave;
 
       await logFoodStallActivity(user, {
         siteId: activeSiteId,
@@ -163,6 +167,9 @@ export default function RecordFoodExpensePage() {
         title: "Expense Recorded",
         description: `An expense for ${categoryToSave} of ₹${values.totalCost.toFixed(2)} has been recorded.`,
       });
+      
+      // The fix: Reset the form to its original empty state.
+      // This clears all fields including the ones that are conditionally rendered.
       form.reset({
         category: undefined,
         otherCategoryDetails: "",
@@ -175,6 +182,7 @@ export default function RecordFoodExpensePage() {
         notes: "",
         billImageUrl: "",
       });
+
     } catch (error: any) {
       console.error("Error recording food expense:", error);
       toast({
