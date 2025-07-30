@@ -56,6 +56,8 @@ import { getApps, initializeApp, getApp } from 'firebase/app';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Textarea } from "@/components/ui/textarea";
 import { logFoodStallActivity } from "@/lib/foodStallLogger";
+import { PlusCircle } from "lucide-react";
+
 
 let db: ReturnType<typeof getFirestore> | undefined;
 if (!getApps().length) {
@@ -96,6 +98,21 @@ export default function RecordFoodExpensePage() {
   const vendor = form.watch("vendor");
   const category = form.watch("category");
   
+  // This state now controls the visibility of conditional fields
+  const [showOther, setShowOther] = useState({
+      category: false,
+      vendor: false,
+      paymentMethod: false,
+  });
+  
+  useEffect(() => {
+    setShowOther({
+        category: category === 'Other',
+        vendor: vendor === 'Other',
+        paymentMethod: paymentMethod === 'Other',
+    });
+  }, [category, vendor, paymentMethod]);
+
   useEffect(() => {
     if (!db) return;
     setLoadingVendors(true);
@@ -168,8 +185,6 @@ export default function RecordFoodExpensePage() {
         description: `An expense for ${categoryToSave} of ₹${values.totalCost.toFixed(2)} has been recorded.`,
       });
       
-      // The fix: Reset the form to its original empty state.
-      // This clears all fields including the ones that are conditionally rendered.
       form.reset({
         category: undefined,
         otherCategoryDetails: "",
@@ -182,6 +197,7 @@ export default function RecordFoodExpensePage() {
         notes: "",
         billImageUrl: "",
       });
+      setShowOther({ category: false, vendor: false, paymentMethod: false });
 
     } catch (error: any) {
       console.error("Error recording food expense:", error);
@@ -273,7 +289,7 @@ export default function RecordFoodExpensePage() {
                     </FormItem>
                   )}
                 />
-                 {category === 'Other' && (
+                 {showOther.category && (
                     <FormField
                       control={form.control}
                       name="otherCategoryDetails"
@@ -347,7 +363,7 @@ export default function RecordFoodExpensePage() {
                   )}
                 />
 
-                {vendor === 'Other' && (
+                {showOther.vendor && (
                 <FormField
                   control={form.control}
                   name="otherVendorDetails"
@@ -420,7 +436,7 @@ export default function RecordFoodExpensePage() {
                 />
               </div>
               
-              {paymentMethod === 'Other' && (
+              {showOther.paymentMethod && (
                 <FormField
                   control={form.control}
                   name="otherPaymentMethodDetails"
@@ -500,3 +516,5 @@ export default function RecordFoodExpensePage() {
     </div>
   );
 }
+
+    
