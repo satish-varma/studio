@@ -16,6 +16,7 @@ export interface FoodStallActivityLog {
     // Expense details
     expenseCategory?: string;
     totalCost?: number;
+    vendor?: string;
     // Sale details
     totalAmount?: number;
     // Common

@@ -210,7 +210,8 @@ export default function RecordFoodExpensePage() {
         details: {
             expenseCategory: categoryToSave,
             totalCost: values.totalCost,
-            notes: `Vendor: ${vendorNameForLog || 'N/A'}. Payment: ${values.paymentMethod}${values.paymentMethod === 'Other' ? ` (${values.otherPaymentMethodDetails})` : ''}`
+            vendor: vendorNameForLog,
+            notes: values.notes,
         }
       });
       
@@ -220,14 +221,8 @@ export default function RecordFoodExpensePage() {
       });
       
       form.reset({
-        category: values.category,
-        otherCategoryDetails: "",
+        ...values,
         totalCost: undefined,
-        paymentMethod: values.paymentMethod,
-        otherPaymentMethodDetails: "",
-        purchaseDate: values.purchaseDate,
-        vendor: values.vendor,
-        otherVendorDetails: "",
         notes: "",
         billImageUrl: "",
       });

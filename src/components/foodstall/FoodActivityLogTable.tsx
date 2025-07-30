@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
-import { Building, Store, ListChecks, Loader2, ChevronLeft, ChevronRight, FileText } from "lucide-react";
+import { Building, Store, ListChecks, Loader2, ChevronLeft, ChevronRight, FileText, Info } from "lucide-react";
 import Link from "next/link";
 
 interface FoodActivityLogTableProps {
@@ -59,7 +59,7 @@ export function FoodActivityLogTable({
     if (type === 'EXPENSE_RECORDED') return "secondary";
     return "outline";
   };
-
+  
   const formatDetails = (log: FoodStallActivityLog) => {
     if (log.type.startsWith('SALE')) {
         return `Sale Total: ₹${log.details.totalAmount?.toFixed(2) || '0.00'}`;
@@ -69,6 +69,7 @@ export function FoodActivityLogTable({
     }
     return log.details.notes || 'No details.';
   };
+
 
   if (logs.length === 0 && isFirstPage) {
     return (
@@ -86,13 +87,13 @@ export function FoodActivityLogTable({
         <Table>
           <TableHeader className="sticky top-0 bg-card z-10">
             <TableRow>
-              <TableHead className="w-[180px] p-2 sm:p-4">Timestamp</TableHead>
+              <TableHead className="p-2 sm:p-4 w-[140px]">Timestamp</TableHead>
               <TableHead className="p-2 sm:p-4">User</TableHead>
               <TableHead className="p-2 sm:p-4">Location</TableHead>
               <TableHead className="p-2 sm:p-4">Activity Type</TableHead>
+              <TableHead className="p-2 sm:p-4 hidden md:table-cell">Vendor</TableHead>
               <TableHead className="p-2 sm:p-4">Details</TableHead>
-              <TableHead className="p-2 sm:p-4 hidden md:table-cell">Notes</TableHead>
-              <TableHead className="p-2 sm:p-4 hidden sm:table-cell">Related Doc</TableHead>
+              <TableHead className="p-2 sm:p-4 hidden lg:table-cell">Notes</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -112,29 +113,23 @@ export function FoodActivityLogTable({
                 </TableCell>
                 <TableCell className="p-2 sm:p-4">
                   <Badge variant={getActivityBadgeVariant(log.type)} className="text-xs">
-                    {formatActivityType(log.type)}
+                    <div className="sm:whitespace-normal sm:break-words">{formatActivityType(log.type)}</div>
                   </Badge>
                 </TableCell>
+                 <TableCell className="text-sm p-2 sm:p-4 hidden md:table-cell">{log.details.vendor || "N/A"}</TableCell>
                 <TableCell className="text-sm font-medium p-2 sm:p-4">{formatDetails(log)}</TableCell>
-                <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate p-2 sm:p-4 hidden md:table-cell">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="cursor-help">{log.details.notes || "N/A"}</span>
-                    </TooltipTrigger>
-                    <TooltipContent><p>{log.details.notes}</p></TooltipContent>
-                  </Tooltip>
-                </TableCell>
-                <TableCell className="p-2 sm:p-4 hidden sm:table-cell">
-                    <Link
-                        href={log.type.startsWith('SALE') ? `/foodstall/sales/record?date=${log.relatedDocumentId.split('_')[0]}` : '#'}
-                        passHref
-                        title={log.relatedDocumentId}
-                    >
-                        <Button variant="link" className="p-0 h-auto text-xs" disabled={!log.type.startsWith('SALE')}>
-                            <FileText size={12} className="mr-1"/>
-                            View
-                        </Button>
-                    </Link>
+                <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate p-2 sm:p-4 hidden lg:table-cell">
+                  {log.details.notes ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="cursor-help inline-flex items-center gap-1">
+                          <Info size={12} />
+                          <span>{log.details.notes.substring(0, 25)}{log.details.notes.length > 25 ? "..." : ""}</span>
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-xs"><p>{log.details.notes}</p></TooltipContent>
+                    </Tooltip>
+                  ) : "N/A"}
                 </TableCell>
               </TableRow>
             ))}
