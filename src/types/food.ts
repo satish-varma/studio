@@ -35,10 +35,10 @@ export type PaymentMethod = (typeof paymentMethods)[number];
 
 // Define a base object schema without refinements
 const baseFoodExpenseSchema = z.object({
-  category: z.enum(foodExpenseCategories, { required_error: "Category is required" }),
+  category: z.string().min(1, { message: "Category is required." }), // Changed to string to allow 'Other' before validation
   otherCategoryDetails: z.string().optional().nullable(),
   totalCost: z.coerce.number().positive("Total cost must be a positive number"),
-  paymentMethod: z.enum(paymentMethods, { required_error: "Payment method is required." }),
+  paymentMethod: z.string().min(1, { message: "Payment method is required." }), // Changed to string
   otherPaymentMethodDetails: z.string().optional().nullable(),
   purchaseDate: z.date({ required_error: "Purchase date is required." }),
   vendor: z.string({ required_error: "Vendor selection is required." }).min(1, "Vendor selection is required."),
@@ -91,7 +91,7 @@ export interface FoodItemExpense {
   id: string; // Firestore document ID
   category: FoodExpenseCategory | string; // Allow custom strings
   totalCost: number;
-  paymentMethod: PaymentMethod;
+  paymentMethod: PaymentMethod | string;
   otherPaymentMethodDetails?: string | null;
   purchaseDate: Date | Timestamp;
   vendor?: string | null; // Changed from enum to string
@@ -112,6 +112,27 @@ export interface FoodItemExpenseAdmin extends Omit<FoodItemExpense, 'purchaseDat
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
+
+// --------------- Food Expense Presets ---------------
+export interface FoodExpensePreset {
+  id: string; // Firestore document ID
+  category: FoodExpenseCategory | string;
+  defaultVendor?: string;
+  defaultPaymentMethod?: PaymentMethod | string;
+  defaultNotes?: string;
+  defaultTotalCost?: number;
+  createdAt: string; // ISO date string
+}
+
+export const foodExpensePresetFormSchema = z.object({
+  category: z.enum(foodExpenseCategories, { required_error: "Category is required" }),
+  defaultVendor: z.string().optional(),
+  defaultPaymentMethod: z.enum(paymentMethods).optional(),
+  defaultNotes: z.string().optional(),
+  defaultTotalCost: z.coerce.number().min(0).optional(),
+});
+
+export type FoodExpensePresetFormValues = z.infer<typeof foodExpensePresetFormSchema>;
 
 
 // --------------- Food Sale Tracking (Meal Time & Payment Type Based) ---------------

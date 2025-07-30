@@ -25,6 +25,7 @@ import {
   type FoodItemExpenseFormValues,
   foodExpenseCategories,
   paymentMethods,
+  type FoodExpensePreset
 } from "@/types/food";
 import { ArrowLeft, Loader2, Info, Store } from "lucide-react";
 import Link from "next/link";
@@ -77,6 +78,7 @@ export default function RecordFoodExpensePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [vendors, setVendors] = useState<string[]>([]);
   const [loadingVendors, setLoadingVendors] = useState(true);
+  const [expensePresets, setExpensePresets] = useState<FoodExpensePreset[]>([]);
 
   const form = useForm<FoodItemExpenseFormValues>({
     resolver: zodResolver(foodExpenseFormSchema),
@@ -112,23 +114,57 @@ export default function RecordFoodExpensePage() {
     });
   }, [category, vendor, paymentMethod]);
 
+  // Fetch supporting data (vendors, presets)
   useEffect(() => {
     if (!db) return;
     setLoadingVendors(true);
     const vendorsCollectionRef = collection(db, "foodVendors");
-    const q = query(vendorsCollectionRef, orderBy("name", "asc"));
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const fetchedVendors = snapshot.docs.map(doc => doc.data().name as string);
-      setVendors(fetchedVendors);
+    const qVendors = query(vendorsCollectionRef, orderBy("name", "asc"));
+    const unsubscribeVendors = onSnapshot(qVendors, (snapshot) => {
+      setVendors(snapshot.docs.map(doc => doc.data().name as string));
       setLoadingVendors(false);
     }, (error) => {
       console.error("Error fetching vendors:", error);
       toast({ title: "Error", description: "Could not fetch vendors list.", variant: "destructive" });
       setLoadingVendors(false);
     });
-    return () => unsubscribe();
+
+    const presetsCollectionRef = collection(db, "foodExpensePresets");
+    const qPresets = query(presetsCollectionRef);
+    const unsubscribePresets = onSnapshot(qPresets, (snapshot) => {
+      setExpensePresets(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FoodExpensePreset)));
+    }, (error) => {
+      console.error("Error fetching expense presets:", error);
+    });
+
+    return () => {
+      unsubscribeVendors();
+      unsubscribePresets();
+    };
   }, [toast]);
+
+  // Effect to apply presets when category changes
+  useEffect(() => {
+    const selectedPreset = expensePresets.find(p => p.category === category);
+    if (selectedPreset) {
+      if (selectedPreset.defaultVendor) {
+        form.setValue('vendor', vendors.includes(selectedPreset.defaultVendor) ? selectedPreset.defaultVendor : 'Other');
+        if (!vendors.includes(selectedPreset.defaultVendor)) {
+          form.setValue('otherVendorDetails', selectedPreset.defaultVendor);
+        }
+      }
+      if (selectedPreset.defaultPaymentMethod) {
+        form.setValue('paymentMethod', selectedPreset.defaultPaymentMethod);
+      }
+      if (selectedPreset.defaultNotes) {
+        form.setValue('notes', selectedPreset.defaultNotes);
+      }
+      if (selectedPreset.defaultTotalCost !== undefined) {
+        form.setValue('totalCost', selectedPreset.defaultTotalCost);
+      }
+    }
+  }, [category, expensePresets, form, vendors]);
+
 
   async function onSubmit(values: FoodItemExpenseFormValues) {
     if (!user || !activeSiteId || !activeStallId || !db) {
@@ -153,12 +189,11 @@ export default function RecordFoodExpensePage() {
         stallId: activeStallId,
         recordedByUid: user.uid,
         recordedByName: user.displayName || user.email,
-        purchaseDate: Timestamp.fromDate(values.purchaseDate), // Convert to Firestore Timestamp
+        purchaseDate: Timestamp.fromDate(values.purchaseDate),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
 
-      // Remove the temporary 'other' fields before saving
       delete (expenseData as any).otherCategoryDetails;
       delete (expenseData as any).otherVendorDetails;
 
@@ -185,8 +220,14 @@ export default function RecordFoodExpensePage() {
       });
       
       form.reset({
-        ...values, // Retain the previous values
-        totalCost: undefined, // But clear the cost, notes, and image URL
+        category: values.category,
+        otherCategoryDetails: "",
+        totalCost: undefined,
+        paymentMethod: values.paymentMethod,
+        otherPaymentMethodDetails: "",
+        purchaseDate: values.purchaseDate,
+        vendor: values.vendor,
+        otherVendorDetails: "",
         notes: "",
         billImageUrl: "",
       });
@@ -248,7 +289,7 @@ export default function RecordFoodExpensePage() {
             <CardHeader>
               <CardTitle>Expense Details</CardTitle>
               <CardDescription>
-                All fields marked with * are required.
+                All fields marked with * are required. Select a category to auto-fill defaults.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">

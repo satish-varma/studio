@@ -3,7 +3,7 @@
 
 import PageHeader from "@/components/shared/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
-import { Settings as SettingsIcon, Palette, BellRing, DatabaseZap, Upload, Download, Loader2, ShieldAlert, AlertTriangle, Utensils, MailQuestion, Users } from "lucide-react";
+import { Settings as SettingsIcon, Palette, BellRing, DatabaseZap, Upload, Download, Loader2, ShieldAlert, AlertTriangle, Utensils, MailQuestion, Users, BookCopy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -24,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { useAuth } from "@/contexts/AuthContext";
 import ManageVendorsDialog from "@/components/foodstall/ManageVendorsDialog";
 import { auth } from "@/lib/firebaseConfig"; 
+import ManageExpensePresetsDialog from "@/components/foodstall/ManageExpensePresetsDialog";
 
 const LOG_PREFIX = "[SettingsPage]";
 
@@ -42,6 +43,8 @@ export default function SettingsPage() {
   const STAFF_RESET_PHRASE = "RESET STAFF DATA";
 
   const [showManageVendorsDialog, setShowManageVendorsDialog] = useState(false);
+  const [showManagePresetsDialog, setShowManagePresetsDialog] = useState(false);
+
 
   const handleDataReset = async (apiEndpoint: string, confirmationPhrase: string, confirmationInput: string, setIsResetting: React.Dispatch<React.SetStateAction<boolean>>) => {
     if (confirmationInput !== confirmationPhrase) {
@@ -87,7 +90,10 @@ export default function SettingsPage() {
         </Card>
         <Card className="shadow-lg">
           <CardHeader><CardTitle className="flex items-center"><Utensils className="mr-2 h-5 w-5 text-primary" />Food Stall Settings</CardTitle><CardDescription>Manage settings specific to the Food Stall module.</CardDescription></CardHeader>
-          <CardContent><Button variant="outline" className="w-full" onClick={() => setShowManageVendorsDialog(true)}>Manage Food Vendors</Button></CardContent>
+          <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Button variant="outline" className="w-full" onClick={() => setShowManageVendorsDialog(true)}>Manage Food Vendors</Button>
+            <Button variant="outline" className="w-full" onClick={() => setShowManagePresetsDialog(true)}><BookCopy className="mr-2 h-4 w-4" />Manage Expense Presets</Button>
+          </CardContent>
         </Card>
       </div>
       
@@ -171,6 +177,7 @@ export default function SettingsPage() {
       )}
 
       <ManageVendorsDialog isOpen={showManageVendorsDialog} onClose={() => setShowManageVendorsDialog(false)}/>
+      <ManageExpensePresetsDialog isOpen={showManagePresetsDialog} onClose={() => setShowManagePresetsDialog(false)}/>
     </div>
   );
 }
