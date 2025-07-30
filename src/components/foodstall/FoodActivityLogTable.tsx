@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
-import { Building, Store, ListChecks, Loader2, ChevronLeft, ChevronRight, FileText, Info } from "lucide-react";
+import { Building, Store, ListChecks, Loader2, ChevronLeft, ChevronRight, FileText, Info, Truck } from "lucide-react";
 import Link from "next/link";
 
 interface FoodActivityLogTableProps {
@@ -116,7 +116,12 @@ export function FoodActivityLogTable({
                     <div className="sm:whitespace-normal sm:break-words">{formatActivityType(log.type)}</div>
                   </Badge>
                 </TableCell>
-                 <TableCell className="text-sm p-2 sm:p-4 hidden md:table-cell">{log.details.vendor || "N/A"}</TableCell>
+                 <TableCell className="text-sm p-2 sm:p-4 hidden md:table-cell">
+                    <div className="flex items-center gap-1.5">
+                        {log.details.vendor && <Truck className="h-4 w-4 text-muted-foreground shrink-0"/>}
+                        <span className="truncate">{log.details.vendor || "N/A"}</span>
+                    </div>
+                </TableCell>
                 <TableCell className="text-sm font-medium p-2 sm:p-4">{formatDetails(log)}</TableCell>
                 <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate p-2 sm:p-4 hidden lg:table-cell">
                   {log.details.notes ? (
