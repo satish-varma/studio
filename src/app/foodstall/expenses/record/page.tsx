@@ -185,14 +185,8 @@ export default function RecordFoodExpensePage() {
       });
       
       form.reset({
-        category: "", // THE FIX: Reset to empty string
-        otherCategoryDetails: "",
-        totalCost: undefined,
-        paymentMethod: "", // THE FIX: Reset to empty string
-        otherPaymentMethodDetails: "",
-        purchaseDate: new Date(),
-        vendor: "", // THE FIX: Reset to empty string
-        otherVendorDetails: "",
+        ...values, // Retain the previous values
+        totalCost: undefined, // But clear the cost, notes, and image URL
         notes: "",
         billImageUrl: "",
       });
