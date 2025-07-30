@@ -99,10 +99,22 @@ export default function ManageExpensePresetsDialog({ isOpen, onClose }: ManageEx
 
     setIsSubmitting(true);
     try {
-      await addDoc(collection(db, "foodExpensePresets"), {
-        ...values,
+      // THE FIX: Create a clean object to send to Firestore, excluding undefined fields.
+      const dataToSave: Partial<FoodExpensePresetFormValues> & { createdAt: string, category: string } = {
+        category: values.category!, // We know it's defined from the Zod schema
         createdAt: new Date().toISOString(),
-      });
+      };
+
+      if (values.defaultVendor) dataToSave.defaultVendor = values.defaultVendor;
+      if (values.defaultPaymentMethod) dataToSave.defaultPaymentMethod = values.defaultPaymentMethod;
+      if (values.defaultNotes) dataToSave.defaultNotes = values.defaultNotes;
+      // This is the key part: only add defaultTotalCost if it's a valid number.
+      if (values.defaultTotalCost !== undefined && !isNaN(values.defaultTotalCost)) {
+          dataToSave.defaultTotalCost = values.defaultTotalCost;
+      }
+      
+      await addDoc(collection(db, "foodExpensePresets"), dataToSave);
+      
       toast({ title: "Preset Added", description: `Default values for "${values.category}" have been saved.` });
       form.reset({
         category: undefined, defaultVendor: "", defaultPaymentMethod: undefined,
@@ -144,7 +156,7 @@ export default function ManageExpensePresetsDialog({ isOpen, onClose }: ManageEx
                 </Select><FormMessage/></FormItem>
             )}/>
              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <FormField name="defaultTotalCost" control={form.control} render={({ field }) => (<FormItem><FormLabel>Default Cost (₹)</FormLabel><FormControl><Input type="number" step="0.01" {...field} value={field.value ?? ""} placeholder="e.g., 150.50"/></FormControl><FormMessage/></FormItem>)}/>
+                <FormField name="defaultTotalCost" control={form.control} render={({ field }) => (<FormItem><FormLabel>Default Cost (₹)</FormLabel><FormControl><Input type="number" step="0.01" {...field} value={field.value ?? ""} onChange={e => field.onChange(parseFloat(e.target.value))} placeholder="e.g., 150.50"/></FormControl><FormMessage/></FormItem>)}/>
                 <FormField name="defaultPaymentMethod" control={form.control} render={({ field }) => (<FormItem><FormLabel>Default Payment</FormLabel><Select onValueChange={field.onChange} value={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Select method" /></SelectTrigger></FormControl>
                     <SelectContent>{paymentMethods.map((m) => (<SelectItem key={m} value={m}>{m}</SelectItem>))}</SelectContent>
                 </Select><FormMessage/></FormItem>)}/>
