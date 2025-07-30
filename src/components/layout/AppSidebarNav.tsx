@@ -130,19 +130,35 @@ export function AppSidebarNav() {
   const { user } = useAuth();
   const { setOpenMobile } = useSidebar(); // Get function to close mobile sidebar
   
-  const [openMenus, setOpenMenus] = useState<Set<string>>(new Set());
+  const [openMenus, setOpenMenus] = useState<Set<string>>(() => {
+    // Initialize with '/foodstall' open
+    const initialOpen = new Set<string>();
+    initialOpen.add('/foodstall');
+    
+    // Also check if the current path is under a different parent
+    const activeParent = navItems.find(item => 
+      item.subItems && 
+      pathname.startsWith(item.href) && 
+      !item.exactMatch &&
+      item.href !== '/foodstall'
+    );
+    if (activeParent) {
+      initialOpen.add(activeParent.href);
+    }
+    
+    return initialOpen;
+  });
 
   useEffect(() => {
     const activeParent = navItems.find(item => item.subItems && pathname.startsWith(item.href) && !item.exactMatch);
-    if (activeParent) {
+    if (activeParent && !openMenus.has(activeParent.href)) {
       setOpenMenus(prev => {
-        if (prev.has(activeParent.href)) return prev;
         const newSet = new Set(prev);
         newSet.add(activeParent.href);
         return newSet;
       });
     }
-  }, [pathname]);
+  }, [pathname, openMenus]);
 
   const toggleMenu = (href: string) => {
     setOpenMenus(prev => {

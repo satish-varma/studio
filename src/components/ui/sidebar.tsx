@@ -69,7 +69,7 @@ const SidebarProvider = React.forwardRef<
     ref
   ) => {
     const isMobile = useIsMobile()
-    const [openMobile, setOpenMobile] = React.useState(true) // Start open on mobile
+    const [openMobile, setOpenMobile] = React.useState(false) // Default mobile to closed
 
     const [_open, _setOpen] = React.useState(defaultOpen)
     const open = openProp ?? _open
@@ -753,5 +753,3 @@ export {
   SidebarTrigger,
   useSidebar,
 }
-
-    
