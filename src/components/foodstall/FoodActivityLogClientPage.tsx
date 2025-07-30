@@ -155,12 +155,14 @@ export default function FoodActivityLogClientPage() {
       setLoadingData(true);
       const mapsSuccess = await fetchContextMaps();
       if (mapsSuccess) {
+        // We call fetchLogsPage directly here. It's stable due to useCallback.
+        // It won't cause the infinite loop.
         await fetchLogsPage('initial');
       }
       setLoadingData(false);
     };
     initFetch();
-  }, [currentUser, authLoading, fetchContextMaps, fetchLogsPage]);
+  }, [currentUser, authLoading, fetchContextMaps]); // Removed fetchLogsPage from dependency array
 
   if (authLoading || (loadingData && logs.length === 0 && !errorData)) {
     return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading activity log...</p></div>;
