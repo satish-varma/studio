@@ -1,21 +1,19 @@
 
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import type { StockMovementLog } from "@/types/log";
 import type { Site, Stall, StockItem, AppUser } from "@/types";
 import { 
   getFirestore, 
   collection, 
-  onSnapshot, 
   query, 
   orderBy,
-  QuerySnapshot,
-  DocumentData,
   getDocs,
   limit,
   startAfter,
   DocumentSnapshot as FirestoreDocumentSnapshot,
+  DocumentData,
   endBefore
 } from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
@@ -57,7 +55,7 @@ export default function ActivityLogClientPage() {
   const [isLastPage, setIsLastPage] = useState(false);
   const [isFirstPageReached, setIsFirstPageReached] = useState(true);
 
-  const fetchContextMaps = async () => {
+  const fetchContextMaps = useCallback(async () => {
     console.log(`${LOG_PREFIX} Fetching context maps (sites, stalls, items, users).`);
     try {
       const sitesCollectionRef = collection(db, "sites");
@@ -93,12 +91,12 @@ export default function ActivityLogClientPage() {
       setErrorData(prev => (prev ? prev + "\n" : "") + "Failed to load context data for logs. " + mapError.message);
       return false;
     }
-  };
+  }, []);
 
-  const fetchLogsPage = async (direction: 'initial' | 'next' | 'prev' = 'initial') => {
+  const fetchLogsPage = useCallback(async (direction: 'initial' | 'next' | 'prev' = 'initial') => {
     if (authLoading) return;
     if (!currentUser || currentUser.role !== 'admin') {
-        setLoadingData(false); // Ensure loading stops if access check fails later
+        setLoadingData(false);
         setErrorData("Access Denied: You do not have permission to view this page.");
         return;
     }
@@ -115,17 +113,11 @@ export default function ActivityLogClientPage() {
     if (direction === 'next' && lastLogDoc) {
         q = query(q, startAfter(lastLogDoc), limit(LOGS_PER_PAGE + 1));
     } else if (direction === 'prev' && firstLogDoc) {
-        q = query(q, endBefore(firstLogDoc), limit(LOGS_PER_PAGE)); // For prev, fetch normally then reverse in UI/logic
-        // This approach for 'prev' with onSnapshot is more complex to get the *actual* previous page.
-        // For simplicity, one might use getDocs for 'prev' or manage an array of firstLogDocs.
-        // For this iteration, 'prev' will fetch docs *before* the current first, limited.
-        // A more robust 'prev' would require `orderBy("timestamp", "asc"), startAfter(firstLogDocRev), limit(LOGS_PER_PAGE)` and then reversing.
-    } else { // initial
+        q = query(logsCollectionRef, orderBy("timestamp", "asc"), startAfter(firstLogDoc), limit(LOGS_PER_PAGE));
+    } else {
         q = query(q, limit(LOGS_PER_PAGE + 1));
     }
     
-    // Using getDocs for pagination simplicity here instead of onSnapshot for every page.
-    // onSnapshot is better for real-time updates on the *first* page or a non-paginated view.
     try {
         const snapshot = await getDocs(q);
         console.log(`${LOG_PREFIX} Logs snapshot received. Docs: ${snapshot.docs.length}, Empty: ${snapshot.empty}`);
@@ -136,29 +128,27 @@ export default function ActivityLogClientPage() {
         
         const hasMore = fetchedLogs.length > LOGS_PER_PAGE;
         if (hasMore && (direction === 'initial' || direction === 'next')) {
-            fetchedLogs.pop(); // Remove the extra item used for "hasMore" check
+            fetchedLogs.pop();
         }
-        // If fetching 'prev', results are already in correct order (desc) if main query is desc.
-        // If we used reversed order for prev, we'd reverse here.
         
         setLogs(fetchedLogs);
         
         if (snapshot.docs.length > 0) {
             if (direction === 'initial') setIsFirstPageReached(true);
             else if (direction === 'next') setIsFirstPageReached(false);
-            else if (direction === 'prev' && fetchedLogs.length < LOGS_PER_PAGE) setIsFirstPageReached(true); // If prev fetches less than full page
+            else if (direction === 'prev' && fetchedLogs.length < LOGS_PER_PAGE) setIsFirstPageReached(true);
             
             setFirstLogDoc(snapshot.docs[0]);
-            setLastLogDoc(snapshot.docs[fetchedLogs.length - 1]); // Last doc of the current page
+            setLastLogDoc(snapshot.docs[fetchedLogs.length - 1]);
             setIsLastPage(!hasMore && (direction === 'initial' || direction === 'next'));
         } else {
             if (direction === 'initial') {
                 setIsFirstPageReached(true);
                 setIsLastPage(true);
             } else if (direction === 'next') {
-                setIsLastPage(true); // No more items when fetching next
+                setIsLastPage(true);
             } else if (direction === 'prev') {
-                 setIsFirstPageReached(true); // No items before current means this is the first page
+                 setIsFirstPageReached(true);
             }
             setFirstLogDoc(null);
             setLastLogDoc(null);
@@ -173,7 +163,7 @@ export default function ActivityLogClientPage() {
         setIsLoadingNextPage(false);
         setIsLoadingPrevPage(false);
     }
-  };
+  }, [authLoading, currentUser, lastLogDoc, firstLogDoc]);
 
 
   useEffect(() => {
@@ -191,14 +181,14 @@ export default function ActivityLogClientPage() {
       if (mapsSuccess) {
         await fetchLogsPage('initial');
       } else {
-        setLoadingData(false); // Maps failed, no need to fetch logs
+        setLoadingData(false); 
       }
     };
     initFetch();
-  }, [currentUser, authLoading]); 
+  }, [currentUser, authLoading, fetchContextMaps, fetchLogsPage]); 
 
 
-  if (authLoading || (loadingData && logs.length === 0 && !errorData)) { // Show main loader if still loading initial data
+  if (authLoading || (loadingData && logs.length === 0 && !errorData)) {
     return (
       <div className="flex justify-center items-center py-10">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -207,7 +197,7 @@ export default function ActivityLogClientPage() {
     );
   }
 
-  if (errorData && logs.length === 0) { // Show error only if no logs are displayed yet
+  if (errorData && logs.length === 0) {
     return (
       <Card className="shadow-lg border-destructive">
         <CardHeader>

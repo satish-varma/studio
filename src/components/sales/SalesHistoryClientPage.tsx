@@ -11,13 +11,10 @@ import { subDays, startOfDay, endOfDay, parseISO, isValid } from "date-fns";
 import { 
     getFirestore, 
     collection, 
-    onSnapshot, 
     query, 
     where, 
     orderBy, 
     Timestamp, 
-    QuerySnapshot, 
-    DocumentData,
     getDocs,
     doc,
     updateDoc,
@@ -62,8 +59,8 @@ export default function SalesHistoryClientPage() {
   const [sitesMap, setSitesMap] = useState<Record<string, string>>({});
   const [stallsMap, setStallsMap] = useState<Record<string, string>>({});
 
-  const [firstTransactionDoc, setFirstTransactionDoc] = useState<FirestoreDocumentSnapshot<DocumentData> | null>(null);
-  const [lastTransactionDoc, setLastTransactionDoc] = useState<FirestoreDocumentSnapshot<DocumentData> | null>(null);
+  const [firstTransactionDoc, setFirstTransactionDoc] = useState<FirestoreDocumentSnapshot | null>(null);
+  const [lastTransactionDoc, setLastTransactionDoc] = useState<FirestoreDocumentSnapshot | null>(null);
   const [isLoadingNextPage, setIsLoadingNextPage] = useState(false);
   const [isLoadingPrevPage, setIsLoadingPrevPage] = useState(false);
   const [isLastPage, setIsLastPage] = useState(false);
@@ -153,46 +150,40 @@ export default function SalesHistoryClientPage() {
     const salesCollectionRef = collection(db, "salesTransactions");
     const q = query(salesCollectionRef, ...finalConstraints);
 
-    const unsubscribe = onSnapshot(q,
-      (snapshot: QuerySnapshot<DocumentData>) => {
-        let fetchedTransactions: SaleTransaction[] = snapshot.docs.map(d => ({
-          id: d.id, ...d.data(), transactionDate: (d.data().transactionDate as Timestamp).toDate().toISOString()
-        } as SaleTransaction));
-        const hasMore = fetchedTransactions.length > TRANSACTIONS_PER_PAGE;
-        if (hasMore) fetchedTransactions.pop();
-        
-        setCurrentPageTransactions(fetchedTransactions);
-        setIsLastPage(!hasMore);
-        
-        if (fetchedTransactions.length > 0) {
-          if (direction === 'initial') setIsFirstPageReached(true);
-          else if (direction === 'next') setIsFirstPageReached(false);
-          setFirstTransactionDoc(snapshot.docs[0]);
-          setLastTransactionDoc(snapshot.docs[fetchedTransactions.length - 1]);
-        } else {
-          if (direction === 'initial') setIsFirstPageReached(true);
-          if (direction === 'next') setIsLastPage(true);
-        }
+    try {
+      const snapshot = await getDocs(q);
+      let fetchedTransactions: SaleTransaction[] = snapshot.docs.map(d => ({
+        id: d.id, ...d.data(), transactionDate: (d.data().transactionDate as Timestamp).toDate().toISOString()
+      } as SaleTransaction));
+      const hasMore = fetchedTransactions.length > TRANSACTIONS_PER_PAGE;
+      if (hasMore) fetchedTransactions.pop();
+      
+      setCurrentPageTransactions(fetchedTransactions);
+      setIsLastPage(!hasMore);
+      
+      if (snapshot.docs.length > 0) {
+        if (direction === 'initial') setIsFirstPageReached(true);
+        else if (direction === 'next') setIsFirstPageReached(false);
+        setFirstTransactionDoc(snapshot.docs[0]);
+        setLastTransactionDoc(snapshot.docs[fetchedTransactions.length - 1]);
+      } else {
+        if (direction === 'next') setIsLastPage(true);
+        if (direction === 'initial') setIsFirstPageReached(true);
+      }
+    } catch(error: any) {
+      setErrorTransactions(error.message.includes("requires an index")
+          ? `Query requires Firestore index. Details: ${error.message.substring(error.message.indexOf('https://'))}`
+          : "Failed to load sales history.");
+    } finally {
         setLoadingTransactions(false);
         setIsLoadingNextPage(false);
         setIsLoadingPrevPage(false);
-      },
-      (error: any) => {
-        setErrorTransactions(error.message.includes("requires an index")
-          ? `Query requires Firestore index. Details: ${error.message.substring(error.message.indexOf('https://'))}`
-          : "Failed to load sales history.");
-        setLoadingTransactions(false);
-      }
-    );
-    return unsubscribe;
+    }
   }, [buildTransactionQuery, authLoading, db, lastTransactionDoc, firstTransactionDoc]);
 
 
   useEffect(() => {
-    const unsubscribePromise = fetchTransactions('initial');
-    return () => {
-      unsubscribePromise.then(unsub => unsub && unsub());
-    };
+    fetchTransactions('initial');
   }, [fetchTransactions]);
 
   const handleDeleteSaleWithJustification = async (saleId: string, justification: string) => {
@@ -207,6 +198,7 @@ export default function SalesHistoryClientPage() {
         deletedBy: user.uid, deletionJustification: justification.trim(),
       });
       toast({ title: "Sale Deleted", description: "The sale transaction has been marked as deleted." });
+      fetchTransactions('initial'); // Refetch current page
     } catch (error: any) {
       toast({ title: "Deletion Failed", description: error.message, variant: "destructive" });
     }
