@@ -13,15 +13,15 @@ export const metadata = {
 const faqItems = [
   {
     question: "How do I add a new stock item?",
-    answer: "Navigate to 'Stock Items' from the sidebar menu. Click the 'Add New Item' button on the top right. Fill in the item details in the form and click 'Add Item'."
+    answer: "Navigate to 'Stock & Sales' from the sidebar menu. Click the 'Add New Item' button on the top right. Fill in the item details in the form and click 'Add Item'."
   },
   {
     question: "How can I update the quantity of an existing item?",
-    answer: "Go to the 'Stock Items' page. Find the item in the table and click the three-dots menu icon on the right. Select 'Update Stock', enter the new quantity, and save."
+    answer: "Go to the 'Stock & Sales' -> 'Stock Items' page. Find the item in the table and click the three-dots menu icon on the right. Select 'Update Stock', enter the new quantity, and save."
   },
   {
     question: "Where can I see my sales history?",
-    answer: "Click on 'Sales History' in the sidebar. You can filter sales by date range. Managers and Admins can also filter by staff member."
+    answer: "Click on 'Stock & Sales' -> 'Sales History' in the sidebar. You can filter sales by date range. Managers and Admins can also filter by staff member."
   },
   {
     question: "How do I change my display name?",
@@ -106,20 +106,65 @@ export default function SupportPage() {
         <CardHeader>
           <CardTitle className="flex items-center">
             <BookOpen className="mr-2 h-5 w-5 text-primary" />
-            User Guides & Documentation
+            User Guides &amp; Documentation
           </CardTitle>
           <CardDescription>
             In-depth guides and tutorials for using StallSync features.
           </CardDescription>
         </CardHeader>
         <CardContent>
-           <div className="p-8 text-center text-muted-foreground bg-muted/30 rounded-md border border-dashed">
-                <Wrench className="mx-auto h-12 w-12 text-primary mb-4" /> {/* Replaced Construction with Wrench */}
-                <p className="text-xl font-semibold">Comprehensive Guides - Coming Soon!</p>
-                <p className="mt-2 text-sm">
-                  We are working on detailed documentation and video tutorials.
-                </p>
-            </div>
+           <Accordion type="single" collapsible className="w-full">
+            <AccordionItem value="item-1">
+              <AccordionTrigger>Getting Started</AccordionTrigger>
+              <AccordionContent>
+                Welcome to StallSync! Your first steps depend on your role.
+                <ul className="list-disc pl-6 mt-2 space-y-1 text-muted-foreground">
+                  <li><strong>Admins:</strong> Start by setting up your business structure in 'Administration' -&gt; 'Manage Sites &amp; Stalls'. Then, create user accounts for your team in 'User Management'.</li>
+                  <li><strong>Managers:</strong> Once an Admin assigns you to a site, you can select it from the header. From there, you can manage stock, view sales, and oversee staff for that location.</li>
+                  <li><strong>Staff:</strong> Your view is automatically set to your assigned site and stall. You can start recording sales or managing stock quantities right away.</li>
+                </ul>
+              </AccordionContent>
+            </AccordionItem>
+            <AccordionItem value="item-2">
+              <AccordionTrigger>Managing Stock</AccordionTrigger>
+              <AccordionContent>
+                All stock operations are handled in the 'Stock & Sales' -&gt; 'Stock Items' page.
+                <ul className="list-disc pl-6 mt-2 space-y-1 text-muted-foreground">
+                  <li><strong>Master Stock:</strong> This is the inventory held at the site level. Use the 'Allocate to Stall' action to move items from here to a specific stall.</li>
+                  <li><strong>Stall Stock:</strong> This is the inventory within a specific stall. You can record sales from this stock. Use 'Return to Master' to send items back, or 'Transfer to Stall' to move them between stalls at the same site.</li>
+                  <li><strong>Updating Quantity:</strong> Use the 'Update Stock' action for direct quantity adjustments. This automatically adjusts master stock if the item is linked.</li>
+                </ul>
+              </AccordionContent>
+            </AccordionItem>
+            <AccordionItem value="item-3">
+              <AccordionTrigger>Processing Sales</AccordionTrigger>
+              <AccordionContent>
+                To record a transaction, go to 'Stock & Sales' -&gt; 'Record Sale'. Your current stall context must be selected. You can only sell items available in that specific stall's inventory. Stock levels are automatically updated when a sale is completed.
+              </AccordionContent>
+            </AccordionItem>
+             <AccordionItem value="item-4">
+              <AccordionTrigger>User Roles Explained</AccordionTrigger>
+              <AccordionContent>
+                StallSync has three user roles with different permissions:
+                <ul className="list-disc pl-6 mt-2 space-y-1 text-muted-foreground">
+                  <li><strong>Admin:</strong> Has full control over the entire application, including creating sites, stalls, and users.</li>
+                  <li><strong>Manager:</strong> Can manage all aspects of the sites they are assigned to, including stock, sales, and staff. They cannot create new sites or users.</li>
+                  <li><strong>Staff:</strong> Has the most focused role, primarily recording sales and managing stock quantities for their specifically assigned site and stall.</li>
+                </ul>
+              </AccordionContent>
+            </AccordionItem>
+             <AccordionItem value="item-5">
+              <AccordionTrigger>Food Stall Module</AccordionTrigger>
+              <AccordionContent>
+                The 'Food Stall' section is a dedicated module for tracking food-related finances separately from general stock.
+                <ul className="list-disc pl-6 mt-2 space-y-1 text-muted-foreground">
+                  <li><strong>Add Expense:</strong> Use this to record purchases like groceries, vegetables, and supplies.</li>
+                  <li><strong>Add Sales:</strong> Instead of individual items, you record the total daily sales summary, broken down by mealtime (e.g., Breakfast, Lunch) and payment type (e.g., UPI, Cash).</li>
+                  <li><strong>Reports:</strong> The Food Stall has its own financial reports to track profitability based on its unique sales and expense structure.</li>
+                </ul>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
         </CardContent>
       </Card>
     </div>
