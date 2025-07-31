@@ -1,7 +1,7 @@
 
 import PageHeader from "@/components/shared/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { LifeBuoy, Mail, HelpCircle, BookOpen, MessageSquare, Wrench } from "lucide-react"; // Added Wrench
+import { LifeBuoy, Mail, HelpCircle, BookOpen, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -13,7 +13,7 @@ export const metadata = {
 const faqItems = [
   {
     question: "How do I add a new stock item?",
-    answer: "Navigate to 'Stock & Sales' from the sidebar menu. Click the 'Add New Item' button on the top right. Fill in the item details in the form and click 'Add Item'."
+    answer: "Navigate to 'Stock & Sales' -> 'Stock Items' from the sidebar menu. Click the 'Add New Item' button on the top right. Fill in the item details in the form and click 'Add Item'."
   },
   {
     question: "How can I update the quantity of an existing item?",
@@ -27,6 +27,106 @@ const faqItems = [
     question: "How do I change my display name?",
     answer: "Click on your avatar in the top right corner to open the user menu, then select 'Profile'. You can update your display name there."
   }
+];
+
+const userGuideItems = [
+    {
+        question: "Getting Started Guide",
+        answer: (
+            <div className="space-y-2 text-muted-foreground">
+                <p>Welcome to StallSync! Your first steps depend on your role.</p>
+                <ul className="list-disc pl-6 mt-2 space-y-2">
+                    <li><strong>Admins:</strong> Your primary role is to set up the application structure.
+                        <ul className="list-circle pl-5 mt-1">
+                            <li><strong>1. Setup Sites & Stalls:</strong> Go to 'Administration' &rarr; 'Manage Sites & Stalls'. Create your business locations (Sites) first, then add the specific points of sale or storage (Stalls) within each site.</li>
+                            <li><strong>2. Create Users:</strong> Go to 'Administration' &rarr; 'User Management'. Create accounts for your managers and staff, assigning them the correct roles and site/stall contexts.</li>
+                            <li><strong>3. Add Master Stock:</strong> Navigate to 'Stock & Sales' &rarr; 'Stock Items'. Select a site from the header to view its "Master Stock". Use the "Add New Item" button to populate your main inventory.</li>
+                            <li><strong>4. Allocate Stock:</strong> From the Master Stock view, use the action menu on an item to 'Allocate to Stall', moving inventory to where it can be sold.</li>
+                        </ul>
+                    </li>
+                    <li><strong>Managers:</strong> Once an Admin assigns you to a site, you can select it from the header. Your view is now contextual to that site.
+                         <ul className="list-circle pl-5 mt-1">
+                            <li>Review the 'Dashboard' for an overview of your site's performance.</li>
+                            <li>Use the 'Stock & Sales' section to manage inventory, transfer items between stalls, and view sales reports for your site.</li>
+                             <li>Use the 'Staff' section to manage attendance and payroll for staff members at your site.</li>
+                        </ul>
+                    </li>
+                    <li><strong>Staff:</strong> Your view is automatically set to your assigned site and stall.
+                        <ul className="list-circle pl-5 mt-1">
+                           <li>Go to 'Stock & Sales' &rarr; 'Record Sale' to process customer transactions.</li>
+                           <li>If assigned to a food stall, use the 'Food Stall' section to record daily sales summaries and expenses.</li>
+                           <li>Update your personal information in 'My Profile'.</li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        )
+    },
+    {
+        question: "Stock & Sales Module",
+        answer: (
+             <div className="space-y-2 text-muted-foreground">
+                <p>This module is the core of your inventory and sales management.</p>
+                <ul className="list-disc pl-6 mt-2 space-y-2">
+                    <li><strong>Stock Items:</strong> This page shows all inventory. Use the filters to narrow down your view. "Master Stock" is the main inventory for a site. "Stall Stock" is inventory available at a specific point of sale, allocated from the master stock.</li>
+                    <li><strong>Item Actions:</strong> The three-dots menu on each item row allows for powerful actions:
+                        <ul className="list-circle pl-5 mt-1">
+                           <li><strong>Update Stock:</strong> For direct quantity changes (e.g., correcting a miscount). This affects master stock if the stall item is linked.</li>
+                           <li><strong>Allocate to Stall:</strong> (Master stock only) Moves a specified quantity to a stall, making it available for sale there.</li>
+                           <li><strong>Return to Master:</strong> (Stall stock only) Moves quantity from a stall back to the main site inventory.</li>
+                           <li><strong>Transfer to Stall:</strong> (Stall stock only) Moves quantity from one stall directly to another within the same site.</li>
+                        </ul>
+                    </li>
+                    <li><strong>Record Sale:</strong> You can only sell items that are in stock at the currently selected stall. Completing a sale automatically decrements the stock quantity.</li>
+                    <li><strong>Sales History:</strong> Review all past transactions. Admins and Managers have advanced filtering options. Click any transaction ID to view a detailed, printable receipt.</li>
+                     <li><strong>Sales Reports:</strong> Analyze key metrics like COGS, profit, and see top-selling items. Use the AI summary for a quick analysis of trends.</li>
+                </ul>
+            </div>
+        )
+    },
+     {
+        question: "Food Stall Module",
+        answer: (
+             <div className="space-y-2 text-muted-foreground">
+                <p>This is a dedicated module for tracking food-related finances separately from general stock.</p>
+                <ul className="list-disc pl-6 mt-2 space-y-2">
+                    <li><strong>Dashboard:</strong> Get a quick overview of sales, expenses, and net profit for the food stall in your selected context.</li>
+                    <li><strong>Add Expense:</strong> Use this to record purchases like groceries, vegetables, and supplies. You can manage a list of common vendors in 'Settings'.</li>
+                    <li><strong>Add Sales:</strong> Instead of individual items, you record the total daily sales summary. This is broken down by mealtime (e.g., Breakfast, Lunch) and payment type (e.g., UPI, Cash, HungerBox).</li>
+                    <li><strong>Reports:</strong> The Food Stall has its own financial reports to track profitability based on its unique sales and expense structure.</li>
+                    <li><strong>Activity Log:</strong> A specific log to track every expense and sales summary entry related to food stalls.</li>
+                </ul>
+            </div>
+        )
+    },
+    {
+        question: "Staff Management Module",
+        answer: (
+             <div className="space-y-2 text-muted-foreground">
+                <p>This module (for Managers & Admins) handles staff attendance and payroll.</p>
+                <ul className="list-disc pl-6 mt-2 space-y-2">
+                    <li><strong>Staff List:</strong> View all staff and managers. Admins can edit profiles from here.</li>
+                    <li><strong>Attendance:</strong> A monthly calendar view to mark attendance. Click on a cell to cycle through Present, Absent, Leave, and Half-day. Weekends and holidays are marked automatically. Admins can manage the holiday list in 'Settings'.</li>
+                    <li><strong>Salary Advances:</strong> Record any cash advances given to staff during the month. These are automatically deducted during payroll calculation.</li>
+                    <li><strong>Payroll:</strong> At the end of the month, this page automatically calculates each employee's net salary based on their base salary, days worked (from attendance), and any advances taken. You can then record salary payments.</li>
+                    <li><strong>Activity Log:</strong> Tracks all staff-related actions, such as attendance changes, payments, and profile updates, providing a clear audit trail.</li>
+                </ul>
+            </div>
+        )
+    },
+    {
+        question: "User Roles Explained",
+        answer: (
+             <div className="space-y-2 text-muted-foreground">
+                <p>StallSync has three user roles with different permissions:</p>
+                <ul className="list-disc pl-6 mt-2 space-y-2">
+                  <li><strong>Admin:</strong> Has full control over the entire application. They can create sites, stalls, and users, manage all financial data, and view logs across all locations.</li>
+                  <li><strong>Manager:</strong> Can manage all aspects of the sites they are assigned to, including stock, sales, and staff. They cannot create new sites, users, or access site data they are not assigned to.</li>
+                  <li><strong>Staff:</strong> Has the most focused role. They can record sales and manage stock quantities for their specifically assigned site and stall. They can view their own profile but cannot access broader reports or other users' data.</li>
+                </ul>
+            </div>
+        )
+    },
 ];
 
 export default function SupportPage() {
@@ -52,7 +152,7 @@ export default function SupportPage() {
               <Accordion type="single" collapsible className="w-full">
                 {faqItems.map((faq, index) => (
                   <AccordionItem value={`item-${index}`} key={index}>
-                    <AccordionTrigger className="text-sm font-medium hover:no-underline">
+                    <AccordionTrigger className="text-sm font-medium hover:no-underline text-left">
                       {faq.question}
                     </AccordionTrigger>
                     <AccordionContent className="text-sm text-muted-foreground">
@@ -114,56 +214,12 @@ export default function SupportPage() {
         </CardHeader>
         <CardContent>
            <Accordion type="single" collapsible className="w-full">
-            <AccordionItem value="item-1">
-              <AccordionTrigger>Getting Started</AccordionTrigger>
-              <AccordionContent>
-                Welcome to StallSync! Your first steps depend on your role.
-                <ul className="list-disc pl-6 mt-2 space-y-1 text-muted-foreground">
-                  <li><strong>Admins:</strong> Start by setting up your business structure in 'Administration' -&gt; 'Manage Sites &amp; Stalls'. Then, create user accounts for your team in 'User Management'.</li>
-                  <li><strong>Managers:</strong> Once an Admin assigns you to a site, you can select it from the header. From there, you can manage stock, view sales, and oversee staff for that location.</li>
-                  <li><strong>Staff:</strong> Your view is automatically set to your assigned site and stall. You can start recording sales or managing stock quantities right away.</li>
-                </ul>
-              </AccordionContent>
-            </AccordionItem>
-            <AccordionItem value="item-2">
-              <AccordionTrigger>Managing Stock</AccordionTrigger>
-              <AccordionContent>
-                All stock operations are handled in the 'Stock & Sales' -&gt; 'Stock Items' page.
-                <ul className="list-disc pl-6 mt-2 space-y-1 text-muted-foreground">
-                  <li><strong>Master Stock:</strong> This is the inventory held at the site level. Use the 'Allocate to Stall' action to move items from here to a specific stall.</li>
-                  <li><strong>Stall Stock:</strong> This is the inventory within a specific stall. You can record sales from this stock. Use 'Return to Master' to send items back, or 'Transfer to Stall' to move them between stalls at the same site.</li>
-                  <li><strong>Updating Quantity:</strong> Use the 'Update Stock' action for direct quantity adjustments. This automatically adjusts master stock if the item is linked.</li>
-                </ul>
-              </AccordionContent>
-            </AccordionItem>
-            <AccordionItem value="item-3">
-              <AccordionTrigger>Processing Sales</AccordionTrigger>
-              <AccordionContent>
-                To record a transaction, go to 'Stock & Sales' -&gt; 'Record Sale'. Your current stall context must be selected. You can only sell items available in that specific stall's inventory. Stock levels are automatically updated when a sale is completed.
-              </AccordionContent>
-            </AccordionItem>
-             <AccordionItem value="item-4">
-              <AccordionTrigger>User Roles Explained</AccordionTrigger>
-              <AccordionContent>
-                StallSync has three user roles with different permissions:
-                <ul className="list-disc pl-6 mt-2 space-y-1 text-muted-foreground">
-                  <li><strong>Admin:</strong> Has full control over the entire application, including creating sites, stalls, and users.</li>
-                  <li><strong>Manager:</strong> Can manage all aspects of the sites they are assigned to, including stock, sales, and staff. They cannot create new sites or users.</li>
-                  <li><strong>Staff:</strong> Has the most focused role, primarily recording sales and managing stock quantities for their specifically assigned site and stall.</li>
-                </ul>
-              </AccordionContent>
-            </AccordionItem>
-             <AccordionItem value="item-5">
-              <AccordionTrigger>Food Stall Module</AccordionTrigger>
-              <AccordionContent>
-                The 'Food Stall' section is a dedicated module for tracking food-related finances separately from general stock.
-                <ul className="list-disc pl-6 mt-2 space-y-1 text-muted-foreground">
-                  <li><strong>Add Expense:</strong> Use this to record purchases like groceries, vegetables, and supplies.</li>
-                  <li><strong>Add Sales:</strong> Instead of individual items, you record the total daily sales summary, broken down by mealtime (e.g., Breakfast, Lunch) and payment type (e.g., UPI, Cash).</li>
-                  <li><strong>Reports:</strong> The Food Stall has its own financial reports to track profitability based on its unique sales and expense structure.</li>
-                </ul>
-              </AccordionContent>
-            </AccordionItem>
+            {userGuideItems.map((item, index) => (
+                <AccordionItem value={`guide-${index}`} key={`guide-${index}`}>
+                    <AccordionTrigger className="text-base font-semibold hover:no-underline text-left">{item.question}</AccordionTrigger>
+                    <AccordionContent>{item.answer}</AccordionContent>
+                </AccordionItem>
+            ))}
           </Accordion>
         </CardContent>
       </Card>
