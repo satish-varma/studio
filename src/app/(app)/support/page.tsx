@@ -1,7 +1,7 @@
 
 import PageHeader from "@/components/shared/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { LifeBuoy, Mail, HelpCircle, BookOpen, MessageSquare } from "lucide-react";
+import { LifeBuoy, Mail, HelpCircle, BookOpen, MessageSquare, Phone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -249,16 +249,24 @@ export default function SupportPage() {
           <CardContent className="space-y-4">
             <p className="text-sm">
               For urgent issues or specific queries, please email us at: 
-              <Link href="mailto:support@stallsync.example.com" className="text-primary hover:underline font-medium ml-1">
-                support@stallsync.example.com
+              <Link href="mailto:thegutguru.in@gmail.com" className="text-primary hover:underline font-medium ml-1">
+                thegutguru.in@gmail.com
               </Link>
             </p>
             <p className="text-sm">
-              We aim to respond to all queries within 24-48 business hours.
+              Or call us at:
+              <Link href="tel:7709632898" className="text-primary hover:underline font-medium ml-1">
+                7709632898
+              </Link>
             </p>
             <Button className="w-full" asChild>
-              <Link href="mailto:support@stallsync.example.com">
+              <Link href="mailto:thegutguru.in@gmail.com">
                  <Mail className="mr-2 h-4 w-4" /> Email Support
+              </Link>
+            </Button>
+            <Button className="w-full" variant="outline" asChild>
+              <Link href="tel:7709632898">
+                 <Phone className="mr-2 h-4 w-4" /> Call Us
               </Link>
             </Button>
              <div className="p-4 mt-4 text-center text-muted-foreground bg-muted/30 rounded-md border border-dashed">
