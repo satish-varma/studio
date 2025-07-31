@@ -12,7 +12,6 @@ import {
   SidebarHeader,
   SidebarContent,
   SidebarFooter,
-  SidebarInset,
 } from "@/components/ui/sidebar";
 import { AppSidebarNav } from "@/components/layout/AppSidebarNav";
 import { AppHeaderContent } from "@/components/layout/AppHeaderContent";
@@ -58,12 +57,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <SidebarProvider>
-      <div className="flex h-screen w-full">
+      <div className="flex h-screen w-full bg-background">
+        {/* Desktop Sidebar */}
         <Sidebar collapsible="icon" variant="sidebar" className="border-r border-sidebar-border hidden md:flex">
           <SidebarHeader className="p-4 flex flex-col items-center group-data-[collapsible=icon]:hidden">
             <Link href="/dashboard" className="flex items-center gap-2 mb-4">
               <Image 
-                src="https://placehold.co/80x80.png?text=SS" // Placeholder for StallSync logo
+                src="https://placehold.co/80x80.png?text=SS"
                 alt="StallSync Logo"
                 data-ai-hint="logo abstract"
                 width={40}
@@ -93,17 +93,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               Sign Out
             </Button>
           </SidebarFooter>
-          <SidebarFooter className="p-2 mt-auto hidden group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:justify-center">
+           <SidebarFooter className="p-2 mt-auto hidden group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:justify-center">
             <Button variant="ghost" size="icon" onClick={signOutUser} className="text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground">
               <LogOut className="h-5 w-5" />
             </Button>
           </SidebarFooter>
         </Sidebar>
 
-        <div className="flex flex-col flex-1 w-full">
+        {/* Main Content Area */}
+        <div className="flex flex-1 flex-col">
           <AppHeaderContent />
-          <main className="flex-1 overflow-y-auto bg-background pb-16 md:pb-0">
-            <motion.div
+          <main className="flex-1 overflow-y-auto pb-16 md:pb-0">
+             <motion.div
               key={pathname}
               initial="initial"
               animate="in"
@@ -111,7 +112,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               transition={pageTransition}
               className="p-4 sm:p-6 lg:p-8"
             >
-            {children}
+              {children}
             </motion.div>
           </main>
           <BottomNavBar />
