@@ -37,8 +37,6 @@ body {
     --input: 210 40% 98%;
     --ring: 217 91% 60%;
 
-    --radius: 0.75rem;
-
     /* Sidebar specific colors (LIGHT THEME) */
     --sidebar-background: 210 40% 98%; 
     --sidebar-foreground: 210 10% 30%; 
