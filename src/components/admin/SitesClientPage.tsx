@@ -7,7 +7,7 @@ import { PlusCircle, Loader2, ShieldAlert } from "lucide-react";
 import PageHeader from "@/components/shared/PageHeader";
 import { SitesTable } from "@/components/admin/SitesTable";
 import type { Site } from "@/types/site";
-import { getFirestore, collection, onSnapshot, QuerySnapshot, DocumentData } from "firebase/firestore";
+import { getFirestore, collection, onSnapshot, QuerySnapshot, DocumentData, getDocs, query, orderBy } from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
@@ -51,31 +51,32 @@ export default function SitesClientPage() {
       return;
     }
 
-    console.log(`${LOG_PREFIX} Subscribing to sites collection.`);
-    setLoadingSites(true);
-    const sitesCollectionRef = collection(db, "sites");
-    const unsubscribe = onSnapshot(sitesCollectionRef, 
-      (snapshot: QuerySnapshot<DocumentData>) => {
+    const fetchSites = async () => {
+      console.log(`${LOG_PREFIX} Fetching sites collection.`);
+      setLoadingSites(true);
+      try {
+        const sitesCollectionRef = collection(db, "sites");
+        const q = query(sitesCollectionRef, orderBy("createdAt", "desc"));
+        const snapshot = await getDocs(q);
+        
         const fetchedSites: Site[] = snapshot.docs.map(docSnapshot => ({
           id: docSnapshot.id,
           ...docSnapshot.data()
-        } as Site)).sort((a,b) => (b.createdAt && a.createdAt) ? new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime() : 0);
+        } as Site));
+        
         console.log(`${LOG_PREFIX} Sites snapshot received. ${fetchedSites.length} sites fetched.`);
         setSites(fetchedSites);
-        setLoadingSites(false);
         setErrorSites(null);
-      },
-      (error) => {
+      } catch (error: any) {
         console.error(`${LOG_PREFIX} Error fetching sites:`, error.message, error.stack);
         setErrorSites(`Failed to load sites: ${error.message}. Please try again later.`);
+      } finally {
         setLoadingSites(false);
       }
-    );
-
-    return () => {
-      console.log(`${LOG_PREFIX} Unmounted. Unsubscribing from sites collection.`);
-      unsubscribe();
     };
+    
+    fetchSites();
+
   }, [currentUser, authLoading]);
 
   if (authLoading || loadingSites) {

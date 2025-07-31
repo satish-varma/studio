@@ -17,7 +17,9 @@ import {
   doc, 
   getDoc,
   QuerySnapshot,
-  DocumentData
+  DocumentData,
+  getDocs,
+  orderBy
 } from "firebase/firestore";
 import { getApps, initializeApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
@@ -84,9 +86,6 @@ export default function StallsClientPage() {
       router.replace("/admin/sites");
       return;
     }
-    
-    let unsubscribeSite: (() => void) | null = null;
-    let unsubscribeStalls: (() => void) | null = null;
 
     const fetchData = async () => {
       console.log(`${LOG_PREFIX} Starting fetchData for site ${siteId}.`);
@@ -94,42 +93,33 @@ export default function StallsClientPage() {
       setErrorData(null);
       try {
         const siteDocRef = doc(db, "sites", siteId);
-        unsubscribeSite = onSnapshot(siteDocRef, (docSnapshot) => {
-          if (docSnapshot.exists()) {
-            console.log(`${LOG_PREFIX} Site document for ${siteId} received:`, docSnapshot.data());
-            setSite({ id: docSnapshot.id, ...docSnapshot.data() } as Site);
-          } else {
+        const siteDocSnap = await getDoc(siteDocRef);
+
+        if (siteDocSnap.exists()) {
+            console.log(`${LOG_PREFIX} Site document for ${siteId} received:`, siteDocSnap.data());
+            setSite({ id: siteDocSnap.id, ...siteDocSnap.data() } as Site);
+        } else {
             console.warn(`${LOG_PREFIX} Parent site ${siteId} not found.`);
             setErrorData("Parent site not found. Cannot load stalls.");
             setSite(null);
             setStalls([]);
-          }
-        }, (error) => {
-          console.error(`${LOG_PREFIX} Error fetching site details for ${siteId}:`, error.message, error.stack);
-          setErrorData(`Failed to load site details: ${error.message}.`);
-          setSite(null);
-        });
+            setLoadingData(false); // Stop loading if parent site not found
+            return;
+        }
 
         const stallsCollectionRef = collection(db, "stalls");
-        const q = query(stallsCollectionRef, where("siteId", "==", siteId));
-        console.log(`${LOG_PREFIX} Subscribing to stalls for site ${siteId}.`);
-        unsubscribeStalls = onSnapshot(q, 
-          (snapshot: QuerySnapshot<DocumentData>) => {
-            const fetchedStalls: Stall[] = snapshot.docs.map(docSnapshot => ({
-              id: docSnapshot.id,
-              ...docSnapshot.data()
-            } as Stall)).sort((a,b) => (b.createdAt && a.createdAt) ? new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime() : 0);
-            console.log(`${LOG_PREFIX} Stalls snapshot received for site ${siteId}. ${fetchedStalls.length} stalls fetched.`);
-            setStalls(fetchedStalls);
-          },
-          (error) => {
-            console.error(`${LOG_PREFIX} Error fetching stalls for site ${siteId}:`, error.message, error.stack);
-            setErrorData(`Failed to load stalls: ${error.message}. Please try again later.`);
-          }
-        );
-
+        const q = query(stallsCollectionRef, where("siteId", "==", siteId), orderBy("createdAt", "desc"));
+        console.log(`${LOG_PREFIX} Fetching stalls for site ${siteId}.`);
+        const snapshot = await getDocs(q);
+        
+        const fetchedStalls: Stall[] = snapshot.docs.map(docSnapshot => ({
+          id: docSnapshot.id,
+          ...docSnapshot.data()
+        } as Stall));
+        console.log(`${LOG_PREFIX} Stalls snapshot received for site ${siteId}. ${fetchedStalls.length} stalls fetched.`);
+        setStalls(fetchedStalls);
       } catch (err: any) {
-         console.error(`${LOG_PREFIX} Error in fetchData setup for site ${siteId}:`, err.message, err.stack);
+         console.error(`${LOG_PREFIX} Error in fetchData for site ${siteId}:`, err.message, err.stack);
          setErrorData(`An unexpected error occurred: ${err.message}.`);
       } finally {
         setLoadingData(false); 
@@ -139,11 +129,6 @@ export default function StallsClientPage() {
 
     fetchData();
 
-    return () => {
-      console.log(`${LOG_PREFIX} Unmounted for site ${siteId}. Unsubscribing...`);
-      if (unsubscribeSite) unsubscribeSite();
-      if (unsubscribeStalls) unsubscribeStalls();
-    };
   }, [currentUser, authLoading, siteId, router]);
 
   if (authLoading || loadingData) {
