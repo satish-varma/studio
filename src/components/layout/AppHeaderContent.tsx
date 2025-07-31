@@ -22,7 +22,7 @@ export function AppHeaderContent() {
               className="rounded-md"
             />
           </Link>
-          <div className="hidden md:block">
+          <div className="block">
             <SiteStallSelector />
           </div>
       </div>
