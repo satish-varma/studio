@@ -25,8 +25,14 @@ import { useAuth } from "@/contexts/AuthContext";
 import ManageVendorsDialog from "@/components/foodstall/ManageVendorsDialog";
 import { auth } from "@/lib/firebaseConfig"; 
 import ManageExpensePresetsDialog from "@/components/foodstall/ManageExpensePresetsDialog";
+import CsvImportDialog from "@/components/shared/CsvImportDialog";
+import { getFirestore, collection, getDocs, query, where, orderBy } from "firebase/firestore";
+import type { SaleTransaction, StockItem, FoodItemExpense, Site, Stall, AppUser } from "@/types";
+import { format } from "date-fns";
+import { Timestamp } from "firebase/firestore";
 
 const LOG_PREFIX = "[SettingsPage]";
+const db = getFirestore();
 
 export default function SettingsPage() {
   const { user: appUser } = useAuth();
@@ -44,6 +50,112 @@ export default function SettingsPage() {
 
   const [showManageVendorsDialog, setShowManageVendorsDialog] = useState(false);
   const [showManagePresetsDialog, setShowManagePresetsDialog] = useState(false);
+  
+  const [isExporting, setIsExporting] = useState<null | 'stock' | 'sales' | 'foodExpenses'>(null);
+  const [showImportDialog, setShowImportDialog] = useState<null | 'stock' | 'foodExpenses'>(null);
+
+  const escapeCsvCell = (cellData: any): string => {
+    if (cellData === null || cellData === undefined) return "";
+    const stringData = String(cellData);
+    if (stringData.includes(",") || stringData.includes("\n") || stringData.includes('"')) {
+      return `"${stringData.replace(/"/g, '""')}"`;
+    }
+    return stringData;
+  };
+
+  const getFormattedTimestamp = () => new Date().toISOString().replace(/:/g, '-').slice(0, 19);
+
+  const downloadCsv = (csvString: string, filename: string) => {
+    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleExport = async (dataType: 'stock' | 'sales' | 'foodExpenses') => {
+    if (!db) {
+      toast({ title: "Export Error", description: "Database is not available.", variant: "destructive"});
+      return;
+    }
+    setIsExporting(dataType);
+    toast({ title: "Exporting...", description: `Fetching all ${dataType.replace(/([A-Z])/g, ' $1')} data for export. Please wait.`});
+    
+    try {
+      let csvString: string;
+      let filename = `stallsync_${dataType}_${getFormattedTimestamp()}.csv`;
+      
+      const sitesSnapshot = await getDocs(collection(db, "sites"));
+      const sitesMap = new Map(sitesSnapshot.docs.map(doc => [doc.id, (doc.data() as Site).name]));
+      const stallsSnapshot = await getDocs(collection(db, "stalls"));
+      const stallsMap = new Map(stallsSnapshot.docs.map(doc => [doc.id, (doc.data() as Stall).name]));
+
+      if (dataType === 'stock') {
+        const stockSnapshot = await getDocs(query(collection(db, "stockItems"), orderBy("siteId"), orderBy("name")));
+        const itemsToExport = stockSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as StockItem));
+        const headers = ["ID", "Name", "Category", "Description", "Quantity", "Unit", "Cost Price (₹)", "Selling Price (₹)", "Low Stock Threshold", "Image URL", "Site Name", "Stall Name", "Original Master Item ID"];
+        const rows = [headers.join(',')];
+        itemsToExport.forEach(item => {
+            rows.push([
+            escapeCsvCell(item.id), escapeCsvCell(item.name), escapeCsvCell(item.category),
+            escapeCsvCell(item.description), escapeCsvCell(item.quantity), escapeCsvCell(item.unit),
+            escapeCsvCell((item.costPrice ?? 0).toFixed(2)), escapeCsvCell(item.price.toFixed(2)),
+            escapeCsvCell(item.lowStockThreshold), escapeCsvCell(item.imageUrl || ""),
+            escapeCsvCell(item.siteId ? sitesMap.get(item.siteId) || item.siteId : "N/A"),
+            escapeCsvCell(item.stallId ? stallsMap.get(item.stallId) || item.stallId : "N/A"),
+            escapeCsvCell(item.originalMasterItemId || "")
+            ].join(','));
+        });
+        csvString = rows.join('\n');
+      } else if (dataType === 'sales') {
+        const salesSnapshot = await getDocs(query(collection(db, "salesTransactions"), orderBy("transactionDate", "desc")));
+        const itemsToExport = salesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SaleTransaction));
+        const headers = ["Transaction ID", "Date", "Staff Name", "Staff ID", "Total Amount (₹)", "Number of Item Types", "Total Quantity of Items", "Site Name", "Stall Name", "Is Deleted", "Items Sold (JSON)"];
+        const rows = [headers.join(',')];
+        itemsToExport.forEach(sale => {
+            rows.push([
+            escapeCsvCell(sale.id), escapeCsvCell(new Date(sale.transactionDate).toLocaleString('en-IN')), escapeCsvCell(sale.staffName || 'N/A'),
+            escapeCsvCell(sale.staffId), escapeCsvCell(sale.totalAmount.toFixed(2)), escapeCsvCell(sale.items.length),
+            escapeCsvCell(sale.items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)),
+            escapeCsvCell(sale.siteId ? sitesMap.get(sale.siteId) || sale.siteId : "N/A"),
+            escapeCsvCell(sale.stallId ? stallsMap.get(sale.stallId) || sale.stallId : "N/A"),
+            escapeCsvCell(sale.isDeleted ? "Yes" : "No"),
+            escapeCsvCell(JSON.stringify(sale.items))
+            ].join(','));
+        });
+        csvString = rows.join('\n');
+      } else { // foodExpenses
+         const usersSnapshot = await getDocs(collection(db, "users"));
+         const usersMap = new Map(usersSnapshot.docs.map(doc => [doc.id, (doc.data() as AppUser).displayName || (doc.data() as AppUser).email]));
+         const expensesSnapshot = await getDocs(query(collection(db, "foodItemExpenses"), orderBy("purchaseDate", "desc")));
+         const itemsToExport = expensesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FoodItemExpense));
+         const headers = ["Expense ID", "Category", "Total Cost", "Payment Method", "Other Payment Details", "Purchase Date", "Vendor", "Other Vendor Details", "Notes", "Bill Image URL", "Site Name", "Stall Name", "Recorded By (Name)"];
+         const rows = [headers.join(',')];
+         itemsToExport.forEach(expense => {
+            rows.push([
+              escapeCsvCell(expense.id), escapeCsvCell(expense.category), escapeCsvCell(expense.totalCost.toFixed(2)),
+              escapeCsvCell(expense.paymentMethod), escapeCsvCell(expense.otherPaymentMethodDetails || ""),
+              escapeCsvCell(format((expense.purchaseDate as Timestamp).toDate(), "yyyy-MM-dd")),
+              escapeCsvCell(expense.vendor || ""), escapeCsvCell(expense.otherVendorDetails || ""),
+              escapeCsvCell(expense.notes || ""), escapeCsvCell(expense.billImageUrl || ""),
+              escapeCsvCell(expense.siteId ? sitesMap.get(expense.siteId) || expense.siteId : "N/A"),
+              escapeCsvCell(expense.stallId ? stallsMap.get(expense.stallId) || expense.stallId : "N/A"),
+              escapeCsvCell(expense.recordedByName || usersMap.get(expense.recordedByUid) || expense.recordedByUid),
+            ].join(','));
+        });
+        csvString = rows.join('\n');
+      }
+
+      downloadCsv(csvString, filename);
+      toast({ title: "Export Successful", description: `Successfully exported ${dataType} data.` });
+    } catch (error: any) {
+      toast({ title: "Export Failed", description: `Could not export data. ${error.message}`, variant: "destructive" });
+    } finally {
+      setIsExporting(null);
+    }
+  };
 
 
   const handleDataReset = async (apiEndpoint: string, confirmationPhrase: string, confirmationInput: string, setIsResetting: React.Dispatch<React.SetStateAction<boolean>>) => {
@@ -79,22 +191,54 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Application Settings" description="Manage your application preferences and configurations. (Visible to Managers & Admins)"/>
-      <div className="grid gap-6 md:grid-cols-2">
-        <Card className="shadow-lg">
-          <CardHeader><CardTitle className="flex items-center"><Palette className="mr-2 h-5 w-5 text-primary" />Appearance</CardTitle><CardDescription>Customize the look and feel of the application.</CardDescription></CardHeader>
-          <CardContent className="space-y-4"><div className="flex items-center justify-between p-4 bg-muted/30 rounded-md"><Label htmlFor="dark-mode-switch" className="text-sm font-medium">Dark Mode</Label><Switch id="dark-mode-switch" disabled /></div><p className="text-xs text-center text-muted-foreground">(Theme switching coming soon)</p></CardContent>
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        
+        {/* --- Data Management Card --- */}
+        <Card className="shadow-lg lg:col-span-2">
+            <CardHeader><CardTitle className="flex items-center"><DatabaseZap className="mr-2 h-5 w-5 text-primary" />Data Management</CardTitle><CardDescription>Import or export application data using CSV files.</CardDescription></CardHeader>
+            <CardContent className="space-y-4">
+                <div className="p-3 border rounded-md">
+                    <h4 className="font-semibold text-sm mb-2">Stock Items</h4>
+                    <div className="flex gap-2">
+                        <Button variant="outline" className="flex-1" onClick={() => setShowImportDialog('stock')}><Upload className="mr-2 h-4 w-4" />Import Stock</Button>
+                        <Button variant="outline" className="flex-1" onClick={() => handleExport('stock')} disabled={isExporting === 'stock'}>{isExporting === 'stock' ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Download className="mr-2 h-4 w-4" />}Export Stock</Button>
+                    </div>
+                </div>
+                 <div className="p-3 border rounded-md">
+                    <h4 className="font-semibold text-sm mb-2">Food Stall Expenses</h4>
+                    <div className="flex gap-2">
+                         <Button variant="outline" className="flex-1" onClick={() => setShowImportDialog('foodExpenses')}><Upload className="mr-2 h-4 w-4" />Import Expenses</Button>
+                         <Button variant="outline" className="flex-1" onClick={() => handleExport('foodExpenses')} disabled={isExporting === 'foodExpenses'}>{isExporting === 'foodExpenses' ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Download className="mr-2 h-4 w-4" />}Export Expenses</Button>
+                    </div>
+                </div>
+                 <div className="p-3 border rounded-md">
+                    <h4 className="font-semibold text-sm mb-2">Sales Transactions</h4>
+                     <Button variant="outline" className="w-full" onClick={() => handleExport('sales')} disabled={isExporting === 'sales'}>{isExporting === 'sales' ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Download className="mr-2 h-4 w-4" />}Export All Sales</Button>
+                </div>
+            </CardContent>
+             <CardFooter>
+                <p className="text-xs text-muted-foreground">Note: For updates via import, ensure the 'ID' column from an export is present.</p>
+            </CardFooter>
         </Card>
-        <Card className="shadow-lg">
-          <CardHeader><CardTitle className="flex items-center"><BellRing className="mr-2 h-5 w-5 text-primary" />Notifications</CardTitle><CardDescription>Manage how you receive alerts and notifications.</CardDescription></CardHeader>
-          <CardContent className="space-y-4"><div className="flex items-center justify-between p-4 bg-muted/30 rounded-md"><div className="flex items-center space-x-2"><MailQuestion className="h-4 w-4 text-muted-foreground" /><Label htmlFor="low-stock-alerts" className="text-sm font-medium">Low Stock Email Alerts</Label></div><Switch id="low-stock-alerts" disabled /></div><p className="text-xs text-center text-muted-foreground">(Email alert functionality requires backend setup)</p><div className="flex items-center justify-between p-4 bg-muted/30 rounded-md"><Label htmlFor="new-sale-notif" className="text-sm font-medium">In-App New Sale Notifications</Label><Switch id="new-sale-notif" checked disabled /></div><p className="text-xs text-center text-muted-foreground">(Other notification preferences coming soon)</p></CardContent>
-        </Card>
-        <Card className="shadow-lg">
-          <CardHeader><CardTitle className="flex items-center"><Utensils className="mr-2 h-5 w-5 text-primary" />Food Stall Settings</CardTitle><CardDescription>Manage settings specific to the Food Stall module.</CardDescription></CardHeader>
-          <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Button variant="outline" className="w-full" onClick={() => setShowManageVendorsDialog(true)}>Manage Food Vendors</Button>
-            <Button variant="outline" className="w-full" onClick={() => setShowManagePresetsDialog(true)}><BookCopy className="mr-2 h-4 w-4" />Manage Expense Presets</Button>
-          </CardContent>
-        </Card>
+
+        {/* --- Settings Column --- */}
+        <div className="space-y-6 lg:col-span-1">
+            <Card className="shadow-lg">
+                <CardHeader><CardTitle className="flex items-center"><Palette className="mr-2 h-5 w-5 text-primary" />Appearance</CardTitle><CardDescription>Customize the look and feel of the application.</CardDescription></CardHeader>
+                <CardContent className="space-y-4"><div className="flex items-center justify-between p-4 bg-muted/30 rounded-md"><Label htmlFor="dark-mode-switch" className="text-sm font-medium">Dark Mode</Label><Switch id="dark-mode-switch" disabled /></div><p className="text-xs text-center text-muted-foreground">(Theme switching coming soon)</p></CardContent>
+            </Card>
+            <Card className="shadow-lg">
+                <CardHeader><CardTitle className="flex items-center"><BellRing className="mr-2 h-5 w-5 text-primary" />Notifications</CardTitle><CardDescription>Manage how you receive alerts and notifications.</CardDescription></CardHeader>
+                <CardContent className="space-y-4"><div className="flex items-center justify-between p-4 bg-muted/30 rounded-md"><div className="flex items-center space-x-2"><MailQuestion className="h-4 w-4 text-muted-foreground" /><Label htmlFor="low-stock-alerts" className="text-sm font-medium">Low Stock Email Alerts</Label></div><Switch id="low-stock-alerts" disabled /></div><p className="text-xs text-center text-muted-foreground">(Email alert functionality requires backend setup)</p><div className="flex items-center justify-between p-4 bg-muted/30 rounded-md"><Label htmlFor="new-sale-notif" className="text-sm font-medium">In-App New Sale Notifications</Label><Switch id="new-sale-notif" checked disabled /></div><p className="text-xs text-center text-muted-foreground">(Other notification preferences coming soon)</p></CardContent>
+            </Card>
+            <Card className="shadow-lg">
+                <CardHeader><CardTitle className="flex items-center"><Utensils className="mr-2 h-5 w-5 text-primary" />Food Stall Settings</CardTitle><CardDescription>Manage settings specific to the Food Stall module.</CardDescription></CardHeader>
+                <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Button variant="outline" className="w-full" onClick={() => setShowManageVendorsDialog(true)}>Manage Food Vendors</Button>
+                    <Button variant="outline" className="w-full" onClick={() => setShowManagePresetsDialog(true)}><BookCopy className="mr-2 h-4 w-4" />Manage Expense Presets</Button>
+                </CardContent>
+            </Card>
+        </div>
       </div>
       
       {appUser?.role === 'admin' && (
@@ -171,13 +315,18 @@ export default function SettingsPage() {
             </AlertDialog>
           </CardContent>
           <CardFooter>
-            <p className="text-xs text-muted-foreground">It's recommended to back up your data (e.g., using CSV export) before performing any reset operation.</p>
+            <p className="text-xs text-muted-foreground">It's recommended to back up your data before performing any reset operation.</p>
           </CardFooter>
         </Card>
       )}
 
       <ManageVendorsDialog isOpen={showManageVendorsDialog} onClose={() => setShowManageVendorsDialog(false)}/>
       <ManageExpensePresetsDialog isOpen={showManagePresetsDialog} onClose={() => setShowManagePresetsDialog(false)}/>
+      <CsvImportDialog
+        dataType={showImportDialog}
+        isOpen={!!showImportDialog}
+        onClose={() => setShowImportDialog(null)}
+      />
     </div>
   );
 }

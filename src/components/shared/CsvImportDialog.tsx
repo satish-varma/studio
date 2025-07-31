@@ -14,7 +14,7 @@ import { auth } from '@/lib/firebaseConfig'; // Correctly import the auth instan
 const LOG_PREFIX = "[CsvImportDialog]";
 
 interface CsvImportDialogProps {
-  dataType: 'stock' | 'foodExpenses';
+  dataType: 'stock' | 'foodExpenses' | null;
   isOpen: boolean;
   onClose: () => void;
 }
@@ -37,8 +37,8 @@ export default function CsvImportDialog({ dataType, isOpen, onClose }: CsvImport
   };
 
   const handleImport = async () => {
-    if (!selectedFile) {
-      toast({ title: "No File Selected", description: "Please select a CSV file to import.", variant: "destructive" });
+    if (!selectedFile || !dataType) {
+      toast({ title: "Missing Information", description: "Please select a file and ensure data type is set.", variant: "destructive" });
       return;
     }
     if (!user) {
@@ -54,7 +54,7 @@ export default function CsvImportDialog({ dataType, isOpen, onClose }: CsvImport
       const csvData = e.target?.result as string;
       
       try {
-        const authInstance = auth; // Use the imported auth instance
+        const authInstance = auth;
         if (!authInstance || !authInstance.currentUser) throw new Error("Firebase user not available for token retrieval.");
         const idToken = await authInstance.currentUser.getIdToken(true);
 
