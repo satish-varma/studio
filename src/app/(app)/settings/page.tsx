@@ -220,25 +220,27 @@ export default function SettingsPage() {
                 <p className="text-xs text-muted-foreground">Note: For updates via import, ensure the 'ID' column from an export is present.</p>
             </CardFooter>
         </Card>
-
-        {/* --- Settings Column --- */}
-        <div className="space-y-6 lg:col-span-1">
-            <Card className="shadow-lg">
-                <CardHeader><CardTitle className="flex items-center"><Palette className="mr-2 h-5 w-5 text-primary" />Appearance</CardTitle><CardDescription>Customize the look and feel of the application.</CardDescription></CardHeader>
-                <CardContent className="space-y-4"><div className="flex items-center justify-between p-4 bg-muted/30 rounded-md"><Label htmlFor="dark-mode-switch" className="text-sm font-medium">Dark Mode</Label><Switch id="dark-mode-switch" disabled /></div><p className="text-xs text-center text-muted-foreground">(Theme switching coming soon)</p></CardContent>
-            </Card>
-            <Card className="shadow-lg">
-                <CardHeader><CardTitle className="flex items-center"><BellRing className="mr-2 h-5 w-5 text-primary" />Notifications</CardTitle><CardDescription>Manage how you receive alerts and notifications.</CardDescription></CardHeader>
-                <CardContent className="space-y-4"><div className="flex items-center justify-between p-4 bg-muted/30 rounded-md"><div className="flex items-center space-x-2"><MailQuestion className="h-4 w-4 text-muted-foreground" /><Label htmlFor="low-stock-alerts" className="text-sm font-medium">Low Stock Email Alerts</Label></div><Switch id="low-stock-alerts" disabled /></div><p className="text-xs text-center text-muted-foreground">(Email alert functionality requires backend setup)</p><div className="flex items-center justify-between p-4 bg-muted/30 rounded-md"><Label htmlFor="new-sale-notif" className="text-sm font-medium">In-App New Sale Notifications</Label><Switch id="new-sale-notif" checked disabled /></div><p className="text-xs text-center text-muted-foreground">(Other notification preferences coming soon)</p></CardContent>
-            </Card>
+        
+        <div className="lg:col-span-1 space-y-6">
             <Card className="shadow-lg">
                 <CardHeader><CardTitle className="flex items-center"><Utensils className="mr-2 h-5 w-5 text-primary" />Food Stall Settings</CardTitle><CardDescription>Manage settings specific to the Food Stall module.</CardDescription></CardHeader>
-                <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <CardContent className="space-y-3">
                     <Button variant="outline" className="w-full" onClick={() => setShowManageVendorsDialog(true)}>Manage Food Vendors</Button>
                     <Button variant="outline" className="w-full" onClick={() => setShowManagePresetsDialog(true)}><BookCopy className="mr-2 h-4 w-4" />Manage Expense Presets</Button>
                 </CardContent>
             </Card>
         </div>
+      </div>
+
+       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        <Card className="shadow-lg">
+            <CardHeader><CardTitle className="flex items-center"><Palette className="mr-2 h-5 w-5 text-primary" />Appearance</CardTitle><CardDescription>Customize the look and feel of the application.</CardDescription></CardHeader>
+            <CardContent className="space-y-4"><div className="flex items-center justify-between p-4 bg-muted/30 rounded-md"><Label htmlFor="dark-mode-switch" className="text-sm font-medium">Dark Mode</Label><Switch id="dark-mode-switch" disabled /></div><p className="text-xs text-center text-muted-foreground">(Theme switching coming soon)</p></CardContent>
+        </Card>
+        <Card className="shadow-lg">
+            <CardHeader><CardTitle className="flex items-center"><BellRing className="mr-2 h-5 w-5 text-primary" />Notifications</CardTitle><CardDescription>Manage how you receive alerts and notifications.</CardDescription></CardHeader>
+            <CardContent className="space-y-4"><div className="flex items-center justify-between p-4 bg-muted/30 rounded-md"><div className="flex items-center space-x-2"><MailQuestion className="h-4 w-4 text-muted-foreground" /><Label htmlFor="low-stock-alerts" className="text-sm font-medium">Low Stock Email Alerts</Label></div><Switch id="low-stock-alerts" disabled /></div><p className="text-xs text-center text-muted-foreground">(Email alert functionality requires backend setup)</p><div className="flex items-center justify-between p-4 bg-muted/30 rounded-md"><Label htmlFor="new-sale-notif" className="text-sm font-medium">In-App New Sale Notifications</Label><Switch id="new-sale-notif" checked disabled /></div><p className="text-xs text-center text-muted-foreground">(Other notification preferences coming soon)</p></CardContent>
+        </Card>
       </div>
       
       {appUser?.role === 'admin' && (
