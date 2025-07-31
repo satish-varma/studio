@@ -102,7 +102,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
         <div className="flex flex-col flex-1 w-full">
           <AppHeaderContent />
-          <main className="flex-1 overflow-y-auto bg-background pb-20 md:pb-0">
+          <main className="flex-1 overflow-y-auto bg-background pb-16 md:pb-0">
             <motion.div
               key={pathname}
               initial="initial"
@@ -114,8 +114,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             {children}
             </motion.div>
           </main>
+          <BottomNavBar />
         </div>
-        <BottomNavBar />
       </div>
     </SidebarProvider>
   );
