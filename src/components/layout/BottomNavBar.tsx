@@ -10,7 +10,10 @@ import {
   ShoppingCart,
   Users,
   Briefcase,
-  UserPlus
+  UserPlus,
+  Package,
+  IndianRupee,
+  Utensils
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -38,9 +41,9 @@ const navItems: NavItem[] = [
 ];
 
 const FAB_ITEMS = [
-    { href: '/items/new', label: 'Add Stock Item', roles: ['staff', 'manager', 'admin'] },
-    { href: '/sales/record', label: 'Record Sale', roles: ['staff', 'manager', 'admin'] },
-    { href: '/foodstall/expenses/record', label: 'Add Expense', roles: ['staff', 'manager', 'admin'] },
+    { href: '/sales/record', label: 'Record Stock Sale', roles: ['staff', 'manager', 'admin'], icon: IndianRupee },
+    { href: '/items/new', label: 'Add Stock Item', roles: ['staff', 'manager', 'admin'], icon: Package },
+    { href: '/foodstall/expenses/record', label: 'Add Food Expense', roles: ['staff', 'manager', 'admin'], icon: Utensils },
     { href: '/users', label: 'Add New User', roles: ['admin'], icon: UserPlus },
   ];
 
