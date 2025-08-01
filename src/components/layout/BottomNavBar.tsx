@@ -6,14 +6,13 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   LucideIcon,
   Plus,
-  LayoutDashboard,
-  ShoppingCart,
-  Users,
-  Briefcase,
   UserPlus,
   Package,
   IndianRupee,
-  Utensils
+  Utensils,
+  FileText,
+  CalendarCheck,
+  HandCoins,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -34,10 +33,11 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { href: "/dashboard", label: "Home", icon: LayoutDashboard, roles: ['staff', 'manager', 'admin'], exactMatch: true },
-  { href: "/items", label: "Stock", icon: ShoppingCart, roles: ['staff', 'manager', 'admin'] },
-  { href: "/staff/list", label: "Staff", icon: Briefcase, roles: ['manager', 'admin'] },
-  { href: "/users", label: "Users", icon: Users, roles: ['admin'] },
+    { href: "/foodstall/expenses/record", label: "Add Expense", icon: Utensils, roles: ['staff', 'manager', 'admin'] },
+    { href: "/staff/attendance", label: "Attendance", icon: CalendarCheck, roles: ['manager', 'admin'] },
+    { href: "/staff/advances", label: "Pay Advance", icon: HandCoins, roles: ['manager', 'admin'] },
+    { href: "/staff/payroll", label: "Payroll", icon: IndianRupee, roles: ['manager', 'admin'] },
+    { href: "/foodstall/activity-log", label: "Food Log", icon: FileText, roles: ['admin'] },
 ];
 
 const FAB_ITEMS = [
