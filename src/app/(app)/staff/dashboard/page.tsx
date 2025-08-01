@@ -154,7 +154,7 @@ export default function StaffDashboardPage() {
             // --- Today's Attendance & Salary ---
             const attendanceTodayDocs = attendanceTodaySnapshots.flat().flatMap(s => s.docs);
             
-            const activeStaffList = staffList.filter(s => s.role === 'staff' && (s.status === 'active' || !s.status));
+            const activeStaffList = staffList.filter(s => (s.role === 'staff' || s.role === 'manager') && (s.status === 'active' || !s.status));
             const activeStaffCount = activeStaffList.length;
 
             const notPresentRecords = attendanceTodayDocs
@@ -280,7 +280,7 @@ export default function StaffDashboardPage() {
     };
     
     const projectedSalaryList = staffList
-        .filter(s => (s.status === 'active' || !s.status))
+        .filter(s => (s.role === 'staff' || s.role === 'manager') && (s.status === 'active' || !s.status))
         .map(s => ({
             ...s,
             salary: staffDetailsMap.get(s.uid)?.salary || 0
@@ -476,3 +476,4 @@ export default function StaffDashboardPage() {
     );
 }
 
+    
