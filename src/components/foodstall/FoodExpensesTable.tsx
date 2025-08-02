@@ -64,7 +64,7 @@ const TableRowSkeleton = () => (
       <Skeleton className="h-4 w-28" />
     </TableCell>
     <TableCell>
-      <Skeleton className="h-4 w-8" />
+      <Skeleton className="h-4 w-24" />
     </TableCell>
     <TableCell>
       <Skeleton className="h-8 w-8" />
@@ -95,6 +95,15 @@ export function FoodExpensesTable({
     }
   };
 
+  const formatDateTimeForDisplay = (dateString?: string) => {
+      if (!dateString) return "N/A";
+      try {
+        return format(new Date(dateString), "MMM dd, yyyy h:mm a");
+      } catch (e) {
+        return "Invalid Date";
+      }
+  };
+
   const formatCurrency = (amount: number) => {
     return `₹${amount.toFixed(2)}`;
   };
@@ -113,12 +122,13 @@ export function FoodExpensesTable({
           <TableHeader>
             <TableRow>
               <TableHead>Category</TableHead>
-              <TableHead>Date</TableHead>
+              <TableHead>Purchase Date</TableHead>
               <TableHead className="hidden md:table-cell">Site</TableHead>
               <TableHead className="text-right">Total Cost</TableHead>
               <TableHead>Payment Method</TableHead>
               <TableHead className="hidden md:table-cell">Vendor</TableHead>
               <TableHead className="hidden lg:table-cell">Recorded By</TableHead>
+              <TableHead className="hidden lg:table-cell">Last Updated</TableHead>
               <TableHead>Notes</TableHead>
               <TableHead>Actions</TableHead>
             </TableRow>
@@ -160,6 +170,7 @@ export function FoodExpensesTable({
               <TableHead className="w-[130px]">Payment Method</TableHead>
               <TableHead className="w-[130px] hidden md:table-cell">Vendor</TableHead>
               <TableHead className="w-[150px] hidden lg:table-cell">Recorded By</TableHead>
+              <TableHead className="w-[150px] hidden lg:table-cell">Last Updated</TableHead>
               <TableHead className="min-w-[180px]">Notes</TableHead>
               <TableHead className="w-[80px]">Actions</TableHead>
             </TableRow>
@@ -192,6 +203,9 @@ export function FoodExpensesTable({
                 </TableCell>
                 <TableCell className="text-muted-foreground hidden lg:table-cell">
                     {usersMap[expense.recordedByUid] || 'N/A'}
+                </TableCell>
+                 <TableCell className="text-muted-foreground text-xs hidden lg:table-cell">
+                    {formatDateTimeForDisplay(expense.updatedAt)}
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate">
                   {expense.notes ? (
