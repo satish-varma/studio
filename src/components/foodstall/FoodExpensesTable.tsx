@@ -170,7 +170,7 @@ export function FoodExpensesTable({
               <TableHead className="w-[130px]">Payment Method</TableHead>
               <TableHead className="w-[130px] hidden md:table-cell">Vendor</TableHead>
               <TableHead className="w-[150px] hidden lg:table-cell">Recorded By</TableHead>
-              <TableHead className="w-[150px] hidden lg:table-cell">Last Updated</TableHead>
+              <TableHead className="w-[180px] hidden lg:table-cell">Last Updated</TableHead>
               <TableHead className="min-w-[180px]">Notes</TableHead>
               <TableHead className="w-[80px]">Actions</TableHead>
             </TableRow>
