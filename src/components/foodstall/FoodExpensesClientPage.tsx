@@ -324,35 +324,40 @@ export default function FoodExpensesClientPage() {
             </div>
           </div>
         </CardHeader>
-        <CardContent className="flex flex-col gap-4 border-t pt-4">
-            <div className="flex flex-wrap gap-2">
-                <Button variant={dateFilter === 'today' ? 'default' : 'outline'} onClick={() => setDateFilter('today')}>Today</Button>
-                <Button variant={dateFilter === 'last_7_days' ? 'default' : 'outline'} onClick={() => setDateFilter('last_7_days')}>Last 7 Days</Button>
-                <Button variant={dateFilter === 'this_month' ? 'default' : 'outline'} onClick={() => setDateFilter('this_month')}>This Month</Button>
-                <Button variant={dateFilter === 'all_time' ? 'default' : 'outline'} onClick={() => setDateFilter('all_time')}>All Time</Button>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-                {user?.role === 'admin' && (
-                    <Select value={siteFilter} onValueChange={setSiteFilter}>
-                        <SelectTrigger className="w-full sm:w-auto md:w-[180px] bg-input"><Building className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by site" /></SelectTrigger>
-                        <SelectContent><SelectItem value="all">All Sites</SelectItem>{allSites.map(site => (<SelectItem key={site.id} value={site.id}>{site.name}</SelectItem>))}</SelectContent>
-                    </Select>
-                )}
-                 <Select value={vendorFilter} onValueChange={setVendorFilter}>
-                  <SelectTrigger className="w-full sm:w-auto md:w-[180px] bg-input"><ShoppingCart className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by vendor" /></SelectTrigger>
-                  <SelectContent><SelectItem value="all">All Vendors</SelectItem>{allVendors.map(v => (<SelectItem key={v} value={v}>{v}</SelectItem>))}<SelectItem value="Other">Other</SelectItem></SelectContent>
-                </Select>
-                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                  <SelectTrigger className="w-full sm:w-auto md:w-[180px] bg-input"><ListFilter className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by category" /></SelectTrigger>
-                  <SelectContent><SelectItem value="all">All Categories</SelectItem>{foodExpenseCategories.map(cat => (<SelectItem key={cat} value={cat}>{cat}</SelectItem>))}</SelectContent>
-                </Select>
-                <Select value={userFilter} onValueChange={setUserFilter}>
-                  <SelectTrigger className="w-full sm:w-auto md:w-[180px] bg-input"><Users className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by user" /></SelectTrigger>
-                  <SelectContent><SelectItem value="all">All Users</SelectItem>{allUsers.map(u => (<SelectItem key={u.uid} value={u.uid}>{u.displayName}</SelectItem>))}</SelectContent>
-                </Select>
-                <div className="flex gap-2 ml-auto">
+        <CardContent className="border-t pt-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+                {/* Date Filters */}
+                <div className="col-span-2 lg:col-span-4 flex flex-wrap gap-2">
+                    <Button variant={dateFilter === 'today' ? 'default' : 'outline'} onClick={() => setDateFilter('today')}>Today</Button>
+                    <Button variant={dateFilter === 'last_7_days' ? 'default' : 'outline'} onClick={() => setDateFilter('last_7_days')}>Last 7 Days</Button>
+                    <Button variant={dateFilter === 'this_month' ? 'default' : 'outline'} onClick={() => setDateFilter('this_month')}>This Month</Button>
+                    <Button variant={dateFilter === 'all_time' ? 'default' : 'outline'} onClick={() => setDateFilter('all_time')}>All Time</Button>
+                </div>
+                {/* Import/Export */}
+                <div className="col-span-2 lg:col-span-2 flex items-center justify-end gap-2">
                     <Button variant="outline" onClick={() => setShowImportDialog(true)} className="flex-1 sm:flex-auto"><Upload className="mr-2 h-4 w-4" />Import</Button>
                     <Button variant="outline" onClick={handleExport} disabled={isExporting} className="flex-1 sm:flex-auto">{isExporting ? <Download className="mr-2 h-4 w-4 animate-spin"/> : <Download className="mr-2 h-4 w-4" />}Export</Button>
+                </div>
+                {/* Other Filters */}
+                <div className="col-span-2 md:col-span-3 lg:col-span-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 pt-2">
+                    {user?.role === 'admin' && (
+                        <Select value={siteFilter} onValueChange={setSiteFilter}>
+                            <SelectTrigger className="bg-input"><Building className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by site" /></SelectTrigger>
+                            <SelectContent><SelectItem value="all">All Sites</SelectItem>{allSites.map(site => (<SelectItem key={site.id} value={site.id}>{site.name}</SelectItem>))}</SelectContent>
+                        </Select>
+                    )}
+                     <Select value={vendorFilter} onValueChange={setVendorFilter}>
+                      <SelectTrigger className="bg-input"><ShoppingCart className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by vendor" /></SelectTrigger>
+                      <SelectContent><SelectItem value="all">All Vendors</SelectItem>{allVendors.map(v => (<SelectItem key={v} value={v}>{v}</SelectItem>))}<SelectItem value="Other">Other</SelectItem></SelectContent>
+                    </Select>
+                    <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                      <SelectTrigger className="bg-input"><ListFilter className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by category" /></SelectTrigger>
+                      <SelectContent><SelectItem value="all">All Categories</SelectItem>{foodExpenseCategories.map(cat => (<SelectItem key={cat} value={cat}>{cat}</SelectItem>))}</SelectContent>
+                    </Select>
+                    <Select value={userFilter} onValueChange={setUserFilter}>
+                      <SelectTrigger className="bg-input"><Users className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by user" /></SelectTrigger>
+                      <SelectContent><SelectItem value="all">All Users</SelectItem>{allUsers.map(u => (<SelectItem key={u.uid} value={u.uid}>{u.displayName}</SelectItem>))}</SelectContent>
+                    </Select>
                 </div>
             </div>
         </CardContent>

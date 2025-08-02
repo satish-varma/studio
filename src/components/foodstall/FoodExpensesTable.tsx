@@ -212,9 +212,9 @@ export function FoodExpensesTable({
                   {expense.notes ? (
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <span className="cursor-help underline decoration-dotted">
-                          {expense.notes.substring(0, 25)}
-                          {expense.notes.length > 25 ? "..." : ""}
+                        <span className="cursor-help inline-flex items-center gap-1">
+                           <Info size={12} />
+                           {expense.notes}
                         </span>
                       </TooltipTrigger>
                       <TooltipContent className="max-w-xs">
