@@ -63,6 +63,9 @@ const TableRowSkeleton = () => (
      <TableCell className="hidden lg:table-cell">
       <Skeleton className="h-4 w-28" />
     </TableCell>
+     <TableCell className="hidden lg:table-cell">
+      <Skeleton className="h-4 w-28" />
+    </TableCell>
     <TableCell>
       <Skeleton className="h-4 w-24" />
     </TableCell>
