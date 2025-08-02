@@ -25,7 +25,7 @@ import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Info, ListFilter, DollarSign, Upload, Download, Building, ShoppingCart, Users } from "lucide-react";
+import { Loader2, Info, ListFilter, DollarSign, Upload, Download, Building, ShoppingCart, Users, Calendar as CalendarIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { FoodExpensesTable } from "./FoodExpensesTable";
 import { foodExpenseCategories } from "@/types/food";
@@ -40,6 +40,10 @@ import {
 import { format, subDays, startOfDay, endOfDay, startOfMonth } from "date-fns";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import CsvImportDialog from "@/components/shared/CsvImportDialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { cn } from "@/lib/utils";
+import type { DateRange } from "react-day-picker";
 
 const LOG_PREFIX = "[FoodExpensesClientPage]";
 const EXPENSES_PER_PAGE = 50;
@@ -53,8 +57,6 @@ if (!getApps().length) {
 }
 const db = getFirestore(getApp());
 
-type DateFilterOption = 'today' | 'last_7_days' | 'this_month' | 'all_time';
-
 export default function FoodExpensesClientPage() {
   const { user, activeSiteId, activeStallId, loading: authLoading } = useAuth();
   const { toast } = useToast();
@@ -63,7 +65,10 @@ export default function FoodExpensesClientPage() {
   const [loadingExpenses, setLoadingExpenses] = useState(true);
   const [errorExpenses, setErrorExpenses] = useState<string | null>(null);
   
-  const [dateFilter, setDateFilter] = useState<DateFilterOption>('today');
+  const [dateRange, setDateRange] = useState<DateRange | undefined>({
+    from: startOfDay(subDays(new Date(), 6)),
+    to: endOfDay(new Date()),
+  });
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [vendorFilter, setVendorFilter] = useState<string>("all");
   const [siteFilter, setSiteFilter] = useState<string>('all');
@@ -97,21 +102,14 @@ export default function FoodExpensesClientPage() {
     
     if (activeStallId) qConstraints.push(where("stallId", "==", activeStallId));
     
-    const now = new Date(); let startDate: Date | null = null; let endDate: Date | null = endOfDay(now);
-    switch (dateFilter) {
-        case 'today': startDate = startOfDay(now); break;
-        case 'last_7_days': startDate = startOfDay(subDays(now, 6)); break;
-        case 'this_month': startDate = startOfMonth(now); break;
-        case 'all_time': startDate = null; endDate = null; break;
-    }
-    if(startDate) qConstraints.push(where("purchaseDate", ">=", Timestamp.fromDate(startDate)));
-    if(endDate) qConstraints.push(where("purchaseDate", "<=", Timestamp.fromDate(endDate)));
+    if(dateRange?.from) qConstraints.push(where("purchaseDate", ">=", Timestamp.fromDate(dateRange.from)));
+    if(dateRange?.to) qConstraints.push(where("purchaseDate", "<=", Timestamp.fromDate(dateRange.to)));
     if (categoryFilter !== "all") qConstraints.push(where("category", "==", categoryFilter));
     if (vendorFilter !== "all") qConstraints.push(where("vendor", "==", vendorFilter));
     if (userFilter !== "all") qConstraints.push(where("recordedByUid", "==", userFilter));
 
     return qConstraints;
-  }, [authLoading, user, activeSiteId, activeStallId, dateFilter, categoryFilter, siteFilter, vendorFilter, userFilter]);
+  }, [authLoading, user, activeSiteId, activeStallId, dateRange, categoryFilter, siteFilter, vendorFilter, userFilter]);
 
 
   useEffect(() => {
@@ -325,21 +323,8 @@ export default function FoodExpensesClientPage() {
           </div>
         </CardHeader>
         <CardContent className="border-t pt-4">
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
-                {/* Date Filters */}
-                <div className="col-span-2 lg:col-span-4 flex flex-wrap gap-2">
-                    <Button variant={dateFilter === 'today' ? 'default' : 'outline'} onClick={() => setDateFilter('today')}>Today</Button>
-                    <Button variant={dateFilter === 'last_7_days' ? 'default' : 'outline'} onClick={() => setDateFilter('last_7_days')}>Last 7 Days</Button>
-                    <Button variant={dateFilter === 'this_month' ? 'default' : 'outline'} onClick={() => setDateFilter('this_month')}>This Month</Button>
-                    <Button variant={dateFilter === 'all_time' ? 'default' : 'outline'} onClick={() => setDateFilter('all_time')}>All Time</Button>
-                </div>
-                {/* Import/Export */}
-                <div className="col-span-2 lg:col-span-2 flex items-center justify-end gap-2">
-                    <Button variant="outline" onClick={() => setShowImportDialog(true)} className="flex-1 sm:flex-auto"><Upload className="mr-2 h-4 w-4" />Import</Button>
-                    <Button variant="outline" onClick={handleExport} disabled={isExporting} className="flex-1 sm:flex-auto">{isExporting ? <Download className="mr-2 h-4 w-4 animate-spin"/> : <Download className="mr-2 h-4 w-4" />}Export</Button>
-                </div>
-                {/* Other Filters */}
-                <div className="col-span-2 md:col-span-3 lg:col-span-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 pt-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="col-span-1 md:col-span-2 lg:col-span-3 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
                     {user?.role === 'admin' && (
                         <Select value={siteFilter} onValueChange={setSiteFilter}>
                             <SelectTrigger className="bg-input"><Building className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by site" /></SelectTrigger>
@@ -358,6 +343,49 @@ export default function FoodExpensesClientPage() {
                       <SelectTrigger className="bg-input"><Users className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by user" /></SelectTrigger>
                       <SelectContent><SelectItem value="all">All Users</SelectItem>{allUsers.map(u => (<SelectItem key={u.uid} value={u.uid}>{u.displayName}</SelectItem>))}</SelectContent>
                     </Select>
+                </div>
+                 <div className="col-span-1 md:col-span-2 lg:col-span-3 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                    <Popover>
+                        <PopoverTrigger asChild>
+                        <Button
+                            id="expenseDateRange"
+                            variant={"outline"}
+                            className={cn(
+                            "w-full sm:w-[280px] justify-start text-left font-normal bg-input",
+                            !dateRange && "text-muted-foreground"
+                            )}
+                        >
+                            <CalendarIcon className="mr-2 h-4 w-4" />
+                            {dateRange?.from ? (
+                            dateRange.to ? (
+                                <>
+                                {format(dateRange.from, "LLL dd, y")} -{" "}
+                                {format(dateRange.to, "LLL dd, y")}
+                                </>
+                            ) : (
+                                format(dateRange.from, "LLL dd, y")
+                            )
+                            ) : (
+                            <span>Pick a date range</span>
+                            )}
+                        </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                            initialFocus
+                            mode="range"
+                            defaultMonth={dateRange?.from}
+                            selected={dateRange}
+                            onSelect={setDateRange}
+                            numberOfMonths={2}
+                            disabled={(date) => date > new Date() || date < new Date("2000-01-01")}
+                        />
+                        </PopoverContent>
+                    </Popover>
+                    <div className="flex items-center gap-2">
+                        <Button variant="outline" onClick={() => setShowImportDialog(true)} className="flex-1"><Upload className="mr-2 h-4 w-4" />Import</Button>
+                        <Button variant="outline" onClick={handleExport} disabled={isExporting} className="flex-1">{isExporting ? <Download className="mr-2 h-4 w-4 animate-spin"/> : <Download className="mr-2 h-4 w-4" />}Export</Button>
+                    </div>
                 </div>
             </div>
         </CardContent>
