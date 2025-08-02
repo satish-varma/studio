@@ -12,14 +12,12 @@ import {
   limit,
   startAfter,
   endBefore,
+  limitToLast,
   getDocs,
   Timestamp,
   QueryConstraint,
   DocumentSnapshot,
   DocumentData,
-  onSnapshot,
-  sum,
-  getAggregateFromServer,
 } from "firebase/firestore";
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
@@ -46,7 +44,7 @@ import { cn } from "@/lib/utils";
 import type { DateRange } from "react-day-picker";
 
 const LOG_PREFIX = "[FoodExpensesClientPage]";
-const EXPENSES_PER_PAGE = 50;
+const EXPENSES_PER_PAGE = 20;
 
 if (!getApps().length) {
   try {
@@ -85,6 +83,13 @@ export default function FoodExpensesClientPage() {
   const [sitesMap, setSitesMap] = useState<Record<string, string>>({});
   const [stallsMap, setStallsMap] = useState<Record<string, string>>({});
   const [usersMap, setUsersMap] = useState<Record<string, string>>({});
+
+  const [firstVisibleDoc, setFirstVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
+  const [lastVisibleDoc, setLastVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
+  const [isLoadingNextPage, setIsLoadingNextPage] = useState(false);
+  const [isLoadingPrevPage, setIsLoadingPrevPage] = useState(false);
+  const [isLastPage, setIsLastPage] = useState(false);
+  const [isFirstPageReached, setIsFirstPageReached] = useState(true);
 
   useEffect(() => {
     const now = new Date();
@@ -179,52 +184,98 @@ export default function FoodExpensesClientPage() {
     fetchContextData();
   }, [toast]);
   
-
-  useEffect(() => {
+  const fetchExpensesPage = useCallback(async (direction: 'initial' | 'next' | 'prev' = 'initial') => {
     const baseConstraints = buildExpenseQuery();
     if (!baseConstraints || !db) {
-        setExpenses([]);
-        setLoadingExpenses(false);
-        return;
+      setExpenses([]);
+      setLoadingExpenses(false);
+      return;
     }
-    setLoadingExpenses(true);
+
+    if (direction === 'initial') setLoadingExpenses(true);
+    if (direction === 'next') setIsLoadingNextPage(true);
+    if (direction === 'prev') setIsLoadingPrevPage(true);
     setErrorExpenses(null);
 
+    let finalConstraints: QueryConstraint[];
+    
+    if (direction === 'prev' && firstVisibleDoc) {
+      finalConstraints = [orderBy("purchaseDate", "asc"), startAfter(firstVisibleDoc), limit(EXPENSES_PER_PAGE), ...baseConstraints.filter(c => c.type !== 'orderBy')];
+    } else {
+      finalConstraints = [...baseConstraints];
+      if (direction === 'next' && lastVisibleDoc) {
+        finalConstraints.push(startAfter(lastVisibleDoc));
+      }
+      finalConstraints.push(limit(EXPENSES_PER_PAGE + 1));
+    }
+    
     const expensesCollectionRef = collection(db, "foodItemExpenses");
-    const q = query(expensesCollectionRef, ...baseConstraints, limit(EXPENSES_PER_PAGE));
+    const q = query(expensesCollectionRef, ...finalConstraints);
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const fetchedExpenses = snapshot.docs.map(doc => ({
+    try {
+      const snapshot = await getDocs(q);
+      let fetchedExpenses: FoodItemExpense[] = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
         purchaseDate: (doc.data().purchaseDate as Timestamp).toDate(),
       } as FoodItemExpense));
+      
+      if (direction === 'prev') {
+        fetchedExpenses.reverse();
+      }
+
+      const hasMore = fetchedExpenses.length > EXPENSES_PER_PAGE;
+      if (hasMore) fetchedExpenses.pop();
+      
       setExpenses(fetchedExpenses);
-      setLoadingExpenses(false);
-    }, (error) => {
-      console.error(`${LOG_PREFIX} Real-time expenses fetch error:`, error);
-      setErrorExpenses(error.message || "Failed to load expenses in real-time.");
-      setLoadingExpenses(false);
-    });
-    
+      
+      if (snapshot.docs.length > 0) {
+        setFirstVisibleDoc(snapshot.docs[0]);
+        setLastVisibleDoc(snapshot.docs[fetchedExpenses.length - 1]);
+        if(direction === 'initial') setIsFirstPageReached(true);
+        if(direction === 'next') setIsFirstPageReached(false);
+      } else {
+         if(direction === 'next') setIsLastPage(true);
+         else if(direction === 'prev') setIsFirstPageReached(true);
+      }
+      
+      if(direction !== 'prev' && snapshot.docs.length <= EXPENSES_PER_PAGE) {
+          setIsLastPage(true);
+      } else if (direction !== 'prev') {
+          setIsLastPage(false);
+      }
+
+    } catch (error: any) {
+       setErrorExpenses(error.message);
+    } finally {
+       setLoadingExpenses(false);
+       setIsLoadingNextPage(false);
+       setIsLoadingPrevPage(false);
+    }
+
+  }, [buildExpenseQuery, db, lastVisibleDoc, firstVisibleDoc]);
+  
+  useEffect(() => {
+    fetchExpensesPage('initial');
+  }, [fetchExpensesPage]);
+
+  // For total amount calculation
+  useEffect(() => {
+    const baseConstraints = buildExpenseQuery();
+    if (!baseConstraints || !db) {
+        setTotalExpensesAmount(0);
+        return;
+    }
     const fetchTotal = async () => {
         setLoadingTotal(true);
-        try {
-            const totalQuery = query(expensesCollectionRef, ...baseConstraints);
-            const snapshot = await getAggregateFromServer(totalQuery, {
-                totalCost: sum('totalCost')
-            });
-            setTotalExpensesAmount(snapshot.data().totalCost || 0);
-        } catch(error) {
-            console.error("Error calculating total expenses:", error);
-            setTotalExpensesAmount(0);
-        } finally {
-            setLoadingTotal(false);
-        }
+        const expensesCollectionRef = collection(db, "foodItemExpenses");
+        const totalQuery = query(expensesCollectionRef, ...baseConstraints);
+        const snapshot = await getDocs(totalQuery);
+        const total = snapshot.docs.reduce((sum, doc) => sum + (doc.data().totalCost || 0), 0);
+        setTotalExpensesAmount(total);
+        setLoadingTotal(false);
     };
     fetchTotal();
-
-    return () => unsubscribe();
   }, [buildExpenseQuery, db]);
 
 
@@ -418,7 +469,10 @@ export default function FoodExpensesClientPage() {
           isLoading={loadingExpenses}
           sitesMap={sitesMap}
           usersMap={usersMap}
-          expensesPerPage={EXPENSES_PER_PAGE}
+          onNextPage={() => fetchExpensesPage('next')}
+          onPrevPage={() => fetchExpensesPage('prev')}
+          isLastPage={isLastPage}
+          isFirstPage={isFirstPageReached}
         />
       )}
       <CsvImportDialog
@@ -426,9 +480,9 @@ export default function FoodExpensesClientPage() {
         isOpen={showImportDialog}
         onClose={() => {
           setShowImportDialog(false);
+          fetchExpensesPage('initial');
         }}
       />
     </div>
   );
 }
-

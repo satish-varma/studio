@@ -37,41 +37,23 @@ interface FoodExpensesTableProps {
   isLoading: boolean;
   sitesMap: Record<string, string>;
   usersMap: Record<string, string>;
-  expensesPerPage: number;
+  onNextPage: () => void;
+  onPrevPage: () => void;
+  isLastPage: boolean;
+  isFirstPage: boolean;
 }
 
 const TableRowSkeleton = () => (
   <TableRow>
-    <TableCell>
-      <Skeleton className="h-4 w-24" />
-    </TableCell>
-    <TableCell>
-      <Skeleton className="h-4 w-20" />
-    </TableCell>
-    <TableCell className="hidden md:table-cell">
-      <Skeleton className="h-4 w-32" />
-    </TableCell>
-    <TableCell className="text-right">
-      <Skeleton className="h-4 w-20 inline-block" />
-    </TableCell>
-    <TableCell>
-      <Skeleton className="h-4 w-24" />
-    </TableCell>
-    <TableCell className="hidden md:table-cell">
-      <Skeleton className="h-4 w-20" />
-    </TableCell>
-     <TableCell className="hidden lg:table-cell">
-      <Skeleton className="h-4 w-28" />
-    </TableCell>
-     <TableCell className="hidden lg:table-cell">
-      <Skeleton className="h-4 w-28" />
-    </TableCell>
-    <TableCell>
-      <Skeleton className="h-4 w-24" />
-    </TableCell>
-    <TableCell>
-      <Skeleton className="h-8 w-8" />
-    </TableCell>
+    <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+    <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+    <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-32" /></TableCell>
+    <TableCell className="text-right"><Skeleton className="h-4 w-20 inline-block" /></TableCell>
+    <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+    <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-20" /></TableCell>
+     <TableCell className="hidden lg:table-cell"><Skeleton className="h-4 w-28" /></TableCell>
+    <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+    <TableCell><Skeleton className="h-8 w-8" /></TableCell>
   </TableRow>
 );
 
@@ -80,7 +62,10 @@ export function FoodExpensesTable({
   isLoading,
   sitesMap,
   usersMap,
-  expensesPerPage,
+  onNextPage,
+  onPrevPage,
+  isLastPage,
+  isFirstPage,
 }: FoodExpensesTableProps) {
   const router = useRouter();
 
@@ -96,15 +81,6 @@ export function FoodExpensesTable({
     } catch (e) {
       return "Invalid Date";
     }
-  };
-
-  const formatDateTimeForDisplay = (dateString?: string) => {
-      if (!dateString) return "N/A";
-      try {
-        return format(new Date(dateString), "MMM dd, yyyy h:mm a");
-      } catch (e) {
-        return "Invalid Date";
-      }
   };
 
   const formatCurrency = (amount: number) => {
@@ -131,7 +107,6 @@ export function FoodExpensesTable({
               <TableHead>Payment Method</TableHead>
               <TableHead className="hidden md:table-cell">Vendor</TableHead>
               <TableHead className="hidden lg:table-cell">Recorded By</TableHead>
-              <TableHead className="hidden lg:table-cell">Last Updated</TableHead>
               <TableHead>Notes</TableHead>
               <TableHead>Actions</TableHead>
             </TableRow>
@@ -173,7 +148,6 @@ export function FoodExpensesTable({
               <TableHead className="w-[130px]">Payment Method</TableHead>
               <TableHead className="w-[130px] hidden md:table-cell">Vendor</TableHead>
               <TableHead className="w-[150px] hidden lg:table-cell">Recorded By</TableHead>
-              <TableHead className="w-[180px] hidden lg:table-cell">Last Updated</TableHead>
               <TableHead className="min-w-[180px]">Notes</TableHead>
               <TableHead className="w-[80px]">Actions</TableHead>
             </TableRow>
@@ -207,9 +181,6 @@ export function FoodExpensesTable({
                 <TableCell className="text-muted-foreground hidden lg:table-cell">
                     {usersMap[expense.recordedByUid] || 'N/A'}
                 </TableCell>
-                 <TableCell className="text-muted-foreground text-xs hidden lg:table-cell">
-                    {formatDateTimeForDisplay(expense.updatedAt)}
-                </TableCell>
                 <TableCell className="text-xs text-muted-foreground">
                   {expense.notes ? (
                     <Tooltip>
@@ -238,8 +209,25 @@ export function FoodExpensesTable({
           </TableBody>
         </Table>
       </div>
-      <div className="text-center text-xs text-muted-foreground pt-2">
-        Showing up to {expensesPerPage} latest results matching filters.
+      <div className="flex items-center justify-end space-x-2 py-4">
+        <Button
+            variant="outline"
+            size="sm"
+            onClick={onPrevPage}
+            disabled={isFirstPage || isLoadingPrevPage || isLoadingNextPage}
+        >
+            {isLoadingPrevPage ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChevronLeft className="h-4 w-4" />}
+            <span className="ml-2 hidden sm:inline">Previous</span>
+        </Button>
+        <Button
+            variant="outline"
+            size="sm"
+            onClick={onNextPage}
+            disabled={isLastPage || isLoadingNextPage || isLoadingPrevPage}
+        >
+             <span className="mr-2 hidden sm:inline">Next</span>
+            {isLoadingNextPage ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChevronRight className="h-4 w-4" />}
+        </Button>
       </div>
     </TooltipProvider>
   );
