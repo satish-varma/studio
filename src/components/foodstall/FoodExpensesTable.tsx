@@ -12,7 +12,6 @@ import {
 import { Button } from "@/components/ui/button";
 import type { FoodItemExpense } from "@/types/food";
 import { format } from "date-fns";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Tooltip,
   TooltipContent,
@@ -160,9 +159,9 @@ export function FoodExpensesTable({
 
   return (
     <TooltipProvider>
-      <ScrollArea className="rounded-lg border shadow-sm bg-card h-[60vh]">
-        <Table className="min-w-full">
-          <TableHeader className="sticky top-0 bg-card z-10">
+      <div className="rounded-lg border shadow-sm bg-card">
+        <Table>
+          <TableHeader>
             <TableRow>
               <TableHead className="w-[150px]">Category</TableHead>
               <TableHead className="w-[120px]">Purchase Date</TableHead>
@@ -235,7 +234,7 @@ export function FoodExpensesTable({
             ))}
           </TableBody>
         </Table>
-      </ScrollArea>
+      </div>
       <div className="text-center text-xs text-muted-foreground pt-2">
         Showing up to {expensesPerPage} latest results matching filters.
       </div>
