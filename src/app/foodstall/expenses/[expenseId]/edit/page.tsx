@@ -197,6 +197,19 @@ export default function EditFoodExpensePage() {
 
 
       await setDoc(expenseDocRef, expenseDataToUpdate, { merge: true });
+
+      await logFoodStallActivity(user, {
+        siteId: values.siteId,
+        stallId: values.stallId,
+        type: 'EXPENSE_UPDATED',
+        relatedDocumentId: expenseId,
+        details: {
+          expenseCategory: categoryToSave,
+          totalCost: values.totalCost,
+          vendor: vendorToSave,
+          notes: `Expense record updated. New amount: ₹${values.totalCost.toFixed(2)}.`,
+        }
+      });
       
       toast({ title: "Expense Updated", description: `Expense has been successfully updated.` });
       router.push('/foodstall/expenses');
