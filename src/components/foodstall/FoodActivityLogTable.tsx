@@ -11,11 +11,9 @@ import {
 } from "@/components/ui/table";
 import type { FoodStallActivityLog } from "@/types";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { Building, Store, ListChecks, Loader2, ChevronLeft, ChevronRight, FileText, Info, Truck } from "lucide-react";
-import Link from "next/link";
 
 interface FoodActivityLogTableProps {
   logs: FoodStallActivityLog[];
@@ -56,7 +54,8 @@ export function FoodActivityLogTable({
 
   const getActivityBadgeVariant = (type: FoodStallActivityLog['type']): "default" | "secondary" | "destructive" | "outline" => {
     if (type === 'SALE_RECORDED_OR_UPDATED') return "default";
-    if (type === 'EXPENSE_RECORDED') return "secondary";
+    if (type === 'EXPENSE_RECORDED' || type === 'EXPENSE_BULK_IMPORTED') return "secondary";
+    if (type === 'EXPENSE_UPDATED') return "outline";
     return "outline";
   };
   
@@ -65,7 +64,10 @@ export function FoodActivityLogTable({
         return `Sale Total: ₹${log.details.totalAmount?.toFixed(2) || '0.00'}`;
     }
     if (log.type.startsWith('EXPENSE')) {
-        return `Expense: ₹${log.details.totalCost?.toFixed(2) || '0.00'} (${log.details.expenseCategory || 'N/A'})`;
+      if(log.type === 'EXPENSE_BULK_IMPORTED') {
+        return `Imported ${log.details.processedCount} records.`;
+      }
+      return `Expense: ₹${log.details.totalCost?.toFixed(2) || '0.00'} (${log.details.expenseCategory || 'N/A'})`;
     }
     return log.details.notes || 'No details.';
   };
@@ -83,17 +85,17 @@ export function FoodActivityLogTable({
 
   return (
     <TooltipProvider>
-      <ScrollArea className="h-[600px] rounded-lg border shadow-sm bg-card">
+      <div className="rounded-lg border shadow-sm bg-card">
         <Table>
-          <TableHeader className="sticky top-0 bg-card z-10">
+          <TableHeader>
             <TableRow>
-              <TableHead className="p-2 sm:p-4 w-[140px]">Timestamp</TableHead>
-              <TableHead className="p-2 sm:p-4">User</TableHead>
-              <TableHead className="p-2 sm:p-4">Location</TableHead>
-              <TableHead className="p-2 sm:p-4">Activity Type</TableHead>
-              <TableHead className="p-2 sm:p-4 hidden md:table-cell">Vendor</TableHead>
-              <TableHead className="p-2 sm:p-4">Details</TableHead>
-              <TableHead className="p-2 sm:p-4 hidden lg:table-cell">Notes</TableHead>
+              <TableHead className="p-2 sm:p-4 w-[140px] whitespace-nowrap">Timestamp</TableHead>
+              <TableHead className="p-2 sm:p-4 whitespace-nowrap">User</TableHead>
+              <TableHead className="p-2 sm:p-4 whitespace-nowrap">Location</TableHead>
+              <TableHead className="p-2 sm:p-4 whitespace-nowrap">Activity Type</TableHead>
+              <TableHead className="p-2 sm:p-4 hidden md:table-cell whitespace-nowrap">Vendor</TableHead>
+              <TableHead className="p-2 sm:p-4 whitespace-nowrap">Details</TableHead>
+              <TableHead className="p-2 sm:p-4 hidden lg:table-cell whitespace-nowrap">Notes</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -112,8 +114,8 @@ export function FoodActivityLogTable({
                   </div>
                 </TableCell>
                 <TableCell className="p-2 sm:p-4">
-                  <Badge variant={getActivityBadgeVariant(log.type)} className="text-xs">
-                    <div className="sm:whitespace-normal sm:break-words">{formatActivityType(log.type)}</div>
+                  <Badge variant={getActivityBadgeVariant(log.type)} className="text-xs whitespace-nowrap">
+                    {formatActivityType(log.type)}
                   </Badge>
                 </TableCell>
                  <TableCell className="text-sm p-2 sm:p-4 hidden md:table-cell">
@@ -123,13 +125,13 @@ export function FoodActivityLogTable({
                     </div>
                 </TableCell>
                 <TableCell className="text-sm font-medium p-2 sm:p-4">{formatDetails(log)}</TableCell>
-                <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate p-2 sm:p-4 hidden lg:table-cell">
+                <TableCell className="text-xs text-muted-foreground max-w-[200px] p-2 sm:p-4 hidden lg:table-cell">
                   {log.details.notes ? (
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <span className="cursor-help inline-flex items-center gap-1">
+                        <span className="cursor-help inline-flex items-center gap-1 truncate">
                           <Info size={12} />
-                          <span>{log.details.notes.substring(0, 25)}{log.details.notes.length > 25 ? "..." : ""}</span>
+                          {log.details.notes}
                         </span>
                       </TooltipTrigger>
                       <TooltipContent className="max-w-xs"><p>{log.details.notes}</p></TooltipContent>
@@ -140,16 +142,16 @@ export function FoodActivityLogTable({
             ))}
           </TableBody>
         </Table>
-      </ScrollArea>
-      <div className="flex items-center justify-end space-x-2 py-4 px-2 border-t">
-        <Button variant="outline" size="sm" onClick={onPrevPage} disabled={isFirstPage || isLoadingPrevPage || isLoadingNextPage}>
-          {isLoadingPrevPage ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChevronLeft className="h-4 w-4" />}
-          <span className="ml-2 hidden sm:inline">Previous</span>
-        </Button>
-        <Button variant="outline" size="sm" onClick={onNextPage} disabled={isLastPage || isLoadingNextPage || isLoadingPrevPage}>
-          <span className="mr-2 hidden sm:inline">Next</span>
-          {isLoadingNextPage ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChevronRight className="h-4 w-4" />}
-        </Button>
+        <div className="flex items-center justify-end space-x-2 py-4 px-2 border-t">
+            <Button variant="outline" size="sm" onClick={onPrevPage} disabled={isFirstPage || isLoadingPrevPage || isLoadingNextPage}>
+                {isLoadingPrevPage ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChevronLeft className="h-4 w-4" />}
+                <span className="ml-2 hidden sm:inline">Previous</span>
+            </Button>
+            <Button variant="outline" size="sm" onClick={onNextPage} disabled={isLastPage || isLoadingNextPage || isLoadingPrevPage}>
+                <span className="mr-2 hidden sm:inline">Next</span>
+                {isLoadingNextPage ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChevronRight className="h-4 w-4" />}
+            </Button>
+        </div>
       </div>
     </TooltipProvider>
   );
