@@ -26,6 +26,7 @@ import {
   Loader2,
   Edit,
   Building,
+  Info,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -207,7 +208,7 @@ export function FoodExpensesTable({
                  <TableCell className="text-muted-foreground text-xs hidden lg:table-cell">
                     {formatDateTimeForDisplay(expense.updatedAt)}
                 </TableCell>
-                <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate">
+                <TableCell className="text-xs text-muted-foreground">
                   {expense.notes ? (
                     <Tooltip>
                       <TooltipTrigger asChild>
