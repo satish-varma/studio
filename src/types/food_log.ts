@@ -1,6 +1,8 @@
 
 export type FoodStallActivityType =
   | 'EXPENSE_RECORDED'
+  | 'EXPENSE_UPDATED'
+  | 'EXPENSE_BULK_IMPORTED'
   | 'SALE_RECORDED_OR_UPDATED';
 
 export interface FoodStallActivityLog {
@@ -19,6 +21,8 @@ export interface FoodStallActivityLog {
     vendor?: string;
     // Sale details
     totalAmount?: number;
+    // Bulk import details
+    processedCount?: number;
     // Common
     notes?: string | null;
   };

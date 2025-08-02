@@ -5,6 +5,7 @@ import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { getFirestore as getAdminFirestore, Timestamp, WriteBatch } from 'firebase-admin/firestore';
 import type { StockItem, FoodItemExpense } from '@/types';
 import Papa from 'papaparse';
+import { logFoodStallActivity } from '@/lib/foodStallLogger'; // Import logger
 
 const LOG_PREFIX = "[API:CsvImport]";
 
@@ -124,6 +125,9 @@ async function handleFoodExpenseImport(adminDb: ReturnType<typeof getAdminFirest
     let batch = adminDb.batch();
     let operationCount = 0;
     let totalProcessed = 0;
+    
+    // Aggregate by site/stall to log one activity per stall
+    const logAggregation = new Map<string, { siteId: string; stallId: string; count: number }>();
 
     for (const row of parsedData) {
         const siteId = sitesMap.get(row['Site Name']?.toLowerCase() || '');
@@ -157,6 +161,12 @@ async function handleFoodExpenseImport(adminDb: ReturnType<typeof getAdminFirest
         batch.set(expenseRef, expenseData, { merge: true });
         operationCount++;
 
+        // Aggregate for logging
+        const aggKey = `${siteId}_${stallId}`;
+        const currentAgg = logAggregation.get(aggKey) || { siteId, stallId, count: 0 };
+        currentAgg.count++;
+        logAggregation.set(aggKey, currentAgg);
+
         if (operationCount >= BATCH_SIZE) {
             await batch.commit();
             totalProcessed += operationCount;
@@ -168,6 +178,21 @@ async function handleFoodExpenseImport(adminDb: ReturnType<typeof getAdminFirest
     if (operationCount > 0) {
         await batch.commit();
         totalProcessed += operationCount;
+    }
+
+    // After all batches are committed, create the activity logs
+    const callingUser = await getAdminAuth().getUser(uid);
+    for (const [, agg] of logAggregation) {
+        await logFoodStallActivity({ uid: callingUser.uid, displayName: callingUser.displayName, email: callingUser.email, role: 'admin'}, {
+            siteId: agg.siteId,
+            stallId: agg.stallId,
+            type: 'EXPENSE_BULK_IMPORTED',
+            relatedDocumentId: `csv-import-${Date.now()}`,
+            details: {
+                processedCount: agg.count,
+                notes: `Processed a bulk import of ${agg.count} expense records from a CSV file.`
+            }
+        });
     }
     
     return { message: `Successfully processed ${totalProcessed} food expense records.` };

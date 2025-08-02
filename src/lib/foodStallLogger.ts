@@ -38,5 +38,6 @@ export async function logFoodStallActivity(
     await addDoc(collection(db, "foodStallActivityLogs"), activityLog);
   } catch (error) {
     console.error(`${LOG_PREFIX} Failed to log food stall activity:`, error, logData);
+    // Optionally re-throw or handle the error as needed by the application
   }
 }
