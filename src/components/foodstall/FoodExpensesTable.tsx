@@ -41,6 +41,8 @@ interface FoodExpensesTableProps {
   onPrevPage: () => void;
   isLastPage: boolean;
   isFirstPage: boolean;
+  isLoadingNextPage: boolean;
+  isLoadingPrevPage: boolean;
 }
 
 const TableRowSkeleton = () => (
@@ -66,6 +68,8 @@ export function FoodExpensesTable({
   onPrevPage,
   isLastPage,
   isFirstPage,
+  isLoadingNextPage,
+  isLoadingPrevPage,
 }: FoodExpensesTableProps) {
   const router = useRouter();
 

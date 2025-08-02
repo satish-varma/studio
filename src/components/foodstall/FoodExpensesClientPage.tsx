@@ -473,6 +473,8 @@ export default function FoodExpensesClientPage() {
           onPrevPage={() => fetchExpensesPage('prev')}
           isLastPage={isLastPage}
           isFirstPage={isFirstPageReached}
+          isLoadingNextPage={isLoadingNextPage}
+          isLoadingPrevPage={isLoadingPrevPage}
         />
       )}
       <CsvImportDialog
