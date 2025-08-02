@@ -57,6 +57,8 @@ if (!getApps().length) {
 }
 const db = getFirestore(getApp());
 
+type DateFilterOption = 'today' | 'last_7_days' | 'this_month' | 'all_time' | 'custom';
+
 export default function FoodExpensesClientPage() {
   const { user, activeSiteId, activeStallId, loading: authLoading } = useAuth();
   const { toast } = useToast();
@@ -65,10 +67,8 @@ export default function FoodExpensesClientPage() {
   const [loadingExpenses, setLoadingExpenses] = useState(true);
   const [errorExpenses, setErrorExpenses] = useState<string | null>(null);
   
-  const [dateRange, setDateRange] = useState<DateRange | undefined>({
-    from: startOfDay(subDays(new Date(), 6)),
-    to: endOfDay(new Date()),
-  });
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
+  const [dateFilter, setDateFilter] = useState<DateFilterOption>('last_7_days');
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [vendorFilter, setVendorFilter] = useState<string>("all");
   const [siteFilter, setSiteFilter] = useState<string>('all');
@@ -86,6 +86,32 @@ export default function FoodExpensesClientPage() {
   const [stallsMap, setStallsMap] = useState<Record<string, string>>({});
   const [usersMap, setUsersMap] = useState<Record<string, string>>({});
 
+  useEffect(() => {
+    const now = new Date();
+    switch (dateFilter) {
+        case 'today':
+            setDateRange({ from: startOfDay(now), to: endOfDay(now) });
+            break;
+        case 'last_7_days':
+            setDateRange({ from: startOfDay(subDays(now, 6)), to: endOfDay(now) });
+            break;
+        case 'this_month':
+            setDateRange({ from: startOfMonth(now), to: endOfDay(now) });
+            break;
+        case 'all_time':
+            setDateRange({ from: new Date(2000, 0, 1), to: endOfDay(now) });
+            break;
+        case 'custom':
+            // Do nothing, dateRange is set by the picker
+            break;
+    }
+  }, [dateFilter]);
+
+  // When custom date is picked, change filter state to 'custom'
+  const handleDateRangeChange = (newRange: DateRange | undefined) => {
+      setDateRange(newRange);
+      setDateFilter('custom');
+  }
 
   const buildExpenseQuery = useCallback(() => {
     if (authLoading || !db || !user) return null;
@@ -323,8 +349,36 @@ export default function FoodExpensesClientPage() {
           </div>
         </CardHeader>
         <CardContent className="border-t pt-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <div className="col-span-1 md:col-span-2 lg:col-span-3 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                <div className="col-span-full grid grid-cols-1 sm:grid-cols-2 md:flex md:items-center md:flex-wrap gap-2">
+                     <Button variant={dateFilter === 'today' ? 'default' : 'outline'} onClick={() => setDateFilter('today')}>Today</Button>
+                     <Button variant={dateFilter === 'last_7_days' ? 'default' : 'outline'} onClick={() => setDateFilter('last_7_days')}>Last 7 Days</Button>
+                     <Button variant={dateFilter === 'this_month' ? 'default' : 'outline'} onClick={() => setDateFilter('this_month')}>This Month</Button>
+                     <Button variant={dateFilter === 'all_time' ? 'default' : 'outline'} onClick={() => setDateFilter('all_time')}>All Time</Button>
+                     <Popover>
+                        <PopoverTrigger asChild>
+                        <Button
+                            id="expenseDateRange"
+                            variant={dateFilter === 'custom' ? 'default' : 'outline'}
+                            className={cn("w-full sm:w-auto justify-start text-left font-normal bg-input", !dateRange && "text-muted-foreground")}
+                        >
+                            <CalendarIcon className="mr-2 h-4 w-4" />
+                            {dateRange?.from ? (
+                            dateRange.to ? ( <> {format(dateRange.from, "LLL dd, y")} - {format(dateRange.to, "LLL dd, y")} </>
+                            ) : ( format(dateRange.from, "LLL dd, y") )
+                            ) : ( <span>Pick a date range</span> )}
+                        </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                            initialFocus mode="range" defaultMonth={dateRange?.from}
+                            selected={dateRange} onSelect={handleDateRangeChange} numberOfMonths={2}
+                            disabled={(date) => date > new Date() || date < new Date("2000-01-01")}
+                        />
+                        </PopoverContent>
+                    </Popover>
+                </div>
+                <div className="col-span-full grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
                     {user?.role === 'admin' && (
                         <Select value={siteFilter} onValueChange={setSiteFilter}>
                             <SelectTrigger className="bg-input"><Building className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by site" /></SelectTrigger>
@@ -343,46 +397,7 @@ export default function FoodExpensesClientPage() {
                       <SelectTrigger className="bg-input"><Users className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by user" /></SelectTrigger>
                       <SelectContent><SelectItem value="all">All Users</SelectItem>{allUsers.map(u => (<SelectItem key={u.uid} value={u.uid}>{u.displayName}</SelectItem>))}</SelectContent>
                     </Select>
-                </div>
-                 <div className="col-span-1 md:col-span-2 lg:col-span-3 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-                    <Popover>
-                        <PopoverTrigger asChild>
-                        <Button
-                            id="expenseDateRange"
-                            variant={"outline"}
-                            className={cn(
-                            "w-full sm:w-[280px] justify-start text-left font-normal bg-input",
-                            !dateRange && "text-muted-foreground"
-                            )}
-                        >
-                            <CalendarIcon className="mr-2 h-4 w-4" />
-                            {dateRange?.from ? (
-                            dateRange.to ? (
-                                <>
-                                {format(dateRange.from, "LLL dd, y")} -{" "}
-                                {format(dateRange.to, "LLL dd, y")}
-                                </>
-                            ) : (
-                                format(dateRange.from, "LLL dd, y")
-                            )
-                            ) : (
-                            <span>Pick a date range</span>
-                            )}
-                        </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                            initialFocus
-                            mode="range"
-                            defaultMonth={dateRange?.from}
-                            selected={dateRange}
-                            onSelect={setDateRange}
-                            numberOfMonths={2}
-                            disabled={(date) => date > new Date() || date < new Date("2000-01-01")}
-                        />
-                        </PopoverContent>
-                    </Popover>
-                    <div className="flex items-center gap-2">
+                     <div className="flex items-center gap-2">
                         <Button variant="outline" onClick={() => setShowImportDialog(true)} className="flex-1"><Upload className="mr-2 h-4 w-4" />Import</Button>
                         <Button variant="outline" onClick={handleExport} disabled={isExporting} className="flex-1">{isExporting ? <Download className="mr-2 h-4 w-4 animate-spin"/> : <Download className="mr-2 h-4 w-4" />}Export</Button>
                     </div>
@@ -416,3 +431,4 @@ export default function FoodExpensesClientPage() {
     </div>
   );
 }
+
