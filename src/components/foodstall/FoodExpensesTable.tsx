@@ -117,8 +117,8 @@ export function FoodExpensesTable({
 
   if (isLoading && expenses.length === 0) {
     return (
-      <div className="rounded-lg border shadow-sm overflow-hidden bg-card">
-        <Table>
+      <div className="relative w-full overflow-x-auto rounded-lg border shadow-sm bg-card">
+        <Table className="min-w-full">
           <TableHeader>
             <TableRow>
               <TableHead>Category</TableHead>
@@ -159,8 +159,8 @@ export function FoodExpensesTable({
 
   return (
     <TooltipProvider>
-      <div className="rounded-lg border shadow-sm bg-card">
-        <Table>
+      <div className="relative w-full overflow-x-auto rounded-lg border shadow-sm bg-card">
+        <Table className="min-w-full">
           <TableHeader>
             <TableRow>
               <TableHead className="w-[150px]">Category</TableHead>
