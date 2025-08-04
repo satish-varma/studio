@@ -247,6 +247,7 @@ export default function SalaryAdvanceClientPage() {
                     <TableRow>
                         <TableHead>Date</TableHead>
                         <TableHead>Staff Member</TableHead>
+                        <TableHead>Recorded By</TableHead>
                         <TableHead className="text-right">Amount</TableHead>
                         <TableHead>Notes</TableHead>
                     </TableRow>
@@ -256,6 +257,7 @@ export default function SalaryAdvanceClientPage() {
                         <TableRow key={adv.id}>
                             <TableCell>{format(new Date(adv.date), 'PPP')}</TableCell>
                             <TableCell>{staffList.find(s => s.uid === adv.staffUid)?.displayName || adv.staffUid.substring(0,8)}</TableCell>
+                            <TableCell>{adv.recordedByName || adv.recordedByUid.substring(0,8)}</TableCell>
                             <TableCell className="text-right font-medium">₹{adv.amount.toFixed(2)}</TableCell>
                             <TableCell>{adv.notes || 'N/A'}</TableCell>
                         </TableRow>
