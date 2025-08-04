@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import type { FoodStallActivityLog, Site, AppUser, FoodStallActivityType } from "@/types";
+import type { FoodStallActivityLog, Site, Stall, AppUser, FoodStallActivityType } from "@/types";
 import { 
   getFirestore, 
   collection, 
@@ -59,6 +59,7 @@ export default function FoodActivityLogClientPage() {
   
   const [logs, setLogs] = useState<FoodStallActivityLog[]>([]);
   const [sitesMap, setSitesMap] = useState<Record<string, string>>({});
+  const [stallsMap, setStallsMap] = useState<Record<string, string>>({});
   const [usersMap, setUsersMap] = useState<Record<string, string>>({});
   const [allSites, setAllSites] = useState<Site[]>([]);
   const [allAdminsAndManagers, setAllAdminsAndManagers] = useState<AppUser[]>([]);
@@ -107,7 +108,7 @@ export default function FoodActivityLogClientPage() {
 
   const fetchContextMaps = useCallback(async () => {
     if (!db) return false;
-    console.log(`${LOG_PREFIX} Fetching context maps (sites, users).`);
+    console.log(`${LOG_PREFIX} Fetching context maps (sites, users, stalls).`);
     try {
       const sitesSnapshot = await getDocs(query(collection(db, "sites"), orderBy("name")));
       const newSitesMap: Record<string, string> = {};
@@ -119,6 +120,13 @@ export default function FoodActivityLogClientPage() {
       });
       setSitesMap(newSitesMap);
       setAllSites(fetchedSites);
+
+      const stallsSnapshot = await getDocs(collection(db, "stalls"));
+      const newStallsMap: Record<string, string> = {};
+      stallsSnapshot.forEach(doc => {
+          newStallsMap[doc.id] = (doc.data() as Stall).name;
+      });
+      setStallsMap(newStallsMap);
 
       const usersSnapshot = await getDocs(query(collection(db, "users"), orderBy("displayName")));
       const newUsersMap: Record<string, string> = {};
@@ -221,7 +229,7 @@ export default function FoodActivityLogClientPage() {
 
   useEffect(() => {
     fetchLogsPage('initial');
-  }, [siteFilter, userFilter, typeFilter, dateRange]);
+  }, [siteFilter, userFilter, typeFilter, dateRange, fetchLogsPage]);
 
 
   if (authLoading || (loadingData && logs.length === 0 && !errorData)) {
