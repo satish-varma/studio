@@ -78,7 +78,7 @@ export function FoodActivityLogTable({
       <div className="text-center py-10 px-4 bg-card rounded-lg border shadow-sm">
         <ListChecks className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
         <p className="text-xl font-semibold text-foreground mb-2">No Food Stall Activity Found</p>
-        <p className="text-muted-foreground">No sales or expense activities have been recorded yet.</p>
+        <p className="text-muted-foreground">No sales or expense activities match the current filters.</p>
       </div>
     );
   }
