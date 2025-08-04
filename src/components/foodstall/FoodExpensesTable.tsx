@@ -111,7 +111,7 @@ export function FoodExpensesTable({
               <TableHead>Payment Method</TableHead>
               <TableHead className="hidden md:table-cell">Vendor</TableHead>
               <TableHead className="hidden lg:table-cell">Recorded By</TableHead>
-              <TableHead>Notes</TableHead>
+              <TableHead>Last Updated</TableHead>
               <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -152,7 +152,7 @@ export function FoodExpensesTable({
               <TableHead className="w-[130px]">Payment Method</TableHead>
               <TableHead className="w-[130px] hidden md:table-cell">Vendor</TableHead>
               <TableHead className="w-[150px] hidden lg:table-cell">Recorded By</TableHead>
-              <TableHead className="min-w-[180px]">Notes</TableHead>
+              <TableHead className="w-[120px] hidden lg:table-cell">Last Updated</TableHead>
               <TableHead className="w-[80px]">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -185,22 +185,8 @@ export function FoodExpensesTable({
                 <TableCell className="text-muted-foreground hidden lg:table-cell">
                     {usersMap[expense.recordedByUid] || 'N/A'}
                 </TableCell>
-                <TableCell className="text-xs text-muted-foreground">
-                  {expense.notes ? (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="cursor-help inline-flex items-center gap-1">
-                           <Info size={12} />
-                           {expense.notes}
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent className="max-w-xs">
-                        <p>{expense.notes}</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  ) : (
-                    "N/A"
-                  )}
+                <TableCell className="text-muted-foreground text-xs hidden lg:table-cell">
+                    {formatDateForDisplay(expense.updatedAt)}
                 </TableCell>
                 <TableCell>
                   <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => handleEdit(expense.id)}>

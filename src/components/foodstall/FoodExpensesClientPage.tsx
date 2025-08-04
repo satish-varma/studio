@@ -23,10 +23,10 @@ import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Info, ListFilter, DollarSign, Upload, Download, Building, ShoppingCart, Users, Calendar as CalendarIcon } from "lucide-react";
+import { Loader2, Info, ListFilter, DollarSign, Upload, Download, Building, ShoppingCart, Users, Calendar as CalendarIcon, Wallet } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { FoodExpensesTable } from "./FoodExpensesTable";
-import { foodExpenseCategories } from "@/types/food";
+import { foodExpenseCategories, paymentMethods } from "@/types/food";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -68,6 +68,7 @@ export default function FoodExpensesClientPage() {
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
   const [dateFilter, setDateFilter] = useState<DateFilterOption>('last_7_days');
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState<string>("all");
   const [vendorFilter, setVendorFilter] = useState<string>("all");
   const [siteFilter, setSiteFilter] = useState<string>('all');
   const [userFilter, setUserFilter] = useState<string>('all');
@@ -134,11 +135,12 @@ export default function FoodExpensesClientPage() {
     if(dateRange?.from) qConstraints.push(where("purchaseDate", ">=", Timestamp.fromDate(dateRange.from)));
     if(dateRange?.to) qConstraints.push(where("purchaseDate", "<=", Timestamp.fromDate(dateRange.to)));
     if (categoryFilter !== "all") qConstraints.push(where("category", "==", categoryFilter));
+    if (paymentMethodFilter !== "all") qConstraints.push(where("paymentMethod", "==", paymentMethodFilter));
     if (vendorFilter !== "all") qConstraints.push(where("vendor", "==", vendorFilter));
     if (userFilter !== "all") qConstraints.push(where("recordedByUid", "==", userFilter));
 
     return qConstraints;
-  }, [authLoading, user, activeSiteId, activeStallId, dateRange, categoryFilter, siteFilter, vendorFilter, userFilter]);
+  }, [authLoading, user, activeSiteId, activeStallId, dateRange, categoryFilter, siteFilter, vendorFilter, userFilter, paymentMethodFilter]);
 
 
   useEffect(() => {
@@ -204,11 +206,19 @@ export default function FoodExpensesClientPage() {
       finalConstraints.push(startAfter(lastVisibleDoc));
     } else if (direction === 'prev' && pageHistory.length > 1) {
       const prevPageStartAfter = pageHistory[pageHistory.length - 2];
-      if (prevPageStartAfter) {
-        finalConstraints.push(startAfter(prevPageStartAfter));
-      }
+      const reversedBaseConstraints = baseConstraints
+        .map(c => {
+            if ('type' in c && c.type === 'orderBy' && 'field' in c && c.field === 'purchaseDate') {
+                return orderBy("purchaseDate", "asc");
+            }
+            return c;
+        })
+        .filter(c => c.type !== 'startAfter' && c.type !== 'endBefore');
+      
+      finalConstraints = [...reversedBaseConstraints, endBefore(firstVisibleDoc), limitToLast(EXPENSES_PER_PAGE + 1)];
+    } else {
+       finalConstraints.push(limit(EXPENSES_PER_PAGE + 1));
     }
-    finalConstraints.push(limit(EXPENSES_PER_PAGE + 1));
     
     const expensesCollectionRef = collection(db, "foodItemExpenses");
     const q = query(expensesCollectionRef, ...finalConstraints);
@@ -218,6 +228,10 @@ export default function FoodExpensesClientPage() {
       let fetchedExpenses: FoodItemExpense[] = snapshot.docs.map(doc => ({
         id: doc.id, ...doc.data(), purchaseDate: (doc.data().purchaseDate as Timestamp).toDate(),
       } as FoodItemExpense));
+      
+      if(direction === 'prev') {
+        fetchedExpenses.reverse();
+      }
       
       const hasMore = fetchedExpenses.length > EXPENSES_PER_PAGE;
       if (hasMore) fetchedExpenses.pop();
@@ -254,7 +268,7 @@ export default function FoodExpensesClientPage() {
        setIsLoadingPrevPage(false);
     }
 
-  }, [buildExpenseQuery, db, lastVisibleDoc, pageHistory]);
+  }, [buildExpenseQuery, db, lastVisibleDoc, firstVisibleDoc, pageHistory]);
   
   useEffect(() => {
     fetchExpensesPage('initial');
@@ -430,7 +444,7 @@ export default function FoodExpensesClientPage() {
                         </PopoverContent>
                     </Popover>
                 </div>
-                <div className="col-span-full grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
+                <div className="col-span-full grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2">
                     {user?.role === 'admin' && (
                         <Select value={siteFilter} onValueChange={setSiteFilter}>
                             <SelectTrigger className="bg-input"><Building className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by site" /></SelectTrigger>
@@ -444,6 +458,10 @@ export default function FoodExpensesClientPage() {
                     <Select value={categoryFilter} onValueChange={setCategoryFilter}>
                       <SelectTrigger className="bg-input"><ListFilter className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by category" /></SelectTrigger>
                       <SelectContent><SelectItem value="all">All Categories</SelectItem>{foodExpenseCategories.map(cat => (<SelectItem key={cat} value={cat}>{cat}</SelectItem>))}</SelectContent>
+                    </Select>
+                    <Select value={paymentMethodFilter} onValueChange={setPaymentMethodFilter}>
+                      <SelectTrigger className="bg-input"><Wallet className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by payment method" /></SelectTrigger>
+                      <SelectContent><SelectItem value="all">All Payment Methods</SelectItem>{paymentMethods.map(m => (<SelectItem key={m} value={m}>{m}</SelectItem>))}</SelectContent>
                     </Select>
                     <Select value={userFilter} onValueChange={setUserFilter}>
                       <SelectTrigger className="bg-input"><Users className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by user" /></SelectTrigger>
