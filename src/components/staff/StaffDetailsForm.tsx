@@ -1,3 +1,4 @@
+
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -189,7 +190,7 @@ export default function StaffDetailsForm({ staffUid, initialData, staffUser }: S
                 <div className="flex justify-center items-center py-10"><Loader2 className="h-6 w-6 animate-spin"/></div>
             ) : (
                 <StaffHistory 
-                    initialDetails={initialData}
+                    initialDetails={initialData || null}
                     logs={activityLogs} 
                     advances={advances}
                     payments={payments}
@@ -201,4 +202,3 @@ export default function StaffDetailsForm({ staffUid, initialData, staffUser }: S
     </div>
   );
 }
-
