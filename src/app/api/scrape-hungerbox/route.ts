@@ -44,12 +44,9 @@ async function scrapeData(username: string, password_hb: string) {
     console.log(`${LOG_PREFIX} Starting browser for scraping...`);
     let browser;
     let page;
-
-    // Define the directory for screenshots
-    const scrapeDir = path.join(process.cwd(), 'public', 'scrapes');
+    let pageContentOnError = "";
 
     try {
-        await fs.mkdir(scrapeDir, { recursive: true });
         browser = await puppeteer.launch({
             headless: true,
             args: ['--no-sandbox', '--disable-setuid-sandbox']
@@ -59,7 +56,6 @@ async function scrapeData(username: string, password_hb: string) {
         
         console.log(`${LOG_PREFIX} Navigating to Hungerbox login page...`);
         await page.goto('https://admin.hungerbox.com/', { waitUntil: 'networkidle2' });
-        await page.screenshot({ path: `${scrapeDir}/01_initial_page.png` });
 
         const usernameSelector = 'input[name="email"]';
         const passwordSelector = 'input[name="password"]';
@@ -69,17 +65,14 @@ async function scrapeData(username: string, password_hb: string) {
         console.log(`${LOG_PREFIX} Login form detected. Logging in...`);
         await page.type(usernameSelector, username);
         await page.type(passwordSelector, password_hb);
-        await page.screenshot({ path: `${scrapeDir}/02_before_login_click.png` });
         await page.click(submitButtonSelector);
         
         console.log(`${LOG_PREFIX} Login step completed. Waiting for navigation...`);
         await page.waitForNavigation({ waitUntil: 'networkidle2' });
-        await page.screenshot({ path: `${scrapeDir}/03_after_login.png` });
         
         const reportUrl = 'https://admin.hungerbox.com/va/reporting/schedule-report/HBR1';
         console.log(`${LOG_PREFIX} Navigating to report page: ${reportUrl}`);
         await page.goto(reportUrl, { waitUntil: 'networkidle2' });
-        await page.screenshot({ path: `${scrapeDir}/04_report_page.png` });
         console.log(`${LOG_PREFIX} Arrived at report page.`);
 
         console.log(`${LOG_PREFIX} Finding and clicking 'Select All' checkboxes...`);
@@ -101,14 +94,12 @@ async function scrapeData(username: string, password_hb: string) {
                  throw new Error('Could not find Cafeteria "Select All" checkbox.');
              }
         });
-        await page.screenshot({ path: `${scrapeDir}/05_after_checkboxes.png` });
         console.log(`${LOG_PREFIX} 'Select All' checkboxes clicked.`);
         
         const startDate = '03-06-2025';
         const endDate = format(new Date(), 'dd-MM-yyyy');
         console.log(`${LOG_PREFIX} Setting date range from ${startDate} to ${endDate}...`);
         console.log(`${LOG_PREFIX} (LOG) Would now interact with date picker elements on the page.`);
-        await page.screenshot({ path: `${scrapeDir}/06_before_date_selection.png` });
         
         console.log(`${LOG_PREFIX} Finding and clicking 'Schedule Report' button...`);
         await page.evaluate(() => {
@@ -121,7 +112,6 @@ async function scrapeData(username: string, password_hb: string) {
                  throw new Error('Could not find "Schedule Report" button.');
             }
         });
-        await page.screenshot({ path: `${scrapeDir}/07_after_schedule_click.png` });
         console.log(`${LOG_PREFIX} 'Schedule Report' button clicked.`);
 
         console.log(`${LOG_PREFIX} Waiting for report to generate/download...`);
@@ -129,20 +119,19 @@ async function scrapeData(username: string, password_hb: string) {
         
         console.log(`${LOG_PREFIX} Scraped mock data. In a real scenario, this would read a downloaded file.`);
         return [
-            { date: new Date().toISOString().split('T')[0], hungerboxSales: (Math.random() * 500 + 100).toFixed(2), upiSales: (Math.random() * 200).toFixed(2) },
+            { date: new Date().toISOString().split('T')[0], hungerboxSales: (Math.random() * 500 + 100).toFixed(2), upiSales: (Math.random() * 200).toFixed(2), stallId: 'mockStall1', siteId: 'mockSite1' },
+            { date: new Date().toISOString().split('T')[0], hungerboxSales: (Math.random() * 300).toFixed(2), upiSales: (Math.random() * 100).toFixed(2), stallId: 'mockStall2', siteId: 'mockSite1' },
         ];
     } catch (error: any) {
         console.error(`${LOG_PREFIX} Scraping failed:`, error);
-        let pageContent = "";
         if (page) {
             try {
-                await page.screenshot({ path: `${scrapeDir}/99_error_page.png` });
-                pageContent = await page.content();
+                pageContentOnError = await page.content();
             } catch (contentError) {
-                pageContent = "Could not retrieve page content after initial error.";
+                pageContentOnError = "Could not retrieve page content after initial error.";
             }
         }
-        throw new Error(`Failed to scrape data. This could be due to incorrect credentials, a change in the website's layout, or a CAPTCHA. Original error: ${error.message}. HTML content at time of failure is included in the full error message in the server logs.`);
+        throw new Error(`Failed to scrape data. This could be due to incorrect credentials, a change in the website's layout, or a CAPTCHA. Please check the selectors in the API route. Raw HTML at time of error: ${pageContentOnError}`);
     } finally {
         if (browser) {
             await browser.close();
@@ -168,16 +157,16 @@ export async function POST(request: NextRequest) {
         const idToken = authorization.split('Bearer ')[1];
         const decodedToken = await adminAuth.verifyIdToken(idToken);
         const userDocRef = adminDb.collection("users").doc(decodedToken.uid);
-        const callingUserDocSnap = await userDocRef.get(); // This is the corrected call
+        const callingUserDocSnap = await userDocRef.get();
 
         if (!callingUserDocSnap.exists()) {
           return NextResponse.json({ error: 'Caller user document not found in Firestore.' }, { status: 403 });
         }
         callingUser = { uid: callingUserDocSnap.id, ...callingUserDocSnap.data() } as AppUser;
 
-        const { username, password, siteId, stallId } = await request.json();
-        if (!username || !password || !siteId || !stallId) {
-            return NextResponse.json({ error: 'Missing required fields: username, password, siteId, or stallId.'}, { status: 400 });
+        const { username, password } = await request.json();
+        if (!username || !password) {
+            return NextResponse.json({ error: 'Missing required fields: username or password.'}, { status: 400 });
         }
         
         const scrapedData = await scrapeData(username, password);
@@ -186,10 +175,12 @@ export async function POST(request: NextRequest) {
         const batch = adminDb.batch();
 
         for (const record of scrapedData) {
-            if (!record.date) continue;
+            // In a real scenario, the CSV/report would contain site/stall identifiers to map to your Firestore IDs
+            // For this mock, we'll use hardcoded IDs
+            if (!record.date || !record.siteId || !record.stallId) continue;
 
             const saleDate = new Date(record.date);
-            const docId = `${record.date}_${stallId}`;
+            const docId = `${record.date}_${record.stallId}`;
             const docRef = adminDb.collection("foodSaleTransactions").doc(docId);
             
             const breakfastSales = parseFloat(record.hungerboxSales) || 0;
@@ -204,8 +195,8 @@ export async function POST(request: NextRequest) {
                 snacks: { hungerbox: 0, upi: 0, other: 0 },
                 totalAmount: total,
                 notes: `Imported from Hungerbox on ${new Date().toLocaleDateString()}`,
-                siteId: siteId,
-                stallId: stallId,
+                siteId: record.siteId,
+                stallId: record.stallId,
                 recordedByUid: callingUser.uid,
                 recordedByName: callingUser.displayName || callingUser.email,
                 createdAt: new Date().toISOString(),
@@ -219,11 +210,11 @@ export async function POST(request: NextRequest) {
         
         if (processedCount > 0) {
             await logFoodStallActivity(callingUser, {
-                siteId: siteId,
-                stallId: stallId,
+                siteId: 'CONSOLIDATED', // Use a special identifier for consolidated reports
+                stallId: 'CONSOLIDATED',
                 type: 'SALE_RECORDED_OR_UPDATED',
                 relatedDocumentId: `hungerbox-import-${Date.now()}`,
-                details: { notes: `Successfully imported ${processedCount} sales records from Hungerbox.` }
+                details: { notes: `Successfully imported ${processedCount} sales records from Hungerbox consolidated report.` }
             });
         }
 

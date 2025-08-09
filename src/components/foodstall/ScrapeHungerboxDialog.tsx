@@ -1,21 +1,16 @@
 
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Bot, Eye, EyeOff, Building, Store } from "lucide-react";
+import { Loader2, Bot, Eye, EyeOff } from "lucide-react";
 import { useAuth } from '@/contexts/AuthContext';
 import { auth } from '@/lib/firebaseConfig';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { getFirestore, collection, query, orderBy, onSnapshot, where } from 'firebase/firestore';
-import type { Site, Stall } from '@/types';
-
-const db = getFirestore();
 
 interface ScrapeHungerboxDialogProps {
   isOpen: boolean;
@@ -28,56 +23,13 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
   const [isScraping, setIsScraping] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  // New state for site/stall selection within the dialog
-  const [allSites, setAllSites] = useState<Site[]>([]);
-  const [stallsForSite, setStallsForSite] = useState<Stall[]>([]);
-  const [selectedSiteId, setSelectedSiteId] = useState<string>('');
-  const [selectedStallId, setSelectedStallId] = useState<string>('');
-  const [loadingContext, setLoadingContext] = useState(true);
-
   const { toast } = useToast();
   const { user } = useAuth();
-  
-  // Fetch sites and stalls when the dialog is open
-  useEffect(() => {
-    if (!isOpen || !db) return;
-
-    setLoadingContext(true);
-    const sitesQuery = query(collection(db, "sites"), orderBy("name"));
-    const unsubSites = onSnapshot(sitesQuery, (snapshot) => {
-        setAllSites(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()} as Site)));
-        setLoadingContext(false);
-    }, () => setLoadingContext(false));
-
-    return () => {
-      unsubSites();
-    };
-  }, [isOpen]);
-
-  // Update stalls dropdown when a site is selected
-  useEffect(() => {
-    if (selectedSiteId) {
-        setLoadingContext(true);
-        const stallsQuery = query(collection(db, "stalls"), where("siteId", "==", selectedSiteId), orderBy("name"));
-        const unsub = onSnapshot(stallsQuery, (snapshot) => {
-            setStallsForSite(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()} as Stall)));
-            setLoadingContext(false);
-        });
-        return () => unsub();
-    }
-    setStallsForSite([]);
-    setSelectedStallId(''); // Reset stall when site changes
-  }, [selectedSiteId]);
-
 
   const handleImport = async () => {
     if (!username || !password) {
       toast({ title: "Missing Credentials", description: "Please enter your Hungerbox username and password.", variant: "destructive" });
       return;
-    }
-     if (!selectedSiteId || !selectedStallId) {
-        toast({ title: "Context Required", description: "Please select a site and stall to associate this import with.", variant: "destructive" });
-        return;
     }
     if (!user) {
       toast({ title: "Authentication Error", description: "You must be logged in to import data.", variant: "destructive" });
@@ -94,7 +46,7 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
       const response = await fetch('/api/scrape-hungerbox', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
-        body: JSON.stringify({ username, password, siteId: selectedSiteId, stallId: selectedStallId }),
+        body: JSON.stringify({ username, password, consolidated: true }), // Send consolidated flag
       });
 
       const result = await response.json();
@@ -118,9 +70,9 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
     <Dialog open={isOpen} onOpenChange={(open) => { if(!open) onClose(); }}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Import from Hungerbox</DialogTitle>
+          <DialogTitle>Import Consolidated Report</DialogTitle>
           <DialogDescription>
-            Enter your credentials and select the site/stall to associate the imported sales data with.
+            Enter your Hungerbox credentials to import the consolidated sales report.
           </DialogDescription>
         </DialogHeader>
         <div className="py-4 space-y-4">
@@ -131,22 +83,6 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
               This feature works by simulating a browser login. If Hungerbox changes their website layout, this import may fail.
             </AlertDescription>
           </Alert>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-             <div className="space-y-2">
-                <Label htmlFor="import-site-select">Site *</Label>
-                <Select value={selectedSiteId} onValueChange={setSelectedSiteId} disabled={loadingContext || isScraping}>
-                    <SelectTrigger id="import-site-select"><Building className="h-4 w-4 mr-2 text-muted-foreground"/><SelectValue placeholder="Select site..."/></SelectTrigger>
-                    <SelectContent>{allSites.map(site => <SelectItem key={site.id} value={site.id}>{site.name}</SelectItem>)}</SelectContent>
-                </Select>
-            </div>
-            <div className="space-y-2">
-                <Label htmlFor="import-stall-select">Stall *</Label>
-                 <Select value={selectedStallId} onValueChange={setSelectedStallId} disabled={!selectedSiteId || loadingContext || isScraping}>
-                    <SelectTrigger id="import-stall-select"><Store className="h-4 w-4 mr-2 text-muted-foreground"/><SelectValue placeholder={!selectedSiteId ? "Select site first" : "Select stall..."}/></SelectTrigger>
-                    <SelectContent>{stallsForSite.map(stall => <SelectItem key={stall.id} value={stall.id}>{stall.name}</SelectItem>)}</SelectContent>
-                </Select>
-            </div>
-          </div>
           <div className="space-y-2">
             <Label htmlFor="hb-username">Hungerbox Username</Label>
             <Input 
@@ -184,7 +120,7 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={isScraping}>Cancel</Button>
-          <Button onClick={handleImport} disabled={isScraping || !username || !password || !selectedSiteId || !selectedStallId}>
+          <Button onClick={handleImport} disabled={isScraping || !username || !password}>
             {isScraping ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Bot className="h-4 w-4 mr-2" />}
             Import Data
           </Button>
