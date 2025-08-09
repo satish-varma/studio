@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { FoodItemExpense, Site, Stall, AppUser } from "@/types";
 import {
   getFirestore,
@@ -68,6 +68,8 @@ export default function FoodExpensesClientPage() {
     to: endOfDay(new Date())
   }));
   const [tempDateRange, setTempDateRange] = useState<DateRange | undefined>(dateRange);
+  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+
 
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<string>("all");
@@ -126,7 +128,7 @@ export default function FoodExpensesClientPage() {
   
   const applyDateFilter = () => {
     setDateRange(tempDateRange);
-    document.dispatchEvent(new Event('close-date-picker-popover'));
+    setIsDatePickerOpen(false); // Close popover on apply
   };
 
   const buildExpenseQuery = useCallback(() => {
@@ -413,7 +415,10 @@ export default function FoodExpensesClientPage() {
         <CardContent className="border-t pt-4">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 <div className="col-span-full">
-                    <Popover onOpenChange={(open) => { if (!open) setTempDateRange(dateRange)}}>
+                    <Popover open={isDatePickerOpen} onOpenChange={(open) => {
+                      setIsDatePickerOpen(open);
+                      if (!open) setTempDateRange(dateRange); // Reset temp range if closed without applying
+                    }}>
                         <PopoverTrigger asChild>
                         <Button
                             id="expenseDateRange"
@@ -450,7 +455,7 @@ export default function FoodExpensesClientPage() {
                                     disabled={(date) => date > new Date() || date < new Date("2000-01-01")}
                                 />
                                 <div className="flex justify-end gap-2 pt-2 border-t mt-2">
-                                     <Button variant="ghost" onClick={() => document.dispatchEvent(new Event('close-date-picker-popover'))}>Close</Button>
+                                     <Button variant="ghost" onClick={() => setIsDatePickerOpen(false)}>Close</Button>
                                      <Button onClick={applyDateFilter}>Apply</Button>
                                 </div>
                             </div>
