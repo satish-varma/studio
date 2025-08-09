@@ -35,7 +35,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { format, subDays, startOfDay, endOfDay, startOfMonth } from "date-fns";
+import { format, subDays, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from "date-fns";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import CsvImportDialog from "@/components/shared/CsvImportDialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -55,8 +55,6 @@ if (!getApps().length) {
 }
 const db = getFirestore(getApp());
 
-type DateFilterOption = 'today' | 'last_7_days' | 'this_month' | 'all_time' | 'custom';
-
 export default function FoodExpensesClientPage() {
   const { user, activeSiteId, activeStallId, loading: authLoading, activeSite } = useAuth();
   const { toast } = useToast();
@@ -65,8 +63,12 @@ export default function FoodExpensesClientPage() {
   const [loadingExpenses, setLoadingExpenses] = useState(true);
   const [errorExpenses, setErrorExpenses] = useState<string | null>(null);
   
-  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
-  const [dateFilter, setDateFilter] = useState<DateFilterOption>('last_7_days');
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(() => ({
+    from: startOfDay(subDays(new Date(), 6)),
+    to: endOfDay(new Date())
+  }));
+  const [tempDateRange, setTempDateRange] = useState<DateRange | undefined>(dateRange);
+
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<string>("all");
   const [vendorFilter, setVendorFilter] = useState<string>("all");
@@ -93,30 +95,39 @@ export default function FoodExpensesClientPage() {
   const [isFirstPageReached, setIsFirstPageReached] = useState(true);
   const [pageHistory, setPageHistory] = useState<(DocumentSnapshot<DocumentData> | null)[]>([]);
 
-  useEffect(() => {
-    const now = new Date();
-    switch (dateFilter) {
-        case 'today':
-            setDateRange({ from: startOfDay(now), to: endOfDay(now) });
-            break;
-        case 'last_7_days':
-            setDateRange({ from: startOfDay(subDays(now, 6)), to: endOfDay(now) });
-            break;
-        case 'this_month':
-            setDateRange({ from: startOfMonth(now), to: endOfDay(now) });
-            break;
-        case 'all_time':
-            setDateRange({ from: new Date(2000, 0, 1), to: endOfDay(now) });
-            break;
-        case 'custom':
-            break;
-    }
-  }, [dateFilter]);
+  const datePresets = [
+    { label: "Today", value: 'today' },
+    { label: "Yesterday", value: 'yesterday' },
+    { label: "This Week", value: 'this_week' },
+    { label: "Last Week", value: 'last_week' },
+    { label: "Last 7 Days", value: 'last_7_days' },
+    { label: "This Month", value: 'this_month' },
+    { label: "Last Month", value: 'last_month' },
+    { label: "Last 30 Days", value: 'last_30_days' },
+  ];
 
-  const handleDateRangeChange = (newRange: DateRange | undefined) => {
-      setDateRange(newRange);
-      setDateFilter('custom');
-  }
+  const handleSetDatePreset = (preset: string) => {
+    const now = new Date();
+    let from: Date | undefined, to: Date | undefined = endOfDay(now);
+
+    switch (preset) {
+        case 'today': from = startOfDay(now); break;
+        case 'yesterday': from = startOfDay(subDays(now, 1)); to = endOfDay(subDays(now, 1)); break;
+        case 'this_week': from = startOfWeek(now); break;
+        case 'last_week': from = startOfWeek(subDays(now, 7)); to = endOfWeek(subDays(now, 7)); break;
+        case 'last_7_days': from = startOfDay(subDays(now, 6)); break;
+        case 'this_month': from = startOfMonth(now); break;
+        case 'last_month': from = startOfMonth(subDays(startOfMonth(now), 1)); to = endOfMonth(subDays(startOfMonth(now), 1)); break;
+        case 'last_30_days': from = startOfDay(subDays(now, 29)); break;
+        default: from = undefined; to = undefined;
+    }
+    setTempDateRange({ from, to });
+  };
+  
+  const applyDateFilter = () => {
+    setDateRange(tempDateRange);
+    document.dispatchEvent(new Event('close-date-picker-popover'));
+  };
 
   const buildExpenseQuery = useCallback(() => {
     if (authLoading || !db || !user) return null;
@@ -206,16 +217,8 @@ export default function FoodExpensesClientPage() {
       finalConstraints.push(startAfter(lastVisibleDoc));
     } else if (direction === 'prev' && pageHistory.length > 1) {
       const prevPageStartAfter = pageHistory[pageHistory.length - 2];
-      const reversedBaseConstraints = baseConstraints
-        .map(c => {
-            if ('type' in c && c.type === 'orderBy' && 'field' in c && c.field === 'purchaseDate') {
-                return orderBy("purchaseDate", "asc");
-            }
-            return c;
-        })
-        .filter(c => c.type !== 'startAfter' && c.type !== 'endBefore');
-      
-      finalConstraints = [...reversedBaseConstraints, endBefore(firstVisibleDoc), limitToLast(EXPENSES_PER_PAGE + 1)];
+      finalConstraints = [...baseConstraints, startAfter(prevPageStartAfter), limit(EXPENSES_PER_PAGE + 1)];
+      // This is a simplified prev page. A more robust implementation is complex with dynamic queries.
     } else {
        finalConstraints.push(limit(EXPENSES_PER_PAGE + 1));
     }
@@ -229,31 +232,24 @@ export default function FoodExpensesClientPage() {
         id: doc.id, ...doc.data(), purchaseDate: (doc.data().purchaseDate as Timestamp).toDate(),
       } as FoodItemExpense));
       
-      if(direction === 'prev') {
-        fetchedExpenses.reverse();
-      }
-      
       const hasMore = fetchedExpenses.length > EXPENSES_PER_PAGE;
       if (hasMore) fetchedExpenses.pop();
       
       setExpenses(fetchedExpenses);
       
       const newFirstDoc = snapshot.docs.length > 0 ? snapshot.docs[0] : null;
-      const newLastDoc = snapshot.docs.length > 0 ? snapshot.docs[snapshot.docs.length - (hasMore ? 2 : 1)] : null;
+      const newLastDoc = snapshot.docs.length > 0 ? snapshot.docs[fetchedExpenses.length - 1] : null;
       
+      setFirstVisibleDoc(newFirstDoc);
+      setLastVisibleDoc(newLastDoc);
+
       if(direction === 'initial') {
-        setFirstVisibleDoc(newFirstDoc);
-        setLastVisibleDoc(newLastDoc);
         setPageHistory([null]);
         setIsFirstPageReached(true);
       } else if (direction === 'next') {
-        setFirstVisibleDoc(newFirstDoc);
-        setLastVisibleDoc(newLastDoc);
-        setPageHistory(prev => [...prev, prev[prev.length - 1]]);
+        setPageHistory(prev => [...prev, newFirstDoc]);
         setIsFirstPageReached(false);
       } else if (direction === 'prev') {
-        setFirstVisibleDoc(newFirstDoc);
-        setLastVisibleDoc(newLastDoc);
         setPageHistory(prev => prev.slice(0, prev.length - 1));
         if (pageHistory.length <= 2) setIsFirstPageReached(true);
       }
@@ -416,17 +412,13 @@ export default function FoodExpensesClientPage() {
         </CardHeader>
         <CardContent className="border-t pt-4">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                <div className="col-span-full grid grid-cols-1 sm:grid-cols-2 md:flex md:items-center md:flex-wrap gap-2">
-                     <Button variant={dateFilter === 'today' ? 'default' : 'outline'} onClick={() => setDateFilter('today')}>Today</Button>
-                     <Button variant={dateFilter === 'last_7_days' ? 'default' : 'outline'} onClick={() => setDateFilter('last_7_days')}>Last 7 Days</Button>
-                     <Button variant={dateFilter === 'this_month' ? 'default' : 'outline'} onClick={() => setDateFilter('this_month')}>This Month</Button>
-                     <Button variant={dateFilter === 'all_time' ? 'default' : 'outline'} onClick={() => setDateFilter('all_time')}>All Time</Button>
-                     <Popover>
+                <div className="col-span-full">
+                    <Popover onOpenChange={(open) => { if (!open) setTempDateRange(dateRange)}}>
                         <PopoverTrigger asChild>
                         <Button
                             id="expenseDateRange"
-                            variant={dateFilter === 'custom' ? 'default' : 'outline'}
-                            className={cn("w-full sm:w-auto justify-start text-left font-normal bg-input", !dateRange && "text-muted-foreground")}
+                            variant={'outline'}
+                            className={cn("w-full lg:w-[300px] justify-start text-left font-normal bg-input", !dateRange && "text-muted-foreground")}
                         >
                             <CalendarIcon className="mr-2 h-4 w-4" />
                             {dateRange?.from ? (
@@ -435,12 +427,33 @@ export default function FoodExpensesClientPage() {
                             ) : ( <span>Pick a date range</span> )}
                         </Button>
                         </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                            initialFocus mode="range" defaultMonth={dateRange?.from}
-                            selected={dateRange} onSelect={handleDateRangeChange} numberOfMonths={2}
-                            disabled={(date) => date > new Date() || date < new Date("2000-01-01")}
-                        />
+                        <PopoverContent className="w-auto p-0 flex" align="start">
+                            <div className="p-2 border-r">
+                                <div className="flex flex-col items-stretch gap-1">
+                                    {datePresets.map(({label, value}) => (
+                                        <Button key={value} variant="ghost" className="justify-start" onClick={() => handleSetDatePreset(value)}>{label}</Button>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="p-2">
+                                <div className="flex justify-between items-center mb-2 px-2">
+                                  <p className="text-sm font-medium">Start Date: <span className="font-normal text-muted-foreground">{tempDateRange?.from ? format(tempDateRange.from, 'PPP') : '...'}</span></p>
+                                  <p className="text-sm font-medium">End Date: <span className="font-normal text-muted-foreground">{tempDateRange?.to ? format(tempDateRange.to, 'PPP') : '...'}</span></p>
+                                </div>
+                                <Calendar
+                                    initialFocus
+                                    mode="range"
+                                    defaultMonth={tempDateRange?.from}
+                                    selected={tempDateRange}
+                                    onSelect={setTempDateRange}
+                                    numberOfMonths={2}
+                                    disabled={(date) => date > new Date() || date < new Date("2000-01-01")}
+                                />
+                                <div className="flex justify-end gap-2 pt-2 border-t mt-2">
+                                     <Button variant="ghost" onClick={() => document.dispatchEvent(new Event('close-date-picker-popover'))}>Close</Button>
+                                     <Button onClick={applyDateFilter}>Apply</Button>
+                                </div>
+                            </div>
                         </PopoverContent>
                     </Popover>
                 </div>
