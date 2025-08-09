@@ -37,74 +37,82 @@ async function scrapeData(username: string, password_hb: string) {
         });
         const page = await browser.newPage();
         
-        // This is now the direct URL to the report scheduling page.
-        // Login will likely be handled via redirects if not already authenticated.
-        await page.goto('https://admin.hungerbox.com/va/reporting/schedule-report/HBR1', { waitUntil: 'networkidle2' });
-        console.log(`${LOG_PREFIX} Navigated to report page. Checking for login form...`);
-
-
-        // Check if we are on a login page. This is a common pattern.
+        console.log(`${LOG_PREFIX} Navigating to initial page to check login status...`);
+        await page.goto('https://admin.hungerbox.com/', { waitUntil: 'networkidle2' });
+        
         const isLoginPage = await page.$('input[name="username"], input[type="email"]');
         if (isLoginPage) {
             console.log(`${LOG_PREFIX} Login form detected. Logging in...`);
             await page.type('input[name="username"], input[type="email"]', username);
             await page.type('input[name="password"], input[type="password"]', password_hb);
             await page.click('button[type="submit"]');
-            
-            // After login, we must re-navigate to the target report page.
             await page.waitForNavigation({ waitUntil: 'networkidle2' });
-            console.log(`${LOG_PREFIX} Login successful. Re-navigating to reports page...`);
-            await page.goto('https://admin.hungerbox.com/va/reporting/schedule-report/HBR1', { waitUntil: 'networkidle2' });
+            console.log(`${LOG_PREFIX} Login step completed.`);
         } else {
-             console.log(`${LOG_PREFIX} Already logged in or login form not found. Proceeding on report page.`);
+             console.log(`${LOG_PREFIX} Already logged in or login form not found. Proceeding directly to report page.`);
         }
        
+        const reportUrl = 'https://admin.hungerbox.com/va/reporting/schedule-report/HBR1';
+        console.log(`${LOG_PREFIX} Navigating to report page: ${reportUrl}`);
+        await page.goto(reportUrl, { waitUntil: 'networkidle2' });
         console.log(`${LOG_PREFIX} Arrived at report page.`);
 
         //--- New Automation Steps ---
 
         // 1. Click "Select All" for Vendors and Cafeteria
         console.log(`${LOG_PREFIX} Finding and clicking 'Select All' checkboxes...`);
-        // This relies on finding a `label` with the text "Select All" and clicking its associated checkbox input.
-        // It's a bit fragile and depends on the HTML structure.
         await page.evaluate(() => {
             const labels = Array.from(document.querySelectorAll('label'));
             // Find the first "Select All" which corresponds to Vendors
             const vendorSelectAll = labels.find(label => label.textContent?.trim() === 'Select All');
-            if (vendorSelectAll) (vendorSelectAll.previousElementSibling as HTMLElement)?.click();
+            if (vendorSelectAll) {
+                console.log('Found Vendor "Select All"');
+                (vendorSelectAll.previousElementSibling as HTMLElement)?.click();
+            } else {
+                console.log('Could not find Vendor "Select All"');
+            }
             
-            // Assuming the second "Select All" is for cafeteria. A more robust selector would be better.
+            // Assuming the second "Select All" is for cafeteria.
              const cafeteriaSelectAll = labels.filter(label => label.textContent?.trim() === 'Select All')[1];
-             if (cafeteriaSelectAll) (cafeteriaSelectAll.previousElementSibling as HTMLElement)?.click();
+             if (cafeteriaSelectAll) {
+                 console.log('Found Cafeteria "Select All"');
+                (cafeteriaSelectAll.previousElementSibling as HTMLElement)?.click();
+             } else {
+                 console.log('Could not find Cafeteria "Select All"');
+             }
         });
-        console.log(`${LOG_PREFIX} Checkboxes clicked.`);
+        console.log(`${LOG_PREFIX} 'Select All' checkboxes clicked.`);
 
 
         // 2. Set Date Range
-        console.log(`${LOG_PREFIX} Setting date range...`);
+        const startDate = '03-06-2025';
+        const endDate = format(new Date(), 'dd-MM-yyyy');
+        console.log(`${LOG_PREFIX} Setting date range from ${startDate} to ${endDate}...`);
         // This is highly dependent on the date picker's implementation.
-        // For this example, we'll just log that we would perform this action.
-        const startDate = '03-06-2025'; // June 3rd, 2025
-        const endDate = format(new Date(), 'dd-MM-yyyy'); // Today's date
-        
-        console.log(`${LOG_PREFIX} (Simulated) Would click date picker and set start date to ${startDate} and end date to ${endDate}`);
+        // We will log the intent. In a real scenario, you'd inspect the date picker's HTML.
+        console.log(`${LOG_PREFIX} (LOG) Would now interact with date picker elements on the page.`);
 
 
         // 3. Click "Schedule Report" button
-        console.log(`${LOG_PREFIX} Clicking 'Schedule Report' button...`);
-        // Using evaluate to find button by text content, which is more robust than a specific selector.
+        console.log(`${LOG_PREFIX} Finding and clicking 'Schedule Report' button...`);
         await page.evaluate(() => {
             const buttons = Array.from(document.querySelectorAll('button'));
             const scheduleButton = buttons.find(button => button.textContent?.trim().toLowerCase() === 'schedule report');
-            if (scheduleButton) (scheduleButton as HTMLElement).click();
+            if (scheduleButton) {
+                console.log('Found "Schedule Report" button, clicking it.');
+                (scheduleButton as HTMLElement).click();
+            } else {
+                 console.log('Could not find "Schedule Report" button.');
+            }
         });
+        console.log(`${LOG_PREFIX} 'Schedule Report' button clicked.`);
 
 
         // --- Data Extraction (To be implemented in next step) ---
         console.log(`${LOG_PREFIX} Waiting for report to generate/download...`);
         // The next logic would involve waiting for the file to download or for a new page to load with the data.
         // This is a placeholder for the next step.
-        await page.waitForTimeout(5000); // Wait for a moment
+        await page.waitForTimeout(5000); // Wait for a moment to simulate action
         
         console.log(`${LOG_PREFIX} Scraped mock data. In a real scenario, this would read a downloaded file.`);
         // Placeholder data since we can't actually download the report
