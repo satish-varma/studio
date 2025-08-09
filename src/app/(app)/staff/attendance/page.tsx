@@ -67,7 +67,7 @@ export default function StaffAttendanceClientPage() {
 
   // Use the optimized hook to fetch users and related data
   const {
-    users: allStaffForSite,
+    users: allStaffForContext,
     sites,
     staffDetails: staffDetailsMap,
     loading: userManagementLoading,
@@ -86,12 +86,11 @@ export default function StaffAttendanceClientPage() {
   const handleGoToCurrentMonth = () => setCurrentMonth(new Date());
 
   const filteredStaffList = useMemo(() => {
-    const operationalStaff = allStaffForSite;
     if (statusFilter === 'all') {
-      return operationalStaff;
+      return allStaffForContext;
     }
-    return operationalStaff.filter(u => (u.status || 'active') === statusFilter);
-  }, [allStaffForSite, statusFilter]);
+    return allStaffForContext.filter(u => (u.status || 'active') === statusFilter);
+  }, [allStaffForContext, statusFilter]);
   
   useEffect(() => {
     setSelectedStaffUids([]);
@@ -101,7 +100,7 @@ export default function StaffAttendanceClientPage() {
     const firstDay = startOfMonth(currentMonth);
     const lastDay = endOfMonth(currentMonth);
 
-    const uids = allStaffForSite.map(s => s.uid);
+    const uids = allStaffForContext.map(s => s.uid);
     setAttendance({}); // Reset attendance when staff list or month changes
 
     if (uids.length > 0) {
@@ -134,7 +133,7 @@ export default function StaffAttendanceClientPage() {
 
         return () => unsubscribers.forEach(unsub => unsub());
     }
-  }, [currentMonth, allStaffForSite]);
+  }, [currentMonth, allStaffForContext]);
 
   useEffect(() => {
     const firstDay = startOfMonth(currentMonth);
@@ -168,15 +167,21 @@ export default function StaffAttendanceClientPage() {
   }, [holidays]);
 
   const handleStatusChange = useCallback(async (staff: AppUser, date: Date) => {
-    const siteIdForAttendance = staff.defaultSiteId || activeSiteId;
-    const holidayInfo = isHoliday(date, siteIdForAttendance);
-
     if (!user) return;
+    
+    const siteIdForAttendance = staff.defaultSiteId || activeSiteId;
 
-    if (!siteIdForAttendance) {
-        toast({ title: "No Site Assigned", description: `Cannot mark attendance as no site context could be determined for ${staff.displayName}.`, variant: "destructive" });
+    if ((staff.role === 'admin' || staff.role === 'manager') && !siteIdForAttendance) {
+        toast({ title: "Site Context Required", description: `To mark attendance for ${staff.displayName}, please select a site from the header. Their attendance will be logged for that site.`, variant: "destructive" });
         return;
     }
+    
+    if (staff.role === 'staff' && !siteIdForAttendance) {
+        toast({ title: "No Site Assigned", description: `${staff.displayName} is not assigned to a site.`, variant: "destructive" });
+        return;
+    }
+
+    const holidayInfo = isHoliday(date, siteIdForAttendance);
 
     if (holidayInfo.holiday) {
       toast({ title: "Holiday", description: `Cannot mark attendance on ${holidayInfo.name}.`, variant: "default" });
@@ -251,7 +256,7 @@ export default function StaffAttendanceClientPage() {
       toast({ title: "Save Failed", description: `Failed to save status for ${staff.displayName}. Reverting change.`, variant: "destructive"});
       setAttendance(prevAttendance);
     }
-  }, [user, activeSiteId, attendance, isHoliday, toast, staffDetailsMap]);
+  }, [user, attendance, isHoliday, toast, staffDetailsMap, activeSiteId]);
 
   const processBulkAction = async (action: (batch: ReturnType<typeof writeBatch>, staff: AppUser, date: Date) => { valid: boolean; status?: AttendanceStatus }) => {
     if (!user) {
@@ -271,7 +276,7 @@ export default function StaffAttendanceClientPage() {
     let finalStatus: AttendanceStatus | 'Cleared' | undefined;
   
     for (const uid of selectedStaffUids) {
-      const staff = allStaffForSite.find(s => s.uid === uid);
+      const staff = allStaffForContext.find(s => s.uid === uid);
       const details = staffDetailsMap.get(uid);
       if (!staff || !staff.defaultSiteId) {
         skippedCount += dateRange.length;
@@ -312,6 +317,7 @@ export default function StaffAttendanceClientPage() {
       });
       toast({ title: "Bulk Action Successful", description: `${validOperations} attendance records updated.` });
       setSelectedStaffUids([]);
+      // Optimistically update local state to reflect change without a full refetch
       setAttendance(prev => {
         const newAttendance = JSON.parse(JSON.stringify(prev || {}));
         for (const uid of selectedStaffUids) {
@@ -353,7 +359,7 @@ export default function StaffAttendanceClientPage() {
       const docId = `${format(date, 'yyyy-MM-dd')}_${staff.uid}`;
       const docRef = doc(db, "staffAttendance", docId);
       batch.delete(docRef);
-      return { valid: true };
+      return { valid: true }; // status is undefined for delete, handled as 'Cleared'
     });
   };
 
@@ -372,7 +378,7 @@ export default function StaffAttendanceClientPage() {
     }
     
     setIsBulkUpdating(true);
-    const activeStaff = allStaffForSite.filter(s => (s.status || 'active') === 'active');
+    const activeStaff = allStaffForContext.filter(s => (s.status || 'active') === 'active');
     const todayAttendanceQuery = query(collection(db, "staffAttendance"), where("date", "==", todayStr));
     
     try {
