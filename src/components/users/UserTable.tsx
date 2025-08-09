@@ -1,4 +1,3 @@
-
 "use client";
 
 import {
@@ -50,6 +49,7 @@ import {
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import UpdateStatusDialog from "./UpdateStatusDialog";
+import { useRouter } from "next/navigation";
 
 interface UserTableProps {
   users: AppUser[];
@@ -88,6 +88,8 @@ export function UserTable({
 
   const [userForStatusUpdate, setUserForStatusUpdate] = useState<AppUser | null>(null);
   const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false);
+  
+  const router = useRouter();
 
 
   const handleRoleChangeInternal = async (userId: string, newRole: UserRole) => {
@@ -321,6 +323,10 @@ export function UserTable({
                         </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                        <DropdownMenuItem onSelect={() => router.push(`/staff/${user.uid}/edit`)}>
+                           <Edit3 className="mr-2 h-4 w-4" /> Edit Profile
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
                         <DropdownMenuItem
                         onSelect={(e) => e.preventDefault()} 
                         className="text-destructive focus:text-destructive-foreground focus:bg-destructive"
