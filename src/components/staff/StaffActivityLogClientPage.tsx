@@ -29,7 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
-import { format, subDays, startOfDay, endOfDay, startOfMonth, endOfWeek, startOfWeek } from "date-fns";
+import { format, subDays, startOfDay, endOfDay, startOfMonth, endOfWeek, startOfWeek, endOfMonth } from "date-fns";
 import { cn } from "@/lib/utils";
 import type { DateRange } from "react-day-picker";
 
@@ -330,3 +330,5 @@ export default function StaffActivityLogClientPage() {
     </div>
   );
 }
+
+    
