@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import PageHeader from "@/components/shared/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Users, UserX, UserRoundCheck, HandCoins, CalendarDays, Wallet, BarChart, IndianRupee, UserCheck } from "lucide-react";
@@ -233,7 +233,7 @@ export default function StaffDashboardPage() {
             setLoadingCalculations(false);
         });
         
-    }, [staffList, staffDetailsMap, userManagementLoading, calculateWorkingDays, getStaffName]);
+    }, [userManagementLoading, staffList, staffDetailsMap, calculateWorkingDays, getStaffName]);
 
     const loading = authLoading || userManagementLoading || loadingCalculations;
 
@@ -475,5 +475,3 @@ export default function StaffDashboardPage() {
         </div>
     );
 }
-
-    
