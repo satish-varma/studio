@@ -15,7 +15,7 @@ import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Info, ChevronLeft, ChevronRight, Filter } from "lucide-react";
+import { Loader2, Info, ChevronLeft, ChevronRight, Filter, IndianRupee } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { format, startOfMonth, endOfMonth, subMonths, addMonths, isAfter, isBefore, max, min, startOfDay } from "date-fns";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,8 @@ import { PayrollTable } from "@/components/staff/PayrollTable";
 import { useUserManagement } from "@/hooks/use-user-management";
 import PageHeader from "@/components/shared/PageHeader";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 
 
 const LOG_PREFIX = "[PayrollClientPage]";
@@ -47,6 +49,8 @@ export interface PayrollData {
     presentDays: number;
     earnedSalary: number;
 }
+
+const formatCurrency = (amount: number) => `₹${amount.toFixed(2)}`;
 
 export default function PayrollClientPage() {
   const { user, activeSiteId, loading: authLoading } = useAuth();
@@ -244,6 +248,9 @@ export default function PayrollClientPage() {
     setLoadingPayrollCalcs(false);
   }, [staffList, staffDetailsMap, monthlyAdvances, monthlyPayments, monthlyHolidays, monthlyAttendance, currentMonth, calculateWorkingDaysForEmployee, userManagementLoading]);
 
+  const totalNetPayable = useMemo(() => {
+    return payrollData.reduce((acc, item) => acc + (item.netPayable > item.paidAmount ? item.netPayable - item.paidAmount : 0), 0);
+  }, [payrollData]);
 
   const loading = authLoading || userManagementLoading || loadingPayrollCalcs;
   const error = userManagementError;
@@ -285,6 +292,22 @@ export default function PayrollClientPage() {
                 </Select>
             </div>
         </div>
+
+        <Card className="sm:max-w-xs shadow-md">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Payable (Outstanding)</CardTitle>
+            <IndianRupee className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {loading ? <Skeleton className="h-8 w-32" /> : formatCurrency(totalNetPayable)}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              For {format(currentMonth, "MMMM yyyy")}
+            </p>
+          </CardContent>
+        </Card>
+
         {loading ? (
             <div className="flex justify-center items-center py-10"><Loader2 className="h-6 w-6 animate-spin" /><p className="ml-2">Recalculating payroll...</p></div>
         ) : (
