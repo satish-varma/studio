@@ -64,21 +64,19 @@ export function useUserManagement() {
     setLoading(true);
     let userUnsubscriber: (() => void) | null = null;
     
+    // Admin sees all users. Manager sees only users assigned to their managed sites.
+    // This logic is now simplified as the page component will do the final filtering by activeSiteId.
+    // The hook provides all necessary users for the current user's role.
     const usersQuery = query(collection(db, "users"), orderBy("displayName", "asc"));
     userUnsubscriber = onSnapshot(usersQuery, (snapshot) => {
         const allUsers = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser));
         
         if (currentUser.role === 'manager') {
             const managedSiteIds = currentUser.managedSiteIds || [];
-            // For a manager, filter users based on their default site assignment
             const filteredUsers = allUsers.filter(u => u.defaultSiteId && managedSiteIds.includes(u.defaultSiteId));
             setUsers(filteredUsers);
-        } else if (currentUser.role === 'admin') {
-            // Admin sees all users regardless of active site context
+        } else { // Admin
             setUsers(allUsers);
-        } else {
-            // Default case, e.g., staff (though this hook is guarded)
-            setUsers([]);
         }
     }, (err) => {
         console.error(`${LOG_PREFIX} Error fetching users:`, err);
@@ -131,7 +129,7 @@ export function useUserManagement() {
       unsubStalls();
       unsubStaffDetails();
     };
-  }, [currentUser, authLoading, activeSiteId]);
+  }, [currentUser, authLoading]);
 
   const handleCreateUserFirestoreDoc = useCallback(async (uid: string, newUserData: Omit<AppUser, 'createdAt' | 'uid'>): Promise<boolean> => {
     if (!currentUser || currentUser.role !== 'admin') {

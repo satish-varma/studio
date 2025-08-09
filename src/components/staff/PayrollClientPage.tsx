@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
-import type { AppUser, StaffDetails, SalaryAdvance, SalaryPayment, Site, Holiday, StaffAttendance } from "@/types";
+import type { AppUser, StaffDetails, SalaryAdvance, SalaryPayment, Site, Holiday, UserStatus } from "@/types";
 import { 
   getFirestore, 
   collection, 
@@ -15,13 +15,17 @@ import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Info, ChevronLeft, ChevronRight } from "lucide-react";
+import { Loader2, Info, ChevronLeft, ChevronRight, Filter, IndianRupee, HandCoins, CalendarDays, Wallet, Building } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { format, startOfMonth, endOfMonth, subMonths, addMonths, isAfter, isBefore, max, min, startOfDay } from "date-fns";
+import { format, startOfMonth, endOfMonth, subMonths, addMonths, isAfter, isBefore, max, min, startOfDay, getDate } from "date-fns";
 import { Button } from "@/components/ui/button";
-import { PayrollTable } from "./PayrollTable";
+import { PayrollTable } from "@/components/staff/PayrollTable";
 import { useUserManagement } from "@/hooks/use-user-management";
 import PageHeader from "@/components/shared/PageHeader";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+
 
 const LOG_PREFIX = "[PayrollClientPage]";
 
@@ -46,24 +50,43 @@ export interface PayrollData {
     earnedSalary: number;
 }
 
+const formatCurrency = (amount: number) => `₹${amount.toFixed(2)}`;
+
 export default function PayrollClientPage() {
   const { user, activeSiteId, loading: authLoading } = useAuth();
   const { toast } = useToast();
   
   const {
     users: allUsersForContext,
+    sites, // Now using sites from the hook
     staffDetails: staffDetailsMap,
     loading: userManagementLoading,
     error: userManagementError,
   } = useUserManagement();
 
-  const staffList = useMemo(() => {
-    return allUsersForContext.filter(u => u.role === 'staff' || u.role === 'manager');
-  }, [allUsersForContext]);
-  
   const [payrollData, setPayrollData] = useState<PayrollData[]>([]);
   const [loadingPayrollCalcs, setLoadingPayrollCalcs] = useState(true);
   const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [statusFilter, setStatusFilter] = useState<UserStatus | 'all'>('active');
+
+  const staffList = useMemo(() => {
+    const baseList = allUsersForContext.filter(u => u.role === 'staff' || u.role === 'manager');
+    const statusFiltered = statusFilter === 'all' ? baseList : baseList.filter(u => (u.status || 'active') === statusFilter);
+    // NEW: Site filtering logic
+    if (activeSiteId) {
+      return statusFiltered.filter(u => u.defaultSiteId === activeSiteId);
+    }
+    // For admins with no activeSiteId, show all (already filtered by status)
+    if (user?.role === 'admin' && !activeSiteId) {
+      return statusFiltered;
+    }
+    // For managers with no activeSiteId, they shouldn't see anyone (handled by parent logic but safe here)
+    if (user?.role === 'manager' && !activeSiteId) {
+      return [];
+    }
+    return statusFiltered;
+  }, [allUsersForContext, statusFilter, activeSiteId, user?.role]);
+  
 
   // State for fetched data
   const [monthlyAdvances, setMonthlyAdvances] = useState<Map<string, number>>(new Map());
@@ -121,15 +144,23 @@ export default function PayrollClientPage() {
         uidsBatches.push(uids.slice(i, i + 30));
     }
     
-    const firstDayOfMonth = startOfMonth(currentMonth);
-    const lastDayOfMonth = endOfMonth(currentMonth);
+    // Payroll month start and end dates for earned salary
+    const payrollMonthStart = startOfMonth(currentMonth);
+    const payrollMonthEnd = endOfMonth(currentMonth);
+    
+    // Advances calculation period: from the start of the payroll month
+    // until the 15th of the next month.
+    const advancesStartDate = payrollMonthStart;
+    const nextMonth = addMonths(currentMonth, 1);
+    const advancesEndDate = new Date(nextMonth.getFullYear(), nextMonth.getMonth(), 15, 23, 59, 59);
+
 
     const fetchStaticData = async () => {
         try {
             const [advancesDocs, paymentsDocs, holidaysDocs] = await Promise.all([
-                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "advances"), where("staffUid", "in", batch), where("date", ">=", firstDayOfMonth.toISOString()), where("date", "<=", lastDayOfMonth.toISOString()))))),
+                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "advances"), where("staffUid", "in", batch), where("date", ">=", advancesStartDate.toISOString()), where("date", "<=", advancesEndDate.toISOString()))))),
                 Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", batch), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear()))))),
-                getDocs(query(collection(db, "holidays"), where("date", ">=", format(firstDayOfMonth, 'yyyy-MM-dd')), where("date", "<=", format(lastDayOfMonth, 'yyyy-MM-dd'))))
+                getDocs(query(collection(db, "holidays"), where("date", ">=", format(payrollMonthStart, 'yyyy-MM-dd')), where("date", "<=", format(payrollMonthEnd, 'yyyy-MM-dd'))))
             ]);
 
             const advancesMap = new Map<string, number>();
@@ -236,6 +267,21 @@ export default function PayrollClientPage() {
     setLoadingPayrollCalcs(false);
   }, [staffList, staffDetailsMap, monthlyAdvances, monthlyPayments, monthlyHolidays, monthlyAttendance, currentMonth, calculateWorkingDaysForEmployee, userManagementLoading]);
 
+  const totalProjectedSalary = useMemo(() => {
+    return payrollData.reduce((acc, item) => acc + (item.details?.salary || 0), 0);
+  }, [payrollData]);
+
+  const totalNetPayable = useMemo(() => {
+    return payrollData.reduce((acc, item) => acc + (item.netPayable > item.paidAmount ? item.netPayable - item.paidAmount : 0), 0);
+  }, [payrollData]);
+
+  const totalEarnedSalary = useMemo(() => {
+    return payrollData.reduce((acc, item) => acc + item.earnedSalary, 0);
+  }, [payrollData]);
+
+  const totalAdvances = useMemo(() => {
+    return payrollData.reduce((acc, item) => acc + item.advances, 0);
+  }, [payrollData]);
 
   const loading = authLoading || userManagementLoading || loadingPayrollCalcs;
   const error = userManagementError;
@@ -243,12 +289,12 @@ export default function PayrollClientPage() {
   if (loading && payrollData.length === 0) return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin" /><p className="ml-2">Loading Payroll Data...</p></div>;
   if (error) return <Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>;
 
-  if (!activeSiteId && user?.role !== 'admin') return (
+  if (!activeSiteId && user?.role === 'manager') return (
     <div className="space-y-6">
         <PageHeader title="Staff Payroll" description="Calculate net payable salary for staff members."/>
         <Alert variant="default" className="border-primary/50">
             <Info className="h-4 w-4" /><AlertTitle>Site Selection Required</AlertTitle>
-            <AlertDescription>Please select a site to manage payroll, or select "All Sites" if you are an administrator.</AlertDescription>
+            <AlertDescription>Please select a site to manage payroll.</AlertDescription>
         </Alert>
     </div>
   );
@@ -256,12 +302,79 @@ export default function PayrollClientPage() {
   return (
     <div className="space-y-6">
         <PageHeader title="Staff Payroll" description="Calculate net payable salary for the current month and record payments."/>
-        <div className="flex items-center gap-2">
-            <Button variant="outline" size="icon" onClick={handlePrevMonth} aria-label="Previous month" disabled={loading}><ChevronLeft className="h-4 w-4" /></Button>
-            <h2 className="text-xl font-semibold text-center min-w-[150px]">{format(currentMonth, "MMMM yyyy")}</h2>
-            <Button variant="outline" size="icon" onClick={handleNextMonth} aria-label="Next month" disabled={loading}><ChevronRight className="h-4 w-4" /></Button>
-            <Button variant="outline" onClick={handleGoToCurrentMonth} disabled={loading}>Current Month</Button>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-2 flex-wrap">
+                <Button variant="outline" size="icon" onClick={handlePrevMonth} aria-label="Previous month" disabled={loading}><ChevronLeft className="h-4 w-4" /></Button>
+                <h2 className="text-xl font-semibold text-center min-w-[150px]">{format(currentMonth, "MMMM yyyy")}</h2>
+                <Button variant="outline" size="icon" onClick={handleNextMonth} aria-label="Next month" disabled={loading}><ChevronRight className="h-4 w-4" /></Button>
+                <Button variant="outline" onClick={handleGoToCurrentMonth} disabled={loading}>Current Month</Button>
+            </div>
+             <div className="flex items-center gap-2">
+                <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as any)}>
+                  <SelectTrigger className="w-[180px] bg-input">
+                    <Filter className="mr-2 h-4 w-4 text-muted-foreground"/>
+                    <SelectValue placeholder="Filter by status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active Staff</SelectItem>
+                    <SelectItem value="inactive">Inactive Staff</SelectItem>
+                    <SelectItem value="all">All Staff</SelectItem>
+                  </SelectContent>
+                </Select>
+            </div>
         </div>
+
+         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Card className="shadow-md">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Projected Salary</CardTitle>
+              <Wallet className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {loading ? <Skeleton className="h-8 w-32" /> : formatCurrency(totalProjectedSalary)}
+              </div>
+              <p className="text-xs text-muted-foreground">Total base salary of active staff</p>
+            </CardContent>
+          </Card>
+          <Card className="shadow-md">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Earned Salary</CardTitle>
+              <CalendarDays className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {loading ? <Skeleton className="h-8 w-32" /> : formatCurrency(totalEarnedSalary)}
+              </div>
+              <p className="text-xs text-muted-foreground">Based on attendance for {format(currentMonth, "MMMM")}</p>
+            </CardContent>
+          </Card>
+           <Card className="shadow-md">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Advances Paid</CardTitle>
+              <HandCoins className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-orange-600">
+                {loading ? <Skeleton className="h-8 w-28" /> : formatCurrency(totalAdvances)}
+              </div>
+              <p className="text-xs text-muted-foreground">From {format(startOfMonth(currentMonth), 'MMM d')} to {format(addMonths(currentMonth, 1), 'MMM')} 15th</p>
+            </CardContent>
+          </Card>
+          <Card className="shadow-md">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Net Payable (Outstanding)</CardTitle>
+              <IndianRupee className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-accent">
+                {loading ? <Skeleton className="h-8 w-32" /> : formatCurrency(totalNetPayable)}
+              </div>
+              <p className="text-xs text-muted-foreground">Amount left to be paid for {format(currentMonth, "MMMM")}</p>
+            </CardContent>
+          </Card>
+        </div>
+
         {loading ? (
             <div className="flex justify-center items-center py-10"><Loader2 className="h-6 w-6 animate-spin" /><p className="ml-2">Recalculating payroll...</p></div>
         ) : (
