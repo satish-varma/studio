@@ -17,8 +17,10 @@ let adminAuth: ReturnType<typeof getAdminAuth>;
 let adminDb: ReturnType<typeof getFirestore>;
 
 function initializeAdminApp(): void {
-    if (getApps().length > 0 && getApps().find(app => app.name === '[DEFAULT]')) {
-        adminApp = getApps().find(app => app.name === '[DEFAULT]')!;
+    const appName = '[DEFAULT]';
+    // Check if the default app is already initialized
+    if (getApps().find(app => app.name === appName)) {
+        adminApp = getApps().find(app => app.name === appName)!;
     } else {
         const serviceAccountJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
         if (!serviceAccountJson) {
