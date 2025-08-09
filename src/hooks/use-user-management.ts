@@ -64,16 +64,23 @@ export function useUserManagement() {
     setLoading(true);
     let userUnsubscriber: (() => void) | null = null;
     
-    // Admin sees all users. Manager sees only users assigned to their managed sites.
-    // This logic is now simplified as the page component will do the final filtering by activeSiteId.
-    // The hook provides all necessary users for the current user's role.
+    // Admins see all users. Managers see all users to correctly filter later.
     const usersQuery = query(collection(db, "users"), orderBy("displayName", "asc"));
     userUnsubscriber = onSnapshot(usersQuery, (snapshot) => {
-        const allUsers = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser));
+        let allUsers = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser));
         
+        // ** THE FIX IS HERE **
+        // The filtering responsibility is moved to the component that uses the hook.
+        // This hook should provide all users relevant to the user's role without being
+        // constrained by the *currently active* site, which could be "All Sites" for an admin.
         if (currentUser.role === 'manager') {
             const managedSiteIds = currentUser.managedSiteIds || [];
-            const filteredUsers = allUsers.filter(u => u.defaultSiteId && managedSiteIds.includes(u.defaultSiteId));
+            // For managers, we pre-filter to only staff within their managed sites.
+            const filteredUsers = allUsers.filter(u => 
+                (u.role === 'staff' || u.role === 'manager') && 
+                u.defaultSiteId && 
+                managedSiteIds.includes(u.defaultSiteId)
+            );
             setUsers(filteredUsers);
         } else { // Admin
             setUsers(allUsers);
