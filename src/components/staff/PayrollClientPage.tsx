@@ -68,24 +68,21 @@ export default function PayrollClientPage() {
   const [loadingPayrollCalcs, setLoadingPayrollCalcs] = useState(true);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [statusFilter, setStatusFilter] = useState<UserStatus | 'all'>('active');
+  const [siteFilter, setSiteFilter] = useState<string>('all'); // New state for site filter
 
   const staffList = useMemo(() => {
     const baseList = allUsersForContext.filter(u => u.role === 'staff' || u.role === 'manager');
-    const statusFiltered = statusFilter === 'all' ? baseList : baseList.filter(u => (u.status || 'active') === statusFilter);
-    // NEW: Site filtering logic
-    if (activeSiteId) {
+    let statusFiltered = statusFilter === 'all' ? baseList : baseList.filter(u => (u.status || 'active') === statusFilter);
+    
+    // Apply site filter logic
+    if (user?.role === 'admin' && siteFilter !== 'all') {
+      return statusFiltered.filter(u => u.defaultSiteId === siteFilter);
+    } else if (user?.role === 'manager' && activeSiteId) {
       return statusFiltered.filter(u => u.defaultSiteId === activeSiteId);
     }
-    // For admins with no activeSiteId, show all (already filtered by status)
-    if (user?.role === 'admin' && !activeSiteId) {
-      return statusFiltered;
-    }
-    // For managers with no activeSiteId, they shouldn't see anyone (handled by parent logic but safe here)
-    if (user?.role === 'manager' && !activeSiteId) {
-      return [];
-    }
+    // If Admin viewing "All Sites", or a manager with no specific site selected (should not happen with page guard)
     return statusFiltered;
-  }, [allUsersForContext, statusFilter, activeSiteId, user?.role]);
+  }, [allUsersForContext, statusFilter, siteFilter, activeSiteId, user?.role]);
   
 
   // State for fetched data
@@ -130,10 +127,17 @@ export default function PayrollClientPage() {
     return workingDays;
   }, []);
   
-  // Effect for one-time fetches per month (advances, payments, holidays)
+  // Effect for fetching all payroll-related data
   useEffect(() => {
     if (userManagementLoading || staffList.length === 0) {
-        if(!userManagementLoading) setLoadingPayrollCalcs(false);
+        if(!userManagementLoading) {
+            setLoadingPayrollCalcs(false);
+            setPayrollData([]);
+            setMonthlyAdvances(new Map());
+            setMonthlyPayments(new Map());
+            setMonthlyAttendance(new Map());
+            setMonthlyHolidays([]);
+        }
         return;
     }
 
@@ -144,98 +148,86 @@ export default function PayrollClientPage() {
         uidsBatches.push(uids.slice(i, i + 30));
     }
     
-    // Payroll month start and end dates for earned salary
     const payrollMonthStart = startOfMonth(currentMonth);
     const payrollMonthEnd = endOfMonth(currentMonth);
-    
-    // Advances calculation period: from the start of the payroll month
-    // until the 15th of the next month.
     const advancesStartDate = payrollMonthStart;
     const nextMonth = addMonths(currentMonth, 1);
     const advancesEndDate = new Date(nextMonth.getFullYear(), nextMonth.getMonth(), 15, 23, 59, 59);
 
+    let allUnsubscribers: (() => void)[] = [];
 
-    const fetchStaticData = async () => {
-        try {
-            const [advancesDocs, paymentsDocs, holidaysDocs] = await Promise.all([
-                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "advances"), where("staffUid", "in", batch), where("date", ">=", advancesStartDate.toISOString()), where("date", "<=", advancesEndDate.toISOString()))))),
-                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", batch), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear()))))),
-                getDocs(query(collection(db, "holidays"), where("date", ">=", format(payrollMonthStart, 'yyyy-MM-dd')), where("date", "<=", format(payrollMonthEnd, 'yyyy-MM-dd'))))
-            ]);
+    // Fetch Holidays (one-time for the month)
+    const holidaysQuery = query(collection(db, "holidays"), where("date", ">=", format(payrollMonthStart, 'yyyy-MM-dd')), where("date", "<=", format(payrollMonthEnd, 'yyyy-MM-dd')));
+    const unsubHolidays = onSnapshot(holidaysQuery, 
+        (snapshot) => setMonthlyHolidays(snapshot.docs.map(doc => doc.data() as Holiday)),
+        (error) => console.error("Error fetching holidays:", error)
+    );
+    allUnsubscribers.push(unsubHolidays);
 
-            const advancesMap = new Map<string, number>();
-            advancesDocs.flat().forEach(snapshot => snapshot.forEach(doc => {
-                const advance = doc.data() as SalaryAdvance;
-                advancesMap.set(advance.staffUid, (advancesMap.get(advance.staffUid) || 0) + advance.amount);
-            }));
-            setMonthlyAdvances(advancesMap);
+    // Set up listeners for each batch of UIDs
+    uidsBatches.forEach(batch => {
+      if (batch.length === 0) return;
 
-            const paymentsMap = new Map<string, number>();
-            paymentsDocs.flat().forEach(snapshot => snapshot.forEach(doc => {
-                const payment = doc.data() as SalaryPayment;
-                paymentsMap.set(payment.staffUid, (paymentsMap.get(payment.staffUid) || 0) + payment.amountPaid);
-            }));
-            setMonthlyPayments(paymentsMap);
-
-            setMonthlyHolidays(holidaysDocs.docs.map(doc => doc.data() as Holiday));
-        } catch (error: any) {
-            console.error("Error fetching payroll static details:", error);
-            toast({ title: "Error", description: `Could not load advances/payments: ${error.message}`, variant: "destructive" });
-        }
-    };
-    fetchStaticData();
-  }, [staffList, currentMonth, toast, userManagementLoading]);
-
-  // Dedicated real-time effect for attendance
-  useEffect(() => {
-    if (userManagementLoading || staffList.length === 0) return;
-
-    setLoadingPayrollCalcs(true);
-    const uids = staffList.map(s => s.uid);
-    const uidsBatches: string[][] = [];
-    for (let i = 0; i < uids.length; i += 30) {
-        uidsBatches.push(uids.slice(i, i + 30));
-    }
-    
-    const firstDayOfMonth = startOfMonth(currentMonth);
-    const lastDayOfMonth = endOfMonth(currentMonth);
-
-    const unsubscribers = uidsBatches.map(batch => {
-      if (batch.length === 0) return () => {};
-      const q = query(collection(db, "staffAttendance"), 
-        where("staffUid", "in", batch),
-        where("date", ">=", format(firstDayOfMonth, 'yyyy-MM-dd')),
-        where("date", "<=", format(lastDayOfMonth, 'yyyy-MM-dd'))
-      );
-      return onSnapshot(q, (snapshot) => {
-          setMonthlyAttendance(prevMap => {
-              const newMap = new Map(prevMap);
-              // First, clear old entries for this batch to handle deletions
-              batch.forEach(uid => newMap.delete(uid));
-              // Then, process new data
-              const batchAttendanceMap = new Map<string, { present: number, halfDay: number }>();
+      // Advances Listener
+      const advancesQuery = query(collection(db, "advances"), where("staffUid", "in", batch), where("date", ">=", advancesStartDate.toISOString()), where("date", "<=", advancesEndDate.toISOString()));
+      const unsubAdvances = onSnapshot(advancesQuery, (snapshot) => {
+          setMonthlyAdvances(prev => {
+              const newMap = new Map(prev);
+              const batchMap = new Map<string, number>();
               snapshot.forEach(doc => {
-                  const att = doc.data() as StaffAttendance;
-                  const current = batchAttendanceMap.get(att.staffUid) || { present: 0, halfDay: 0 };
-                  if (att.status === 'Present') current.present++;
-                  if (att.status === 'Half-day') current.halfDay++;
-                  batchAttendanceMap.set(att.staffUid, current);
+                  const data = doc.data() as SalaryAdvance;
+                  batchMap.set(data.staffUid, (batchMap.get(data.staffUid) || 0) + data.amount);
               });
-              batchAttendanceMap.forEach((value, key) => newMap.set(key, value));
+              batch.forEach(uid => { newMap.set(uid, batchMap.get(uid) || 0); }); // Reset and set for this batch
               return newMap;
           });
-          setLoadingPayrollCalcs(false); // Mark loading as false once listener is active
-      }, (error) => {
-          console.error("Error on attendance snapshot:", error);
-          toast({ title: "Real-time Error", description: "Could not get live attendance updates.", variant: "destructive" });
-          setLoadingPayrollCalcs(false);
       });
+      allUnsubscribers.push(unsubAdvances);
+
+      // Payments Listener
+      const paymentsQuery = query(collection(db, "salaryPayments"), where("staffUid", "in", batch), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear()));
+      const unsubPayments = onSnapshot(paymentsQuery, (snapshot) => {
+          setMonthlyPayments(prev => {
+              const newMap = new Map(prev);
+              const batchMap = new Map<string, number>();
+              snapshot.forEach(doc => {
+                  const data = doc.data() as SalaryPayment;
+                  batchMap.set(data.staffUid, (batchMap.get(data.staffUid) || 0) + data.amountPaid);
+              });
+              batch.forEach(uid => { newMap.set(uid, batchMap.get(uid) || 0); });
+              return newMap;
+          });
+      });
+      allUnsubscribers.push(unsubPayments);
+
+      // Attendance Listener
+      const attendanceQuery = query(collection(db, "staffAttendance"), 
+        where("staffUid", "in", batch),
+        where("date", ">=", format(payrollMonthStart, 'yyyy-MM-dd')),
+        where("date", "<=", format(payrollMonthEnd, 'yyyy-MM-dd'))
+      );
+      const unsubAttendance = onSnapshot(attendanceQuery, (snapshot) => {
+          setMonthlyAttendance(prev => {
+              const newMap = new Map(prev);
+              const batchMap = new Map<string, { present: number, halfDay: number }>();
+              snapshot.forEach(doc => {
+                  const att = doc.data() as StaffAttendance;
+                  const current = batchMap.get(att.staffUid) || { present: 0, halfDay: 0 };
+                  if (att.status === 'Present') current.present++;
+                  if (att.status === 'Half-day') current.halfDay++;
+                  batchMap.set(att.staffUid, current);
+              });
+              batch.forEach(uid => { newMap.set(uid, batchMap.get(uid) || { present: 0, halfDay: 0 }); });
+              return newMap;
+          });
+      });
+      allUnsubscribers.push(unsubAttendance);
     });
 
-    return () => unsubscribers.forEach(unsub => unsub());
-
+    return () => {
+        allUnsubscribers.forEach(unsub => unsub());
+    };
   }, [staffList, currentMonth, toast, userManagementLoading]);
-
 
   // Effect to re-calculate payroll whenever any data changes
   useEffect(() => {
@@ -311,7 +303,7 @@ export default function PayrollClientPage() {
             </div>
              <div className="flex items-center gap-2">
                 <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as any)}>
-                  <SelectTrigger className="w-[180px] bg-input">
+                  <SelectTrigger className="w-full sm:w-[180px] bg-input">
                     <Filter className="mr-2 h-4 w-4 text-muted-foreground"/>
                     <SelectValue placeholder="Filter by status" />
                   </SelectTrigger>
@@ -321,6 +313,18 @@ export default function PayrollClientPage() {
                     <SelectItem value="all">All Staff</SelectItem>
                   </SelectContent>
                 </Select>
+                {user?.role === 'admin' && (
+                    <Select value={siteFilter} onValueChange={setSiteFilter}>
+                      <SelectTrigger className="w-full sm:w-[180px] bg-input">
+                        <Building className="mr-2 h-4 w-4 text-muted-foreground"/>
+                        <SelectValue placeholder="Filter by site" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Sites</SelectItem>
+                        {sites.map(site => <SelectItem key={site.id} value={site.id}>{site.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                )}
             </div>
         </div>
 
@@ -334,7 +338,7 @@ export default function PayrollClientPage() {
               <div className="text-2xl font-bold">
                 {loading ? <Skeleton className="h-8 w-32" /> : formatCurrency(totalProjectedSalary)}
               </div>
-              <p className="text-xs text-muted-foreground">Total base salary of active staff</p>
+              <p className="text-xs text-muted-foreground">Total base salary of filtered staff</p>
             </CardContent>
           </Card>
           <Card className="shadow-md">
@@ -358,7 +362,7 @@ export default function PayrollClientPage() {
               <div className="text-2xl font-bold text-orange-600">
                 {loading ? <Skeleton className="h-8 w-28" /> : formatCurrency(totalAdvances)}
               </div>
-              <p className="text-xs text-muted-foreground">From {format(startOfMonth(currentMonth), 'MMM d')} to {format(addMonths(currentMonth, 1), 'MMM')} 15th</p>
+              <p className="text-xs text-muted-foreground">From {format(startOfMonth(currentMonth), 'MMM d')} to {format(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 15), 'MMM d')}</p>
             </CardContent>
           </Card>
           <Card className="shadow-md">
