@@ -12,7 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { format, subDays, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth } from "date-fns";
+import { format, subDays, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from "date-fns";
 import { CalendarIcon, Users, Download } from "lucide-react";
 import type { DateRange } from "react-day-picker";
 import type { AppUser } from "@/types";
