@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
-import type { AppUser, StaffDetails, SalaryAdvance, SalaryPayment, Site, Holiday, StaffAttendance, UserStatus } from "@/types";
+import type { AppUser, StaffDetails, SalaryAdvance, SalaryPayment, Site, Holiday, UserStatus } from "@/types";
 import { 
   getFirestore, 
   collection, 
@@ -15,7 +15,7 @@ import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Info, ChevronLeft, ChevronRight, Filter, IndianRupee, HandCoins, CalendarDays, Wallet } from "lucide-react";
+import { Loader2, Info, ChevronLeft, ChevronRight, Filter, IndianRupee, HandCoins, CalendarDays, Wallet, Building } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { format, startOfMonth, endOfMonth, subMonths, addMonths, isAfter, isBefore, max, min, startOfDay, getDate } from "date-fns";
 import { Button } from "@/components/ui/button";
@@ -58,6 +58,7 @@ export default function PayrollClientPage() {
   
   const {
     users: allUsersForContext,
+    sites, // Now using sites from the hook
     staffDetails: staffDetailsMap,
     loading: userManagementLoading,
     error: userManagementError,
@@ -67,14 +68,20 @@ export default function PayrollClientPage() {
   const [loadingPayrollCalcs, setLoadingPayrollCalcs] = useState(true);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [statusFilter, setStatusFilter] = useState<UserStatus | 'all'>('active');
+  const [siteFilter, setSiteFilter] = useState<string>('all'); // New state for site filter
 
   const staffList = useMemo(() => {
     const baseList = allUsersForContext.filter(u => u.role === 'staff' || u.role === 'manager');
-    if (statusFilter === 'all') {
-      return baseList;
+    let statusFiltered = statusFilter === 'all' ? baseList : baseList.filter(u => (u.status || 'active') === statusFilter);
+    
+    // Apply site filter logic
+    if (user?.role === 'admin' && siteFilter !== 'all') {
+      return statusFiltered.filter(u => u.defaultSiteId === siteFilter);
+    } else if (user?.role === 'manager' && activeSiteId) {
+      return statusFiltered.filter(u => u.defaultSiteId === activeSiteId);
     }
-    return baseList.filter(u => (u.status || 'active') === statusFilter);
-  }, [allUsersForContext, statusFilter]);
+    return statusFiltered;
+  }, [allUsersForContext, statusFilter, siteFilter, activeSiteId, user?.role]);
   
 
   // State for fetched data
@@ -122,7 +129,10 @@ export default function PayrollClientPage() {
   // Effect for one-time fetches per month (advances, payments, holidays)
   useEffect(() => {
     if (userManagementLoading || staffList.length === 0) {
-        if(!userManagementLoading) setLoadingPayrollCalcs(false);
+        if(!userManagementLoading) {
+            setLoadingPayrollCalcs(false);
+            setPayrollData([]);
+        }
         return;
     }
 
@@ -133,12 +143,9 @@ export default function PayrollClientPage() {
         uidsBatches.push(uids.slice(i, i + 30));
     }
     
-    // Payroll month start and end dates for earned salary
     const payrollMonthStart = startOfMonth(currentMonth);
     const payrollMonthEnd = endOfMonth(currentMonth);
     
-    // Advances calculation period: from the start of the payroll month
-    // until the 15th of the next month.
     const advancesStartDate = payrollMonthStart;
     const nextMonth = addMonths(currentMonth, 1);
     const advancesEndDate = new Date(nextMonth.getFullYear(), nextMonth.getMonth(), 15, 23, 59, 59);
@@ -147,8 +154,8 @@ export default function PayrollClientPage() {
     const fetchStaticData = async () => {
         try {
             const [advancesDocs, paymentsDocs, holidaysDocs] = await Promise.all([
-                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "advances"), where("staffUid", "in", batch), where("date", ">=", advancesStartDate.toISOString()), where("date", "<=", advancesEndDate.toISOString()))))),
-                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", batch), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear()))))),
+                uidsBatches.length > 0 ? Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "advances"), where("staffUid", "in", batch), where("date", ">=", advancesStartDate.toISOString()), where("date", "<=", advancesEndDate.toISOString()))))) : Promise.resolve([]),
+                uidsBatches.length > 0 ? Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", batch), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear()))))) : Promise.resolve([]),
                 getDocs(query(collection(db, "holidays"), where("date", ">=", format(payrollMonthStart, 'yyyy-MM-dd')), where("date", "<=", format(payrollMonthEnd, 'yyyy-MM-dd'))))
             ]);
 
@@ -177,7 +184,10 @@ export default function PayrollClientPage() {
 
   // Dedicated real-time effect for attendance
   useEffect(() => {
-    if (userManagementLoading || staffList.length === 0) return;
+    if (userManagementLoading || staffList.length === 0) {
+        if(!userManagementLoading) setMonthlyAttendance(new Map());
+        return;
+    }
 
     setLoadingPayrollCalcs(true);
     const uids = staffList.map(s => s.uid);
@@ -199,9 +209,6 @@ export default function PayrollClientPage() {
       return onSnapshot(q, (snapshot) => {
           setMonthlyAttendance(prevMap => {
               const newMap = new Map(prevMap);
-              // First, clear old entries for this batch to handle deletions
-              batch.forEach(uid => newMap.delete(uid));
-              // Then, process new data
               const batchAttendanceMap = new Map<string, { present: number, halfDay: number }>();
               snapshot.forEach(doc => {
                   const att = doc.data() as StaffAttendance;
@@ -210,10 +217,16 @@ export default function PayrollClientPage() {
                   if (att.status === 'Half-day') current.halfDay++;
                   batchAttendanceMap.set(att.staffUid, current);
               });
-              batchAttendanceMap.forEach((value, key) => newMap.set(key, value));
+              batch.forEach(uid => { // Update only the UIDs from this batch
+                  if (batchAttendanceMap.has(uid)) {
+                      newMap.set(uid, batchAttendanceMap.get(uid)!);
+                  } else {
+                      newMap.delete(uid); // Or set to zero if preferred
+                  }
+              });
               return newMap;
           });
-          setLoadingPayrollCalcs(false); // Mark loading as false once listener is active
+          setLoadingPayrollCalcs(false);
       }, (error) => {
           console.error("Error on attendance snapshot:", error);
           toast({ title: "Real-time Error", description: "Could not get live attendance updates.", variant: "destructive" });
@@ -278,12 +291,12 @@ export default function PayrollClientPage() {
   if (loading && payrollData.length === 0) return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin" /><p className="ml-2">Loading Payroll Data...</p></div>;
   if (error) return <Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>;
 
-  if (!activeSiteId && user?.role !== 'admin') return (
+  if (!activeSiteId && user?.role === 'manager') return (
     <div className="space-y-6">
         <PageHeader title="Staff Payroll" description="Calculate net payable salary for staff members."/>
         <Alert variant="default" className="border-primary/50">
             <Info className="h-4 w-4" /><AlertTitle>Site Selection Required</AlertTitle>
-            <AlertDescription>Please select a site to manage payroll, or select "All Sites" if you are an administrator.</AlertDescription>
+            <AlertDescription>Please select a site to manage payroll.</AlertDescription>
         </Alert>
     </div>
   );
@@ -292,7 +305,7 @@ export default function PayrollClientPage() {
     <div className="space-y-6">
         <PageHeader title="Staff Payroll" description="Calculate net payable salary for the current month and record payments."/>
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
                 <Button variant="outline" size="icon" onClick={handlePrevMonth} aria-label="Previous month" disabled={loading}><ChevronLeft className="h-4 w-4" /></Button>
                 <h2 className="text-xl font-semibold text-center min-w-[150px]">{format(currentMonth, "MMMM yyyy")}</h2>
                 <Button variant="outline" size="icon" onClick={handleNextMonth} aria-label="Next month" disabled={loading}><ChevronRight className="h-4 w-4" /></Button>
@@ -310,6 +323,18 @@ export default function PayrollClientPage() {
                     <SelectItem value="all">All Staff</SelectItem>
                   </SelectContent>
                 </Select>
+                {user?.role === 'admin' && (
+                    <Select value={siteFilter} onValueChange={setSiteFilter}>
+                      <SelectTrigger className="w-[180px] bg-input">
+                        <Building className="mr-2 h-4 w-4 text-muted-foreground"/>
+                        <SelectValue placeholder="Filter by site" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Sites</SelectItem>
+                        {sites.map(site => <SelectItem key={site.id} value={site.id}>{site.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                )}
             </div>
         </div>
 
@@ -323,7 +348,7 @@ export default function PayrollClientPage() {
               <div className="text-2xl font-bold">
                 {loading ? <Skeleton className="h-8 w-32" /> : formatCurrency(totalProjectedSalary)}
               </div>
-              <p className="text-xs text-muted-foreground">Total base salary of active staff</p>
+              <p className="text-xs text-muted-foreground">Total base salary of filtered staff</p>
             </CardContent>
           </Card>
           <Card className="shadow-md">
@@ -372,3 +397,4 @@ export default function PayrollClientPage() {
     </div>
   );
 }
+
