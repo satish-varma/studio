@@ -150,8 +150,11 @@ export async function POST(request: NextRequest) {
         }
         const idToken = authorization.split('Bearer ')[1];
         const decodedToken = await adminAuth.verifyIdToken(idToken);
-        const callingUser = (await getDoc(doc(adminDb, "users", decodedToken.uid))).data() as AppUser;
-
+        const callingUserDoc = await getDoc(doc(adminDb, "users", decodedToken.uid));
+        if (!callingUserDoc.exists()) {
+          return NextResponse.json({ error: 'Caller user document not found in Firestore.' }, { status: 403 });
+        }
+        const callingUser = callingUserDoc.data() as AppUser;
 
         const { username, password, siteId, stallId, consolidated } = await request.json();
         if (!username || !password) {
