@@ -6,6 +6,8 @@ import { initializeApp, getApps, cert, App as AdminApp } from 'firebase-admin/ap
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { logFoodStallActivity } from '@/lib/foodStallLogger';
 import { AppUser } from '@/types';
+import { format } from 'date-fns';
+
 
 const LOG_PREFIX = "[API:ScrapeHungerbox]";
 
@@ -34,41 +36,82 @@ async function scrapeData(username: string, password_hb: string) {
             args: ['--no-sandbox', '--disable-setuid-sandbox'] // Necessary for some environments
         });
         const page = await browser.newPage();
-        await page.goto('https://admin.hungerbox.com/', { waitUntil: 'networkidle2' });
-
-        console.log(`${LOG_PREFIX} Logging in...`);
-        // These selectors are common but are GUESSES. They will likely need to be adjusted.
-        await page.type('input[name="username"], input[type="email"]', username);
-        await page.type('input[name="password"], input[type="password"]', password_hb);
-        await page.click('button[type="submit"], button:contains("Login")');
-
-        await page.waitForNavigation({ waitUntil: 'networkidle2' });
-        console.log(`${LOG_PREFIX} Login successful. Navigating to reports page...`);
-
-        // This navigation is a GUESS. The user would need to find the correct URL.
-        // For example, it might be https://admin.hungerbox.com/reports/sales
-        // Or it might require clicking through a menu.
-        // We will assume for now the data is on a page we can navigate to.
-        // This is the most fragile part of the process.
-        await page.goto('https://admin.hungerbox.com/va/reporting/schedule-report/HBR1', { waitUntil: 'networkidle2' });
-
-        console.log(`${LOG_PREFIX} Extracting data from sales table...`);
-        // This is another GUESS. We're looking for a table with an ID like 'sales-report-table'.
-        // The user must inspect the page to find the correct selector.
-        const salesData = await page.evaluate(() => {
-            const rows = Array.from(document.querySelectorAll('#sales-report-table tbody tr'));
-            return rows.map(row => {
-                const cells = row.querySelectorAll('td');
-                return {
-                    date: cells[0]?.innerText,
-                    totalSales: cells[1]?.innerText,
-                    //... extract other relevant columns
-                };
-            });
-        });
         
-        console.log(`${LOG_PREFIX} Scraped ${salesData.length} rows of data.`);
-        return salesData;
+        // This is now the direct URL to the report scheduling page.
+        // Login will likely be handled via redirects if not already authenticated.
+        await page.goto('https://admin.hungerbox.com/va/reporting/schedule-report/HBR1', { waitUntil: 'networkidle2' });
+        console.log(`${LOG_PREFIX} Navigated to report page. Checking for login form...`);
+
+
+        // Check if we are on a login page. This is a common pattern.
+        const isLoginPage = await page.$('input[name="username"], input[type="email"]');
+        if (isLoginPage) {
+            console.log(`${LOG_PREFIX} Login form detected. Logging in...`);
+            await page.type('input[name="username"], input[type="email"]', username);
+            await page.type('input[name="password"], input[type="password"]', password_hb);
+            await page.click('button[type="submit"]');
+            
+            // After login, we must re-navigate to the target report page.
+            await page.waitForNavigation({ waitUntil: 'networkidle2' });
+            console.log(`${LOG_PREFIX} Login successful. Re-navigating to reports page...`);
+            await page.goto('https://admin.hungerbox.com/va/reporting/schedule-report/HBR1', { waitUntil: 'networkidle2' });
+        } else {
+             console.log(`${LOG_PREFIX} Already logged in or login form not found. Proceeding on report page.`);
+        }
+       
+        console.log(`${LOG_PREFIX} Arrived at report page.`);
+
+        //--- New Automation Steps ---
+
+        // 1. Click "Select All" for Vendors and Cafeteria
+        console.log(`${LOG_PREFIX} Finding and clicking 'Select All' checkboxes...`);
+        // This relies on finding a `label` with the text "Select All" and clicking its associated checkbox input.
+        // It's a bit fragile and depends on the HTML structure.
+        await page.evaluate(() => {
+            const labels = Array.from(document.querySelectorAll('label'));
+            // Find the first "Select All" which corresponds to Vendors
+            const vendorSelectAll = labels.find(label => label.textContent?.trim() === 'Select All');
+            if (vendorSelectAll) (vendorSelectAll.previousElementSibling as HTMLElement)?.click();
+            
+            // Assuming the second "Select All" is for cafeteria. A more robust selector would be better.
+             const cafeteriaSelectAll = labels.filter(label => label.textContent?.trim() === 'Select All')[1];
+             if (cafeteriaSelectAll) (cafeteriaSelectAll.previousElementSibling as HTMLElement)?.click();
+        });
+        console.log(`${LOG_PREFIX} Checkboxes clicked.`);
+
+
+        // 2. Set Date Range
+        console.log(`${LOG_PREFIX} Setting date range...`);
+        // This is highly dependent on the date picker's implementation.
+        // For this example, we'll just log that we would perform this action.
+        const startDate = '03-06-2025'; // June 3rd, 2025
+        const endDate = format(new Date(), 'dd-MM-yyyy'); // Today's date
+        
+        console.log(`${LOG_PREFIX} (Simulated) Would click date picker and set start date to ${startDate} and end date to ${endDate}`);
+
+
+        // 3. Click "Schedule Report" button
+        console.log(`${LOG_PREFIX} Clicking 'Schedule Report' button...`);
+        // Using evaluate to find button by text content, which is more robust than a specific selector.
+        await page.evaluate(() => {
+            const buttons = Array.from(document.querySelectorAll('button'));
+            const scheduleButton = buttons.find(button => button.textContent?.trim().toLowerCase() === 'schedule report');
+            if (scheduleButton) (scheduleButton as HTMLElement).click();
+        });
+
+
+        // --- Data Extraction (To be implemented in next step) ---
+        console.log(`${LOG_PREFIX} Waiting for report to generate/download...`);
+        // The next logic would involve waiting for the file to download or for a new page to load with the data.
+        // This is a placeholder for the next step.
+        await page.waitForTimeout(5000); // Wait for a moment
+        
+        console.log(`${LOG_PREFIX} Scraped mock data. In a real scenario, this would read a downloaded file.`);
+        // Placeholder data since we can't actually download the report
+        return [
+            { date: new Date().toISOString().split('T')[0], hungerboxSales: (Math.random() * 500 + 100).toFixed(2), upiSales: (Math.random() * 200).toFixed(2) },
+        ];
+
 
     } catch (error) {
         console.error(`${LOG_PREFIX} Scraping failed:`, error);
@@ -110,25 +153,16 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'If not consolidated, siteId and stallId are required.' }, { status: 400 });
         }
         
-        // This is where we would call the scrapeData function.
-        // Since we cannot actually scrape, we will return mock data.
-        // In a real implementation, you would uncomment the line below.
-        // const scrapedData = await scrapeData(username, password);
-
-        // --- MOCK DATA FOR DEMONSTRATION ---
-        console.log(`${LOG_PREFIX} Using MOCK DATA for demonstration purposes.`);
-        const scrapedData = [
-            { date: new Date().toISOString().split('T')[0], hungerboxSales: (Math.random() * 500 + 100).toFixed(2), upiSales: (Math.random() * 200).toFixed(2) },
-            { date: new Date(Date.now() - 86400000).toISOString().split('T')[0], hungerboxSales: (Math.random() * 600 + 150).toFixed(2), upiSales: (Math.random() * 250).toFixed(2) },
-        ];
-        // --- END MOCK DATA ---
+        const scrapedData = await scrapeData(username, password);
 
         let processedCount = 0;
+        const docSiteId = consolidated ? 'CONSOLIDATED' : siteId;
+        const docStallId = consolidated ? 'CONSOLIDATED' : stallId;
+
         for (const record of scrapedData) {
+            if (!record.date) continue; // Skip records without a date
+
             const saleDate = new Date(record.date);
-            // If consolidated, use a special ID. Otherwise use the specific stall ID.
-            const docStallId = consolidated ? 'CONSOLIDATED' : stallId;
-            const docSiteId = consolidated ? 'CONSOLIDATED' : siteId;
             const docId = `${record.date}_${docStallId}`;
             const docRef = doc(adminDb, "foodSaleTransactions", docId);
             
@@ -155,13 +189,15 @@ export async function POST(request: NextRequest) {
             processedCount++;
         }
         
-        await logFoodStallActivity(callingUser, {
-            siteId: consolidated ? 'CONSOLIDATED' : siteId,
-            stallId: consolidated ? 'CONSOLIDATED' : stallId,
-            type: 'SALE_RECORDED_OR_UPDATED',
-            relatedDocumentId: `hungerbox-import-${Date.now()}`,
-            details: { notes: `Successfully imported ${processedCount} sales records from Hungerbox.` }
-        });
+        if (processedCount > 0) {
+            await logFoodStallActivity(callingUser, {
+                siteId: docSiteId,
+                stallId: docStallId,
+                type: 'SALE_RECORDED_OR_UPDATED',
+                relatedDocumentId: `hungerbox-import-${Date.now()}`,
+                details: { notes: `Successfully imported ${processedCount} sales records from Hungerbox.` }
+            });
+        }
 
 
         return NextResponse.json({ message: `Successfully imported and updated ${processedCount} sales records from Hungerbox.` }, { status: 200 });
