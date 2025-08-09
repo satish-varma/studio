@@ -169,20 +169,20 @@ export default function StaffAttendanceClientPage() {
   const handleStatusChange = useCallback(async (staff: AppUser, date: Date) => {
     if (!user) return;
     
-    const siteIdForAttendance = staff.defaultSiteId || activeSiteId;
+    // Determine the site context for the attendance record
+    const siteIdForAttendance = staff.defaultSiteId || ((staff.role === 'manager' || staff.role === 'admin') ? activeSiteId : null);
 
-    if ((staff.role === 'admin' || staff.role === 'manager') && !siteIdForAttendance) {
-        toast({ title: "Site Context Required", description: `To mark attendance for ${staff.displayName}, please select a site from the header. Their attendance will be logged for that site.`, variant: "destructive" });
-        return;
-    }
-    
-    if (staff.role === 'staff' && !siteIdForAttendance) {
-        toast({ title: "No Site Assigned", description: `${staff.displayName} is not assigned to a site.`, variant: "destructive" });
+    if (!siteIdForAttendance) {
+        toast({
+            title: "Site Context Required",
+            description: `To mark attendance for ${staff.displayName}, a site must be assigned to them or selected in the header.`,
+            variant: "destructive",
+            duration: 7000
+        });
         return;
     }
 
     const holidayInfo = isHoliday(date, siteIdForAttendance);
-
     if (holidayInfo.holiday) {
       toast({ title: "Holiday", description: `Cannot mark attendance on ${holidayInfo.name}.`, variant: "default" });
       return;
@@ -549,3 +549,5 @@ export default function StaffAttendanceClientPage() {
     </div>
   );
 }
+
+    
