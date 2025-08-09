@@ -86,7 +86,8 @@ export default function StaffAttendanceClientPage() {
   const handleGoToCurrentMonth = () => setCurrentMonth(new Date());
 
   const filteredStaffList = useMemo(() => {
-    const operationalStaff = allStaffForSite.filter(u => u.role !== 'admin');
+    // FIX: Do not filter out admins from the attendance view.
+    const operationalStaff = allStaffForSite;
     if (statusFilter === 'all') {
       return operationalStaff;
     }
