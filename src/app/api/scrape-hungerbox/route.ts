@@ -15,21 +15,29 @@ let adminAuth: ReturnType<typeof getAdminAuth>;
 let adminDb: ReturnType<typeof getFirestore>;
 
 function initializeAdminApp(): void {
-    const appName = '[DEFAULT]';
-    if (getApps().find(app => app.name === appName)) {
-        adminApp = getApps().find(app => app.name === appName)!;
+    const appName = 'firebase-admin-app-scrapes'; // Use a unique name
+    const existingApp = getApps().find(app => app.name === appName);
+    if (existingApp) {
+        adminApp = existingApp;
     } else {
         const serviceAccountJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
         if (!serviceAccountJson) {
+            console.error(`${LOG_PREFIX} GOOGLE_APPLICATION_CREDENTIALS_JSON is not set.`);
             throw new Error("GOOGLE_APPLICATION_CREDENTIALS_JSON is not set.");
         }
-        adminApp = initializeApp({
-            credential: cert(JSON.parse(serviceAccountJson)),
-        });
+        try {
+            adminApp = initializeApp({
+                credential: cert(JSON.parse(serviceAccountJson)),
+            }, appName);
+        } catch (e: any) {
+            console.error(`${LOG_PREFIX} Failed to initialize Firebase Admin SDK:`, e.message);
+            throw new Error(`Failed to initialize Firebase Admin SDK: ${e.message}`);
+        }
     }
     adminAuth = getAdminAuth(adminApp);
     adminDb = getFirestore(adminApp);
 }
+
 
 async function scrapeData(username: string, password_hb: string) {
     console.log(`${LOG_PREFIX} Starting browser for scraping...`);
@@ -114,7 +122,11 @@ async function scrapeData(username: string, password_hb: string) {
         console.error(`${LOG_PREFIX} Scraping failed:`, error);
         let pageContent = "";
         if (page) {
-            pageContent = await page.content();
+            try {
+                pageContent = await page.content();
+            } catch (contentError) {
+                pageContent = "Could not retrieve page content after initial error.";
+            }
         }
         // Throw a more informative error including the page's HTML for debugging
         throw new Error(`Failed to scrape data. This could be due to incorrect credentials, a change in the website's layout, or a CAPTCHA. Original error: ${error.message}. Page HTML at time of error: \n\n ${pageContent}`);
@@ -145,7 +157,7 @@ export async function POST(request: NextRequest) {
         const userDocRef = adminDb.collection("users").doc(decodedToken.uid);
         const callingUserDocSnap = await userDocRef.get();
 
-        if (!callingUserDocSnap.exists()) {
+        if (!callingUserDocSnap.exists) { // Correctly calling exists() on the snapshot
           return NextResponse.json({ error: 'Caller user document not found in Firestore.' }, { status: 403 });
         }
         callingUser = { uid: callingUserDocSnap.id, ...callingUserDocSnap.data() } as AppUser;
