@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
-import type { AppUser, StaffDetails, SalaryAdvance, SalaryPayment, Site, Holiday, UserStatus } from "@/types";
+import type { AppUser, StaffDetails, SalaryAdvance, SalaryPayment, Site, Holiday, UserStatus, StaffAttendance } from "@/types";
 import { 
   getFirestore, 
   collection, 
@@ -67,21 +67,13 @@ export default function PayrollClientPage() {
   const [payrollData, setPayrollData] = useState<PayrollData[]>([]);
   const [loadingPayrollCalcs, setLoadingPayrollCalcs] = useState(true);
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [statusFilter, setStatusFilter] = useState<UserStatus | 'all'>('all');
+  const [statusFilter, setStatusFilter] = useState<UserStatus | 'all'>('active');
   const [siteFilter, setSiteFilter] = useState<string>('all'); // New state for site filter
 
   const staffList = useMemo(() => {
-    const baseList = allUsersForContext.filter(u => u.role === 'staff' || u.role === 'manager');
-    let siteFilteredList = baseList;
-
-    if (user?.role === 'admin' && siteFilter !== 'all') {
-      siteFilteredList = baseList.filter(u => u.defaultSiteId === siteFilter);
-    } else if (user?.role === 'manager' && activeSiteId) {
-      siteFilteredList = baseList.filter(u => u.defaultSiteId === activeSiteId);
-    }
-    
-    return siteFilteredList;
-  }, [allUsersForContext, siteFilter, activeSiteId, user?.role]);
+    // This hook now correctly returns all users for admin, or users from managed sites for manager
+    return allUsersForContext.filter(u => u.role === 'staff' || u.role === 'manager');
+  }, [allUsersForContext]);
   
 
   const [monthlyAdvances, setMonthlyAdvances] = useState<Map<string, number>>(new Map());
@@ -114,7 +106,11 @@ export default function PayrollClientPage() {
       
       const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
       const isGlobalHoliday = holidays.some(h => h.date === dateStr && h.siteId === null);
-      const isSiteHoliday = staff.defaultSiteId ? holidays.some(h => h.date === dateStr && h.siteId === staff.defaultSiteId) : false;
+      
+      // A manager's working days should be calculated against global holidays, as their work spans multiple sites.
+      // A staff member's working days are affected by their specific site's holidays.
+      const siteIdForHolidayCheck = staff.role === 'manager' ? null : staff.defaultSiteId;
+      const isSiteHoliday = siteIdForHolidayCheck ? holidays.some(h => h.date === dateStr && h.siteId === siteIdForHolidayCheck) : false;
 
       if (!isWeekend && !isGlobalHoliday && !isSiteHoliday) {
         workingDays++;
@@ -249,28 +245,79 @@ export default function PayrollClientPage() {
   }, [staffList, staffDetailsMap, monthlyAdvances, monthlyPayments, monthlyHolidays, monthlyAttendance, currentMonth, calculateWorkingDaysForEmployee, userManagementLoading]);
 
   const filteredPayrollData = useMemo(() => {
-    if (statusFilter === 'all') {
-      return payrollData;
+    let siteFilteredData = payrollData;
+    if (user?.role === 'admin' && siteFilter !== 'all') {
+      siteFilteredData = payrollData.filter(p => {
+        if(p.user.role === 'manager') {
+            return p.user.managedSiteIds?.includes(siteFilter);
+        }
+        return p.user.defaultSiteId === siteFilter;
+      });
+    } else if (user?.role === 'manager' && activeSiteId) {
+      siteFilteredData = payrollData.filter(p => {
+         if(p.user.role === 'manager') {
+            return p.user.managedSiteIds?.includes(activeSiteId);
+        }
+        return p.user.defaultSiteId === activeSiteId;
+      });
     }
-    return payrollData.filter(p => (p.user.status || 'active') === statusFilter);
-  }, [payrollData, statusFilter]);
+    
+    if (statusFilter === 'all') {
+      return siteFilteredData;
+    }
+    return siteFilteredData.filter(p => (p.user.status || 'active') === statusFilter);
+  }, [payrollData, statusFilter, siteFilter, user?.role, activeSiteId]);
   
 
   const totalProjectedSalary = useMemo(() => {
-    return payrollData.reduce((acc, item) => acc + (item.details?.salary || 0), 0);
-  }, [payrollData]);
+    const monthStart = startOfMonth(currentMonth);
+    return filteredPayrollData.reduce((acc, item) => {
+        const details = item.details;
+        // Don't include salary if the user has an exit date before the start of this month.
+        if (details?.exitDate && isBefore(new Date(details.exitDate), monthStart)) {
+            return acc;
+        }
+        // Distribute manager's salary if they manage multiple sites and we're viewing a single site
+        if(item.user.role === 'manager' && siteFilter !== 'all') {
+            const managedCount = item.user.managedSiteIds?.length || 1;
+            return acc + ((details?.salary || 0) / managedCount);
+        }
+        return acc + (details?.salary || 0);
+    }, 0);
+  }, [filteredPayrollData, currentMonth, siteFilter]);
 
   const totalNetPayable = useMemo(() => {
-    return payrollData.reduce((acc, item) => acc + (item.netPayable > item.paidAmount ? item.netPayable - item.paidAmount : 0), 0);
-  }, [payrollData]);
+    return filteredPayrollData.reduce((acc, item) => {
+        let net = item.netPayable > item.paidAmount ? item.netPayable - item.paidAmount : 0;
+        if(item.user.role === 'manager' && siteFilter !== 'all') {
+            const managedCount = item.user.managedSiteIds?.length || 1;
+            net = net / managedCount;
+        }
+        return acc + net;
+    }, 0);
+  }, [filteredPayrollData, siteFilter]);
 
   const totalEarnedSalary = useMemo(() => {
-    return payrollData.reduce((acc, item) => acc + item.earnedSalary, 0);
-  }, [payrollData]);
+    return filteredPayrollData.reduce((acc, item) => {
+        let earned = item.earnedSalary;
+        if(item.user.role === 'manager' && siteFilter !== 'all') {
+            const managedCount = item.user.managedSiteIds?.length || 1;
+            earned = earned / managedCount;
+        }
+        return acc + earned;
+    }, 0);
+  }, [filteredPayrollData, siteFilter]);
 
   const totalAdvances = useMemo(() => {
-    return payrollData.reduce((acc, item) => acc + item.advances, 0);
-  }, [payrollData]);
+    return filteredPayrollData.reduce((acc, item) => {
+        let adv = item.advances;
+        if(item.user.role === 'manager' && siteFilter !== 'all') {
+            const managedCount = item.user.managedSiteIds?.length || 1;
+            adv = adv / managedCount;
+        }
+        return acc + adv;
+    }, 0);
+  }, [filteredPayrollData, siteFilter]);
 
   const loading = authLoading || userManagementLoading || loadingPayrollCalcs;
   const error = userManagementError;
