@@ -86,7 +86,6 @@ export default function StaffAttendanceClientPage() {
   const handleGoToCurrentMonth = () => setCurrentMonth(new Date());
 
   const filteredStaffList = useMemo(() => {
-    // FIX: Do not filter out admins from the attendance view.
     const operationalStaff = allStaffForSite;
     if (statusFilter === 'all') {
       return operationalStaff;
@@ -169,13 +168,16 @@ export default function StaffAttendanceClientPage() {
   }, [holidays]);
 
   const handleStatusChange = useCallback(async (staff: AppUser, date: Date) => {
-    const holidayInfo = isHoliday(date, staff.defaultSiteId);
+    const siteIdForAttendance = staff.defaultSiteId || activeSiteId;
+    const holidayInfo = isHoliday(date, siteIdForAttendance);
+
     if (!user) return;
-    
-    if (!staff.defaultSiteId) {
-        toast({ title: "No Site Assigned", description: `${staff.displayName} is not assigned to a site.`, variant: "destructive" });
+
+    if (!siteIdForAttendance) {
+        toast({ title: "No Site Assigned", description: `Cannot mark attendance as no site context could be determined for ${staff.displayName}.`, variant: "destructive" });
         return;
     }
+
     if (holidayInfo.holiday) {
       toast({ title: "Holiday", description: `Cannot mark attendance on ${holidayInfo.name}.`, variant: "default" });
       return;
@@ -212,7 +214,7 @@ export default function StaffAttendanceClientPage() {
         } else {
             newAttendance[staff.uid][dateStr] = {
                 id: docId, staffUid: staff.uid, date: dateStr, status: newStatus,
-                siteId: staff.defaultSiteId!, recordedByUid: user.uid, recordedByName: user.displayName || user.email!
+                siteId: siteIdForAttendance, recordedByUid: user.uid, recordedByName: user.displayName || user.email!
             };
         }
         return newAttendance;
@@ -226,7 +228,7 @@ export default function StaffAttendanceClientPage() {
             staffUid: staff.uid,
             date: dateStr,
             status: newStatus,
-            siteId: staff.defaultSiteId,
+            siteId: siteIdForAttendance,
             recordedByUid: user.uid,
             recordedByName: user.displayName || user.email,
             updatedAt: new Date().toISOString(),
@@ -236,7 +238,7 @@ export default function StaffAttendanceClientPage() {
       await logStaffActivity(user, {
         type: 'ATTENDANCE_MARKED',
         relatedStaffUid: staff.uid,
-        siteId: staff.defaultSiteId,
+        siteId: siteIdForAttendance,
         details: {
             date: dateStr,
             status: newStatus || 'Cleared',
@@ -249,7 +251,7 @@ export default function StaffAttendanceClientPage() {
       toast({ title: "Save Failed", description: `Failed to save status for ${staff.displayName}. Reverting change.`, variant: "destructive"});
       setAttendance(prevAttendance);
     }
-  }, [user, attendance, isHoliday, toast, staffDetailsMap]);
+  }, [user, activeSiteId, attendance, isHoliday, toast, staffDetailsMap]);
 
   const processBulkAction = async (action: (batch: ReturnType<typeof writeBatch>, staff: AppUser, date: Date) => { valid: boolean; status?: AttendanceStatus }) => {
     if (!user) {
