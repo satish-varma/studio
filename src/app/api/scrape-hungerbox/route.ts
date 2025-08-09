@@ -156,30 +156,29 @@ export async function POST(request: NextRequest) {
         const decodedToken = await adminAuth.verifyIdToken(idToken);
         const callingUserDocSnap = await adminDb.collection("users").doc(decodedToken.uid).get();
 
-        if (!callingUserDocSnap.exists()) {
+        if (!callingUserDocSnap.exists) {
           return NextResponse.json({ error: 'Caller user document not found in Firestore.' }, { status: 403 });
         }
         const callingUser = callingUserDocSnap.data() as AppUser;
 
-        const { username, password, consolidated } = await request.json();
+        const { username, password, siteId, stallId } = await request.json();
         if (!username || !password) {
             return NextResponse.json({ error: 'Missing required fields: username, password.', status: 400 });
+        }
+        if (!siteId || !stallId) {
+            return NextResponse.json({ error: 'Missing required fields: siteId, stallId.', status: 400 });
         }
         
         const scrapedData = await scrapeData(username, password);
 
         let processedCount = 0;
-        // Since consolidated is always true, we use a fixed marker.
-        const docSiteId = 'CONSOLIDATED';
-        const docStallId = 'CONSOLIDATED';
-
         const batch = adminDb.batch();
 
         for (const record of scrapedData) {
             if (!record.date) continue; // Skip records without a date
 
             const saleDate = new Date(record.date);
-            const docId = `${record.date}_${docStallId}`;
+            const docId = `${record.date}_${stallId}`;
             const docRef = adminDb.collection("foodSaleTransactions").doc(docId);
             
             const breakfastSales = parseFloat(record.hungerboxSales) || 0;
@@ -194,8 +193,8 @@ export async function POST(request: NextRequest) {
                 snacks: { hungerbox: 0, upi: 0, other: 0 },
                 totalAmount: total,
                 notes: `Imported from Hungerbox on ${new Date().toLocaleDateString()}`,
-                siteId: docSiteId,
-                stallId: docStallId,
+                siteId: siteId,
+                stallId: stallId,
                 recordedByUid: callingUser.uid,
                 recordedByName: callingUser.displayName || callingUser.email,
                 createdAt: new Date().toISOString(),
@@ -209,8 +208,8 @@ export async function POST(request: NextRequest) {
         
         if (processedCount > 0) {
             await logFoodStallActivity(callingUser, {
-                siteId: docSiteId,
-                stallId: docStallId,
+                siteId: siteId,
+                stallId: stallId,
                 type: 'SALE_RECORDED_OR_UPDATED',
                 relatedDocumentId: `hungerbox-import-${Date.now()}`,
                 details: { notes: `Successfully imported ${processedCount} sales records from Hungerbox.` }
