@@ -7,6 +7,8 @@ import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { logFoodStallActivity } from '@/lib/foodStallLogger';
 import { AppUser } from '@/types';
 import { format } from 'date-fns';
+import fs from 'fs';
+import path from 'path';
 
 const LOG_PREFIX = "[API:ScrapeHungerbox]";
 
@@ -23,6 +25,13 @@ function initializeAdminApp(): AdminApp {
     });
 }
 
+// Ensure scrapes directory exists
+const scrapesDir = path.join(process.cwd(), 'public', 'scrapes');
+if (!fs.existsSync(scrapesDir)) {
+    fs.mkdirSync(scrapesDir, { recursive: true });
+}
+
+
 // NOTE: This is a simplified example. Real-world scraping is fragile and
 // highly dependent on the target site's exact HTML structure.
 // Selectors will likely need to be updated if Hungerbox changes their site.
@@ -35,9 +44,11 @@ async function scrapeData(username: string, password_hb: string) {
             args: ['--no-sandbox', '--disable-setuid-sandbox'] // Necessary for some environments
         });
         const page = await browser.newPage();
+        await page.setViewport({ width: 1280, height: 800 }); // Set a consistent viewport size
         
         console.log(`${LOG_PREFIX} Navigating to initial page to check login status...`);
         await page.goto('https://admin.hungerbox.com/', { waitUntil: 'networkidle2' });
+        await page.screenshot({ path: path.join(scrapesDir, '01_initial_page.png') });
         
         // Using more specific selectors for login form.
         const usernameSelector = 'input#email';
@@ -49,8 +60,10 @@ async function scrapeData(username: string, password_hb: string) {
             console.log(`${LOG_PREFIX} Login form detected. Logging in...`);
             await page.type(usernameSelector, username);
             await page.type(passwordSelector, password_hb);
+            await page.screenshot({ path: path.join(scrapesDir, '02_login_form_filled.png') });
             await page.click(submitButtonSelector);
             await page.waitForNavigation({ waitUntil: 'networkidle2' });
+            await page.screenshot({ path: path.join(scrapesDir, '03_after_login_attempt.png') });
             console.log(`${LOG_PREFIX} Login step completed.`);
         } else {
              console.log(`${LOG_PREFIX} Already logged in or login form not found. Proceeding directly to report page.`);
@@ -59,6 +72,7 @@ async function scrapeData(username: string, password_hb: string) {
         const reportUrl = 'https://admin.hungerbox.com/va/reporting/schedule-report/HBR1';
         console.log(`${LOG_PREFIX} Navigating to report page: ${reportUrl}`);
         await page.goto(reportUrl, { waitUntil: 'networkidle2' });
+        await page.screenshot({ path: path.join(scrapesDir, '04_report_page.png') });
         console.log(`${LOG_PREFIX} Arrived at report page.`);
 
         //--- New Automation Steps ---
@@ -85,6 +99,7 @@ async function scrapeData(username: string, password_hb: string) {
                  console.log('Could not find Cafeteria "Select All"');
              }
         });
+        await page.screenshot({ path: path.join(scrapesDir, '05_checkboxes_clicked.png') });
         console.log(`${LOG_PREFIX} 'Select All' checkboxes clicked.`);
 
 
@@ -95,6 +110,7 @@ async function scrapeData(username: string, password_hb: string) {
         // This is highly dependent on the date picker's implementation.
         // We will log the intent. In a real scenario, you'd inspect the date picker's HTML.
         console.log(`${LOG_PREFIX} (LOG) Would now interact with date picker elements on the page.`);
+        await page.screenshot({ path: path.join(scrapesDir, '06_before_date_set.png') });
 
 
         // 3. Click "Schedule Report" button
@@ -109,6 +125,8 @@ async function scrapeData(username: string, password_hb: string) {
                  console.log('Could not find "Schedule Report" button.');
             }
         });
+        await page.waitForTimeout(2000); // Wait for any modal/action to trigger
+        await page.screenshot({ path: path.join(scrapesDir, '07_after_schedule_click.png') });
         console.log(`${LOG_PREFIX} 'Schedule Report' button clicked.`);
 
 
@@ -156,10 +174,10 @@ export async function POST(request: NextRequest) {
         const decodedToken = await adminAuth.verifyIdToken(idToken);
         const callingUserDocSnap = await adminDb.collection("users").doc(decodedToken.uid).get();
 
-        if (!callingUserDocSnap.exists) {
+        if (!callingUserDocSnap.exists()) {
           return NextResponse.json({ error: 'Caller user document not found in Firestore.' }, { status: 403 });
         }
-        const callingUser = callingUserDocSnap.data() as AppUser;
+        const callingUser = { uid: callingUserDocSnap.id, ...callingUserDocSnap.data() } as AppUser;
 
         const { username, password, siteId, stallId } = await request.json();
         if (!username || !password) {
@@ -217,10 +235,12 @@ export async function POST(request: NextRequest) {
         }
 
 
-        return NextResponse.json({ message: `Successfully imported and updated ${processedCount} sales records from Hungerbox.` }, { status: 200 });
+        return NextResponse.json({ message: `Successfully imported and updated ${processedCount} sales records from Hungerbox. Check the /public/scrapes folder for screenshots.` }, { status: 200 });
 
     } catch (error: any) {
         console.error(`${LOG_PREFIX} Error in API route:`, error);
         return NextResponse.json({ error: error.message || 'An unexpected server error occurred.' }, { status: 500 });
     }
 }
+
+    
