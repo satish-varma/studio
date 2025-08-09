@@ -67,24 +67,23 @@ export default function PayrollClientPage() {
   const [payrollData, setPayrollData] = useState<PayrollData[]>([]);
   const [loadingPayrollCalcs, setLoadingPayrollCalcs] = useState(true);
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [statusFilter, setStatusFilter] = useState<UserStatus | 'all'>('active');
+  const [statusFilter, setStatusFilter] = useState<UserStatus | 'all'>('all');
   const [siteFilter, setSiteFilter] = useState<string>('all'); // New state for site filter
 
   const staffList = useMemo(() => {
     const baseList = allUsersForContext.filter(u => u.role === 'staff' || u.role === 'manager');
-    let statusFiltered = statusFilter === 'all' ? baseList : baseList.filter(u => (u.status || 'active') === statusFilter);
-    
-    // Apply site filter logic
+    let siteFilteredList = baseList;
+
     if (user?.role === 'admin' && siteFilter !== 'all') {
-      return statusFiltered.filter(u => u.defaultSiteId === siteFilter);
+      siteFilteredList = baseList.filter(u => u.defaultSiteId === siteFilter);
     } else if (user?.role === 'manager' && activeSiteId) {
-      return statusFiltered.filter(u => u.defaultSiteId === activeSiteId);
+      siteFilteredList = baseList.filter(u => u.defaultSiteId === activeSiteId);
     }
-    return statusFiltered;
-  }, [allUsersForContext, statusFilter, siteFilter, activeSiteId, user?.role]);
+    
+    return siteFilteredList;
+  }, [allUsersForContext, siteFilter, activeSiteId, user?.role]);
   
 
-  // State for fetched data
   const [monthlyAdvances, setMonthlyAdvances] = useState<Map<string, number>>(new Map());
   const [monthlyPayments, setMonthlyPayments] = useState<Map<string, number>>(new Map());
   const [monthlyHolidays, setMonthlyHolidays] = useState<Holiday[]>([]);
@@ -126,16 +125,11 @@ export default function PayrollClientPage() {
     return workingDays;
   }, []);
   
-  // Unified effect for all real-time payroll data
   useEffect(() => {
     if (userManagementLoading || staffList.length === 0) {
         if(!userManagementLoading) {
             setLoadingPayrollCalcs(false);
             setPayrollData([]);
-            setMonthlyAdvances(new Map());
-            setMonthlyPayments(new Map());
-            setMonthlyAttendance(new Map());
-            setMonthlyHolidays([]);
         }
         return;
     }
@@ -149,6 +143,7 @@ export default function PayrollClientPage() {
     
     const payrollMonthStart = startOfMonth(currentMonth);
     const payrollMonthEnd = endOfMonth(currentMonth);
+    
     const advancesStartDate = payrollMonthStart;
     const nextMonth = addMonths(currentMonth, 1);
     const advancesEndDate = new Date(nextMonth.getFullYear(), nextMonth.getMonth(), 15, 23, 59, 59);
@@ -183,9 +178,9 @@ export default function PayrollClientPage() {
       const paymentsQuery = query(collection(db, "salaryPayments"), where("staffUid", "in", batch), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear()));
       const unsubPayments = onSnapshot(paymentsQuery, (snapshot) => {
           const batchPaymentsMap = new Map<string, number>();
-          snapshot.docs.forEach(doc => {
-              const data = doc.data() as SalaryPayment;
-              batchPaymentsMap.set(data.staffUid, (batchPaymentsMap.get(data.staffUid) || 0) + data.amountPaid);
+          snapshot.forEach(doc => {
+              const payment = doc.data() as SalaryPayment;
+              batchPaymentsMap.set(payment.staffUid, (batchPaymentsMap.get(payment.staffUid) || 0) + payment.amountPaid);
           });
           setMonthlyPayments(prev => {
             const newMap = new Map(prev);
@@ -223,7 +218,6 @@ export default function PayrollClientPage() {
     };
   }, [staffList, currentMonth, toast, userManagementLoading]);
 
-
   // Effect to re-calculate payroll whenever any data changes
   useEffect(() => {
     if (userManagementLoading) return;
@@ -253,6 +247,14 @@ export default function PayrollClientPage() {
     setPayrollData(newPayrollData);
     setLoadingPayrollCalcs(false);
   }, [staffList, staffDetailsMap, monthlyAdvances, monthlyPayments, monthlyHolidays, monthlyAttendance, currentMonth, calculateWorkingDaysForEmployee, userManagementLoading]);
+
+  const filteredPayrollData = useMemo(() => {
+    if (statusFilter === 'all') {
+      return payrollData;
+    }
+    return payrollData.filter(p => (p.user.status || 'active') === statusFilter);
+  }, [payrollData, statusFilter]);
+  
 
   const totalProjectedSalary = useMemo(() => {
     return payrollData.reduce((acc, item) => acc + (item.details?.salary || 0), 0);
@@ -377,7 +379,7 @@ export default function PayrollClientPage() {
         {loading ? (
             <div className="flex justify-center items-center py-10"><Loader2 className="h-6 w-6 animate-spin" /><p className="ml-2">Recalculating payroll...</p></div>
         ) : (
-            <PayrollTable data={payrollData} month={currentMonth.getMonth()+1} year={currentMonth.getFullYear()} />
+            <PayrollTable data={filteredPayrollData} month={currentMonth.getMonth()+1} year={currentMonth.getFullYear()} />
         )}
     </div>
   );
