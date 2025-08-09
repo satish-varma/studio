@@ -1,10 +1,11 @@
+
 "use client";
 
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { format, startOfDay, endOfDay, startOfMonth, subDays, startOfWeek, endOfWeek } from "date-fns";
+import { format, startOfDay, endOfDay, startOfMonth, subDays, startOfWeek, endOfWeek, endOfMonth } from "date-fns";
 import { CalendarIcon } from "lucide-react";
 import type { DateRange } from "react-day-picker";
 import { useState, useEffect } from "react";
