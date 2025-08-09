@@ -1,6 +1,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import puppeteer from 'puppeteer';
+// Corrected import syntax for Firebase Admin SDK
 import { getFirestore, doc, setDoc, Timestamp, getDoc } from 'firebase-admin/firestore';
 import { initializeApp, getApps, cert, App as AdminApp } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
