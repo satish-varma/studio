@@ -1,12 +1,11 @@
 
 import { NextRequest, NextResponse } from 'next/server';
+import type { AppUser, Site, Stall } from '@/types';
 import { logFoodStallActivity } from '@/lib/foodStallLogger';
-import { AppUser } from '@/types';
-import { format } from 'date-fns';
 
 // Using require for firebase-admin modules as dynamic imports can be problematic in this environment.
 const admin = require('firebase-admin');
-const { getFirestore } = require('firebase-admin/firestore');
+const { getFirestore, Timestamp } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
 
 const LOG_PREFIX = "[API:ScrapeHungerbox]";
@@ -33,20 +32,16 @@ function initializeAdminApp() {
     }
 }
 
-
 // MOCK FUNCTION: This function returns hardcoded mock data instead of live scraping.
+// This is used for demonstration as live scraping is unreliable.
 async function getConsolidatedReportData() {
     console.log(`${LOG_PREFIX} Returning hardcoded mock consolidated report data.`);
-    // This simulates a consolidated report with sales figures for different stalls.
-    // In a real scenario, this data would be parsed from the downloaded report file.
-    // NOTE: The siteId and stallId here are placeholders. The logic below now maps them.
     return [
-        { date: '2024-07-21', hungerboxSales: '1250.75', upiSales: '340.50', cashSales: '150.00', stallName: 'HSR Layout The Gut Guru' },
-        { date: '2024-07-21', hungerboxSales: '980.25', upiSales: '410.00', cashSales: '200.00', stallName: 'Koramangala The Gut Guru' },
-        { date: '2024-07-20', hungerboxSales: '1100.00', upiSales: '300.00', cashSales: '180.50', stallName: 'HSR Layout The Gut Guru' },
-        { date: '2024-07-20', hungerboxSales: '950.50', upiSales: '380.75', cashSales: '210.00', stallName: 'Koramangala The Gut Guru' },
+        { date: '2024-07-21', hungerboxSales: '1250.75', upiSales: '340.50', cashSales: '150.00' },
+        { date: '2024-07-20', hungerboxSales: '1100.00', upiSales: '300.00', cashSales: '180.50' },
     ];
 }
+
 
 export async function POST(request: NextRequest) {
     let adminApp;
@@ -78,25 +73,20 @@ export async function POST(request: NextRequest) {
         }
         callingUser = { uid: callingUserDocSnap.id, ...callingUserDocSnap.data() } as AppUser;
         
+        // Correctly get siteId and stallId from request body
+        const { siteId, stallId, username, password } = await request.json();
+
+        if (!username || !password || !siteId || !stallId) {
+            return NextResponse.json({ error: "Missing required fields: username, password, siteId, or stallId." }, { status: 400 });
+        }
+
         const consolidatedData = await getConsolidatedReportData();
-
-        // Fetch all sites and stalls to map names to IDs
-        const sitesSnapshot = await adminDb.collection('sites').get();
-        const stallsSnapshot = await adminDb.collection('stalls').get();
-        const stallsMap = new Map(stallsSnapshot.docs.map(doc => [doc.data().name.toLowerCase(), {id: doc.id, siteId: doc.data().siteId}]));
-
-        let processedCount = 0;
         const batch = adminDb.batch();
+        let processedCount = 0;
 
         for (const record of consolidatedData) {
-            const stallInfo = stallsMap.get(record.stallName.toLowerCase());
-            if (!record.date || !stallInfo) {
-                 console.warn(`${LOG_PREFIX} Skipping record for unknown stall "${record.stallName}" on date ${record.date}`);
-                 continue;
-            }
-
             const saleDate = new Date(record.date);
-            const docId = `${record.date}_${stallInfo.id}`;
+            const docId = `${record.date}_${stallId}`;
             const docRef = adminDb.collection("foodSaleTransactions").doc(docId);
             
             const hungerboxSales = parseFloat(record.hungerboxSales) || 0;
@@ -105,15 +95,15 @@ export async function POST(request: NextRequest) {
             const total = hungerboxSales + upiSales + cashSales;
 
             const saleData = {
-                saleDate: admin.firestore.Timestamp.fromDate(saleDate),
+                saleDate: Timestamp.fromDate(saleDate),
                 breakfast: { hungerbox: hungerboxSales, upi: 0, other: 0 },
                 lunch: { hungerbox: 0, upi: upiSales, other: cashSales },
                 dinner: { hungerbox: 0, upi: 0, other: 0 },
                 snacks: { hungerbox: 0, upi: 0, other: 0 },
                 totalAmount: total,
-                notes: `Imported from Hungerbox Consolidated Report on ${new Date().toLocaleDateString()}`,
-                siteId: stallInfo.siteId,
-                stallId: stallInfo.id,
+                notes: `Imported from Hungerbox Report on ${new Date().toLocaleDateString()}`,
+                siteId: siteId,
+                stallId: stallId,
                 recordedByUid: callingUser.uid,
                 recordedByName: callingUser.displayName || callingUser.email,
                 createdAt: new Date().toISOString(),
@@ -127,18 +117,24 @@ export async function POST(request: NextRequest) {
         
         if (processedCount > 0) {
             await logFoodStallActivity(callingUser, {
-                siteId: 'CONSOLIDATED',
-                stallId: 'CONSOLIDATED',
+                siteId: siteId,
+                stallId: stallId,
                 type: 'SALE_RECORDED_OR_UPDATED',
                 relatedDocumentId: `hungerbox-import-${Date.now()}`,
-                details: { notes: `Successfully imported and processed ${processedCount} sales records from a consolidated report.` }
+                details: { notes: `Successfully imported and processed ${processedCount} sales records from a report.` }
             });
         }
 
-        return NextResponse.json({ message: `Successfully imported and updated ${processedCount} daily sales summaries from the consolidated report.` }, { status: 200 });
+        return NextResponse.json({ message: `Successfully imported and updated ${processedCount} daily sales summaries.` }, { status: 200 });
 
     } catch (error: any) {
         console.error(`${LOG_PREFIX} Error in API route:`, error);
-        return NextResponse.json({ error: error.message || 'An unexpected server error occurred.' }, { status: 500 });
+        let errorMessage = 'An unexpected server error occurred.';
+        if(error.code === 8 || (typeof error.message === 'string' && error.message.includes('RESOURCE_EXHAUSTED'))){
+            errorMessage = "8 RESOURCE_EXHAUSTED: Quota exceeded.";
+        } else if (error.message) {
+            errorMessage = error.message;
+        }
+        return NextResponse.json({ error: errorMessage }, { status: 500 });
     }
 }
