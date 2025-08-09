@@ -1,7 +1,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
-import puppeteer from 'puppeteer';
-import { getFirestore, Timestamp } from 'firebase-admin/firestore';
+import { getFirestore, Timestamp, writeBatch } from 'firebase-admin/firestore';
 import { initializeApp, getApps, cert, App as AdminApp } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { logFoodStallActivity } from '@/lib/foodStallLogger';
@@ -34,57 +33,17 @@ function initializeAdminApp(): AdminApp {
 }
 
 
-async function scrapeData(username: string, password_hb: string) {
-    console.log(`${LOG_PREFIX} Starting browser for scraping...`);
-    let browser;
-    let page;
-    let pageContentOnError = "";
-
-    try {
-        browser = await puppeteer.launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
-        page = await browser.newPage();
-        await page.setViewport({ width: 1280, height: 800 });
-        
-        console.log(`${LOG_PREFIX} Navigating to Hungerbox login page...`);
-        await page.goto('https://admin.hungerbox.com/', { waitUntil: 'networkidle2' });
-
-        const usernameSelector = 'input[name="email"]';
-        const passwordSelector = 'input[name="password"]';
-        const submitButtonSelector = 'button[type="submit"]';
-
-        await page.waitForSelector(usernameSelector, { timeout: 10000 });
-        console.log(`${LOG_PREFIX} Login form detected. Logging in...`);
-        await page.type(usernameSelector, username);
-        await page.type(passwordSelector, password_hb);
-        await page.click(submitButtonSelector);
-        
-        console.log(`${LOG_PREFIX} Login step completed. Waiting for navigation...`);
-        await page.waitForNavigation({ waitUntil: 'networkidle2' });
-        
-        console.log(`${LOG_PREFIX} Scraped mock data. In a real scenario, this would read a downloaded file.`);
-        return [
-            { date: new Date().toISOString().split('T')[0], hungerboxSales: (Math.random() * 500 + 100).toFixed(2), upiSales: (Math.random() * 200).toFixed(2), stallId: 'mockStall1', siteId: 'mockSite1' },
-            { date: new Date().toISOString().split('T')[0], hungerboxSales: (Math.random() * 300).toFixed(2), upiSales: (Math.random() * 100).toFixed(2), stallId: 'mockStall2', siteId: 'mockSite1' },
-        ];
-    } catch (error: any) {
-        console.error(`${LOG_PREFIX} Scraping failed:`, error);
-        if (page) {
-            try {
-                pageContentOnError = await page.content();
-            } catch (contentError) {
-                pageContentOnError = "Could not retrieve page content after initial error.";
-            }
-        }
-        throw new Error(`Failed to scrape data. This could be due to incorrect credentials, a change in the website's layout, or a CAPTCHA. Please check the selectors in the API route. Raw HTML at time of error: ${pageContentOnError}`);
-    } finally {
-        if (browser) {
-            await browser.close();
-            console.log(`${LOG_PREFIX} Browser closed.`);
-        }
-    }
+// MOCK FUNCTION: This function now returns hardcoded mock data instead of live scraping.
+async function getConsolidatedReportData() {
+    console.log(`${LOG_PREFIX} Returning hardcoded mock consolidated report data.`);
+    // This simulates a consolidated report with sales figures for different stalls.
+    // In a real scenario, this data would be parsed from the downloaded report file.
+    return [
+        { date: '2024-07-21', hungerboxSales: '1250.75', upiSales: '340.50', cashSales: '150.00', stallId: 'HsrLayoutStall', siteId: 'BangaloreSite' },
+        { date: '2024-07-21', hungerboxSales: '980.25', upiSales: '410.00', cashSales: '200.00', stallId: 'KoramangalaStall', siteId: 'BangaloreSite' },
+        { date: '2024-07-20', hungerboxSales: '1100.00', upiSales: '300.00', cashSales: '180.50', stallId: 'HsrLayoutStall', siteId: 'BangaloreSite' },
+        { date: '2024-07-20', hungerboxSales: '950.50', upiSales: '380.75', cashSales: '210.00', stallId: 'KoramangalaStall', siteId: 'BangaloreSite' },
+    ];
 }
 
 export async function POST(request: NextRequest) {
@@ -111,42 +70,38 @@ export async function POST(request: NextRequest) {
         const decodedToken = await adminAuth.verifyIdToken(idToken);
         const userDocRef = adminDb.collection("users").doc(decodedToken.uid);
         const callingUserDocSnap = await userDocRef.get();
-        console.log(`${LOG_PREFIX} DEBUG: callingUserDocSnap object received from get():`, callingUserDocSnap);
 
         if (!callingUserDocSnap.exists) {
           return NextResponse.json({ error: 'Caller user document not found in Firestore.' }, { status: 403 });
         }
         callingUser = { uid: callingUserDocSnap.id, ...callingUserDocSnap.data() } as AppUser;
-
-        const { username, password } = await request.json();
-        if (!username || !password) {
-            return NextResponse.json({ error: 'Missing required fields: username or password.'}, { status: 400 });
-        }
         
-        const scrapedData = await scrapeData(username, password);
+        const consolidatedData = await getConsolidatedReportData();
 
         let processedCount = 0;
-        const batch = adminDb.batch();
+        const batch = writeBatch(adminDb);
 
-        for (const record of scrapedData) {
+        for (const record of consolidatedData) {
             if (!record.date || !record.siteId || !record.stallId) continue;
 
             const saleDate = new Date(record.date);
             const docId = `${record.date}_${record.stallId}`;
             const docRef = adminDb.collection("foodSaleTransactions").doc(docId);
             
-            const breakfastSales = parseFloat(record.hungerboxSales) || 0;
+            const hungerboxSales = parseFloat(record.hungerboxSales) || 0;
             const upiSales = parseFloat(record.upiSales) || 0;
-            const total = breakfastSales + upiSales;
+            const cashSales = parseFloat(record.cashSales) || 0;
+            const total = hungerboxSales + upiSales + cashSales;
 
             const saleData = {
                 saleDate: Timestamp.fromDate(saleDate),
-                breakfast: { hungerbox: breakfastSales, upi: 0, other: 0 },
-                lunch: { hungerbox: 0, upi: upiSales, other: 0 },
+                // Assuming consolidated report maps to Breakfast/Lunch for demo
+                breakfast: { hungerbox: hungerboxSales, upi: 0, other: 0 },
+                lunch: { hungerbox: 0, upi: upiSales, other: cashSales },
                 dinner: { hungerbox: 0, upi: 0, other: 0 },
                 snacks: { hungerbox: 0, upi: 0, other: 0 },
                 totalAmount: total,
-                notes: `Imported from Hungerbox on ${new Date().toLocaleDateString()}`,
+                notes: `Imported from Hungerbox Consolidated Report on ${new Date().toLocaleDateString()}`,
                 siteId: record.siteId,
                 stallId: record.stallId,
                 recordedByUid: callingUser.uid,
@@ -166,11 +121,11 @@ export async function POST(request: NextRequest) {
                 stallId: 'CONSOLIDATED',
                 type: 'SALE_RECORDED_OR_UPDATED',
                 relatedDocumentId: `hungerbox-import-${Date.now()}`,
-                details: { notes: `Successfully imported ${processedCount} sales records from Hungerbox consolidated report.` }
+                details: { notes: `Successfully imported and processed ${processedCount} sales records from a consolidated report.` }
             });
         }
 
-        return NextResponse.json({ message: `Successfully imported and updated ${processedCount} sales records from Hungerbox.` }, { status: 200 });
+        return NextResponse.json({ message: `Successfully imported and updated ${processedCount} daily sales summaries from the consolidated report.` }, { status: 200 });
 
     } catch (error: any) {
         console.error(`${LOG_PREFIX} Error in API route:`, error);
