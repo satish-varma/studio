@@ -12,33 +12,31 @@ import * as path from 'path';
 
 const LOG_PREFIX = "[API:ScrapeHungerbox]";
 
-let adminApp: AdminApp;
-let adminAuth: ReturnType<typeof getAdminAuth>;
-let adminDb: ReturnType<typeof getFirestore>;
-
-function initializeAdminApp(): void {
-    const appName = 'firebase-admin-app-scrapes';
-    const existingApp = getApps().find(app => app.name === appName);
-    if (existingApp) {
-        adminApp = existingApp;
-    } else {
-        const serviceAccountJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
-        if (!serviceAccountJson) {
-            console.error(`${LOG_PREFIX} GOOGLE_APPLICATION_CREDENTIALS_JSON is not set.`);
-            throw new Error("GOOGLE_APPLICATION_CREDENTIALS_JSON is not set.");
-        }
-        try {
-            adminApp = initializeApp({
-                credential: cert(JSON.parse(serviceAccountJson)),
-            }, appName);
-        } catch (e: any) {
-            console.error(`${LOG_PREFIX} Failed to initialize Firebase Admin SDK:`, e.message);
-            throw new Error(`Failed to initialize Firebase Admin SDK: ${e.message}`);
-        }
+// This function initializes and returns the admin app instance.
+// It ensures that we don't try to re-initialize an app that already exists.
+function initializeAdminApp(): AdminApp {
+    const existingApps = getApps();
+    if (existingApps.length > 0) {
+        return existingApps[0];
     }
-    adminAuth = getAdminAuth(adminApp);
-    adminDb = getFirestore(adminApp);
+    
+    const serviceAccountJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+    if (!serviceAccountJson) {
+        console.error(`${LOG_PREFIX} GOOGLE_APPLICATION_CREDENTIALS_JSON is not set.`);
+        throw new Error("Server configuration error: Firebase Admin credentials are not set.");
+    }
+    
+    try {
+        const serviceAccount = JSON.parse(serviceAccountJson);
+        return initializeApp({
+            credential: cert(serviceAccount),
+        });
+    } catch (e: any) {
+        console.error(`${LOG_PREFIX} Failed to parse or initialize Firebase Admin SDK:`, e.message);
+        throw new Error(`Server configuration error: Failed to initialize Firebase Admin SDK. ${e.message}`);
+    }
 }
+
 
 async function scrapeData(username: string, password_hb: string) {
     console.log(`${LOG_PREFIX} Starting browser for scraping...`);
@@ -141,11 +139,17 @@ async function scrapeData(username: string, password_hb: string) {
 }
 
 export async function POST(request: NextRequest) {
+    let adminApp: AdminApp;
+    let adminAuth: ReturnType<typeof getAdminAuth>;
+    let adminDb: ReturnType<typeof getFirestore>;
+
     try {
-        initializeAdminApp();
+        adminApp = initializeAdminApp();
+        adminAuth = getAdminAuth(adminApp);
+        adminDb = getFirestore(adminApp);
     } catch (e: any) {
-      console.error(`${LOG_PREFIX} Critical Failure initializing admin app: ${e.message}`);
-      return NextResponse.json({ error: 'Server Configuration Error.', details: e.message }, { status: 500 });
+        console.error(`${LOG_PREFIX} Critical Failure initializing admin app: ${e.message}`);
+        return NextResponse.json({ error: 'Server Configuration Error.', details: e.message }, { status: 500 });
     }
 
     let callingUser: AppUser;
@@ -175,8 +179,6 @@ export async function POST(request: NextRequest) {
         const batch = adminDb.batch();
 
         for (const record of scrapedData) {
-            // In a real scenario, the CSV/report would contain site/stall identifiers to map to your Firestore IDs
-            // For this mock, we'll use hardcoded IDs
             if (!record.date || !record.siteId || !record.stallId) continue;
 
             const saleDate = new Date(record.date);
@@ -210,7 +212,7 @@ export async function POST(request: NextRequest) {
         
         if (processedCount > 0) {
             await logFoodStallActivity(callingUser, {
-                siteId: 'CONSOLIDATED', // Use a special identifier for consolidated reports
+                siteId: 'CONSOLIDATED',
                 stallId: 'CONSOLIDATED',
                 type: 'SALE_RECORDED_OR_UPDATED',
                 relatedDocumentId: `hungerbox-import-${Date.now()}`,
