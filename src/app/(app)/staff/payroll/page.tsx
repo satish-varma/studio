@@ -15,7 +15,7 @@ import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Info, ChevronLeft, ChevronRight, Filter, IndianRupee, HandCoins, CalendarDays } from "lucide-react";
+import { Loader2, Info, ChevronLeft, ChevronRight, Filter, IndianRupee, HandCoins, CalendarDays, Wallet } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { format, startOfMonth, endOfMonth, subMonths, addMonths, isAfter, isBefore, max, min, startOfDay, getDate } from "date-fns";
 import { Button } from "@/components/ui/button";
@@ -256,6 +256,10 @@ export default function PayrollClientPage() {
     setLoadingPayrollCalcs(false);
   }, [staffList, staffDetailsMap, monthlyAdvances, monthlyPayments, monthlyHolidays, monthlyAttendance, currentMonth, calculateWorkingDaysForEmployee, userManagementLoading]);
 
+  const totalProjectedSalary = useMemo(() => {
+    return payrollData.reduce((acc, item) => acc + (item.details?.salary || 0), 0);
+  }, [payrollData]);
+
   const totalNetPayable = useMemo(() => {
     return payrollData.reduce((acc, item) => acc + (item.netPayable > item.paidAmount ? item.netPayable - item.paidAmount : 0), 0);
   }, [payrollData]);
@@ -309,7 +313,19 @@ export default function PayrollClientPage() {
             </div>
         </div>
 
-         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Card className="shadow-md">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Projected Salary</CardTitle>
+              <Wallet className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {loading ? <Skeleton className="h-8 w-32" /> : formatCurrency(totalProjectedSalary)}
+              </div>
+              <p className="text-xs text-muted-foreground">Total base salary of active staff</p>
+            </CardContent>
+          </Card>
           <Card className="shadow-md">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Earned Salary</CardTitle>
@@ -331,7 +347,7 @@ export default function PayrollClientPage() {
               <div className="text-2xl font-bold text-orange-600">
                 {loading ? <Skeleton className="h-8 w-28" /> : formatCurrency(totalAdvances)}
               </div>
-              <p className="text-xs text-muted-foreground">Advances taken from {format(startOfMonth(currentMonth), 'MMM d')} to {format(addMonths(currentMonth, 1), 'MMM')} 15th</p>
+              <p className="text-xs text-muted-foreground">From {format(startOfMonth(currentMonth), 'MMM d')} to {format(addMonths(currentMonth, 1), 'MMM')} 15th</p>
             </CardContent>
           </Card>
           <Card className="shadow-md">
@@ -356,4 +372,3 @@ export default function PayrollClientPage() {
     </div>
   );
 }
-
