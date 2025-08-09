@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import puppeteer from 'puppeteer';
 // Corrected import syntax for Firebase Admin SDK
-const { getFirestore, Timestamp } = require('firebase-admin/firestore');
+import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { initializeApp, getApps, cert, App as AdminApp } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { logFoodStallActivity } from '@/lib/foodStallLogger';
@@ -152,7 +152,7 @@ export async function POST(request: NextRequest) {
         const idToken = authorization.split('Bearer ')[1];
         const decodedToken = await adminAuth.verifyIdToken(idToken);
         const callingUserDocSnap = await adminDb.collection("users").doc(decodedToken.uid).get();
-        if (!callingUserDocSnap.exists()) {
+        if (!callingUserDocSnap.exists) {
           return NextResponse.json({ error: 'Caller user document not found in Firestore.' }, { status: 403 });
         }
         const callingUser = callingUserDocSnap.data() as AppUser;
