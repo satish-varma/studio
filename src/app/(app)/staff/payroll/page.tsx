@@ -17,7 +17,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Info, ChevronLeft, ChevronRight, Filter, IndianRupee, HandCoins, CalendarDays } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { format, startOfMonth, endOfMonth, subMonths, addMonths, isAfter, isBefore, max, min, startOfDay } from "date-fns";
+import { format, startOfMonth, endOfMonth, subMonths, addMonths, isAfter, isBefore, max, min, startOfDay, getDate } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { PayrollTable } from "@/components/staff/PayrollTable";
 import { useUserManagement } from "@/hooks/use-user-management";
@@ -133,15 +133,23 @@ export default function PayrollClientPage() {
         uidsBatches.push(uids.slice(i, i + 30));
     }
     
-    const firstDayOfMonth = startOfMonth(currentMonth);
-    const lastDayOfMonth = endOfMonth(currentMonth);
+    // Payroll month start and end dates for earned salary
+    const payrollMonthStart = startOfMonth(currentMonth);
+    const payrollMonthEnd = endOfMonth(currentMonth);
+    
+    // Advances calculation period: from the start of the payroll month
+    // until the 15th of the next month.
+    const advancesStartDate = payrollMonthStart;
+    const nextMonth = addMonths(currentMonth, 1);
+    const advancesEndDate = new Date(nextMonth.getFullYear(), nextMonth.getMonth(), 15, 23, 59, 59);
+
 
     const fetchStaticData = async () => {
         try {
             const [advancesDocs, paymentsDocs, holidaysDocs] = await Promise.all([
-                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "advances"), where("staffUid", "in", batch), where("date", ">=", firstDayOfMonth.toISOString()), where("date", "<=", lastDayOfMonth.toISOString()))))),
+                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "advances"), where("staffUid", "in", batch), where("date", ">=", advancesStartDate.toISOString()), where("date", "<=", advancesEndDate.toISOString()))))),
                 Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", batch), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear()))))),
-                getDocs(query(collection(db, "holidays"), where("date", ">=", format(firstDayOfMonth, 'yyyy-MM-dd')), where("date", "<=", format(lastDayOfMonth, 'yyyy-MM-dd'))))
+                getDocs(query(collection(db, "holidays"), where("date", ">=", format(payrollMonthStart, 'yyyy-MM-dd')), where("date", "<=", format(payrollMonthEnd, 'yyyy-MM-dd'))))
             ]);
 
             const advancesMap = new Map<string, number>();
@@ -323,7 +331,7 @@ export default function PayrollClientPage() {
               <div className="text-2xl font-bold text-orange-600">
                 {loading ? <Skeleton className="h-8 w-28" /> : formatCurrency(totalAdvances)}
               </div>
-              <p className="text-xs text-muted-foreground">Advances given in {format(currentMonth, "MMMM")}</p>
+              <p className="text-xs text-muted-foreground">Advances taken from {format(startOfMonth(currentMonth), 'MMM d')} to {format(addMonths(currentMonth, 1), 'MMM')} 15th</p>
             </CardContent>
           </Card>
           <Card className="shadow-md">
@@ -348,3 +356,4 @@ export default function PayrollClientPage() {
     </div>
   );
 }
+
