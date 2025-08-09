@@ -1,14 +1,12 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import puppeteer from 'puppeteer';
-// Corrected import syntax for Firebase Admin SDK
 import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { initializeApp, getApps, cert, App as AdminApp } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { logFoodStallActivity } from '@/lib/foodStallLogger';
 import { AppUser } from '@/types';
 import { format } from 'date-fns';
-
 
 const LOG_PREFIX = "[API:ScrapeHungerbox]";
 
@@ -41,12 +39,17 @@ async function scrapeData(username: string, password_hb: string) {
         console.log(`${LOG_PREFIX} Navigating to initial page to check login status...`);
         await page.goto('https://admin.hungerbox.com/', { waitUntil: 'networkidle2' });
         
-        const isLoginPage = await page.$('input[name="username"], input[type="email"]');
+        // Using more specific selectors for login form.
+        const usernameSelector = 'input#email';
+        const passwordSelector = 'input#password';
+        const submitButtonSelector = 'button[type="submit"]';
+
+        const isLoginPage = await page.$(usernameSelector);
         if (isLoginPage) {
             console.log(`${LOG_PREFIX} Login form detected. Logging in...`);
-            await page.type('input[name="username"], input[type="email"]', username);
-            await page.type('input[name="password"], input[type="password"]', password_hb);
-            await page.click('button[type="submit"]');
+            await page.type(usernameSelector, username);
+            await page.type(passwordSelector, password_hb);
+            await page.click(submitButtonSelector);
             await page.waitForNavigation({ waitUntil: 'networkidle2' });
             console.log(`${LOG_PREFIX} Login step completed.`);
         } else {
@@ -152,24 +155,25 @@ export async function POST(request: NextRequest) {
         const idToken = authorization.split('Bearer ')[1];
         const decodedToken = await adminAuth.verifyIdToken(idToken);
         const callingUserDocSnap = await adminDb.collection("users").doc(decodedToken.uid).get();
-        if (!callingUserDocSnap.exists) {
+
+        if (!callingUserDocSnap.exists()) {
           return NextResponse.json({ error: 'Caller user document not found in Firestore.' }, { status: 403 });
         }
         const callingUser = callingUserDocSnap.data() as AppUser;
 
-        const { username, password, siteId, stallId, consolidated } = await request.json();
+        const { username, password, consolidated } = await request.json();
         if (!username || !password) {
             return NextResponse.json({ error: 'Missing required fields: username, password.', status: 400 });
-        }
-        if (!consolidated && (!siteId || !stallId)) {
-            return NextResponse.json({ error: 'If not consolidated, siteId and stallId are required.' }, { status: 400 });
         }
         
         const scrapedData = await scrapeData(username, password);
 
         let processedCount = 0;
-        const docSiteId = consolidated ? 'CONSOLIDATED' : siteId;
-        const docStallId = consolidated ? 'CONSOLIDATED' : stallId;
+        // Since consolidated is always true, we use a fixed marker.
+        const docSiteId = 'CONSOLIDATED';
+        const docStallId = 'CONSOLIDATED';
+
+        const batch = adminDb.batch();
 
         for (const record of scrapedData) {
             if (!record.date) continue; // Skip records without a date
@@ -197,9 +201,11 @@ export async function POST(request: NextRequest) {
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
             };
-            await docRef.set(saleData, { merge: true });
+            batch.set(docRef, saleData, { merge: true });
             processedCount++;
         }
+        
+        await batch.commit();
         
         if (processedCount > 0) {
             await logFoodStallActivity(callingUser, {
