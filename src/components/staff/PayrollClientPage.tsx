@@ -74,18 +74,15 @@ export default function PayrollClientPage() {
     const baseList = allUsersForContext.filter(u => u.role === 'staff' || u.role === 'manager');
     let statusFiltered = statusFilter === 'all' ? baseList : baseList.filter(u => (u.status || 'active') === statusFilter);
     
-    // Apply site filter logic
     if (user?.role === 'admin' && siteFilter !== 'all') {
       return statusFiltered.filter(u => u.defaultSiteId === siteFilter);
     } else if (user?.role === 'manager' && activeSiteId) {
       return statusFiltered.filter(u => u.defaultSiteId === activeSiteId);
     }
-    // If Admin viewing "All Sites", or a manager with no specific site selected (should not happen with page guard)
     return statusFiltered;
   }, [allUsersForContext, statusFilter, siteFilter, activeSiteId, user?.role]);
   
 
-  // State for fetched data
   const [monthlyAdvances, setMonthlyAdvances] = useState<Map<string, number>>(new Map());
   const [monthlyPayments, setMonthlyPayments] = useState<Map<string, number>>(new Map());
   const [monthlyHolidays, setMonthlyHolidays] = useState<Holiday[]>([]);
@@ -127,7 +124,6 @@ export default function PayrollClientPage() {
     return workingDays;
   }, []);
   
-  // Effect for fetching all payroll-related data
   useEffect(() => {
     if (userManagementLoading || staffList.length === 0) {
         if(!userManagementLoading) {
@@ -156,7 +152,6 @@ export default function PayrollClientPage() {
 
     let allUnsubscribers: (() => void)[] = [];
 
-    // Fetch Holidays (one-time for the month)
     const holidaysQuery = query(collection(db, "holidays"), where("date", ">=", format(payrollMonthStart, 'yyyy-MM-dd')), where("date", "<=", format(payrollMonthEnd, 'yyyy-MM-dd')));
     const unsubHolidays = onSnapshot(holidaysQuery, 
         (snapshot) => setMonthlyHolidays(snapshot.docs.map(doc => doc.data() as Holiday)),
@@ -164,11 +159,9 @@ export default function PayrollClientPage() {
     );
     allUnsubscribers.push(unsubHolidays);
 
-    // Set up listeners for each batch of UIDs
     uidsBatches.forEach(batch => {
       if (batch.length === 0) return;
 
-      // Advances Listener
       const advancesQuery = query(collection(db, "advances"), where("staffUid", "in", batch), where("date", ">=", advancesStartDate.toISOString()), where("date", "<=", advancesEndDate.toISOString()));
       const unsubAdvances = onSnapshot(advancesQuery, (snapshot) => {
           setMonthlyAdvances(prev => {
@@ -178,13 +171,12 @@ export default function PayrollClientPage() {
                   const data = doc.data() as SalaryAdvance;
                   batchMap.set(data.staffUid, (batchMap.get(data.staffUid) || 0) + data.amount);
               });
-              batch.forEach(uid => { newMap.set(uid, batchMap.get(uid) || 0); }); // Reset and set for this batch
+              batch.forEach(uid => { newMap.set(uid, batchMap.get(uid) || 0); });
               return newMap;
           });
       });
       allUnsubscribers.push(unsubAdvances);
 
-      // Payments Listener
       const paymentsQuery = query(collection(db, "salaryPayments"), where("staffUid", "in", batch), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear()));
       const unsubPayments = onSnapshot(paymentsQuery, (snapshot) => {
           setMonthlyPayments(prev => {
@@ -200,7 +192,6 @@ export default function PayrollClientPage() {
       });
       allUnsubscribers.push(unsubPayments);
 
-      // Attendance Listener
       const attendanceQuery = query(collection(db, "staffAttendance"), 
         where("staffUid", "in", batch),
         where("date", ">=", format(payrollMonthStart, 'yyyy-MM-dd')),
@@ -229,7 +220,6 @@ export default function PayrollClientPage() {
     };
   }, [staffList, currentMonth, toast, userManagementLoading]);
 
-  // Effect to re-calculate payroll whenever any data changes
   useEffect(() => {
     if (userManagementLoading) return;
     setLoadingPayrollCalcs(true);
