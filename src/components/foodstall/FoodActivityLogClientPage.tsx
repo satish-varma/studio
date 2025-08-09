@@ -36,8 +36,6 @@ import type { DateRange } from "react-day-picker";
 const LOG_PREFIX = "[FoodActivityLogClientPage]";
 const LOGS_PER_PAGE = 25;
 
-type DateFilterOption = 'today' | 'last_7_days' | 'this_month' | 'all_time' | 'custom';
-
 const foodActivityTypes: FoodStallActivityType[] = [
   'EXPENSE_RECORDED',
   'EXPENSE_UPDATED',
@@ -75,36 +73,32 @@ export default function FoodActivityLogClientPage() {
   const [isFirstPageReached, setIsFirstPageReached] = useState(true);
 
   // Filter states
-  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
-  const [dateFilter, setDateFilter] = useState<DateFilterOption>('all_time');
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(() => ({
+    from: startOfDay(subDays(new Date(), 6)),
+    to: endOfDay(new Date())
+  }));
   const [siteFilter, setSiteFilter] = useState<string>('all');
   const [userFilter, setUserFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState<string>('all');
-
-  useEffect(() => {
+  
+  const handleSetDatePreset = (preset: 'today' | 'last_7_days' | 'this_month' | 'all_time') => {
     const now = new Date();
-    switch (dateFilter) {
-        case 'today':
-            setDateRange({ from: startOfDay(now), to: endOfDay(now) });
-            break;
-        case 'last_7_days':
-            setDateRange({ from: startOfDay(subDays(now, 6)), to: endOfDay(now) });
-            break;
-        case 'this_month':
-            setDateRange({ from: startOfMonth(now), to: endOfDay(now) });
-            break;
-        case 'all_time':
-            setDateRange(undefined); // Clear custom range
-            break;
-        case 'custom':
-            break; // Custom range is handled by onDateRangeChange
+    switch (preset) {
+      case 'today':
+        setDateRange({ from: startOfDay(now), to: endOfDay(now) });
+        break;
+      case 'last_7_days':
+        setDateRange({ from: startOfDay(subDays(now, 6)), to: endOfDay(now) });
+        break;
+      case 'this_month':
+        setDateRange({ from: startOfMonth(now), to: endOfDay(now) });
+        break;
+      case 'all_time':
+        setDateRange(undefined);
+        break;
     }
-  }, [dateFilter]);
+  };
 
-  const handleDateRangeChange = (newRange: DateRange | undefined) => {
-      setDateRange(newRange);
-      setDateFilter('custom');
-  }
 
   const fetchContextMaps = useCallback(async () => {
     if (!db) return false;
@@ -155,7 +149,7 @@ export default function FoodActivityLogClientPage() {
       setLoadingData(false);
       return;
     }
-    console.log(`${LOG_PREFIX} fetchLogsPage called. Direction: ${direction}, Filters:`, {siteFilter, userFilter, typeFilter, dateFilter});
+    console.log(`${LOG_PREFIX} fetchLogsPage called. Direction: ${direction}, Filters:`, {siteFilter, userFilter, typeFilter, dateRange});
 
     if (direction === 'initial') setLoadingData(true);
     if (direction === 'next') setIsLoadingNextPage(true);
@@ -207,7 +201,7 @@ export default function FoodActivityLogClientPage() {
         setIsLoadingNextPage(false);
         setIsLoadingPrevPage(false);
     }
-  }, [currentUser, lastLogDoc, firstLogDoc, siteFilter, userFilter, typeFilter, dateFilter, dateRange]);
+  }, [currentUser, lastLogDoc, firstLogDoc, siteFilter, userFilter, typeFilter, dateRange]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -256,14 +250,14 @@ export default function FoodActivityLogClientPage() {
         </CardHeader>
         <CardContent className="space-y-4 border-t pt-4">
             <div className="flex flex-wrap items-center gap-2">
-                 <Button variant={dateFilter === 'today' ? 'default' : 'outline'} onClick={() => setDateFilter('today')}>Today</Button>
-                 <Button variant={dateFilter === 'last_7_days' ? 'default' : 'outline'} onClick={() => setDateFilter('last_7_days')}>Last 7 Days</Button>
-                 <Button variant={dateFilter === 'this_month' ? 'default' : 'outline'} onClick={() => setDateFilter('this_month')}>This Month</Button>
-                 <Button variant={dateFilter === 'all_time' ? 'default' : 'outline'} onClick={() => setDateFilter('all_time')}>All Time</Button>
+                 <Button variant={!dateRange ? 'default' : 'outline'} onClick={() => handleSetDatePreset('all_time')}>All Time</Button>
+                 <Button variant={dateRange && format(dateRange.from!, 'yyyyMMdd') === format(startOfDay(new Date()), 'yyyyMMdd') ? 'default' : 'outline'} onClick={() => handleSetDatePreset('today')}>Today</Button>
+                 <Button variant={dateRange && format(dateRange.from!, 'yyyyMMdd') === format(startOfDay(subDays(new Date(), 6)), 'yyyyMMdd') ? 'default' : 'outline'} onClick={() => handleSetDatePreset('last_7_days')}>Last 7 Days</Button>
+                 <Button variant={dateRange && format(dateRange.from!, 'yyyyMMdd') === format(startOfMonth(new Date()), 'yyyyMMdd') ? 'default' : 'outline'} onClick={() => handleSetDatePreset('this_month')}>This Month</Button>
                  <Popover>
                     <PopoverTrigger asChild>
                     <Button
-                        id="logDateRange" variant={dateFilter === 'custom' ? 'default' : 'outline'}
+                        id="logDateRange" variant={'outline'}
                         className={cn("w-[260px] justify-start text-left font-normal bg-input", !dateRange && "text-muted-foreground")}
                     >
                         <CalendarIcon className="mr-2 h-4 w-4" />
@@ -276,7 +270,7 @@ export default function FoodActivityLogClientPage() {
                     <PopoverContent className="w-auto p-0" align="start">
                     <Calendar
                         initialFocus mode="range" defaultMonth={dateRange?.from}
-                        selected={dateRange} onSelect={handleDateRangeChange} numberOfMonths={2}
+                        selected={dateRange} onSelect={setDateRange} numberOfMonths={2}
                         disabled={(date) => date > new Date() || date < new Date("2000-01-01")}
                     />
                     </PopoverContent>
