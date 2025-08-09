@@ -71,7 +71,7 @@ export default function PayrollClientPage() {
   const [siteFilter, setSiteFilter] = useState<string>('all'); // New state for site filter
 
   const staffList = useMemo(() => {
-    // This list now includes everyone, status filtering will be done on the final payrollData
+    // This hook now correctly returns all users for admin, or users from managed sites for manager
     return allUsersForContext.filter(u => u.role === 'staff' || u.role === 'manager');
   }, [allUsersForContext]);
   
@@ -106,7 +106,11 @@ export default function PayrollClientPage() {
       
       const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
       const isGlobalHoliday = holidays.some(h => h.date === dateStr && h.siteId === null);
-      const isSiteHoliday = staff.defaultSiteId ? holidays.some(h => h.date === dateStr && h.siteId === staff.defaultSiteId) : false;
+      
+      // A manager's working days should be calculated against global holidays, as their work spans multiple sites.
+      // A staff member's working days are affected by their specific site's holidays.
+      const siteIdForHolidayCheck = staff.role === 'manager' ? null : staff.defaultSiteId;
+      const isSiteHoliday = siteIdForHolidayCheck ? holidays.some(h => h.date === dateStr && h.siteId === siteIdForHolidayCheck) : false;
 
       if (!isWeekend && !isGlobalHoliday && !isSiteHoliday) {
         workingDays++;
@@ -243,9 +247,19 @@ export default function PayrollClientPage() {
   const filteredPayrollData = useMemo(() => {
     let siteFilteredData = payrollData;
     if (user?.role === 'admin' && siteFilter !== 'all') {
-      siteFilteredData = payrollData.filter(p => p.user.defaultSiteId === siteFilter);
+      siteFilteredData = payrollData.filter(p => {
+        if(p.user.role === 'manager') {
+            return p.user.managedSiteIds?.includes(siteFilter);
+        }
+        return p.user.defaultSiteId === siteFilter;
+      });
     } else if (user?.role === 'manager' && activeSiteId) {
-      siteFilteredData = payrollData.filter(p => p.user.defaultSiteId === activeSiteId);
+      siteFilteredData = payrollData.filter(p => {
+         if(p.user.role === 'manager') {
+            return p.user.managedSiteIds?.includes(activeSiteId);
+        }
+        return p.user.defaultSiteId === activeSiteId;
+      });
     }
     
     if (statusFilter === 'all') {
@@ -263,21 +277,47 @@ export default function PayrollClientPage() {
         if (details?.exitDate && isBefore(new Date(details.exitDate), monthStart)) {
             return acc;
         }
+        // Distribute manager's salary if they manage multiple sites and we're viewing a single site
+        if(item.user.role === 'manager' && siteFilter !== 'all') {
+            const managedCount = item.user.managedSiteIds?.length || 1;
+            return acc + ((details?.salary || 0) / managedCount);
+        }
         return acc + (details?.salary || 0);
     }, 0);
-  }, [filteredPayrollData, currentMonth]);
+  }, [filteredPayrollData, currentMonth, siteFilter]);
 
   const totalNetPayable = useMemo(() => {
-    return filteredPayrollData.reduce((acc, item) => acc + (item.netPayable > item.paidAmount ? item.netPayable - item.paidAmount : 0), 0);
-  }, [filteredPayrollData]);
+    return filteredPayrollData.reduce((acc, item) => {
+        let net = item.netPayable > item.paidAmount ? item.netPayable - item.paidAmount : 0;
+        if(item.user.role === 'manager' && siteFilter !== 'all') {
+            const managedCount = item.user.managedSiteIds?.length || 1;
+            net = net / managedCount;
+        }
+        return acc + net;
+    }, 0);
+  }, [filteredPayrollData, siteFilter]);
 
   const totalEarnedSalary = useMemo(() => {
-    return filteredPayrollData.reduce((acc, item) => acc + item.earnedSalary, 0);
-  }, [filteredPayrollData]);
+    return filteredPayrollData.reduce((acc, item) => {
+        let earned = item.earnedSalary;
+        if(item.user.role === 'manager' && siteFilter !== 'all') {
+            const managedCount = item.user.managedSiteIds?.length || 1;
+            earned = earned / managedCount;
+        }
+        return acc + earned;
+    }, 0);
+  }, [filteredPayrollData, siteFilter]);
 
   const totalAdvances = useMemo(() => {
-    return filteredPayrollData.reduce((acc, item) => acc + item.advances, 0);
-  }, [filteredPayrollData]);
+    return filteredPayrollData.reduce((acc, item) => {
+        let adv = item.advances;
+        if(item.user.role === 'manager' && siteFilter !== 'all') {
+            const managedCount = item.user.managedSiteIds?.length || 1;
+            adv = adv / managedCount;
+        }
+        return acc + adv;
+    }, 0);
+  }, [filteredPayrollData, siteFilter]);
 
   const loading = authLoading || userManagementLoading || loadingPayrollCalcs;
   const error = userManagementError;
@@ -391,4 +431,3 @@ export default function PayrollClientPage() {
     </div>
   );
 }
-

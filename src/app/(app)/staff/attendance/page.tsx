@@ -169,8 +169,17 @@ export default function StaffAttendanceClientPage() {
   const handleStatusChange = useCallback(async (staff: AppUser, date: Date) => {
     if (!user) return;
     
-    // Determine the site context for the attendance record
-    const siteIdForAttendance = staff.defaultSiteId || ((staff.role === 'manager' || staff.role === 'admin') ? activeSiteId : null);
+    let siteIdForAttendance: string | null = staff.defaultSiteId;
+    
+    // For managers without a default site, use the admin's active site context IF AVAILABLE.
+    // If admin is in "All Sites", use the manager's FIRST assigned site.
+    if (staff.role === 'manager' && !siteIdForAttendance) {
+        if (activeSiteId) { // Admin/viewer has a specific site selected
+            siteIdForAttendance = activeSiteId;
+        } else if (staff.managedSiteIds && staff.managedSiteIds.length > 0) { // Admin is in "All Sites" view
+            siteIdForAttendance = staff.managedSiteIds[0];
+        }
+    }
 
     if (!siteIdForAttendance) {
         toast({
@@ -549,5 +558,3 @@ export default function StaffAttendanceClientPage() {
     </div>
   );
 }
-
-    
