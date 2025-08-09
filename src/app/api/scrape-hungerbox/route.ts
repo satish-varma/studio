@@ -12,17 +12,24 @@ import path from 'path';
 
 const LOG_PREFIX = "[API:ScrapeHungerbox]";
 
-function initializeAdminApp(): AdminApp {
+let adminApp: AdminApp;
+let adminAuth: ReturnType<typeof getAdminAuth>;
+let adminDb: ReturnType<typeof getFirestore>;
+
+function initializeAdminApp(): void {
     if (getApps().length > 0 && getApps().find(app => app.name === '[DEFAULT]')) {
-        return getApps().find(app => app.name === '[DEFAULT]')!;
+        adminApp = getApps().find(app => app.name === '[DEFAULT]')!;
+    } else {
+        const serviceAccountJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+        if (!serviceAccountJson) {
+            throw new Error("GOOGLE_APPLICATION_CREDENTIALS_JSON is not set.");
+        }
+        adminApp = initializeApp({
+            credential: cert(JSON.parse(serviceAccountJson)),
+        });
     }
-    const serviceAccountJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
-    if (!serviceAccountJson) {
-        throw new Error("GOOGLE_APPLICATION_CREDENTIALS_JSON is not set.");
-    }
-    return initializeApp({
-        credential: cert(JSON.parse(serviceAccountJson)),
-    });
+    adminAuth = getAdminAuth(adminApp);
+    adminDb = getFirestore(adminApp);
 }
 
 // Ensure scrapes directory exists
@@ -31,26 +38,21 @@ if (!fs.existsSync(scrapesDir)) {
     fs.mkdirSync(scrapesDir, { recursive: true });
 }
 
-
-// NOTE: This is a simplified example. Real-world scraping is fragile and
-// highly dependent on the target site's exact HTML structure.
-// Selectors will likely need to be updated if Hungerbox changes their site.
 async function scrapeData(username: string, password_hb: string) {
     console.log(`${LOG_PREFIX} Starting browser for scraping...`);
     let browser;
     try {
         browser = await puppeteer.launch({
             headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox'] // Necessary for some environments
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
         const page = await browser.newPage();
-        await page.setViewport({ width: 1280, height: 800 }); // Set a consistent viewport size
+        await page.setViewport({ width: 1280, height: 800 });
         
-        console.log(`${LOG_PREFIX} Navigating to initial page to check login status...`);
+        console.log(`${LOG_PREFIX} Navigating to Hungerbox login page...`);
         await page.goto('https://admin.hungerbox.com/', { waitUntil: 'networkidle2' });
         await page.screenshot({ path: path.join(scrapesDir, '01_initial_page.png') });
         
-        // Using more specific selectors for login form.
         const usernameSelector = 'input#email';
         const passwordSelector = 'input#password';
         const submitButtonSelector = 'button[type="submit"]';
@@ -75,13 +77,9 @@ async function scrapeData(username: string, password_hb: string) {
         await page.screenshot({ path: path.join(scrapesDir, '04_report_page.png') });
         console.log(`${LOG_PREFIX} Arrived at report page.`);
 
-        //--- New Automation Steps ---
-
-        // 1. Click "Select All" for Vendors and Cafeteria
         console.log(`${LOG_PREFIX} Finding and clicking 'Select All' checkboxes...`);
         await page.evaluate(() => {
             const labels = Array.from(document.querySelectorAll('label'));
-            // Find the first "Select All" which corresponds to Vendors
             const vendorSelectAll = labels.find(label => label.textContent?.trim() === 'Select All');
             if (vendorSelectAll) {
                 console.log('Found Vendor "Select All"');
@@ -90,7 +88,6 @@ async function scrapeData(username: string, password_hb: string) {
                 console.log('Could not find Vendor "Select All"');
             }
             
-            // Assuming the second "Select All" is for cafeteria.
              const cafeteriaSelectAll = labels.filter(label => label.textContent?.trim() === 'Select All')[1];
              if (cafeteriaSelectAll) {
                  console.log('Found Cafeteria "Select All"');
@@ -102,18 +99,12 @@ async function scrapeData(username: string, password_hb: string) {
         await page.screenshot({ path: path.join(scrapesDir, '05_checkboxes_clicked.png') });
         console.log(`${LOG_PREFIX} 'Select All' checkboxes clicked.`);
 
-
-        // 2. Set Date Range
         const startDate = '03-06-2025';
         const endDate = format(new Date(), 'dd-MM-yyyy');
         console.log(`${LOG_PREFIX} Setting date range from ${startDate} to ${endDate}...`);
-        // This is highly dependent on the date picker's implementation.
-        // We will log the intent. In a real scenario, you'd inspect the date picker's HTML.
         console.log(`${LOG_PREFIX} (LOG) Would now interact with date picker elements on the page.`);
         await page.screenshot({ path: path.join(scrapesDir, '06_before_date_set.png') });
 
-
-        // 3. Click "Schedule Report" button
         console.log(`${LOG_PREFIX} Finding and clicking 'Schedule Report' button...`);
         await page.evaluate(() => {
             const buttons = Array.from(document.querySelectorAll('button'));
@@ -125,24 +116,17 @@ async function scrapeData(username: string, password_hb: string) {
                  console.log('Could not find "Schedule Report" button.');
             }
         });
-        await page.waitForTimeout(2000); // Wait for any modal/action to trigger
+        await page.waitForTimeout(2000); 
         await page.screenshot({ path: path.join(scrapesDir, '07_after_schedule_click.png') });
         console.log(`${LOG_PREFIX} 'Schedule Report' button clicked.`);
 
-
-        // --- Data Extraction (To be implemented in next step) ---
         console.log(`${LOG_PREFIX} Waiting for report to generate/download...`);
-        // The next logic would involve waiting for the file to download or for a new page to load with the data.
-        // This is a placeholder for the next step.
-        await page.waitForTimeout(5000); // Wait for a moment to simulate action
+        await page.waitForTimeout(5000);
         
         console.log(`${LOG_PREFIX} Scraped mock data. In a real scenario, this would read a downloaded file.`);
-        // Placeholder data since we can't actually download the report
         return [
             { date: new Date().toISOString().split('T')[0], hungerboxSales: (Math.random() * 500 + 100).toFixed(2), upiSales: (Math.random() * 200).toFixed(2) },
         ];
-
-
     } catch (error) {
         console.error(`${LOG_PREFIX} Scraping failed:`, error);
         throw new Error("Failed to scrape data. This could be due to incorrect credentials, a change in the website's layout, or a CAPTCHA. Please check the selectors in the API route.");
@@ -155,15 +139,12 @@ async function scrapeData(username: string, password_hb: string) {
 }
 
 export async function POST(request: NextRequest) {
-    let adminApp: AdminApp;
     try {
-      adminApp = initializeAdminApp();
+        initializeAdminApp();
     } catch (e: any) {
       console.error(`${LOG_PREFIX} Critical Failure initializing admin app: ${e.message}`);
       return NextResponse.json({ error: 'Server Configuration Error.', details: e.message }, { status: 500 });
     }
-    const adminAuth = getAdminAuth(adminApp);
-    const adminDb = getFirestore(adminApp);
 
     try {
         const authorization = request.headers.get('Authorization');
@@ -172,19 +153,17 @@ export async function POST(request: NextRequest) {
         }
         const idToken = authorization.split('Bearer ')[1];
         const decodedToken = await adminAuth.verifyIdToken(idToken);
-        const callingUserDocSnap = await adminDb.collection("users").doc(decodedToken.uid).get();
+        const userDocRef = adminDb.collection("users").doc(decodedToken.uid);
+        const callingUserDocSnap = await userDocRef.get();
 
-        if (!callingUserDocSnap.exists()) {
+        if (!callingUserDocSnap.exists) {
           return NextResponse.json({ error: 'Caller user document not found in Firestore.' }, { status: 403 });
         }
         const callingUser = { uid: callingUserDocSnap.id, ...callingUserDocSnap.data() } as AppUser;
 
         const { username, password, siteId, stallId } = await request.json();
-        if (!username || !password) {
-            return NextResponse.json({ error: 'Missing required fields: username, password.', status: 400 });
-        }
-        if (!siteId || !stallId) {
-            return NextResponse.json({ error: 'Missing required fields: siteId, stallId.', status: 400 });
+        if (!username || !password || !siteId || !stallId) {
+            return NextResponse.json({ error: 'Missing required fields: username, password, siteId, or stallId.', status: 400 });
         }
         
         const scrapedData = await scrapeData(username, password);
@@ -193,7 +172,7 @@ export async function POST(request: NextRequest) {
         const batch = adminDb.batch();
 
         for (const record of scrapedData) {
-            if (!record.date) continue; // Skip records without a date
+            if (!record.date) continue;
 
             const saleDate = new Date(record.date);
             const docId = `${record.date}_${stallId}`;
@@ -234,7 +213,6 @@ export async function POST(request: NextRequest) {
             });
         }
 
-
         return NextResponse.json({ message: `Successfully imported and updated ${processedCount} sales records from Hungerbox. Check the /public/scrapes folder for screenshots.` }, { status: 200 });
 
     } catch (error: any) {
@@ -242,5 +220,3 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: error.message || 'An unexpected server error occurred.' }, { status: 500 });
     }
 }
-
-    
