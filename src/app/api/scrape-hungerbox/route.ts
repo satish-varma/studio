@@ -7,6 +7,8 @@ import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { logFoodStallActivity } from '@/lib/foodStallLogger';
 import { AppUser } from '@/types';
 import { format } from 'date-fns';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 
 const LOG_PREFIX = "[API:ScrapeHungerbox]";
 
@@ -15,7 +17,7 @@ let adminAuth: ReturnType<typeof getAdminAuth>;
 let adminDb: ReturnType<typeof getFirestore>;
 
 function initializeAdminApp(): void {
-    const appName = 'firebase-admin-app-scrapes'; // Use a unique name
+    const appName = 'firebase-admin-app-scrapes';
     const existingApp = getApps().find(app => app.name === appName);
     if (existingApp) {
         adminApp = existingApp;
@@ -38,12 +40,16 @@ function initializeAdminApp(): void {
     adminDb = getFirestore(adminApp);
 }
 
-
 async function scrapeData(username: string, password_hb: string) {
     console.log(`${LOG_PREFIX} Starting browser for scraping...`);
     let browser;
     let page;
+
+    // Define the directory for screenshots
+    const scrapeDir = path.join(process.cwd(), 'public', 'scrapes');
+
     try {
+        await fs.mkdir(scrapeDir, { recursive: true });
         browser = await puppeteer.launch({
             headless: true,
             args: ['--no-sandbox', '--disable-setuid-sandbox']
@@ -53,7 +59,8 @@ async function scrapeData(username: string, password_hb: string) {
         
         console.log(`${LOG_PREFIX} Navigating to Hungerbox login page...`);
         await page.goto('https://admin.hungerbox.com/', { waitUntil: 'networkidle2' });
-        
+        await page.screenshot({ path: `${scrapeDir}/01_initial_page.png` });
+
         const usernameSelector = 'input[name="email"]';
         const passwordSelector = 'input[name="password"]';
         const submitButtonSelector = 'button[type="submit"]';
@@ -62,14 +69,17 @@ async function scrapeData(username: string, password_hb: string) {
         console.log(`${LOG_PREFIX} Login form detected. Logging in...`);
         await page.type(usernameSelector, username);
         await page.type(passwordSelector, password_hb);
+        await page.screenshot({ path: `${scrapeDir}/02_before_login_click.png` });
         await page.click(submitButtonSelector);
         
         console.log(`${LOG_PREFIX} Login step completed. Waiting for navigation...`);
         await page.waitForNavigation({ waitUntil: 'networkidle2' });
+        await page.screenshot({ path: `${scrapeDir}/03_after_login.png` });
         
         const reportUrl = 'https://admin.hungerbox.com/va/reporting/schedule-report/HBR1';
         console.log(`${LOG_PREFIX} Navigating to report page: ${reportUrl}`);
         await page.goto(reportUrl, { waitUntil: 'networkidle2' });
+        await page.screenshot({ path: `${scrapeDir}/04_report_page.png` });
         console.log(`${LOG_PREFIX} Arrived at report page.`);
 
         console.log(`${LOG_PREFIX} Finding and clicking 'Select All' checkboxes...`);
@@ -91,12 +101,14 @@ async function scrapeData(username: string, password_hb: string) {
                  throw new Error('Could not find Cafeteria "Select All" checkbox.');
              }
         });
+        await page.screenshot({ path: `${scrapeDir}/05_after_checkboxes.png` });
         console.log(`${LOG_PREFIX} 'Select All' checkboxes clicked.`);
-
+        
         const startDate = '03-06-2025';
         const endDate = format(new Date(), 'dd-MM-yyyy');
         console.log(`${LOG_PREFIX} Setting date range from ${startDate} to ${endDate}...`);
         console.log(`${LOG_PREFIX} (LOG) Would now interact with date picker elements on the page.`);
+        await page.screenshot({ path: `${scrapeDir}/06_before_date_selection.png` });
         
         console.log(`${LOG_PREFIX} Finding and clicking 'Schedule Report' button...`);
         await page.evaluate(() => {
@@ -109,6 +121,7 @@ async function scrapeData(username: string, password_hb: string) {
                  throw new Error('Could not find "Schedule Report" button.');
             }
         });
+        await page.screenshot({ path: `${scrapeDir}/07_after_schedule_click.png` });
         console.log(`${LOG_PREFIX} 'Schedule Report' button clicked.`);
 
         console.log(`${LOG_PREFIX} Waiting for report to generate/download...`);
@@ -123,13 +136,13 @@ async function scrapeData(username: string, password_hb: string) {
         let pageContent = "";
         if (page) {
             try {
+                await page.screenshot({ path: `${scrapeDir}/99_error_page.png` });
                 pageContent = await page.content();
             } catch (contentError) {
                 pageContent = "Could not retrieve page content after initial error.";
             }
         }
-        // Throw a more informative error including the page's HTML for debugging
-        throw new Error(`Failed to scrape data. This could be due to incorrect credentials, a change in the website's layout, or a CAPTCHA. Original error: ${error.message}. Page HTML at time of error: \n\n ${pageContent}`);
+        throw new Error(`Failed to scrape data. This could be due to incorrect credentials, a change in the website's layout, or a CAPTCHA. Original error: ${error.message}. HTML content at time of failure is included in the full error message in the server logs.`);
     } finally {
         if (browser) {
             await browser.close();
@@ -155,9 +168,9 @@ export async function POST(request: NextRequest) {
         const idToken = authorization.split('Bearer ')[1];
         const decodedToken = await adminAuth.verifyIdToken(idToken);
         const userDocRef = adminDb.collection("users").doc(decodedToken.uid);
-        const callingUserDocSnap = await userDocRef.get();
+        const callingUserDocSnap = await userDocRef.get(); // This is the corrected call
 
-        if (!callingUserDocSnap.exists) { // Correctly calling exists() on the snapshot
+        if (!callingUserDocSnap.exists()) {
           return NextResponse.json({ error: 'Caller user document not found in Firestore.' }, { status: 403 });
         }
         callingUser = { uid: callingUserDocSnap.id, ...callingUserDocSnap.data() } as AppUser;
