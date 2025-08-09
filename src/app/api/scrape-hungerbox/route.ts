@@ -7,13 +7,9 @@ import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { logFoodStallActivity } from '@/lib/foodStallLogger';
 import { AppUser } from '@/types';
 import { format } from 'date-fns';
-import * as fs from 'fs/promises';
-import * as path from 'path';
 
 const LOG_PREFIX = "[API:ScrapeHungerbox]";
 
-// This function initializes and returns the admin app instance.
-// It ensures that we don't try to re-initialize an app that already exists.
 function initializeAdminApp(): AdminApp {
     const existingApps = getApps();
     if (existingApps.length > 0) {
@@ -68,53 +64,6 @@ async function scrapeData(username: string, password_hb: string) {
         console.log(`${LOG_PREFIX} Login step completed. Waiting for navigation...`);
         await page.waitForNavigation({ waitUntil: 'networkidle2' });
         
-        const reportUrl = 'https://admin.hungerbox.com/va/reporting/schedule-report/HBR1';
-        console.log(`${LOG_PREFIX} Navigating to report page: ${reportUrl}`);
-        await page.goto(reportUrl, { waitUntil: 'networkidle2' });
-        console.log(`${LOG_PREFIX} Arrived at report page.`);
-
-        console.log(`${LOG_PREFIX} Finding and clicking 'Select All' checkboxes...`);
-        await page.evaluate(() => {
-            const labels = Array.from(document.querySelectorAll('label'));
-            const vendorSelectAll = labels.find(label => label.textContent?.trim() === 'Select All');
-            if (vendorSelectAll) {
-                console.log('Found Vendor "Select All"');
-                (vendorSelectAll.previousElementSibling as HTMLElement)?.click();
-            } else {
-                throw new Error('Could not find Vendor "Select All" checkbox.');
-            }
-            
-             const cafeteriaSelectAll = labels.filter(label => label.textContent?.trim() === 'Select All')[1];
-             if (cafeteriaSelectAll) {
-                 console.log('Found Cafeteria "Select All"');
-                (cafeteriaSelectAll.previousElementSibling as HTMLElement)?.click();
-             } else {
-                 throw new Error('Could not find Cafeteria "Select All" checkbox.');
-             }
-        });
-        console.log(`${LOG_PREFIX} 'Select All' checkboxes clicked.`);
-        
-        const startDate = '03-06-2025';
-        const endDate = format(new Date(), 'dd-MM-yyyy');
-        console.log(`${LOG_PREFIX} Setting date range from ${startDate} to ${endDate}...`);
-        console.log(`${LOG_PREFIX} (LOG) Would now interact with date picker elements on the page.`);
-        
-        console.log(`${LOG_PREFIX} Finding and clicking 'Schedule Report' button...`);
-        await page.evaluate(() => {
-            const buttons = Array.from(document.querySelectorAll('button'));
-            const scheduleButton = buttons.find(button => button.textContent?.trim().toLowerCase() === 'schedule report');
-            if (scheduleButton) {
-                console.log('Found "Schedule Report" button, clicking it.');
-                (scheduleButton as HTMLElement).click();
-            } else {
-                 throw new Error('Could not find "Schedule Report" button.');
-            }
-        });
-        console.log(`${LOG_PREFIX} 'Schedule Report' button clicked.`);
-
-        console.log(`${LOG_PREFIX} Waiting for report to generate/download...`);
-        await page.waitForTimeout(5000);
-        
         console.log(`${LOG_PREFIX} Scraped mock data. In a real scenario, this would read a downloaded file.`);
         return [
             { date: new Date().toISOString().split('T')[0], hungerboxSales: (Math.random() * 500 + 100).toFixed(2), upiSales: (Math.random() * 200).toFixed(2), stallId: 'mockStall1', siteId: 'mockSite1' },
@@ -162,8 +111,9 @@ export async function POST(request: NextRequest) {
         const decodedToken = await adminAuth.verifyIdToken(idToken);
         const userDocRef = adminDb.collection("users").doc(decodedToken.uid);
         const callingUserDocSnap = await userDocRef.get();
+        console.log(`${LOG_PREFIX} DEBUG: callingUserDocSnap object received from get():`, callingUserDocSnap);
 
-        if (!callingUserDocSnap.exists()) {
+        if (!callingUserDocSnap.exists) {
           return NextResponse.json({ error: 'Caller user document not found in Firestore.' }, { status: 403 });
         }
         callingUser = { uid: callingUserDocSnap.id, ...callingUserDocSnap.data() } as AppUser;
