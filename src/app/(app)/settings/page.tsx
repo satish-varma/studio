@@ -35,7 +35,7 @@ const LOG_PREFIX = "[SettingsPage]";
 const db = getFirestore();
 
 export default function SettingsPage() {
-  const { user: appUser } = useAuth();
+  const { user: appUser, activeSite } = useAuth();
   const { toast } = useToast();
   
   const [showAppDataResetDialog, setShowAppDataResetDialog] = useState(false);
@@ -85,7 +85,8 @@ export default function SettingsPage() {
     
     try {
       let csvString: string;
-      let filename = `stallsync_${dataType}_${getFormattedTimestamp()}.csv`;
+      const siteNameForFile = activeSite?.name.replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'all_sites';
+      let filename = `stallsync_${dataType}_${siteNameForFile}_${getFormattedTimestamp()}.csv`;
       
       const sitesSnapshot = await getDocs(collection(db, "sites"));
       const sitesMap = new Map(sitesSnapshot.docs.map(doc => [doc.id, (doc.data() as Site).name]));
@@ -131,18 +132,20 @@ export default function SettingsPage() {
          const usersMap = new Map(usersSnapshot.docs.map(doc => [doc.id, (doc.data() as AppUser).displayName || (doc.data() as AppUser).email]));
          const expensesSnapshot = await getDocs(query(collection(db, "foodItemExpenses"), orderBy("purchaseDate", "desc")));
          const itemsToExport = expensesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FoodItemExpense));
-         const headers = ["Expense ID", "Category", "Total Cost", "Payment Method", "Other Payment Details", "Purchase Date", "Vendor", "Other Vendor Details", "Notes", "Bill Image URL", "Site Name", "Stall Name", "Recorded By (Name)"];
+         const headers = ["Expense ID", "Category", "Total Cost", "Payment Method", "Other Payment Details", "Purchase Date", "Vendor", "Other Vendor Details", "Notes", "Bill Image URL", "Site Name", "Stall Name", "Recorded By (Name)", "Recorded By (UID)"];
          const rows = [headers.join(',')];
          itemsToExport.forEach(expense => {
+            const purchaseDate = (expense.purchaseDate as Timestamp)?.toDate ? (expense.purchaseDate as Timestamp).toDate() : new Date(expense.purchaseDate as string);
             rows.push([
               escapeCsvCell(expense.id), escapeCsvCell(expense.category), escapeCsvCell(expense.totalCost.toFixed(2)),
               escapeCsvCell(expense.paymentMethod), escapeCsvCell(expense.otherPaymentMethodDetails || ""),
-              escapeCsvCell(format((expense.purchaseDate as Timestamp).toDate(), "yyyy-MM-dd")),
+              escapeCsvCell(format(purchaseDate, "yyyy-MM-dd")),
               escapeCsvCell(expense.vendor || ""), escapeCsvCell(expense.otherVendorDetails || ""),
               escapeCsvCell(expense.notes || ""), escapeCsvCell(expense.billImageUrl || ""),
               escapeCsvCell(expense.siteId ? sitesMap.get(expense.siteId) || expense.siteId : "N/A"),
               escapeCsvCell(expense.stallId ? stallsMap.get(expense.stallId) || expense.stallId : "N/A"),
               escapeCsvCell(expense.recordedByName || usersMap.get(expense.recordedByUid) || expense.recordedByUid),
+              escapeCsvCell(expense.recordedByUid),
             ].join(','));
         });
         csvString = rows.join('\n');
@@ -229,18 +232,11 @@ export default function SettingsPage() {
                     <Button variant="outline" className="w-full" onClick={() => setShowManagePresetsDialog(true)}><BookCopy className="mr-2 h-4 w-4" />Manage Expense Presets</Button>
                 </CardContent>
             </Card>
+             <Card className="shadow-lg">
+                <CardHeader><CardTitle className="flex items-center"><Palette className="mr-2 h-5 w-5 text-primary" />Appearance</CardTitle><CardDescription>Customize the look and feel of the application.</CardDescription></CardHeader>
+                <CardContent className="space-y-4"><div className="flex items-center justify-between p-4 bg-muted/30 rounded-md"><Label htmlFor="dark-mode-switch" className="text-sm font-medium">Dark Mode</Label><Switch id="dark-mode-switch" disabled /></div><p className="text-xs text-center text-muted-foreground">(Theme switching coming soon)</p></CardContent>
+            </Card>
         </div>
-      </div>
-
-       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        <Card className="shadow-lg">
-            <CardHeader><CardTitle className="flex items-center"><Palette className="mr-2 h-5 w-5 text-primary" />Appearance</CardTitle><CardDescription>Customize the look and feel of the application.</CardDescription></CardHeader>
-            <CardContent className="space-y-4"><div className="flex items-center justify-between p-4 bg-muted/30 rounded-md"><Label htmlFor="dark-mode-switch" className="text-sm font-medium">Dark Mode</Label><Switch id="dark-mode-switch" disabled /></div><p className="text-xs text-center text-muted-foreground">(Theme switching coming soon)</p></CardContent>
-        </Card>
-        <Card className="shadow-lg">
-            <CardHeader><CardTitle className="flex items-center"><BellRing className="mr-2 h-5 w-5 text-primary" />Notifications</CardTitle><CardDescription>Manage how you receive alerts and notifications.</CardDescription></CardHeader>
-            <CardContent className="space-y-4"><div className="flex items-center justify-between p-4 bg-muted/30 rounded-md"><div className="flex items-center space-x-2"><MailQuestion className="h-4 w-4 text-muted-foreground" /><Label htmlFor="low-stock-alerts" className="text-sm font-medium">Low Stock Email Alerts</Label></div><Switch id="low-stock-alerts" disabled /></div><p className="text-xs text-center text-muted-foreground">(Email alert functionality requires backend setup)</p><div className="flex items-center justify-between p-4 bg-muted/30 rounded-md"><Label htmlFor="new-sale-notif" className="text-sm font-medium">In-App New Sale Notifications</Label><Switch id="new-sale-notif" checked disabled /></div><p className="text-xs text-center text-muted-foreground">(Other notification preferences coming soon)</p></CardContent>
-        </Card>
       </div>
       
       {appUser?.role === 'admin' && (

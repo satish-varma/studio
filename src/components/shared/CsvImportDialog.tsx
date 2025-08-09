@@ -1,15 +1,15 @@
 
 "use client";
 
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Upload, FileText, CheckCircle, AlertTriangle } from "lucide-react";
+import { Loader2, Upload, FileText } from "lucide-react";
 import { useAuth } from '@/contexts/AuthContext';
 import { Label } from "@/components/ui/label";
-import { auth } from '@/lib/firebaseConfig'; // Correctly import the auth instance
+import { auth } from '@/lib/firebaseConfig';
 
 const LOG_PREFIX = "[CsvImportDialog]";
 
@@ -28,7 +28,7 @@ export default function CsvImportDialog({ dataType, isOpen, onClose }: CsvImport
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files[0]) {
       const file = event.target.files[0];
-      if (file.type !== 'text/csv') {
+      if (file.type !== 'text/csv' && !file.name.endsWith('.csv')) {
         toast({ title: "Invalid File Type", description: "Please select a .csv file.", variant: "destructive" });
         return;
       }

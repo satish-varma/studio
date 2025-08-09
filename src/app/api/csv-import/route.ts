@@ -5,7 +5,7 @@ import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { getFirestore as getAdminFirestore, Timestamp, WriteBatch } from 'firebase-admin/firestore';
 import type { StockItem, FoodItemExpense, AppUser } from '@/types';
 import Papa from 'papaparse';
-import { logFoodStallActivity } from '@/lib/foodStallLogger'; // Import logger
+import { logFoodStallActivity } from '@/lib/foodStallLogger';
 
 const LOG_PREFIX = "[API:CsvImport]";
 
@@ -62,12 +62,13 @@ async function handleStockImport(adminDb: ReturnType<typeof getAdminFirestore>, 
   let totalProcessed = 0;
 
   for (const row of parsedData) {
-    const siteId = sitesMap.get(row['Site Name']?.toLowerCase() || '');
+    const siteId = sitesMap.get(row['Site Name']?.trim().toLowerCase() || '');
     if (!siteId) {
         console.warn(`${LOG_PREFIX} Skipping stock item "${row.Name}" due to unknown site "${row['Site Name']}".`);
         continue;
     }
-    const stallId = row['Stall Name'] ? (stallsMap.get(row['Stall Name']?.toLowerCase() || '') || null) : null;
+    const stallName = row['Stall Name']?.trim().toLowerCase();
+    const stallId = stallName ? (stallsMap.get(stallName) || null) : null;
 
     const itemData: Omit<StockItem, 'id'> = {
         name: row.Name,
@@ -130,8 +131,8 @@ async function handleFoodExpenseImport(adminDb: ReturnType<typeof getAdminFirest
     const logAggregation = new Map<string, { siteId: string; stallId: string; count: number }>();
 
     for (const row of parsedData) {
-        const siteId = sitesMap.get(row['Site Name']?.toLowerCase() || '');
-        const stallId = stallsMap.get(row['Stall Name']?.toLowerCase() || '');
+        const siteId = sitesMap.get(row['Site Name']?.trim().toLowerCase() || '');
+        const stallId = stallsMap.get(row['Stall Name']?.trim().toLowerCase() || '');
         if (!siteId || !stallId) {
             console.warn(`${LOG_PREFIX} Skipping expense for category "${row.Category}" due to unknown site/stall.`);
             continue;
@@ -180,7 +181,6 @@ async function handleFoodExpenseImport(adminDb: ReturnType<typeof getAdminFirest
         totalProcessed += operationCount;
     }
 
-    // After all batches are committed, create the activity logs
     const callingUser = await getAdminAuth().getUser(uid);
     for (const [, agg] of logAggregation) {
         await logFoodStallActivity({ 
@@ -245,9 +245,6 @@ export async function POST(request: NextRequest) {
       case 'foodExpenses':
         result = await handleFoodExpenseImport(adminDb, csvData, callingUserUid);
         break;
-      // case 'sales':
-        // Note: Sales import is omitted due to complexity of stock adjustments.
-        // return NextResponse.json({ error: "Sales import is not supported at this time." }, { status: 501 });
       default:
         return NextResponse.json({ error: `Invalid dataType: ${dataType}` }, { status: 400 });
     }

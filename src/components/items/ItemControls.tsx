@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { PlusCircle, Search, Filter, Store, Building, Upload, Download } from "lucide-react"; 
+import { PlusCircle, Search, Filter, Store, Building, Upload, Download, Loader2 } from "lucide-react"; 
 import { useRouter } from "next/navigation";
 import type { Stall, UserRole } from "@/types";
 import { Badge } from "@/components/ui/badge";
@@ -155,7 +155,7 @@ export function ItemControls({
                 <Upload className="mr-2 h-4 w-4" /> Import Stock
             </Button>
             <Button variant="outline" onClick={onExportClick} disabled={isExporting || !isSiteActive}>
-                {isExporting ? <Download className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                {isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
                  Export Stock
             </Button>
             <Button 
