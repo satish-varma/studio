@@ -74,6 +74,7 @@ export default function PayrollClientPage() {
     const baseList = allUsersForContext.filter(u => u.role === 'staff' || u.role === 'manager');
     let statusFiltered = statusFilter === 'all' ? baseList : baseList.filter(u => (u.status || 'active') === statusFilter);
     
+    // Apply site filter logic
     if (user?.role === 'admin' && siteFilter !== 'all') {
       return statusFiltered.filter(u => u.defaultSiteId === siteFilter);
     } else if (user?.role === 'manager' && activeSiteId) {
@@ -83,6 +84,7 @@ export default function PayrollClientPage() {
   }, [allUsersForContext, statusFilter, siteFilter, activeSiteId, user?.role]);
   
 
+  // State for fetched data
   const [monthlyAdvances, setMonthlyAdvances] = useState<Map<string, number>>(new Map());
   const [monthlyPayments, setMonthlyPayments] = useState<Map<string, number>>(new Map());
   const [monthlyHolidays, setMonthlyHolidays] = useState<Holiday[]>([]);
@@ -124,6 +126,7 @@ export default function PayrollClientPage() {
     return workingDays;
   }, []);
   
+  // Unified effect for all real-time payroll data
   useEffect(() => {
     if (userManagementLoading || staffList.length === 0) {
         if(!userManagementLoading) {
@@ -164,30 +167,30 @@ export default function PayrollClientPage() {
 
       const advancesQuery = query(collection(db, "advances"), where("staffUid", "in", batch), where("date", ">=", advancesStartDate.toISOString()), where("date", "<=", advancesEndDate.toISOString()));
       const unsubAdvances = onSnapshot(advancesQuery, (snapshot) => {
+          const batchAdvancesMap = new Map<string, number>();
+          snapshot.docs.forEach(doc => {
+              const data = doc.data() as SalaryAdvance;
+              batchAdvancesMap.set(data.staffUid, (batchAdvancesMap.get(data.staffUid) || 0) + data.amount);
+          });
           setMonthlyAdvances(prev => {
-              const newMap = new Map(prev);
-              const batchMap = new Map<string, number>();
-              snapshot.forEach(doc => {
-                  const data = doc.data() as SalaryAdvance;
-                  batchMap.set(data.staffUid, (batchMap.get(data.staffUid) || 0) + data.amount);
-              });
-              batch.forEach(uid => { newMap.set(uid, batchMap.get(uid) || 0); });
-              return newMap;
+            const newMap = new Map(prev);
+            batch.forEach(uid => newMap.set(uid, batchAdvancesMap.get(uid) || 0));
+            return newMap;
           });
       });
       allUnsubscribers.push(unsubAdvances);
 
       const paymentsQuery = query(collection(db, "salaryPayments"), where("staffUid", "in", batch), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear()));
       const unsubPayments = onSnapshot(paymentsQuery, (snapshot) => {
+          const batchPaymentsMap = new Map<string, number>();
+          snapshot.docs.forEach(doc => {
+              const data = doc.data() as SalaryPayment;
+              batchPaymentsMap.set(data.staffUid, (batchPaymentsMap.get(data.staffUid) || 0) + data.amountPaid);
+          });
           setMonthlyPayments(prev => {
-              const newMap = new Map(prev);
-              const batchMap = new Map<string, number>();
-              snapshot.forEach(doc => {
-                  const data = doc.data() as SalaryPayment;
-                  batchMap.set(data.staffUid, (batchMap.get(data.staffUid) || 0) + data.amountPaid);
-              });
-              batch.forEach(uid => { newMap.set(uid, batchMap.get(uid) || 0); });
-              return newMap;
+            const newMap = new Map(prev);
+            batch.forEach(uid => newMap.set(uid, batchPaymentsMap.get(uid) || 0));
+            return newMap;
           });
       });
       allUnsubscribers.push(unsubPayments);
@@ -198,17 +201,17 @@ export default function PayrollClientPage() {
         where("date", "<=", format(payrollMonthEnd, 'yyyy-MM-dd'))
       );
       const unsubAttendance = onSnapshot(attendanceQuery, (snapshot) => {
+          const batchAttendanceMap = new Map<string, { present: number, halfDay: number }>();
+          snapshot.forEach(doc => {
+              const att = doc.data() as StaffAttendance;
+              const current = batchAttendanceMap.get(att.staffUid) || { present: 0, halfDay: 0 };
+              if (att.status === 'Present') current.present++;
+              if (att.status === 'Half-day') current.halfDay++;
+              batchAttendanceMap.set(att.staffUid, current);
+          });
           setMonthlyAttendance(prev => {
               const newMap = new Map(prev);
-              const batchMap = new Map<string, { present: number, halfDay: number }>();
-              snapshot.forEach(doc => {
-                  const att = doc.data() as StaffAttendance;
-                  const current = batchMap.get(att.staffUid) || { present: 0, halfDay: 0 };
-                  if (att.status === 'Present') current.present++;
-                  if (att.status === 'Half-day') current.halfDay++;
-                  batchMap.set(att.staffUid, current);
-              });
-              batch.forEach(uid => { newMap.set(uid, batchMap.get(uid) || { present: 0, halfDay: 0 }); });
+              batch.forEach(uid => newMap.set(uid, batchAttendanceMap.get(uid) || { present: 0, halfDay: 0 }));
               return newMap;
           });
       });
@@ -220,6 +223,8 @@ export default function PayrollClientPage() {
     };
   }, [staffList, currentMonth, toast, userManagementLoading]);
 
+
+  // Effect to re-calculate payroll whenever any data changes
   useEffect(() => {
     if (userManagementLoading) return;
     setLoadingPayrollCalcs(true);
@@ -352,7 +357,7 @@ export default function PayrollClientPage() {
               <div className="text-2xl font-bold text-orange-600">
                 {loading ? <Skeleton className="h-8 w-28" /> : formatCurrency(totalAdvances)}
               </div>
-              <p className="text-xs text-muted-foreground">From {format(startOfMonth(currentMonth), 'MMM d')} to {format(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 15), 'MMM d')}</p>
+              <p className="text-xs text-muted-foreground">From {format(startOfMonth(currentMonth), 'MMM d')} to {format(addMonths(currentMonth, 1), 'MMM')} 15th</p>
             </CardContent>
           </Card>
           <Card className="shadow-md">
