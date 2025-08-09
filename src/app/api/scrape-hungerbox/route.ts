@@ -1,7 +1,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import puppeteer from 'puppeteer';
-import { getFirestore, doc, setDoc, Timestamp, getDoc } from 'firebase/admin/firestore';
+import { getFirestore, doc, setDoc, Timestamp, getDoc } from 'firebase-admin/firestore';
 import { initializeApp, getApps, cert, App as AdminApp } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { logFoodStallActivity } from '@/lib/foodStallLogger';
@@ -50,7 +50,7 @@ async function scrapeData(username: string, password_hb: string) {
         // Or it might require clicking through a menu.
         // We will assume for now the data is on a page we can navigate to.
         // This is the most fragile part of the process.
-        // await page.goto('https://admin.hungerbox.com/reports/sales', { waitUntil: 'networkidle2' });
+        await page.goto('https://admin.hungerbox.com/va/reporting/schedule-report/HBR1', { waitUntil: 'networkidle2' });
 
         console.log(`${LOG_PREFIX} Extracting data from sales table...`);
         // This is another GUESS. We're looking for a table with an ID like 'sales-report-table'.
