@@ -219,7 +219,8 @@ export default function PayrollClientPage() {
     } else if (user?.role === 'manager' && activeSiteId) {
       siteFilteredData = payrollData.filter(p => {
          if(p.user.role === 'manager') {
-            return p.user.managedSiteIds?.includes(activeSiteId);
+            // THE FIX: Also include the current manager user themselves, regardless of their defaultSiteId
+            return p.user.uid === user.uid || (p.user.defaultSiteId === activeSiteId);
         }
         return p.user.defaultSiteId === activeSiteId;
       });
@@ -229,7 +230,7 @@ export default function PayrollClientPage() {
       return siteFilteredData;
     }
     return siteFilteredData.filter(p => (p.user.status || 'active') === statusFilter);
-  }, [payrollData, statusFilter, siteFilter, user?.role, activeSiteId]);
+  }, [payrollData, statusFilter, siteFilter, user, activeSiteId]);
   
 
   const totalProjectedSalary = useMemo(() => {
@@ -394,3 +395,5 @@ export default function PayrollClientPage() {
     </div>
   );
 }
+
+    
