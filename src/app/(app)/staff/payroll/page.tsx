@@ -123,8 +123,12 @@ export default function PayrollClientPage() {
   
   const refetchData = useCallback(async () => {
     if (userManagementLoading || staffList.length === 0 || !db) {
+        console.log(`${LOG_PREFIX} refetchData skipped. Loading: ${userManagementLoading}, StaffCount: ${staffList.length}`);
         return;
     }
+    console.log(`${LOG_PREFIX} refetchData triggered.`);
+
+    setLoadingPayrollCalcs(true);
 
     const uids = staffList.map(s => s.uid);
     const uidsBatches: string[][] = [];
@@ -135,11 +139,14 @@ export default function PayrollClientPage() {
     const payrollMonthStart = startOfMonth(currentMonth);
     const payrollMonthEnd = endOfMonth(currentMonth);
     const nextMonth = addMonths(currentMonth, 1);
+    
+    // Corrected advance date range
+    const advancesStartDate = payrollMonthStart;
     const advancesEndDate = new Date(nextMonth.getFullYear(), nextMonth.getMonth(), 15, 23, 59, 59);
 
     try {
         const [advancesSnapshots, paymentsSnapshots, holidaysSnapshot, attendanceSnapshots] = await Promise.all([
-            Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "advances"), where("staffUid", "in", batch), where("date", ">=", payrollMonthStart.toISOString()), where("date", "<=", advancesEndDate.toISOString()))))),
+            Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "advances"), where("staffUid", "in", batch), where("date", ">=", advancesStartDate.toISOString()), where("date", "<=", advancesEndDate.toISOString()))))),
             Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", batch), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear()))))),
             getDocs(query(collection(db, "holidays"), where("date", ">=", format(payrollMonthStart, 'yyyy-MM-dd')), where("date", "<=", format(payrollMonthEnd, 'yyyy-MM-dd')))),
             Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "staffAttendance"), where("staffUid", "in", batch), where("date", ">=", format(payrollMonthStart, 'yyyy-MM-dd')), where("date", "<=", format(payrollMonthEnd, 'yyyy-MM-dd')))))),
@@ -172,13 +179,17 @@ export default function PayrollClientPage() {
         setMonthlyAttendance(newAttendanceMap);
 
     } catch (error: any) {
-        toast({ title: "Error Refetching Data", description: error.message, variant: "destructive"});
+        console.error(`${LOG_PREFIX} Error in refetchData:`, error);
+        toast({ title: "Error Refetching Payroll Data", description: error.message, variant: "destructive"});
     }
   }, [staffList, currentMonth, toast, userManagementLoading, db]);
 
   // Effect to re-calculate payroll whenever any data changes
   useEffect(() => {
-    if (userManagementLoading) return;
+    if (userManagementLoading || staffList.length === 0) {
+      if(!userManagementLoading) setLoadingPayrollCalcs(false);
+      return;
+    }
     setLoadingPayrollCalcs(true);
     const newPayrollData = staffList.map(u => {
       const details = staffDetailsMap.get(u.uid) || null;
@@ -206,6 +217,10 @@ export default function PayrollClientPage() {
     setLoadingPayrollCalcs(false);
   }, [staffList, staffDetailsMap, monthlyAdvances, monthlyPayments, monthlyHolidays, monthlyAttendance, currentMonth, calculateWorkingDaysForEmployee, userManagementLoading]);
 
+  // Initial and month-change data fetch
+  useEffect(() => {
+    refetchData();
+  }, [currentMonth, refetchData]);
 
   const filteredPayrollData = useMemo(() => {
     let siteFilteredData = payrollData;
@@ -236,11 +251,9 @@ export default function PayrollClientPage() {
     const monthStart = startOfMonth(currentMonth);
     return filteredPayrollData.reduce((acc, item) => {
         const details = item.details;
-        // Don't include salary if the user has an exit date before the start of this month.
         if (details?.exitDate && isBefore(new Date(details.exitDate), monthStart)) {
             return acc;
         }
-        // Distribute manager's salary if they manage multiple sites and we're viewing a single site
         if(item.user.role === 'manager' && siteFilter !== 'all') {
             const managedCount = item.user.managedSiteIds?.length || 1;
             return acc + ((details?.salary || 0) / managedCount);
@@ -284,10 +297,6 @@ export default function PayrollClientPage() {
 
   const loading = authLoading || userManagementLoading || loadingPayrollCalcs;
   const error = userManagementError;
-
-  useEffect(() => {
-    refetchData();
-  }, [currentMonth, refetchData]);
 
   if (loading && payrollData.length === 0) return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin" /><p className="ml-2">Loading Payroll Data...</p></div>;
   if (error) return <Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>;
