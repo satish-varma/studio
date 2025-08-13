@@ -165,7 +165,10 @@ export default function PayrollClientPage() {
           });
           setMonthlyAdvances(prev => {
             const newMap = new Map(prev);
-            batch.forEach(uid => newMap.set(uid, batchAdvancesMap.get(uid) || 0));
+            // Update only the UIDs in this batch
+            batch.forEach(uid => {
+                newMap.set(uid, batchAdvancesMap.get(uid) || 0);
+            });
             return newMap;
           });
       });
@@ -174,13 +177,16 @@ export default function PayrollClientPage() {
       const paymentsQuery = query(collection(db, "salaryPayments"), where("staffUid", "in", batch), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear()));
       const unsubPayments = onSnapshot(paymentsQuery, (snapshot) => {
           const batchPaymentsMap = new Map<string, number>();
-          snapshot.forEach(doc => {
+          snapshot.docs.forEach(doc => {
               const payment = doc.data() as SalaryPayment;
               batchPaymentsMap.set(payment.staffUid, (batchPaymentsMap.get(payment.staffUid) || 0) + payment.amountPaid);
           });
           setMonthlyPayments(prev => {
             const newMap = new Map(prev);
-            batch.forEach(uid => newMap.set(uid, batchPaymentsMap.get(uid) || 0));
+            // Update only the UIDs in this batch
+             batch.forEach(uid => {
+                newMap.set(uid, batchPaymentsMap.get(uid) || 0);
+            });
             return newMap;
           });
       });
@@ -202,7 +208,10 @@ export default function PayrollClientPage() {
           });
           setMonthlyAttendance(prev => {
               const newMap = new Map(prev);
-              batch.forEach(uid => newMap.set(uid, batchAttendanceMap.get(uid) || { present: 0, halfDay: 0 }));
+               // Update only the UIDs in this batch
+              batch.forEach(uid => {
+                  newMap.set(uid, batchAttendanceMap.get(uid) || { present: 0, halfDay: 0 });
+              });
               return newMap;
           });
       });
