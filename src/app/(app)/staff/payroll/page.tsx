@@ -176,19 +176,17 @@ export default function PayrollClientPage() {
 
       const paymentsQuery = query(collection(db, "salaryPayments"), where("staffUid", "in", batch), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear()));
       const unsubPayments = onSnapshot(paymentsQuery, (snapshot) => {
-          const batchPaymentsMap = new Map<string, number>();
-          snapshot.docs.forEach(doc => {
-              const payment = doc.data() as SalaryPayment;
-              batchPaymentsMap.set(payment.staffUid, (batchPaymentsMap.get(payment.staffUid) || 0) + payment.amountPaid);
-          });
-          setMonthlyPayments(prev => {
-            const newMap = new Map(prev);
-            // Update only the UIDs in this batch
-             batch.forEach(uid => {
-                newMap.set(uid, batchPaymentsMap.get(uid) || 0);
+        setMonthlyPayments(prevMap => {
+            const newMap = new Map(prevMap);
+            // First, reset the payments for the UIDs in this batch to handle deletions.
+            batch.forEach(uid => newMap.set(uid, 0));
+            // Then, re-aggregate the payments from the snapshot.
+            snapshot.docs.forEach(doc => {
+                const payment = doc.data() as SalaryPayment;
+                newMap.set(payment.staffUid, (newMap.get(payment.staffUid) || 0) + payment.amountPaid);
             });
             return newMap;
-          });
+        });
       });
       allUnsubscribers.push(unsubPayments);
 
