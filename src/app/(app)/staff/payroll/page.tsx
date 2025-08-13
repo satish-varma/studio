@@ -71,15 +71,8 @@ export default function PayrollClientPage() {
   const [siteFilter, setSiteFilter] = useState<string>('all'); // New state for site filter
 
   const staffList = useMemo(() => {
-    // This hook now correctly returns all users for admin, or users from managed sites for manager
     return allUsersForContext.filter(u => u.role === 'staff' || u.role === 'manager');
   }, [allUsersForContext]);
-  
-
-  const [monthlyAdvances, setMonthlyAdvances] = useState<Map<string, number>>(new Map());
-  const [monthlyPayments, setMonthlyPayments] = useState<Map<string, number>>(new Map());
-  const [monthlyHolidays, setMonthlyHolidays] = useState<Holiday[]>([]);
-  const [monthlyAttendance, setMonthlyAttendance] = useState<Map<string, { present: number, halfDay: number }>>(new Map());
   
   const handlePrevMonth = () => setCurrentMonth(prev => subMonths(prev, 1));
   const handleNextMonth = () => setCurrentMonth(prev => addMonths(prev, 1));
@@ -107,8 +100,6 @@ export default function PayrollClientPage() {
       const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
       const isGlobalHoliday = holidays.some(h => h.date === dateStr && h.siteId === null);
       
-      // A manager's working days should be calculated against global holidays, as their work spans multiple sites.
-      // A staff member's working days are affected by their specific site's holidays.
       const siteIdForHolidayCheck = staff.role === 'manager' ? null : staff.defaultSiteId;
       const isSiteHoliday = siteIdForHolidayCheck ? holidays.some(h => h.date === dateStr && h.siteId === siteIdForHolidayCheck) : false;
 
@@ -121,7 +112,7 @@ export default function PayrollClientPage() {
     return workingDays;
   }, []);
   
-  useEffect(() => {
+  const calculateAndSetPayroll = useCallback(async () => {
     if (userManagementLoading || staffList.length === 0) {
         if(!userManagementLoading) {
             setLoadingPayrollCalcs(false);
@@ -129,8 +120,8 @@ export default function PayrollClientPage() {
         }
         return;
     }
-
     setLoadingPayrollCalcs(true);
+
     const uids = staffList.map(s => s.uid);
     const uidsBatches: string[][] = [];
     for (let i = 0; i < uids.length; i += 30) {
@@ -139,117 +130,82 @@ export default function PayrollClientPage() {
     
     const payrollMonthStart = startOfMonth(currentMonth);
     const payrollMonthEnd = endOfMonth(currentMonth);
-    
     const advancesStartDate = payrollMonthStart;
     const nextMonth = addMonths(currentMonth, 1);
     const advancesEndDate = new Date(nextMonth.getFullYear(), nextMonth.getMonth(), 15, 23, 59, 59);
 
-    let allUnsubscribers: (() => void)[] = [];
+    try {
+        const holidaysQuery = query(collection(db, "holidays"), where("date", ">=", format(payrollMonthStart, 'yyyy-MM-dd')), where("date", "<=", format(payrollMonthEnd, 'yyyy-MM-dd')));
+        const holidaysSnap = await getDocs(holidaysQuery);
+        const monthlyHolidays = holidaysSnap.docs.map(doc => doc.data() as Holiday);
 
-    const holidaysQuery = query(collection(db, "holidays"), where("date", ">=", format(payrollMonthStart, 'yyyy-MM-dd')), where("date", "<=", format(payrollMonthEnd, 'yyyy-MM-dd')));
-    const unsubHolidays = onSnapshot(holidaysQuery, 
-        (snapshot) => setMonthlyHolidays(snapshot.docs.map(doc => doc.data() as Holiday)),
-        (error) => console.error("Error fetching holidays:", error)
-    );
-    allUnsubscribers.push(unsubHolidays);
+        const monthlyAdvances = new Map<string, number>();
+        const monthlyPayments = new Map<string, number>();
+        const monthlyAttendance = new Map<string, { present: number, halfDay: number }>();
 
-    uidsBatches.forEach(batch => {
-      if (batch.length === 0) return;
-
-      const advancesQuery = query(collection(db, "advances"), where("staffUid", "in", batch), where("date", ">=", advancesStartDate.toISOString()), where("date", "<=", advancesEndDate.toISOString()));
-      const unsubAdvances = onSnapshot(advancesQuery, (snapshot) => {
-          const batchAdvancesMap = new Map<string, number>();
-          snapshot.docs.forEach(doc => {
-              const data = doc.data() as SalaryAdvance;
-              batchAdvancesMap.set(data.staffUid, (batchAdvancesMap.get(data.staffUid) || 0) + data.amount);
-          });
-          setMonthlyAdvances(prev => {
-            const newMap = new Map(prev);
-            // Update only the UIDs in this batch
-            batch.forEach(uid => {
-                newMap.set(uid, batchAdvancesMap.get(uid) || 0);
+        for (const batch of uidsBatches) {
+            if(batch.length === 0) continue;
+            // Advances
+            const advancesQuery = query(collection(db, "advances"), where("staffUid", "in", batch), where("date", ">=", advancesStartDate.toISOString()), where("date", "<=", advancesEndDate.toISOString()));
+            const advancesSnap = await getDocs(advancesQuery);
+            advancesSnap.forEach(doc => {
+                const data = doc.data() as SalaryAdvance;
+                monthlyAdvances.set(data.staffUid, (monthlyAdvances.get(data.staffUid) || 0) + data.amount);
             });
-            return newMap;
-          });
-      });
-      allUnsubscribers.push(unsubAdvances);
-
-      const paymentsQuery = query(collection(db, "salaryPayments"), where("staffUid", "in", batch), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear()));
-      const unsubPayments = onSnapshot(paymentsQuery, (snapshot) => {
-        setMonthlyPayments(prevMap => {
-            const newMap = new Map(prevMap);
-            // First, reset the payments for the UIDs in this batch to handle deletions.
-            batch.forEach(uid => newMap.set(uid, 0));
-            // Then, re-aggregate the payments from the snapshot.
-            snapshot.docs.forEach(doc => {
+            // Payments
+            const paymentsQuery = query(collection(db, "salaryPayments"), where("staffUid", "in", batch), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear()));
+            const paymentsSnap = await getDocs(paymentsQuery);
+            paymentsSnap.forEach(doc => {
                 const payment = doc.data() as SalaryPayment;
-                newMap.set(payment.staffUid, (newMap.get(payment.staffUid) || 0) + payment.amountPaid);
+                monthlyPayments.set(payment.staffUid, (monthlyPayments.get(payment.staffUid) || 0) + payment.amountPaid);
             });
-            return newMap;
-        });
-      });
-      allUnsubscribers.push(unsubPayments);
+            // Attendance
+            const attendanceQuery = query(collection(db, "staffAttendance"), where("staffUid", "in", batch), where("date", ">=", format(payrollMonthStart, 'yyyy-MM-dd')), where("date", "<=", format(payrollMonthEnd, 'yyyy-MM-dd')));
+            const attendanceSnap = await getDocs(attendanceQuery);
+            attendanceSnap.forEach(doc => {
+                const att = doc.data() as StaffAttendance;
+                const current = monthlyAttendance.get(att.staffUid) || { present: 0, halfDay: 0 };
+                if (att.status === 'Present') current.present++;
+                if (att.status === 'Half-day') current.halfDay++;
+                monthlyAttendance.set(att.staffUid, current);
+            });
+        }
+        
+        const newPayrollData = staffList.map(u => {
+            const details = staffDetailsMap.get(u.uid) || null;
+            const salary = details?.salary || 0;
+            const advances = monthlyAdvances.get(u.uid) || 0;
+            const paidAmount = monthlyPayments.get(u.uid) || 0;
+            
+            const workingDays = calculateWorkingDaysForEmployee(currentMonth, monthlyHolidays, u, details);
+            const attendance = monthlyAttendance.get(u.uid) || { present: 0, halfDay: 0 };
+            const presentDays = attendance.present + (attendance.halfDay * 0.5);
+            
+            const perDaySalary = workingDays > 0 ? salary / workingDays : 0;
+            const earnedSalary = perDaySalary * presentDays;
+            
+            const netPayable = earnedSalary - advances;
 
-      const attendanceQuery = query(collection(db, "staffAttendance"), 
-        where("staffUid", "in", batch),
-        where("date", ">=", format(payrollMonthStart, 'yyyy-MM-dd')),
-        where("date", "<=", format(payrollMonthEnd, 'yyyy-MM-dd'))
-      );
-      const unsubAttendance = onSnapshot(attendanceQuery, (snapshot) => {
-          const batchAttendanceMap = new Map<string, { present: number, halfDay: number }>();
-          snapshot.forEach(doc => {
-              const att = doc.data() as StaffAttendance;
-              const current = batchAttendanceMap.get(att.staffUid) || { present: 0, halfDay: 0 };
-              if (att.status === 'Present') current.present++;
-              if (att.status === 'Half-day') current.halfDay++;
-              batchAttendanceMap.set(att.staffUid, current);
-          });
-          setMonthlyAttendance(prev => {
-              const newMap = new Map(prev);
-               // Update only the UIDs in this batch
-              batch.forEach(uid => {
-                  newMap.set(uid, batchAttendanceMap.get(uid) || { present: 0, halfDay: 0 });
-              });
-              return newMap;
-          });
-      });
-      allUnsubscribers.push(unsubAttendance);
-    });
+            return {
+                user: u, details, advances, netPayable, paidAmount,
+                isPaid: paidAmount >= netPayable && netPayable > 0,
+                workingDays, presentDays, earnedSalary,
+            };
+        }).sort((a,b) => (a.user.displayName || "").localeCompare(b.user.displayName || ""));
+        
+        setPayrollData(newPayrollData);
 
-    return () => {
-        allUnsubscribers.forEach(unsub => unsub());
-    };
-  }, [staffList, currentMonth, toast, userManagementLoading]);
+    } catch (error) {
+        console.error(`${LOG_PREFIX} Error calculating payroll:`, error);
+        toast({ title: "Error", description: "Could not calculate payroll data.", variant: "destructive" });
+    } finally {
+        setLoadingPayrollCalcs(false);
+    }
+  }, [staffList, staffDetailsMap, currentMonth, userManagementLoading, toast, calculateWorkingDaysForEmployee]);
 
-  // Effect to re-calculate payroll whenever any data changes
   useEffect(() => {
-    if (userManagementLoading) return;
-    setLoadingPayrollCalcs(true);
-    const newPayrollData = staffList.map(u => {
-      const details = staffDetailsMap.get(u.uid) || null;
-      const salary = details?.salary || 0;
-      const advances = monthlyAdvances.get(u.uid) || 0;
-      const paidAmount = monthlyPayments.get(u.uid) || 0;
-      
-      const workingDays = calculateWorkingDaysForEmployee(currentMonth, monthlyHolidays, u, details);
-      const attendance = monthlyAttendance.get(u.uid) || { present: 0, halfDay: 0 };
-      const presentDays = attendance.present + (attendance.halfDay * 0.5);
-      
-      const perDaySalary = workingDays > 0 ? salary / workingDays : 0;
-      const earnedSalary = perDaySalary * presentDays;
-      
-      const netPayable = earnedSalary - advances;
-
-      return {
-          user: u, details, advances, netPayable, paidAmount,
-          isPaid: paidAmount >= netPayable && netPayable > 0,
-          workingDays, presentDays, earnedSalary,
-      };
-    }).sort((a,b) => (a.user.displayName || "").localeCompare(b.user.displayName || ""));
-    
-    setPayrollData(newPayrollData);
-    setLoadingPayrollCalcs(false);
-  }, [staffList, staffDetailsMap, monthlyAdvances, monthlyPayments, monthlyHolidays, monthlyAttendance, currentMonth, calculateWorkingDaysForEmployee, userManagementLoading]);
+    calculateAndSetPayroll();
+  }, [calculateAndSetPayroll]);
 
   const filteredPayrollData = useMemo(() => {
     let siteFilteredData = payrollData;
@@ -433,7 +389,7 @@ export default function PayrollClientPage() {
         {loading ? (
             <div className="flex justify-center items-center py-10"><Loader2 className="h-6 w-6 animate-spin" /><p className="ml-2">Recalculating payroll...</p></div>
         ) : (
-            <PayrollTable data={filteredPayrollData} month={currentMonth.getMonth()+1} year={currentMonth.getFullYear()} />
+            <PayrollTable data={filteredPayrollData} month={currentMonth.getMonth()+1} year={currentMonth.getFullYear()} onPaymentSuccess={calculateAndSetPayroll} />
         )}
     </div>
   );

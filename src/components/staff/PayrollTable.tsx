@@ -27,11 +27,12 @@ interface PayrollTableProps {
   data: PayrollData[];
   month: number;
   year: number;
+  onPaymentSuccess: () => void;
 }
 
 const formatCurrency = (amount: number) => `₹${amount.toFixed(2)}`;
 
-export function PayrollTable({ data, month, year }: PayrollTableProps) {
+export function PayrollTable({ data, month, year, onPaymentSuccess }: PayrollTableProps) {
   const { toast } = useToast();
   const { user: currentUser } = useAuth();
   const [selectedPayroll, setSelectedPayroll] = useState<PayrollData | null>(null);
@@ -87,6 +88,7 @@ export function PayrollTable({ data, month, year }: PayrollTableProps) {
         });
 
         toast({ title: "Success", description: "Salary payment recorded." });
+        onPaymentSuccess(); // This will trigger the parent to refetch and recalculate all data
         handleCloseDialog();
     } catch (error: any) {
         toast({ title: "Error", description: `Failed to record payment: ${error.message}`, variant: "destructive" });
@@ -101,7 +103,7 @@ export function PayrollTable({ data, month, year }: PayrollTableProps) {
         <Users className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
         <p className="text-xl font-semibold text-foreground mb-2">No Staff Members Found</p>
         <p className="text-muted-foreground">
-          No staff members are assigned to the selected site.
+          No staff members are assigned to the selected site or match the current filters.
         </p>
       </div>
     );
