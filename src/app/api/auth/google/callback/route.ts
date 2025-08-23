@@ -25,12 +25,32 @@ function initializeAdminApp(): AdminApp {
     return initializeApp({ credential: cert(JSON.parse(serviceAccountJson)) });
 }
 
+const renderAutoClosingPage = (message: string) => `
+  <!DOCTYPE html>
+  <html>
+    <head>
+      <title>Authentication Complete</title>
+      <script>
+        window.onload = function() {
+          if (window.opener) {
+            window.opener.postMessage("${message}", "${new URL(GOOGLE_REDIRECT_URI!).origin}");
+          }
+          window.close();
+        };
+      </script>
+    </head>
+    <body>
+      <p>Authentication successful. This window will now close.</p>
+    </body>
+  </html>
+`;
+
 export async function GET(request: NextRequest) {
   let adminApp;
   try {
     adminApp = initializeAdminApp();
   } catch (e: any) {
-    return NextResponse.json({ error: 'Server Configuration Error.', details: e.message }, { status: 500 });
+    return new Response(`<h1>Server Configuration Error</h1><p>${e.message}</p>`, { status: 500, headers: { 'Content-Type': 'text/html' } });
   }
 
   const adminDb = getAdminFirestore(adminApp);
@@ -40,7 +60,7 @@ export async function GET(request: NextRequest) {
 
   if (!code || !state) {
     console.error(`${LOG_PREFIX} Missing 'code' or 'state' in callback URL.`);
-    return NextResponse.redirect(new URL('/foodstall/sales?error=auth_failed', request.url));
+    return new Response(`<h1>Authentication Failed</h1><p>Required parameters 'code' or 'state' were missing.</p>`, { status: 400, headers: { 'Content-Type': 'text/html' } });
   }
 
   try {
@@ -54,7 +74,6 @@ export async function GET(request: NextRequest) {
     const { tokens } = await oAuth2Client.getToken(code);
     console.log(`${LOG_PREFIX} Tokens received from Google.`);
 
-    // Securely store the tokens in Firestore, associated with the user.
     const tokensDocRef = doc(adminDb, 'user_tokens', uid);
     await setDoc(tokensDocRef, {
       ...tokens,
@@ -64,11 +83,10 @@ export async function GET(request: NextRequest) {
 
     console.log(`${LOG_PREFIX} Tokens for user ${uid} saved successfully.`);
 
-    // Redirect user back to the sales page with a success indicator.
-    return NextResponse.redirect(new URL('/foodstall/sales?gmail_connected=true', request.url));
+    return new Response(renderAutoClosingPage('auth_success'), { status: 200, headers: { 'Content-Type': 'text/html' } });
 
   } catch (error: any) {
     console.error(`${LOG_PREFIX} Error processing Google OAuth callback:`, error.message, error.stack);
-    return NextResponse.redirect(new URL(`/foodstall/sales?error=${encodeURIComponent(error.message)}`, request.url));
+    return new Response(`<h1>Authentication Error</h1><p>${error.message}</p>`, { status: 500, headers: { 'Content-Type': 'text/html' } });
   }
 }

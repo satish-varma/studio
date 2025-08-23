@@ -46,7 +46,6 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
     setIsCheckingConnection(true);
     const tokensDocRef = doc(db, 'user_tokens', user.uid);
 
-    // Use onSnapshot for real-time updates
     const unsubscribe = onSnapshot(tokensDocRef, (docSnap) => {
         setIsGmailConnected(docSnap.exists());
         setIsCheckingConnection(false);
@@ -55,8 +54,22 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
         setIsCheckingConnection(false);
     });
 
-    return () => unsubscribe(); // Cleanup listener on unmount or when dialog closes
-  }, [isOpen, user, db]);
+    // Also listen for messages from the popup
+    const handleAuthMessage = (event: MessageEvent) => {
+        if (event.origin !== window.location.origin) return;
+        if (event.data === 'auth_success') {
+            console.log("Received auth_success message from popup.");
+            setIsGmailConnected(true);
+            toast({ title: "Success!", description: "Gmail account connected." });
+        }
+    };
+    window.addEventListener('message', handleAuthMessage);
+
+    return () => {
+        unsubscribe();
+        window.removeEventListener('message', handleAuthMessage);
+    };
+  }, [isOpen, user, db, toast]);
   
   // Fetch sites and stalls when the dialog is open
   useEffect(() => {
@@ -126,7 +139,14 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
     onClose();
   };
 
-  const authUrl = user ? `/api/auth/google/initiate?uid=${user.uid}` : '#';
+  const openAuthPopup = () => {
+      if (!user) return;
+      const authUrl = `/api/auth/google/initiate?uid=${user.uid}`;
+      const width = 600, height = 700;
+      const left = (window.innerWidth - width) / 2;
+      const top = (window.innerHeight - height) / 2;
+      window.open(authUrl, 'googleAuth', `width=${width},height=${height},top=${top},left=${left}`);
+  };
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && handleDialogClose()}>
@@ -170,8 +190,8 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
                   <AlertTitle>Gmail Account Not Connected</AlertTitle>
                   <AlertDescription>
                        You must connect your Gmail account to allow StallSync to read your sales emails.
-                       <Button asChild variant="link" className="p-0 h-auto font-semibold ml-1">
-                          <a href={authUrl}>Click here to connect.</a>
+                       <Button asChild variant="link" className="p-0 h-auto font-semibold ml-1" onClick={openAuthPopup}>
+                          <a>Click here to connect.</a>
                        </Button>
                   </AlertDescription>
               </Alert>
