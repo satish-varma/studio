@@ -118,6 +118,15 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
     onClose();
   };
 
+  const handleConnectGmail = () => {
+    if (initiateUrl) {
+      // Use window.top.location.href to break out of the iframe in the dev environment
+      window.top.location.href = initiateUrl;
+    } else {
+      toast({ title: "Error", description: "Authentication URL not ready. Please try again.", variant: "destructive" });
+    }
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && handleDialogClose()}>
       <DialogContent>
@@ -161,7 +170,7 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
                   <AlertDescription>
                       You must connect your Gmail account to allow StallSync to read your sales emails.
                        <Button asChild variant="link" className="p-0 h-auto font-semibold ml-1">
-                          <Link href={initiateUrl} target="_blank" rel="noopener noreferrer">Click here to connect.</Link>
+                          <a href={initiateUrl} target="_blank" rel="noopener noreferrer">Click here to connect.</a>
                        </Button>
                   </AlertDescription>
               </Alert>
