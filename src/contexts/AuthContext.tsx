@@ -117,13 +117,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return;
     }
 
+    setLoading(true);
+    console.log(`${LOG_PREFIX_CONTEXT} useEffect: Subscribing to onAuthStateChanged.`);
     let userDocUnsubscribe: (() => void) | null = null;
 
     const authUnsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
-      // **THE FIX IS HERE**: Keep `loading` true until we are completely done.
-      setLoading(true); 
       console.log(`${LOG_PREFIX_CONTEXT} onAuthStateChanged triggered. FirebaseUser UID:`, firebaseUser?.uid);
-      
       if (userDocUnsubscribe) {
         console.log(`${LOG_PREFIX_CONTEXT} Unsubscribing from previous user document listener.`);
         userDocUnsubscribe();
@@ -246,7 +245,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         userDocUnsubscribe();
       }
     };
-  }, []); // Dependency array is intentionally empty for one-time setup
+  }, [initializationError, auth, db, signOutUser]); 
 
   useEffect(() => {
     if (!db) return;

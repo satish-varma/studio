@@ -13,6 +13,9 @@ import {
   FileText,
   CalendarCheck,
   HandCoins,
+  LayoutDashboard,
+  ShoppingCart,
+  Briefcase
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -33,17 +36,17 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-    { href: "/foodstall/expenses/record", label: "Add Expense", icon: Utensils, roles: ['staff', 'manager', 'admin'] },
-    { href: "/staff/attendance", label: "Attendance", icon: CalendarCheck, roles: ['manager', 'admin'] },
-    { href: "/staff/advances", label: "Pay Advance", icon: HandCoins, roles: ['manager', 'admin'] },
-    { href: "/staff/payroll", label: "Payroll", icon: IndianRupee, roles: ['manager', 'admin'] },
-    { href: "/foodstall/activity-log", label: "Food Log", icon: FileText, roles: ['admin'] },
+    { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ['staff', 'manager', 'admin'], exactMatch: true },
+    { href: "/items", label: "Stock", icon: ShoppingCart, roles: ['staff', 'manager', 'admin'] },
+    { href: "/foodstall/dashboard", label: "Food Stall", icon: Utensils, roles: ['staff', 'manager', 'admin'] },
+    { href: "/staff/dashboard", label: "Staff", icon: Briefcase, roles: ['manager', 'admin'] },
 ];
 
 const FAB_ITEMS = [
     { href: '/sales/record', label: 'Record Stock Sale', roles: ['staff', 'manager', 'admin'], icon: IndianRupee },
     { href: '/items/new', label: 'Add Stock Item', roles: ['staff', 'manager', 'admin'], icon: Package },
     { href: '/foodstall/expenses/record', label: 'Add Food Expense', roles: ['staff', 'manager', 'admin'], icon: Utensils },
+    { href: '/staff/advances', label: 'Pay Advance', roles: ['manager', 'admin'], icon: HandCoins },
     { href: '/users', label: 'Add New User', roles: ['admin'], icon: UserPlus },
   ];
 
