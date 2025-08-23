@@ -1,7 +1,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { google } from 'googleapis';
-import { getAuth } from 'firebase-admin/auth';
 import { getApps, initializeApp, cert, App as AdminApp } from 'firebase-admin/app';
 
 const LOG_PREFIX = "[API:GoogleInitiate]";
@@ -35,7 +34,9 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const adminApp = initializeAdminApp(); // Ensure admin app is initialized
+    // Admin App initialization is not strictly needed here if we are not verifying the user token,
+    // but it's good practice to keep the initialization check in case other logic is added later.
+    initializeAdminApp(); 
     
     const oAuth2Client = new google.auth.OAuth2(
       GOOGLE_CLIENT_ID,

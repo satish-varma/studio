@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { getFirestore, collection, query, orderBy, onSnapshot, where, doc, getDoc } from 'firebase/firestore';
 import type { Site, Stall } from '@/types';
 import { Building, Store } from 'lucide-react';
+import Link from 'next/link';
 
 interface ScrapeHungerboxDialogProps {
   isOpen: boolean;
@@ -79,13 +80,6 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
     setStallsForSite([]);
     setSelectedStallId('');
   }, [selectedSiteId, db]);
-
-  const handleConnectGmail = () => {
-    if (initiateUrl) {
-      window.top.location.href = initiateUrl;
-    }
-  };
-
 
   const handleFetchAndProcess = async () => {
      if (!selectedSiteId || !selectedStallId) {
@@ -166,7 +160,9 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
                   <AlertTitle>Gmail Account Not Connected</AlertTitle>
                   <AlertDescription>
                       You must connect your Gmail account to allow StallSync to read your sales emails.
-                       <Button variant="link" className="p-0 h-auto font-semibold ml-1" onClick={handleConnectGmail}>Click here to connect.</Button>
+                       <Button asChild variant="link" className="p-0 h-auto font-semibold ml-1">
+                          <Link href={initiateUrl} target="_blank" rel="noopener noreferrer">Click here to connect.</Link>
+                       </Button>
                   </AlertDescription>
               </Alert>
           )}
