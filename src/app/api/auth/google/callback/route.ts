@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { google } from 'googleapis';
 import { initializeApp, getApps, cert, App as AdminApp } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
-import { getFirestore as getAdminFirestore, doc, setDoc } from 'firebase-admin/firestore';
+import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
 
 const LOG_PREFIX = "[API:GoogleCallback]";
 
@@ -74,8 +74,8 @@ export async function GET(request: NextRequest) {
     const { tokens } = await oAuth2Client.getToken(code);
     console.log(`${LOG_PREFIX} Tokens received from Google.`);
 
-    const tokensDocRef = doc(adminDb, 'user_tokens', uid);
-    await setDoc(tokensDocRef, {
+    const tokensDocRef = adminDb.collection('user_tokens').doc(uid);
+    await tokensDocRef.set({
       ...tokens,
       uid: uid,
       updatedAt: new Date().toISOString(),
