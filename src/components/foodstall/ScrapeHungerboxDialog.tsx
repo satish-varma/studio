@@ -171,7 +171,7 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
                   <AlertDescription>
                        You must connect your Gmail account to allow StallSync to read your sales emails.
                        <Button asChild variant="link" className="p-0 h-auto font-semibold ml-1">
-                          <a href={authUrl} target="_blank" rel="noopener noreferrer">Click here to connect.</a>
+                          <a href={authUrl}>Click here to connect.</a>
                        </Button>
                   </AlertDescription>
               </Alert>
