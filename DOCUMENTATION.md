@@ -55,6 +55,7 @@ StallSync is a comprehensive business management application designed for organi
 *   **Charts:** Recharts (via ShadCN UI Charts)
 *   **Backend:** Firebase (Authentication, Firestore, Cloud Functions for Firebase)
 *   **AI Integration:** Genkit (with Google AI/Gemini models)
+*   **Google APIs:** `googleapis` for Gmail integration.
 *   **Testing:** Jest, React Testing Library
 *   **Deployment:** Configured for Firebase App Hosting (see `apphosting.yaml`) and Firebase Hosting (for static parts, though primarily server-rendered with Next.js).
 
@@ -75,6 +76,7 @@ A brief overview of important directories:
         *   `layout.tsx`: Main authenticated layout with sidebar and header.
     *   `(auth)/`: Authentication-related pages (login).
     *   `api/`: Next.js API routes (server-side logic).
+        *   `auth/google/`: Routes for handling Google OAuth2 flow.
 *   **`/src/components`**: Reusable UI components, organized by feature.
 *   **`/src/contexts`**: React Context providers (AuthContext, ThemeContext).
 *   **`/src/hooks`**: Custom React hooks (e.g., `use-user-management`, `use-toast`).
@@ -118,6 +120,18 @@ The application **will not function** without connecting to your Firebase projec
     GOOGLE_APPLICATION_CREDENTIALS_JSON='{"type": "service_account", "project_id": "...", ...}'
 
     # --------------------------------------------------------------------------
+    # GOOGLE OAUTH 2.0 CREDENTIALS (REQUIRED FOR GMAIL INTEGRATION)
+    # Get these from Google Cloud Console > APIs & Services > Credentials
+    # --------------------------------------------------------------------------
+    GOOGLE_CLIENT_ID=...your-client-id.apps.googleusercontent.com
+    GOOGLE_CLIENT_SECRET=...your-client-secret
+    # This must be your app's full URL followed by /api/auth/google/callback
+    # For local development, this is typically http://localhost:9002/api/auth/google/callback
+    # For a deployed app, it would be https://your-app-url.com/api/auth/google/callback
+    GOOGLE_REDIRECT_URI=http://localhost:9002/api/auth/google/callback
+
+
+    # --------------------------------------------------------------------------
     # GENKIT / GOOGLE AI (if using specific API key)
     # --------------------------------------------------------------------------
     # GEMINI_API_KEY=...
@@ -131,9 +145,27 @@ The application **will not function** without connecting to your Firebase projec
 2.  **Register Web App:** Add a Web App to your project.
 3.  **Enable Authentication:** Enable "Email/Password" sign-in method.
 4.  **Enable Firestore:** Create a Firestore Database in **production mode**.
-5.  **Deploy Security Rules:** Deploy `firestore.rules` using the Firebase CLI: `firebase deploy --only firestore:rules`. **CRITICAL: Review these rules before production.**
-6.  **Deploy Indexes:** Deploy `firestore.indexes.json`: `firebase deploy --only firestore:indexes`.
-7.  **Enable Cloud Functions:** Go to Functions in the Firebase console and click "Get started".
+5.  **Enable Google Cloud APIs for Gmail:**
+    *   Navigate to the [Google Cloud Console](https://console.cloud.google.com/) for your Firebase project.
+    *   Go to **APIs & Services > Library**.
+    *   Search for "Gmail API" and click **Enable**.
+6.  **Configure OAuth Consent Screen:**
+    *   In the Google Cloud Console, go to **APIs & Services > OAuth consent screen**.
+    *   Choose **External** and create.
+    *   Fill in the required details (App name, User support email, Developer contact).
+    *   **Scopes:** Add the `.../auth/gmail.readonly` scope.
+    *   **Test Users:** Add the email address(es) you will use for testing (e.g., `thegutguru.in@gmail.com`).
+7.  **Create OAuth 2.0 Client ID:**
+    *   In the Google Cloud Console, go to **APIs & Services > Credentials**.
+    *   Click **Create Credentials > OAuth client ID**.
+    *   Select **Web application**.
+    *   Add an **Authorized JavaScript origin** (e.g., `http://localhost:9002`).
+    *   Add an **Authorized redirect URI**. This **must** match the `GOOGLE_REDIRECT_URI` in your `.env.local` file (e.g., `http://localhost:9002/api/auth/google/callback`).
+    *   Create the client ID. Copy the "Client ID" and "Client secret" into your `.env.local` file.
+8.  **Deploy Security Rules & Indexes:**
+    *   `firebase deploy --only firestore:rules`
+    *   `firebase deploy --only firestore:indexes`
+9.  **Enable Cloud Functions:** Go to Functions in the Firebase console and click "Get started".
 
 ### Running the Application
 
@@ -219,6 +251,7 @@ The application **will not function** without connecting to your Firebase projec
 
 *   **Item Description Generation:** On the "Add/Edit Item" form, AI can generate a product description from the item's name and category.
 *   **Sales Trend Summary:** On the "Sales Reports" page, AI provides a textual summary of sales trends based on the current data.
+*   **Gmail Sales Import:** In the Food Stall module, users can connect their Gmail account. The application can then, on-demand, fetch and read sales confirmation emails from services like Hungerbox, automatically creating sales records.
 
 ---
 ## 6. Key Components Overview
@@ -228,7 +261,7 @@ The application **will not function** without connecting to your Firebase projec
 *   **`/src/components/admin`**: `ActivityLogClientPage`, `SiteForm`, `SitesTable`, `StallForm`, `StallsTable`.
 *   **`/src/components/auth`**: `LoginForm`.
 *   **`/src/components/dashboard`**: `DashboardSalesChart`.
-*   **`/src/components/foodstall`**: `FoodExpensesClientPage`, `FoodSalesClientPage`, `FoodStallReportClientPage`.
+*   **`/src/components/foodstall`**: `FoodExpensesClientPage`, `FoodSalesClientPage`, `FoodStallReportClientPage`, `ScrapeHungerboxDialog`.
 *   **`/src/components/items`**: `ItemControls`, `ItemForm`, `ItemTable`.
 *   **`/src/components/layout`**: `AppHeaderContent`, `AppSidebarNav`, `UserNav`.
 *   **`/src/components/reports`**: `ReportControls`, `SalesSummaryReportClientPage`.
@@ -264,6 +297,9 @@ The application **will not function** without connecting to your Firebase projec
 *   **`/api/admin/reset-data/route.ts`:** `POST` route for an admin to reset application transactional data.
 *   **`/api/admin/reset-staff-data/route.ts`:** `POST` route for an admin to reset staff transactional data (attendance, payroll).
 *   **`/api/csv-import/route.ts`:** `POST` route for an admin to import data from a CSV file for stock or food expenses.
+*   **`/api/auth/google/initiate/route.ts`:** `GET` route to begin the Google OAuth2 flow, redirecting the user to Google's consent screen.
+*   **`/api/auth/google/callback/route.ts`:** `GET` route that Google redirects to after user consent. It exchanges the auth code for tokens and saves them.
+*   **`/api/gmail-handler/route.ts`:** `POST` route that uses stored OAuth tokens to fetch and process Gmail messages.
 
 ---
 
@@ -273,6 +309,7 @@ StallSync uses Genkit for AI-powered features, configured in `src/ai/genkit.ts`.
 
 *   **`generateItemDescriptionFlow`:** Generates a product description for a stock item.
 *   **`summarizeSalesTrendsFlow`:** Generates a textual summary of sales trends.
+*   **`processHungerboxEmailFlow`:** Reads the text of an email to extract structured sales data.
 
 ---
 
