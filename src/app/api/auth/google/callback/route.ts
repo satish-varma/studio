@@ -55,7 +55,6 @@ export async function GET(request: NextRequest) {
     console.log(`${LOG_PREFIX} Tokens received from Google.`);
 
     // Securely store the tokens in Firestore, associated with the user.
-    // It's good practice to encrypt these tokens before storing.
     const tokensDocRef = doc(adminDb, 'user_tokens', uid);
     await setDoc(tokensDocRef, {
       ...tokens,
@@ -65,34 +64,8 @@ export async function GET(request: NextRequest) {
 
     console.log(`${LOG_PREFIX} Tokens for user ${uid} saved successfully.`);
 
-    // Redirect user back to the app, indicating success.
-    // A better user experience is to show a success page that tells them to close the tab.
-    return new NextResponse(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Authentication Successful</title>
-          <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol"; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #f0f2f5; }
-            .container { text-align: center; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-            h1 { color: #28a745; }
-            p { color: #495057; }
-            button { padding: 10px 20px; border: none; background-color: #007bff; color: white; border-radius: 5px; cursor: pointer; font-size: 16px; }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <h1>Success!</h1>
-            <p>Your Gmail account has been connected successfully.</p>
-            <p>You can now close this tab and return to the StallSync application.</p>
-            <button onclick="window.close()">Close Tab</button>
-          </div>
-        </body>
-      </html>
-    `, {
-      status: 200,
-      headers: { 'Content-Type': 'text/html' },
-    });
+    // Redirect user back to the sales page with a success indicator.
+    return NextResponse.redirect(new URL('/foodstall/sales?gmail_connected=true', request.url));
 
   } catch (error: any) {
     console.error(`${LOG_PREFIX} Error processing Google OAuth callback:`, error.message, error.stack);
