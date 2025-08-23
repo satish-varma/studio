@@ -6,15 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Bot, CheckCircle, Link as LinkIcon } from "lucide-react";
+import { Loader2, Bot, CheckCircle, Link as LinkIcon, Building, Store } from "lucide-react";
 import { useAuth } from '@/contexts/AuthContext';
 import { auth, db } from '@/lib/firebaseConfig';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { getFirestore, collection, query, orderBy, onSnapshot, where, doc, getDoc } from 'firebase/firestore';
 import type { Site, Stall } from '@/types';
-import { Building, Store } from 'lucide-react';
-import Link from 'next/link';
 
 interface ScrapeHungerboxDialogProps {
   isOpen: boolean;
@@ -51,7 +49,6 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
         setIsGmailConnected(tokensDocSnap.exists());
         setIsCheckingConnection(false);
 
-        // Construct the URL with the UID as a query parameter
         setInitiateUrl(`/api/auth/google/initiate?uid=${user.uid}`);
     };
 
@@ -62,7 +59,7 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
     const unsubSites = onSnapshot(sitesQuery, (snapshot) => {
         setAllSites(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()} as Site)));
         setLoadingContext(false);
-    });
+    }, () => setLoadingContext(false));
 
     return () => unsubSites();
   }, [isOpen, user, db]);
@@ -74,7 +71,7 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
         const unsub = onSnapshot(stallsQuery, (snapshot) => {
             setStallsForSite(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()} as Stall)));
             setLoadingContext(false);
-        });
+        }, () => setLoadingContext(false));
         return () => unsub();
     }
     setStallsForSite([]);
@@ -102,7 +99,9 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || `Server responded with status ${response.status}`);
       toast({ title: "Process Complete", description: result.message, variant: "default", duration: 7000 });
-      onClose();
+      if (!result.error) {
+        onClose();
+      }
 
     } catch (error: any) {
       toast({ title: "Processing Failed", description: error.message, variant: "destructive", duration: 10000 });
@@ -120,7 +119,6 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
 
   const handleConnectGmail = () => {
     if (initiateUrl) {
-      // Use window.top.location.href to break out of the iframe in the dev environment
       window.top.location.href = initiateUrl;
     } else {
       toast({ title: "Error", description: "Authentication URL not ready. Please try again.", variant: "destructive" });
@@ -169,8 +167,8 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
                   <AlertTitle>Gmail Account Not Connected</AlertTitle>
                   <AlertDescription>
                       You must connect your Gmail account to allow StallSync to read your sales emails.
-                       <Button asChild variant="link" className="p-0 h-auto font-semibold ml-1">
-                          <a href={initiateUrl} target="_blank" rel="noopener noreferrer">Click here to connect.</a>
+                       <Button asChild variant="link" className="p-0 h-auto font-semibold ml-1" onClick={handleConnectGmail}>
+                          <a>Click here to connect.</a>
                        </Button>
                   </AlertDescription>
               </Alert>

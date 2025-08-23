@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
     console.log(`${LOG_PREFIX} Searching for emails from Hungerbox...`);
     const searchResponse = await gmail.users.messages.list({
         userId: 'me',
-        q: 'from:noreply@hungerbox.com "Order Confirmation" is:unread',
+        q: 'from:noreply@hungerbox.com "Payment Advice" is:unread',
         maxResults: 1 // Process one email at a time to start
     });
 
@@ -102,7 +102,8 @@ export async function POST(request: NextRequest) {
     );
 
     if (!emailBodyPart?.body?.data) {
-        return NextResponse.json({ error: `Could not find plain text body in email ID: ${messageId}` }, { status: 400 });
+        await gmail.users.messages.modify({ userId: 'me', id: messageId, requestBody: { removeLabelIds: ['UNREAD'] } });
+        return NextResponse.json({ error: `Could not find plain text body in email ID: ${messageId}. Email marked as read.` }, { status: 400 });
     }
     const emailBody = decodeBase64Url(emailBodyPart.body.data);
     
@@ -111,7 +112,7 @@ export async function POST(request: NextRequest) {
 
     if (!processedData.paymentDate || !processedData.amountReceived) {
         await gmail.users.messages.modify({ userId: 'me', id: messageId, requestBody: { removeLabelIds: ['UNREAD'] } });
-        return NextResponse.json({ message: "Email was not a relevant sales summary or failed to extract key data. Marked as read." }, { status: 200 });
+        return NextResponse.json({ message: "Email was not a relevant sales summary or failed to extract key data. The email has been marked as read." }, { status: 200 });
     }
 
     const saleDate = new Date(processedData.paymentDate);
