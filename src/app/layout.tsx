@@ -6,11 +6,10 @@ import { AuthProvider } from '@/contexts/AuthContext';
 import { Toaster } from "@/components/ui/toaster";
 import { ThemeProvider } from '@/contexts/ThemeContext';
 
-// The Geist_Mono font is not actively used, so we remove it to avoid preloading it unnecessarily.
 const geistSans = Geist({
   variable: '--font-geist-sans',
   subsets: ['latin'],
-  display: 'swap', // Add display: 'swap' for better font loading behavior
+  display: 'swap',
 });
 
 export const metadata: Metadata = {
