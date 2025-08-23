@@ -21,13 +21,19 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  async rewrites() {
-    return [
-      {
-        source: '/_next/static/media/:path*',
-        destination: '/_next/static/media/:path*',
-      },
-    ];
+  // Adding server.fs.allow to prevent 403 Forbidden errors on static assets like fonts
+  // during development with Vite/Turbopack.
+  experimental: {
+    serverActions: true,
+    serverComponentsExternalPackages: ['@react-email/components'],
+    turbo: {
+        rules: {
+            '*.svg': {
+                loaders: ['@svgr/webpack'],
+                as: '*.js',
+            },
+        },
+    },
   },
 };
 
