@@ -13,7 +13,12 @@ import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { getFirestore, collection, query, orderBy, onSnapshot, where, doc, getDoc } from 'firebase/firestore';
 import type { Site, Stall } from '@/types';
-import Link from 'next/link'; // Import the Link component
+import { google } from 'googleapis';
+
+const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+const GOOGLE_CLIENT_SECRET = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_SECRET;
+const GOOGLE_REDIRECT_URI = process.env.NEXT_PUBLIC_GOOGLE_REDIRECT_URI;
+
 
 interface ScrapeHungerboxDialogProps {
   isOpen: boolean;
@@ -30,7 +35,6 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
   const [selectedSiteId, setSelectedSiteId] = useState<string>('');
   const [selectedStallId, setSelectedStallId] = useState<string>('');
   const [loadingContext, setLoadingContext] = useState(true);
-  const [initiateUrl, setInitiateUrl] = useState<string>('');
 
   const { toast } = useToast();
   const { user } = useAuth();
@@ -39,7 +43,6 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
     if (!isOpen || !user || !db) {
         setIsCheckingConnection(true);
         setIsGmailConnected(false);
-        setInitiateUrl('');
         return;
     }
     
@@ -49,9 +52,6 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
         const tokensDocSnap = await getDoc(tokensDocRef);
         setIsGmailConnected(tokensDocSnap.exists());
         setIsCheckingConnection(false);
-
-        // This is the URL the button will navigate to.
-        setInitiateUrl(`/api/auth/google/initiate?uid=${user.uid}`);
     };
 
     setup();
@@ -68,18 +68,35 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
 
   useEffect(() => {
     if (selectedSiteId && db) {
-        setLoadingContext(true);
         const stallsQuery = query(collection(db, "stalls"), where("siteId", "==", selectedSiteId), orderBy("name"));
         const unsub = onSnapshot(stallsQuery, (snapshot) => {
             setStallsForSite(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()} as Stall)));
-            setLoadingContext(false);
-        }, () => setLoadingContext(false));
+        });
         return () => unsub();
     } else {
         setStallsForSite([]);
         setSelectedStallId('');
     }
   }, [selectedSiteId, db]);
+
+  const handleConnectGmail = () => {
+      if (!user) {
+        toast({ title: "Error", description: "You must be logged in.", variant: "destructive" });
+        return;
+      }
+      if (!GOOGLE_CLIENT_ID || !GOOGLE_REDIRECT_URI) {
+        toast({ title: "Configuration Error", description: "Google API credentials are not configured correctly in the app.", variant: "destructive" });
+        return;
+      }
+      const oAuth2Client = new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI);
+      const authUrl = oAuth2Client.generateAuthUrl({
+        access_type: 'offline',
+        scope: ['https://www.googleapis.com/auth/gmail.readonly'],
+        state: JSON.stringify({ uid: user.uid }),
+        prompt: 'consent', 
+      });
+      window.open(authUrl, '_blank', 'noopener,noreferrer');
+  };
 
   const handleFetchAndProcess = async () => {
      if (!selectedSiteId || !selectedStallId) {
@@ -162,8 +179,8 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
                   <AlertTitle>Gmail Account Not Connected</AlertTitle>
                   <AlertDescription>
                        You must connect your Gmail account to allow StallSync to read your sales emails.
-                       <Button asChild variant="link" className="p-0 h-auto font-semibold ml-1">
-                          <a href={initiateUrl} data-testid="connect-gmail-link">Click here to connect.</a>
+                       <Button variant="link" className="p-0 h-auto font-semibold ml-1" onClick={handleConnectGmail}>
+                          Click here to connect.
                        </Button>
                   </AlertDescription>
               </Alert>
