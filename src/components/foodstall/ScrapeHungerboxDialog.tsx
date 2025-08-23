@@ -13,11 +13,7 @@ import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { getFirestore, collection, query, orderBy, onSnapshot, where, doc, getDoc } from 'firebase/firestore';
 import type { Site, Stall } from '@/types';
-import { google } from 'googleapis';
-
-const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
-const GOOGLE_CLIENT_SECRET = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_SECRET;
-const GOOGLE_REDIRECT_URI = process.env.NEXT_PUBLIC_GOOGLE_REDIRECT_URI;
+import Link from 'next/link';
 
 
 interface ScrapeHungerboxDialogProps {
@@ -79,24 +75,6 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
     }
   }, [selectedSiteId, db]);
 
-  const handleConnectGmail = () => {
-      if (!user) {
-        toast({ title: "Error", description: "You must be logged in.", variant: "destructive" });
-        return;
-      }
-      if (!GOOGLE_CLIENT_ID || !GOOGLE_REDIRECT_URI) {
-        toast({ title: "Configuration Error", description: "Google API credentials are not configured correctly in the app.", variant: "destructive" });
-        return;
-      }
-      const oAuth2Client = new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI);
-      const authUrl = oAuth2Client.generateAuthUrl({
-        access_type: 'offline',
-        scope: ['https://www.googleapis.com/auth/gmail.readonly'],
-        state: JSON.stringify({ uid: user.uid }),
-        prompt: 'consent', 
-      });
-      window.open(authUrl, '_blank', 'noopener,noreferrer');
-  };
 
   const handleFetchAndProcess = async () => {
      if (!selectedSiteId || !selectedStallId) {
@@ -179,8 +157,8 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
                   <AlertTitle>Gmail Account Not Connected</AlertTitle>
                   <AlertDescription>
                        You must connect your Gmail account to allow StallSync to read your sales emails.
-                       <Button variant="link" className="p-0 h-auto font-semibold ml-1" onClick={handleConnectGmail}>
-                          Click here to connect.
+                       <Button asChild variant="link" className="p-0 h-auto font-semibold ml-1">
+                          <a href={`/api/auth/google/initiate?uid=${user?.uid}`}>Click here to connect.</a>
                        </Button>
                   </AlertDescription>
               </Alert>
