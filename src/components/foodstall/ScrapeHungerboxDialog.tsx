@@ -6,13 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Bot, Building, Store, CheckCircle, Link as LinkIcon } from "lucide-react";
+import { Loader2, Bot, CheckCircle, Link as LinkIcon } from "lucide-react";
 import { useAuth } from '@/contexts/AuthContext';
 import { auth, db } from '@/lib/firebaseConfig';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { getFirestore, collection, query, orderBy, onSnapshot, where, doc, getDoc } from 'firebase/firestore';
 import type { Site, Stall } from '@/types';
+import { Building, Store } from 'lucide-react';
 
 interface ScrapeHungerboxDialogProps {
   isOpen: boolean;
@@ -59,7 +60,7 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
     });
 
     return () => unsubSites();
-  }, [isOpen, user, toast]);
+  }, [isOpen, user]);
 
   useEffect(() => {
     if (selectedSiteId && db) {
@@ -77,22 +78,9 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
 
   const handleConnectGmail = async () => {
       if (!auth.currentUser) return;
-      setIsProcessing(true);
-      try {
-          const idToken = await auth.currentUser.getIdToken(true);
-          const response = await fetch('/api/auth/google/initiate', {
-              headers: { 'Authorization': `Bearer ${idToken}` }
-          });
-          if (response.redirected) {
-              window.location.href = response.url;
-          } else {
-              const result = await response.json();
-              if (!response.ok) throw new Error(result.error || 'Failed to initiate Google authentication.');
-          }
-      } catch (error: any) {
-          toast({ title: "Connection Failed", description: error.message, variant: "destructive" });
-          setIsProcessing(false);
-      }
+      // This is the correct way to handle a server-side redirect for OAuth.
+      // We navigate the browser to our API endpoint, which then redirects to Google.
+      window.location.href = '/api/auth/google/initiate';
   };
 
   const handleFetchAndProcess = async () => {
