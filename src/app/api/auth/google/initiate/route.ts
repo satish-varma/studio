@@ -1,8 +1,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { google } from 'googleapis';
-import { initializeApp, getApps, cert, App as AdminApp } from 'firebase-admin/app';
-import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 
 const LOG_PREFIX = "[API:GoogleInitiate]";
 
@@ -21,32 +19,20 @@ const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
 ];
 
-function initializeAdminApp(): AdminApp {
-    if (getApps().length > 0) return getApps()[0];
-    const serviceAccountJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
-    if (!serviceAccountJson) throw new Error("GOOGLE_APPLICATION_CREDENTIALS_JSON is not set.");
-    return initializeApp({ credential: cert(JSON.parse(serviceAccountJson)) });
-}
 
 export async function GET(request: NextRequest) {
-  let adminApp;
-  try {
-    adminApp = initializeAdminApp();
-  } catch (e: any) {
-    return NextResponse.json({ error: 'Server Configuration Error.', details: e.message }, { status: 500 });
+  
+  // THE FIX: The user's identity will be passed in the 'state' parameter to the callback URL.
+  // We no longer need to verify an Authorization header here, as this endpoint's sole purpose
+  // is to generate a URL and redirect. The security happens on Google's side and in our callback.
+  const { searchParams } = new URL(request.url);
+  const uid = searchParams.get('uid');
+
+  if (!uid) {
+    return NextResponse.json({ error: 'Unauthorized: User ID is missing.' }, { status: 401 });
   }
 
-  const adminAuth = getAdminAuth(adminApp);
-  
   try {
-    const authorization = request.headers.get('Authorization');
-    if (!authorization?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized: Missing or invalid token format.' }, { status: 401 });
-    }
-    const idToken = authorization.split('Bearer ')[1];
-    const decodedToken = await adminAuth.verifyIdToken(idToken);
-    const uid = decodedToken.uid;
-    
     console.log(`${LOG_PREFIX} Generating auth URL for user UID: ${uid}`);
     
     const authUrl = oAuth2Client.generateAuthUrl({
@@ -62,9 +48,6 @@ export async function GET(request: NextRequest) {
 
   } catch (error: any) {
     console.error(`${LOG_PREFIX} Error initiating Google OAuth flow:`, error.message, error.stack);
-     if (error.code === 'auth/id-token-expired' || error.code === 'auth/argument-error') {
-      return NextResponse.json({ error: 'Unauthorized: Invalid or expired token.' }, { status: 401 });
-    }
     return NextResponse.json({ error: 'Internal Server Error', details: error.message }, { status: 500 });
   }
 }

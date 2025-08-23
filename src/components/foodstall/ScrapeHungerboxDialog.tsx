@@ -77,10 +77,10 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
   }, [selectedSiteId]);
 
   const handleConnectGmail = async () => {
-      if (!auth.currentUser) return;
-      // This is the correct way to handle a server-side redirect for OAuth.
-      // We navigate the browser to our API endpoint, which then redirects to Google.
-      window.location.href = '/api/auth/google/initiate';
+      if (!user) return;
+      // THE FIX: Pass the user's UID as a query parameter to the initiation route.
+      // This is secure because the API route only uses it to generate a URL.
+      window.location.href = `/api/auth/google/initiate?uid=${user.uid}`;
   };
 
   const handleFetchAndProcess = async () => {
