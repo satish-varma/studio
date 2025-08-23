@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect } from 'react';
@@ -22,6 +23,8 @@ interface ScrapeHungerboxDialogProps {
 
 export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerboxDialogProps) {
   const [isScraping, setIsScraping] = useState(false);
+  
+  // State for site/stall selection within the dialog
   const [allSites, setAllSites] = useState<Site[]>([]);
   const [stallsForSite, setStallsForSite] = useState<Stall[]>([]);
   const [selectedSiteId, setSelectedSiteId] = useState<string>('');
@@ -81,13 +84,13 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
     toast({ title: "Importing...", description: "Processing email data. This may take a moment...", duration: 10000 });
 
     try {
-      if (!auth.currentUser) throw new Error("Firebase user not available.");
+      if (!auth || !auth.currentUser) throw new Error("Firebase user not available for token retrieval.");
       const idToken = await auth.currentUser.getIdToken(true);
 
       const response = await fetch('/api/scrape-hungerbox', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
-        body: JSON.stringify({ siteId: selectedSiteId, stallId: selectedStallId }), // Removed username/password
+        body: JSON.stringify({ siteId: selectedSiteId, stallId: selectedStallId }),
       });
 
       const result = await response.json();

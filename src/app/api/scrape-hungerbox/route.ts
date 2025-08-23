@@ -1,6 +1,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
-import type { AppUser, Site, Stall } from '@/types';
+import type { AppUser } from '@/types';
 import { logFoodStallActivity } from '@/lib/foodStallLogger';
 import { processHungerboxEmail } from '@/ai/flows/process-hungerbox-email-flow';
 
