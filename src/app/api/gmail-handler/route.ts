@@ -117,7 +117,6 @@ export async function POST(request: NextRequest) {
 
     const saleDate = new Date(processedData.paymentDate);
     const docId = `${processedData.paymentDate}_${stallId}`;
-    const docRef = adminDb.collection("foodSaleTransactions").doc(docId);
     
     const totalAmount = processedData.amountReceived || 0;
     const saleData = {
