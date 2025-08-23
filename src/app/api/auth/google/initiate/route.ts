@@ -4,6 +4,7 @@ import { google } from 'googleapis';
 
 const LOG_PREFIX = "[API:GoogleInitiate]";
 
+// Ensure these are in your .env.local file
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI;
@@ -32,10 +33,10 @@ export async function GET(request: NextRequest) {
         );
 
         const authUrl = oAuth2Client.generateAuthUrl({
-            access_type: 'offline',
+            access_type: 'offline', // Necessary to get a refresh token
             scope: ['https://www.googleapis.com/auth/gmail.readonly'],
-            state: JSON.stringify({ uid: uid }), // Pass UID in state to identify user in callback
-            prompt: 'consent',
+            state: JSON.stringify({ uid: uid }),
+            // The 'prompt: consent' line has been removed.
         });
         
         console.log(`${LOG_PREFIX} Generated auth URL for UID: ${uid}. Redirecting...`);
