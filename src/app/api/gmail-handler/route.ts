@@ -3,19 +3,22 @@ import { NextRequest, NextResponse } from 'next/server';
 import { google } from 'googleapis';
 import { initializeApp, getApps, cert, App as AdminApp } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
-import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
-import type { AppUser } from '@/types';
-// Note: The process-hungerbox-email-flow will be created in a subsequent step.
-// import { processHungerboxEmail } from '@/ai/flows/process-hungerbox-email-flow';
+import { getFirestore as getAdminFirestore, Timestamp } from 'firebase-admin/firestore';
+import type { AppUser, FoodSaleTransaction } from '@/types';
+import { processHungerboxEmail } from '@/ai/flows/process-hungerbox-email-flow';
+import { logFoodStallActivity } from '@/lib/foodStallLogger';
 
 const LOG_PREFIX = "[API:GmailHandler]";
 
-// This is a placeholder for your OAuth2 client credentials.
-// In a real application, these should come from a secure source like environment variables.
+// Ensure these are in your .env.local file
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI;
+
 const oAuth2Client = new google.auth.OAuth2(
-  process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET,
-  process.env.GOOGLE_REDIRECT_URI // e.g., http://localhost:3000/api/auth/google/callback
+  GOOGLE_CLIENT_ID,
+  GOOGLE_CLIENT_SECRET,
+  GOOGLE_REDIRECT_URI
 );
 
 function initializeAdminApp(): AdminApp {
@@ -23,6 +26,17 @@ function initializeAdminApp(): AdminApp {
     const serviceAccountJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
     if (!serviceAccountJson) throw new Error("GOOGLE_APPLICATION_CREDENTIALS_JSON is not set.");
     return initializeApp({ credential: cert(JSON.parse(serviceAccountJson)) });
+}
+
+// Helper to decode base64url email body
+function decodeBase64Url(base64Url: string) {
+  let base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+  let pad = base64.length % 4;
+  if(pad) {
+    if(pad === 1) throw new Error('InvalidLengthError: Input base64url string is the wrong length to determine padding');
+    base64 += new Array(5-pad).join('=');
+  }
+  return Buffer.from(base64, 'base64').toString();
 }
 
 export async function POST(request: NextRequest) {
@@ -35,7 +49,8 @@ export async function POST(request: NextRequest) {
 
   const adminAuth = getAdminAuth(adminApp);
   const adminDb = getAdminFirestore(adminApp);
-
+  
+  let callingUser: AppUser;
   try {
     const authorization = request.headers.get('Authorization');
     if (!authorization?.startsWith('Bearer ')) {
@@ -44,42 +59,91 @@ export async function POST(request: NextRequest) {
     const idToken = authorization.split('Bearer ')[1];
     const decodedToken = await adminAuth.verifyIdToken(idToken);
     
-    const userDoc = await adminDb.collection('users').doc(decodedToken.uid).get();
-    if (!userDoc.exists) {
+    const userDocRef = adminDb.collection('users').doc(decodedToken.uid);
+    const userDocSnap = await userDocRef.get();
+    if (!userDocSnap.exists) {
         return NextResponse.json({ error: 'User not found in database.' }, { status: 404 });
     }
-    const appUser = userDoc.data() as AppUser;
+    callingUser = { uid: userDocSnap.id, ...userDocSnap.data() } as AppUser;
 
-    // In a real implementation, you would get tokens from your database
-    // that were saved during the OAuth consent flow.
-    // For this example, we'll return a message indicating the next steps.
+    const { siteId, stallId } = await request.json();
+    if (!siteId || !stallId) {
+        return NextResponse.json({ error: "Missing siteId or stallId in request body." }, { status: 400 });
+    }
+
+    const tokensDocRef = adminDb.collection('user_tokens').doc(callingUser.uid);
+    const tokensDocSnap = await tokensDocRef.get();
+    if (!tokensDocSnap.exists) {
+        return NextResponse.json({ error: 'Gmail account not connected. Please connect your account first.' }, { status: 401 });
+    }
+    const tokens = tokensDocSnap.data();
+    oAuth2Client.setCredentials(tokens as any);
+
+    const gmail = google.gmail({ version: 'v1', auth: oAuth2Client });
     
-    //
-    // TODO: Implement the following logic:
-    //
-    // 1. Retrieve user's OAuth tokens from Firestore (e.g., from a 'user_tokens' collection).
-    //    oAuth2Client.setCredentials(tokens);
-    //
-    // 2. Initialize the Gmail API client.
-    //    const gmail = google.gmail({ version: 'v1', auth: oAuth2Client });
-    //
-    // 3. Search for emails from Hungerbox.
-    //    const res = await gmail.users.messages.list({
-    //      userId: 'me',
-    //      q: 'from:noreply@hungerbox.com "Order Confirmation"', // Example query
-    //    });
-    //
-    // 4. For each new email found:
-    //    a. Get the full email content.
-    //    b. Pass the email body to the 'processHungerboxEmail' Genkit flow.
-    //    c. Use the structured data returned from the flow to create a new FoodSaleTransaction.
-    //    d. Mark the email as processed (e.g., by adding a label) to avoid re-processing.
-    //
+    console.log(`${LOG_PREFIX} Searching for emails from Hungerbox...`);
+    const searchResponse = await gmail.users.messages.list({
+        userId: 'me',
+        q: 'from:noreply@hungerbox.com "Order Confirmation" is:unread',
+        maxResults: 1 // Process one email at a time to start
+    });
 
-    return NextResponse.json({ 
-        message: "Gmail handler endpoint reached successfully.",
-        details: "This is a placeholder for the Gmail processing logic. The AI flow for email parsing needs to be created and integrated. OAuth token management is also required."
-    }, { status: 200 });
+    const messages = searchResponse.data.messages;
+    if (!messages || messages.length === 0) {
+        return NextResponse.json({ message: "No new Hungerbox sales emails found." }, { status: 200 });
+    }
+
+    const messageId = messages[0].id!;
+    console.log(`${LOG_PREFIX} Found email. Fetching content for message ID: ${messageId}`);
+    const messageResponse = await gmail.users.messages.get({ userId: 'me', id: messageId });
+
+    const emailBodyPart = messageResponse.data.payload?.parts?.find(
+        (part) => part.mimeType === 'text/plain'
+    );
+
+    if (!emailBodyPart?.body?.data) {
+        return NextResponse.json({ error: `Could not find plain text body in email ID: ${messageId}` }, { status: 400 });
+    }
+    const emailBody = decodeBase64Url(emailBodyPart.body.data);
+    
+    console.log(`${LOG_PREFIX} Processing email body with AI flow...`);
+    const processedData = await processHungerboxEmail({ emailBody });
+
+    if (!processedData.isRelevantEmail || !processedData.saleDate || !processedData.totalAmount) {
+        await gmail.users.messages.modify({ userId: 'me', id: messageId, requestBody: { removeLabelIds: ['UNREAD'] } });
+        return NextResponse.json({ message: "Email was not a relevant sales summary. Marked as read." }, { status: 200 });
+    }
+
+    const saleDate = new Date(processedData.saleDate);
+    const docId = `${processedData.saleDate}_${stallId}`;
+    const docRef = adminDb.collection("foodSaleTransactions").doc(docId);
+    
+    const totalAmount = processedData.totalAmount || 0;
+    const saleData = {
+        saleDate: Timestamp.fromDate(saleDate),
+        lunch: { hungerbox: totalAmount, upi: 0, other: 0 },
+        breakfast: { hungerbox: 0, upi: 0, other: 0 },
+        dinner: { hungerbox: 0, upi: 0, other: 0 },
+        snacks: { hungerbox: 0, upi: 0, other: 0 },
+        totalAmount: totalAmount,
+        notes: processedData.notes || `Imported from Gmail on ${new Date().toLocaleDateString()}`,
+        siteId: siteId, stallId: stallId,
+        recordedByUid: callingUser.uid, recordedByName: callingUser.displayName || callingUser.email,
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
+    
+    await setDoc(docRef, saleData, { merge: true });
+
+    await gmail.users.messages.modify({ userId: 'me', id: messageId, requestBody: { removeLabelIds: ['UNREAD'] } });
+    console.log(`${LOG_PREFIX} Email ${messageId} processed and marked as read.`);
+    
+    await logFoodStallActivity(callingUser, {
+        siteId: siteId, stallId: stallId, type: 'SALE_RECORDED_OR_UPDATED',
+        relatedDocumentId: docId,
+        details: { notes: `Successfully imported sales of INR ${totalAmount.toFixed(2)} for ${processedData.saleDate} from Gmail.` }
+    });
+
+    return NextResponse.json({ message: `Successfully imported sales of INR ${totalAmount.toFixed(2)} for ${processedData.saleDate}.` }, { status: 200 });
 
   } catch (error: any) {
     console.error(`${LOG_PREFIX} Error:`, error);

@@ -4,17 +4,15 @@
 import { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Bot, Building, Store } from "lucide-react";
+import { Loader2, Bot, Building, Store, CheckCircle, Link as LinkIcon } from "lucide-react";
 import { useAuth } from '@/contexts/AuthContext';
-import { auth } from '@/lib/firebaseConfig';
+import { auth, db } from '@/lib/firebaseConfig';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { getFirestore, collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
+import { getFirestore, collection, query, orderBy, onSnapshot, where, doc, getDoc } from 'firebase/firestore';
 import type { Site, Stall } from '@/types';
-import { Label } from '../ui/label';
-
-const db = getFirestore();
 
 interface ScrapeHungerboxDialogProps {
   isOpen: boolean;
@@ -22,9 +20,10 @@ interface ScrapeHungerboxDialogProps {
 }
 
 export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerboxDialogProps) {
-  const [isScraping, setIsScraping] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isGmailConnected, setIsGmailConnected] = useState(false);
+  const [isCheckingConnection, setIsCheckingConnection] = useState(true);
   
-  // State for site/stall selection within the dialog
   const [allSites, setAllSites] = useState<Site[]>([]);
   const [stallsForSite, setStallsForSite] = useState<Stall[]>([]);
   const [selectedSiteId, setSelectedSiteId] = useState<string>('');
@@ -34,30 +33,37 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
   const { toast } = useToast();
   const { user } = useAuth();
   
-  // Fetch sites when the dialog is open
   useEffect(() => {
-    if (!isOpen || !db) return;
+    if (!isOpen || !user) {
+        setIsCheckingConnection(true);
+        setIsGmailConnected(false);
+        return;
+    }
 
-    setLoadingContext(true);
+    const checkConnectionStatus = async () => {
+      setIsCheckingConnection(true);
+      if (db) {
+          const tokensDocRef = doc(db, 'user_tokens', user.uid);
+          const tokensDocSnap = await getDoc(tokensDocRef);
+          setIsGmailConnected(tokensDocSnap.exists());
+      }
+      setIsCheckingConnection(false);
+    };
+
+    checkConnectionStatus();
+
     const sitesQuery = query(collection(db, "sites"), orderBy("name"));
     const unsubSites = onSnapshot(sitesQuery, (snapshot) => {
         setAllSites(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()} as Site)));
         setLoadingContext(false);
-    }, (error) => {
-        console.error("Error fetching sites for dialog:", error);
-        setLoadingContext(false);
-        toast({ title: "Error", description: "Could not load sites.", variant: "destructive" });
     });
 
-    return () => {
-      unsubSites();
-    };
-  }, [isOpen, toast]);
+    return () => unsubSites();
+  }, [isOpen, user, toast]);
 
-  // Update stalls dropdown when a site is selected
   useEffect(() => {
     if (selectedSiteId && db) {
-        setLoadingContext(true); // Show loading while stalls fetch for new site
+        setLoadingContext(true);
         const stallsQuery = query(collection(db, "stalls"), where("siteId", "==", selectedSiteId), orderBy("name"));
         const unsub = onSnapshot(stallsQuery, (snapshot) => {
             setStallsForSite(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()} as Stall)));
@@ -66,47 +72,56 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
         return () => unsub();
     }
     setStallsForSite([]);
-    setSelectedStallId(''); // Reset stall when site changes
+    setSelectedStallId('');
   }, [selectedSiteId]);
 
+  const handleConnectGmail = async () => {
+      if (!auth.currentUser) return;
+      setIsProcessing(true);
+      try {
+          const idToken = await auth.currentUser.getIdToken(true);
+          const response = await fetch('/api/auth/google/initiate', {
+              headers: { 'Authorization': `Bearer ${idToken}` }
+          });
+          if (response.redirected) {
+              window.location.href = response.url;
+          } else {
+              const result = await response.json();
+              if (!response.ok) throw new Error(result.error || 'Failed to initiate Google authentication.');
+          }
+      } catch (error: any) {
+          toast({ title: "Connection Failed", description: error.message, variant: "destructive" });
+          setIsProcessing(false);
+      }
+  };
 
-  const handleImport = async () => {
+  const handleFetchAndProcess = async () => {
      if (!selectedSiteId || !selectedStallId) {
-        toast({ title: "Context Required", description: "Please select a site and stall to associate this import with.", variant: "destructive" });
+        toast({ title: "Context Required", description: "Please select a site and stall.", variant: "destructive" });
         return;
     }
-    if (!user) {
-      toast({ title: "Authentication Error", description: "You must be logged in to import data.", variant: "destructive" });
-      return;
-    }
+    if (!user || !auth.currentUser) return;
 
-    setIsScraping(true);
-    toast({ title: "Importing...", description: "Processing email data. This may take a moment...", duration: 10000 });
+    setIsProcessing(true);
+    toast({ title: "Fetching Emails...", description: "Looking for new sales emails from Hungerbox.", duration: 10000 });
 
     try {
-      if (!auth || !auth.currentUser) throw new Error("Firebase user not available for token retrieval.");
       const idToken = await auth.currentUser.getIdToken(true);
-
-      const response = await fetch('/api/scrape-hungerbox', {
+      const response = await fetch('/api/gmail-handler', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
         body: JSON.stringify({ siteId: selectedSiteId, stallId: selectedStallId }),
       });
 
       const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || `Server responded with status ${response.status}`);
-      }
-
-      toast({ title: "Import Successful", description: result.message, variant: "default", duration: 7000 });
+      if (!response.ok) throw new Error(result.error || `Server responded with status ${response.status}`);
+      toast({ title: "Process Complete", description: result.message, variant: "default", duration: 7000 });
       onClose();
 
     } catch (error: any) {
-      console.error("Error during Hungerbox import:", error);
-      toast({ title: "Import Failed", description: error.message, variant: "destructive", duration: 10000 });
+      toast({ title: "Processing Failed", description: error.message, variant: "destructive", duration: 10000 });
     } finally {
-      setIsScraping(false);
+      setIsProcessing(false);
     }
   };
   
@@ -121,42 +136,62 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
     <Dialog open={isOpen} onOpenChange={(open) => !open && handleDialogClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Import Sales from Hungerbox Email</DialogTitle>
+          <DialogTitle>Import Sales from Gmail</DialogTitle>
           <DialogDescription>
-            Select the site and stall to associate the imported sales data with. This will process the latest sales data from a sample email.
+            Connect your Gmail account to automatically fetch and record sales from Hungerbox confirmation emails.
           </DialogDescription>
         </DialogHeader>
         <div className="py-4 space-y-4">
-          <Alert variant="default" className="border-primary/30">
-            <Bot className="h-4 w-4" />
-            <AlertTitle>How this works</AlertTitle>
-            <AlertDescription className="text-xs">
-              This feature uses an AI flow to read a sample email and automatically create a sales record for the selected stall.
-            </AlertDescription>
-          </Alert>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
              <div className="space-y-2">
-                <Label htmlFor="import-site-select">Site *</Label>
-                <Select value={selectedSiteId} onValueChange={setSelectedSiteId} disabled={loadingContext || isScraping}>
+                <Label htmlFor="import-site-select">Target Site *</Label>
+                <Select value={selectedSiteId} onValueChange={setSelectedSiteId} disabled={loadingContext || isProcessing}>
                     <SelectTrigger id="import-site-select"><Building className="h-4 w-4 mr-2 text-muted-foreground"/><SelectValue placeholder="Select site..."/></SelectTrigger>
                     <SelectContent>{allSites.map(site => <SelectItem key={site.id} value={site.id}>{site.name}</SelectItem>)}</SelectContent>
                 </Select>
             </div>
             <div className="space-y-2">
-                <Label htmlFor="import-stall-select">Stall *</Label>
-                 <Select value={selectedStallId} onValueChange={setSelectedStallId} disabled={!selectedSiteId || loadingContext || isScraping}>
+                <Label htmlFor="import-stall-select">Target Stall *</Label>
+                 <Select value={selectedStallId} onValueChange={setSelectedStallId} disabled={!selectedSiteId || loadingContext || isProcessing}>
                     <SelectTrigger id="import-stall-select"><Store className="h-4 w-4 mr-2 text-muted-foreground"/><SelectValue placeholder={!selectedSiteId ? "Select site first" : "Select stall..."}/></SelectTrigger>
                     <SelectContent>{stallsForSite.map(stall => <SelectItem key={stall.id} value={stall.id}>{stall.name}</SelectItem>)}</SelectContent>
                 </Select>
             </div>
           </div>
+          {isCheckingConnection ? (
+              <div className="flex items-center justify-center p-4"><Loader2 className="h-5 w-5 animate-spin" /></div>
+          ) : isGmailConnected ? (
+              <Alert variant="default" className="border-green-300 bg-green-50 dark:bg-green-900/30">
+                  <CheckCircle className="h-4 w-4 text-green-600" />
+                  <AlertTitle className="text-green-800 dark:text-green-300">Gmail Account Connected</AlertTitle>
+                  <AlertDescription className="text-green-700 dark:text-green-400">
+                      You are ready to fetch and process emails.
+                  </AlertDescription>
+              </Alert>
+          ) : (
+              <Alert variant="destructive">
+                  <LinkIcon className="h-4 w-4" />
+                  <AlertTitle>Gmail Account Not Connected</AlertTitle>
+                  <AlertDescription>
+                      You must connect your Gmail account to allow StallSync to read your sales emails.
+                  </AlertDescription>
+              </Alert>
+          )}
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={handleDialogClose} disabled={isScraping}>Cancel</Button>
-          <Button onClick={handleImport} disabled={isScraping || loadingContext || !selectedSiteId || !selectedStallId}>
-            {isScraping || loadingContext ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Bot className="h-4 w-4 mr-2" />}
-            {loadingContext ? "Loading..." : isScraping ? "Importing..." : "Process & Import"}
-          </Button>
+        <DialogFooter className="flex flex-col sm:flex-row gap-2">
+          <Button variant="outline" onClick={handleDialogClose} disabled={isProcessing}>Cancel</Button>
+          {!isGmailConnected && (
+            <Button onClick={handleConnectGmail} disabled={isProcessing || isCheckingConnection}>
+                {isProcessing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <LinkIcon className="h-4 w-4 mr-2" />}
+                Connect to Gmail
+            </Button>
+          )}
+          {isGmailConnected && (
+             <Button onClick={handleFetchAndProcess} disabled={isProcessing || isCheckingConnection || !selectedSiteId || !selectedStallId}>
+                {isProcessing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Bot className="h-4 w-4 mr-2" />}
+                Fetch & Process Emails
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

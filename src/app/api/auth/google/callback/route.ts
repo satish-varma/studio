@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { google } from 'googleapis';
 import { initializeApp, getApps, cert, App as AdminApp } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
-import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
+import { getFirestore as getAdminFirestore, doc, setDoc } from 'firebase-admin/firestore';
 
 const LOG_PREFIX = "[API:GoogleCallback]";
 
@@ -66,6 +66,7 @@ export async function GET(request: NextRequest) {
     console.log(`${LOG_PREFIX} Tokens for user ${uid} saved successfully.`);
 
     // Redirect user back to the app, indicating success.
+    // Redirect to a specific settings/integration page could be better UX.
     return NextResponse.redirect(new URL('/foodstall/sales?success=gmail_connected', request.url));
 
   } catch (error: any) {
