@@ -35,22 +35,32 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
   const { toast } = useToast();
   const { user } = useAuth();
   
+  // Real-time listener for Gmail connection status
   useEffect(() => {
     if (!isOpen || !user || !db) {
         setIsCheckingConnection(true);
         setIsGmailConnected(false);
         return;
     }
-    
-    const setup = async () => {
-        setIsCheckingConnection(true);
-        const tokensDocRef = doc(db, 'user_tokens', user.uid);
-        const tokensDocSnap = await getDoc(tokensDocRef);
-        setIsGmailConnected(tokensDocSnap.exists());
-        setIsCheckingConnection(false);
-    };
 
-    setup();
+    setIsCheckingConnection(true);
+    const tokensDocRef = doc(db, 'user_tokens', user.uid);
+
+    // Use onSnapshot for real-time updates
+    const unsubscribe = onSnapshot(tokensDocRef, (docSnap) => {
+        setIsGmailConnected(docSnap.exists());
+        setIsCheckingConnection(false);
+    }, (error) => {
+        console.error("Error listening to token status:", error);
+        setIsCheckingConnection(false);
+    });
+
+    return () => unsubscribe(); // Cleanup listener on unmount or when dialog closes
+  }, [isOpen, user, db]);
+  
+  // Fetch sites and stalls when the dialog is open
+  useEffect(() => {
+    if (!isOpen || !db) return;
 
     setLoadingContext(true);
     const sitesQuery = query(collection(db, "sites"), orderBy("name"));
@@ -60,8 +70,9 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
     }, () => setLoadingContext(false));
 
     return () => unsubSites();
-  }, [isOpen, user, db]);
+  }, [isOpen]);
 
+  // Update stalls dropdown when a site is selected
   useEffect(() => {
     if (selectedSiteId && db) {
         const stallsQuery = query(collection(db, "stalls"), where("siteId", "==", selectedSiteId), orderBy("name"));
