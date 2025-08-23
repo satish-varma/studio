@@ -50,6 +50,7 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
         setIsGmailConnected(tokensDocSnap.exists());
         setIsCheckingConnection(false);
 
+        // This is the URL the button will navigate to.
         setInitiateUrl(`/api/auth/google/initiate?uid=${user.uid}`);
     };
 
@@ -160,11 +161,9 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
                   <LinkIcon className="h-4 w-4" />
                   <AlertTitle>Gmail Account Not Connected</AlertTitle>
                   <AlertDescription>
-                       You must connect your Gmail account. Right-click and open in a new tab:
+                       You must connect your Gmail account to allow StallSync to read your sales emails.
                        <Button asChild variant="link" className="p-0 h-auto font-semibold ml-1">
-                          <Link href={initiateUrl} target="_blank" rel="noopener noreferrer">
-                              Click here to connect.
-                          </Link>
+                          <a href={initiateUrl} data-testid="connect-gmail-link">Click here to connect.</a>
                        </Button>
                   </AlertDescription>
               </Alert>

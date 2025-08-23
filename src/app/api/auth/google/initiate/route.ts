@@ -1,7 +1,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { google } from 'googleapis';
-import { getApps, initializeApp, cert, App as AdminApp } from 'firebase-admin/app';
 
 const LOG_PREFIX = "[API:GoogleInitiate]";
 
@@ -10,13 +9,6 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI;
 
-// No need to initialize admin app if we are not verifying a token
-// function initializeAdminApp(): AdminApp {
-//     if (getApps().length > 0) return getApps()[0];
-//     const serviceAccountJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
-//     if (!serviceAccountJson) throw new Error("GOOGLE_APPLICATION_CREDENTIALS_JSON is not set.");
-//     return initializeApp({ credential: cert(JSON.parse(serviceAccountJson)) });
-// }
 
 export async function GET(request: NextRequest) {
   
@@ -42,10 +34,14 @@ export async function GET(request: NextRequest) {
     const authUrl = oAuth2Client.generateAuthUrl({
       access_type: 'offline',
       scope: ['https://www.googleapis.com/auth/gmail.readonly'],
+      // Pass user's UID in the state to retrieve it in the callback
       state: JSON.stringify({ uid }),
-      prompt: 'consent',
+      // Force the consent screen to appear every time, useful for development and ensuring refresh tokens are granted
+      prompt: 'consent', 
     });
 
+    console.log(`${LOG_PREFIX} Generated auth URL for UID: ${uid}. Redirecting...`);
+    // Redirect the user to Google's OAuth consent screen
     return NextResponse.redirect(authUrl);
 
   } catch (error: any) {
