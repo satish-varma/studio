@@ -37,7 +37,7 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
   const { user } = useAuth();
   
   useEffect(() => {
-    if (!isOpen || !user || !db || !auth.currentUser) {
+    if (!isOpen || !user || !db) {
         setIsCheckingConnection(true);
         setIsGmailConnected(false);
         setInitiateUrl('');
@@ -51,14 +51,13 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
         setIsGmailConnected(tokensDocSnap.exists());
         setIsCheckingConnection(false);
 
-        const idToken = await auth.currentUser.getIdToken();
-        // This is a dummy URL creation for the link. The real redirect happens on the server.
-        const url = `/api/auth/google/initiate?token=${idToken}`;
-        setInitiateUrl(url);
+        // Construct the URL with the UID as a query parameter
+        setInitiateUrl(`/api/auth/google/initiate?uid=${user.uid}`);
     };
 
     setup();
 
+    setLoadingContext(true);
     const sitesQuery = query(collection(db, "sites"), orderBy("name"));
     const unsubSites = onSnapshot(sitesQuery, (snapshot) => {
         setAllSites(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()} as Site)));
@@ -66,7 +65,7 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
     });
 
     return () => unsubSites();
-  }, [isOpen, user, db, auth.currentUser]);
+  }, [isOpen, user, db]);
 
   useEffect(() => {
     if (selectedSiteId && db) {

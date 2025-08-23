@@ -24,19 +24,18 @@ export async function GET(request: NextRequest) {
     console.error(`${LOG_PREFIX} Missing Google OAuth2 credentials in environment variables.`);
     return NextResponse.json({ error: 'Server configuration error: Missing Google credentials.' }, { status: 500 });
   }
-  
-  // This check is to ensure we can get a UID to pass in the state.
-  // It relies on cookies being sent by the browser during navigation.
-  const authorization = request.headers.get('Authorization');
-  if (!authorization?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'This endpoint requires user authentication to proceed.' }, { status: 401 });
+
+  // The user's UID needs to be passed to the 'state' parameter so we know who to associate the tokens with in the callback.
+  // We will get it from a query parameter instead of a header.
+  const { searchParams } = new URL(request.url);
+  const uid = searchParams.get('uid');
+
+  if (!uid) {
+      return NextResponse.json({ error: 'This endpoint requires a user UID to be passed as a query parameter.' }, { status: 400 });
   }
 
   try {
-    const adminApp = initializeAdminApp();
-    const idToken = authorization.split('Bearer ')[1];
-    const decodedToken = await getAuth(adminApp).verifyIdToken(idToken);
-    const uid = decodedToken.uid;
+    const adminApp = initializeAdminApp(); // Ensure admin app is initialized
     
     const oAuth2Client = new google.auth.OAuth2(
       GOOGLE_CLIENT_ID,
@@ -47,8 +46,9 @@ export async function GET(request: NextRequest) {
     const authUrl = oAuth2Client.generateAuthUrl({
       access_type: 'offline',
       scope: ['https://www.googleapis.com/auth/gmail.readonly'],
+      // Pass the UID through the state parameter so we can identify the user upon callback
       state: JSON.stringify({ uid }),
-      prompt: 'consent',
+      prompt: 'consent', // Force consent screen every time
     });
 
     // Instead of returning JSON, we redirect the user's browser directly.
@@ -56,9 +56,6 @@ export async function GET(request: NextRequest) {
 
   } catch (error: any) {
     console.error(`${LOG_PREFIX} Error initiating Google OAuth flow:`, error.message);
-    if (error.code === 'auth/id-token-expired') {
-       return NextResponse.json({ error: 'Authentication token expired. Please try again.' }, { status: 401 });
-    }
     return NextResponse.json({ error: 'Internal Server Error', details: error.message }, { status: 500 });
   }
 }
