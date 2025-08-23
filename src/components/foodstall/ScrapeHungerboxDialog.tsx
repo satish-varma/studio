@@ -40,7 +40,7 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
     toast({ title: "Importing...", description: "Connecting to Hungerbox. This may take a moment...", duration: 10000 });
 
     try {
-      if (!auth.currentUser) throw new Error("Firebase user not available.");
+      if (!auth || !auth.currentUser) throw new Error("Firebase user not available.");
       const idToken = await auth.currentUser.getIdToken(true);
 
       const response = await fetch('/api/scrape-hungerbox', {
