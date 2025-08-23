@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { AppUser, Site, Stall } from '@/types';
 import { logFoodStallActivity } from '@/lib/foodStallLogger';
+import { processHungerboxEmail } from '@/ai/flows/process-hungerbox-email-flow';
 
 // Using require for firebase-admin modules as dynamic imports can be problematic in this environment.
 const admin = require('firebase-admin');
@@ -32,14 +33,28 @@ function initializeAdminApp() {
     }
 }
 
-// MOCK FUNCTION: This function returns hardcoded mock data instead of live scraping.
-// This is used for demonstration as live scraping is unreliable.
-async function getConsolidatedReportData() {
-    console.log(`${LOG_PREFIX} Returning hardcoded mock consolidated report data.`);
-    return [
-        { date: '2024-07-21', hungerboxSales: '1250.75', upiSales: '340.50', cashSales: '150.00' },
-        { date: '2024-07-20', hungerboxSales: '1100.00', upiSales: '300.00', cashSales: '180.50' },
-    ];
+// MOCK FUNCTION: This function provides a sample email body instead of live scraping.
+// This allows us to test the AI processing flow.
+async function getSampleEmailBody() {
+    console.log(`${LOG_PREFIX} Returning hardcoded sample email body.`);
+    return `
+      Subject: Your Hungerbox Daily Sales Summary
+
+      Dear Partner,
+
+      Here is your sales summary for July 21, 2024.
+
+      Total Sales Amount: INR 1250.75
+
+      Breakdown:
+      - Hungerbox QR: 800.25
+      - Other UPI: 350.50
+      - Cash: 100.00
+
+      Thank you for your partnership.
+
+      The Hungerbox Team
+    `;
 }
 
 
@@ -74,58 +89,55 @@ export async function POST(request: NextRequest) {
         callingUser = { uid: callingUserDocSnap.id, ...callingUserDocSnap.data() } as AppUser;
         
         // Correctly get siteId and stallId from request body
-        const { siteId, stallId, username, password } = await request.json();
+        const { siteId, stallId } = await request.json();
 
-        if (!username || !password || !siteId || !stallId) {
-            return NextResponse.json({ error: "Missing required fields: username, password, siteId, or stallId." }, { status: 400 });
+        if (!siteId || !stallId) {
+            return NextResponse.json({ error: "Missing required fields: siteId, or stallId." }, { status: 400 });
         }
 
-        const consolidatedData = await getConsolidatedReportData();
-        const batch = adminDb.batch();
-        let processedCount = 0;
+        const emailBody = await getSampleEmailBody();
+        const processedData = await processHungerboxEmail({ emailBody });
 
-        for (const record of consolidatedData) {
-            const saleDate = new Date(record.date);
-            const docId = `${record.date}_${stallId}`;
-            const docRef = adminDb.collection("foodSaleTransactions").doc(docId);
-            
-            const hungerboxSales = parseFloat(record.hungerboxSales) || 0;
-            const upiSales = parseFloat(record.upiSales) || 0;
-            const cashSales = parseFloat(record.cashSales) || 0;
-            const total = hungerboxSales + upiSales + cashSales;
-
-            const saleData = {
-                saleDate: Timestamp.fromDate(saleDate),
-                breakfast: { hungerbox: hungerboxSales, upi: 0, other: 0 },
-                lunch: { hungerbox: 0, upi: upiSales, other: cashSales },
-                dinner: { hungerbox: 0, upi: 0, other: 0 },
-                snacks: { hungerbox: 0, upi: 0, other: 0 },
-                totalAmount: total,
-                notes: `Imported from Hungerbox Report on ${new Date().toLocaleDateString()}`,
-                siteId: siteId,
-                stallId: stallId,
-                recordedByUid: callingUser.uid,
-                recordedByName: callingUser.displayName || callingUser.email,
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-            };
-            batch.set(docRef, saleData, { merge: true });
-            processedCount++;
+        if (!processedData.isRelevantEmail || !processedData.saleDate || !processedData.totalAmount) {
+            return NextResponse.json({ message: "The provided email content was not identified as a relevant sales summary." }, { status: 200 });
         }
         
+        const saleDate = new Date(processedData.saleDate);
+        const docId = `${processedData.saleDate}_${stallId}`;
+        const docRef = adminDb.collection("foodSaleTransactions").doc(docId);
+            
+        const totalAmount = processedData.totalAmount || 0;
+
+        const saleData = {
+            saleDate: Timestamp.fromDate(saleDate),
+            // Assuming the AI provides a single total amount. We will place it under 'other' for simplicity.
+            breakfast: { hungerbox: 0, upi: 0, other: 0 },
+            lunch: { hungerbox: 0, upi: 0, other: totalAmount },
+            dinner: { hungerbox: 0, upi: 0, other: 0 },
+            snacks: { hungerbox: 0, upi: 0, other: 0 },
+            totalAmount: totalAmount,
+            notes: processedData.notes || `Imported from email on ${new Date().toLocaleDateString()}`,
+            siteId: siteId,
+            stallId: stallId,
+            recordedByUid: callingUser.uid,
+            recordedByName: callingUser.displayName || callingUser.email,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+        };
+        
+        const batch = adminDb.batch();
+        batch.set(docRef, saleData, { merge: true });
         await batch.commit();
         
-        if (processedCount > 0) {
-            await logFoodStallActivity(callingUser, {
-                siteId: siteId,
-                stallId: stallId,
-                type: 'SALE_RECORDED_OR_UPDATED',
-                relatedDocumentId: `hungerbox-import-${Date.now()}`,
-                details: { notes: `Successfully imported and processed ${processedCount} sales records from a report.` }
-            });
-        }
+        await logFoodStallActivity(callingUser, {
+            siteId: siteId,
+            stallId: stallId,
+            type: 'SALE_RECORDED_OR_UPDATED',
+            relatedDocumentId: docId,
+            details: { notes: `Successfully imported and processed a sales record of INR ${totalAmount.toFixed(2)} for ${processedData.saleDate} from email.` }
+        });
 
-        return NextResponse.json({ message: `Successfully imported and updated ${processedCount} daily sales summaries.` }, { status: 200 });
+        return NextResponse.json({ message: `Successfully imported sales of INR ${totalAmount.toFixed(2)} for ${processedData.saleDate}.` }, { status: 200 });
 
     } catch (error: any) {
         console.error(`${LOG_PREFIX} Error in API route:`, error);
