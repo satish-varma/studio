@@ -10,12 +10,13 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI;
 
-function initializeAdminApp(): AdminApp {
-    if (getApps().length > 0) return getApps()[0];
-    const serviceAccountJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
-    if (!serviceAccountJson) throw new Error("GOOGLE_APPLICATION_CREDENTIALS_JSON is not set.");
-    return initializeApp({ credential: cert(JSON.parse(serviceAccountJson)) });
-}
+// No need to initialize admin app if we are not verifying a token
+// function initializeAdminApp(): AdminApp {
+//     if (getApps().length > 0) return getApps()[0];
+//     const serviceAccountJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+//     if (!serviceAccountJson) throw new Error("GOOGLE_APPLICATION_CREDENTIALS_JSON is not set.");
+//     return initializeApp({ credential: cert(JSON.parse(serviceAccountJson)) });
+// }
 
 export async function GET(request: NextRequest) {
   
@@ -24,8 +25,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Server configuration error: Missing Google credentials.' }, { status: 500 });
   }
 
-  // The user's UID needs to be passed to the 'state' parameter so we know who to associate the tokens with in the callback.
-  // We will get it from a query parameter instead of a header.
   const { searchParams } = new URL(request.url);
   const uid = searchParams.get('uid');
 
@@ -34,10 +33,6 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // Admin App initialization is not strictly needed here if we are not verifying the user token,
-    // but it's good practice to keep the initialization check in case other logic is added later.
-    initializeAdminApp(); 
-    
     const oAuth2Client = new google.auth.OAuth2(
       GOOGLE_CLIENT_ID,
       GOOGLE_CLIENT_SECRET,
@@ -47,12 +42,10 @@ export async function GET(request: NextRequest) {
     const authUrl = oAuth2Client.generateAuthUrl({
       access_type: 'offline',
       scope: ['https://www.googleapis.com/auth/gmail.readonly'],
-      // Pass the UID through the state parameter so we can identify the user upon callback
       state: JSON.stringify({ uid }),
-      prompt: 'consent', // Force consent screen every time
+      prompt: 'consent',
     });
 
-    // Instead of returning JSON, we redirect the user's browser directly.
     return NextResponse.redirect(authUrl);
 
   } catch (error: any) {

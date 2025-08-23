@@ -13,6 +13,7 @@ import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { getFirestore, collection, query, orderBy, onSnapshot, where, doc, getDoc } from 'firebase/firestore';
 import type { Site, Stall } from '@/types';
+import Link from 'next/link'; // Import the Link component
 
 interface ScrapeHungerboxDialogProps {
   isOpen: boolean;
@@ -73,9 +74,10 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
             setLoadingContext(false);
         }, () => setLoadingContext(false));
         return () => unsub();
+    } else {
+        setStallsForSite([]);
+        setSelectedStallId('');
     }
-    setStallsForSite([]);
-    setSelectedStallId('');
   }, [selectedSiteId, db]);
 
   const handleFetchAndProcess = async () => {
@@ -115,14 +117,6 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
     setSelectedStallId('');
     setStallsForSite([]);
     onClose();
-  };
-
-  const handleConnectGmail = () => {
-    if (initiateUrl) {
-      window.top.location.href = initiateUrl;
-    } else {
-      toast({ title: "Error", description: "Authentication URL not ready. Please try again.", variant: "destructive" });
-    }
   };
 
   return (
@@ -166,9 +160,11 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
                   <LinkIcon className="h-4 w-4" />
                   <AlertTitle>Gmail Account Not Connected</AlertTitle>
                   <AlertDescription>
-                      You must connect your Gmail account to allow StallSync to read your sales emails.
-                       <Button asChild variant="link" className="p-0 h-auto font-semibold ml-1" onClick={handleConnectGmail}>
-                          <a>Click here to connect.</a>
+                       You must connect your Gmail account. Right-click and open in a new tab:
+                       <Button asChild variant="link" className="p-0 h-auto font-semibold ml-1">
+                          <Link href={initiateUrl} target="_blank" rel="noopener noreferrer">
+                              Click here to connect.
+                          </Link>
                        </Button>
                   </AlertDescription>
               </Alert>
