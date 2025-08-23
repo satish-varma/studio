@@ -133,7 +133,7 @@ export async function POST(request: NextRequest) {
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     };
     
-    await setDoc(docRef, saleData, { merge: true });
+    await adminDb.collection("foodSaleTransactions").doc(docId).set(saleData, { merge: true });
 
     await gmail.users.messages.modify({ userId: 'me', id: messageId, requestBody: { removeLabelIds: ['UNREAD'] } });
     console.log(`${LOG_PREFIX} Email ${messageId} processed and marked as read.`);
