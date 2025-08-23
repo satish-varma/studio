@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { getFirestore, collection, query, orderBy, onSnapshot, where, doc, getDoc } from 'firebase/firestore';
 import type { Site, Stall } from '@/types';
 import { Building, Store } from 'lucide-react';
+import { google } from 'googleapis';
 
 interface ScrapeHungerboxDialogProps {
   isOpen: boolean;
@@ -78,8 +79,18 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
 
   const handleConnectGmail = async () => {
       if (!user) return;
-      // This is the FIX: using window.top.location.href breaks out of the iframe
-      window.top.location.href = `/api/auth/google/initiate?uid=${user.uid}`;
+      
+      const response = await fetch('/api/auth/google/initiate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid: user.uid }),
+      });
+      const { authUrl } = await response.json();
+      if(authUrl){
+         window.top!.location.href = authUrl;
+      } else {
+        toast({ title: "Error", description: "Could not generate authentication URL.", variant: "destructive"});
+      }
   };
 
   const handleFetchAndProcess = async () => {
