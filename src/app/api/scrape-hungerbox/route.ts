@@ -96,27 +96,27 @@ export async function POST(request: NextRequest) {
         }
 
         const emailBody = await getSampleEmailBody();
-        const processedData = await processHungerboxEmail({ emailBody });
+        const processedData = await processHungerboxEmail({ sourceText: emailBody });
 
-        if (!processedData.isRelevantEmail || !processedData.saleDate || !processedData.totalAmount) {
-            return NextResponse.json({ message: "The provided email content was not identified as a relevant sales summary." }, { status: 200 });
+        if (!processedData.paymentDate || !processedData.amountReceived) {
+            return NextResponse.json({ message: "The provided document content was not identified as a relevant sales summary." }, { status: 200 });
         }
         
-        const saleDate = new Date(processedData.saleDate);
-        const docId = `${processedData.saleDate}_${stallId}`;
+        const saleDate = new Date(processedData.paymentDate);
+        const docId = `${processedData.paymentDate}_${stallId}`;
         const docRef = adminDb.collection("foodSaleTransactions").doc(docId);
             
-        const totalAmount = processedData.totalAmount || 0;
+        const totalAmount = processedData.amountReceived || 0;
 
         const saleData = {
             saleDate: Timestamp.fromDate(saleDate),
             // Assuming the AI provides a single total amount. We will place it under 'other' for simplicity.
             breakfast: { hungerbox: 0, upi: 0, other: 0 },
-            lunch: { hungerbox: 0, upi: 0, other: totalAmount },
+            lunch: { hungerbox: totalAmount, upi: 0, other: 0 }, // Placing in hungerbox for consistency
             dinner: { hungerbox: 0, upi: 0, other: 0 },
             snacks: { hungerbox: 0, upi: 0, other: 0 },
             totalAmount: totalAmount,
-            notes: processedData.notes || `Imported from email on ${new Date().toLocaleDateString()}`,
+            notes: `Imported from email on ${new Date().toLocaleDateString()}. Ref: ${processedData.referenceNumber}`,
             siteId: siteId,
             stallId: stallId,
             recordedByUid: callingUser.uid,
@@ -134,10 +134,10 @@ export async function POST(request: NextRequest) {
             stallId: stallId,
             type: 'SALE_RECORDED_OR_UPDATED',
             relatedDocumentId: docId,
-            details: { notes: `Successfully imported and processed a sales record of INR ${totalAmount.toFixed(2)} for ${processedData.saleDate} from email.` }
+            details: { notes: `Successfully imported and processed a sales record of INR ${totalAmount.toFixed(2)} for ${processedData.paymentDate} from a document.` }
         });
 
-        return NextResponse.json({ message: `Successfully imported sales of INR ${totalAmount.toFixed(2)} for ${processedData.saleDate}.` }, { status: 200 });
+        return NextResponse.json({ message: `Successfully imported sales of INR ${totalAmount.toFixed(2)} for ${processedData.paymentDate}.` }, { status: 200 });
 
     } catch (error: any) {
         console.error(`${LOG_PREFIX} Error in API route:`, error);

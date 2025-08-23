@@ -10,28 +10,28 @@ import {z} from 'genkit';
 const LOG_PREFIX = "[ProcessHungerboxEmailFlow]";
 
 const ProcessHungerboxEmailInputSchema = z.object({
-  emailBody: z.string().describe('The full text content of the email from Hungerbox.'),
+  sourceText: z.string().describe('The full text content of the email or PDF from Hungerbox.'),
 });
 export type ProcessHungerboxEmailInput = z.infer<typeof ProcessHungerboxEmailInputSchema>;
 
 const ProcessHungerboxEmailOutputSchema = z.object({
-  isRelevantEmail: z.boolean().describe('Whether the email contains relevant Hungerbox sales data.'),
-  saleDate: z.string().describe('The date of the sale in YYYY-MM-DD format.').optional(),
-  totalAmount: z.number().describe('The total sales amount mentioned in the email.').optional(),
-  notes: z.string().describe('Any relevant notes or summary extracted from the email.').optional(),
+  serviceContext: z.string().describe('The name of the recipient company found after "Payment Advice Raised To".'),
+  amountReceived: z.number().describe('The numeric value from the "Net Payable Amount" line.'),
+  paymentDate: z.string().describe('The date from the "Raised On" line in YYYY-MM-DD format.'),
+  referenceNumber: z.string().describe('The number found after "SettlementId:".'),
 });
 export type ProcessHungerboxEmailOutput = z.infer<typeof ProcessHungerboxEmailOutputSchema>;
 
 // This function would be called by the API route.
 export async function processHungerboxEmail(input: ProcessHungerboxEmailInput): Promise<ProcessHungerboxEmailOutput> {
-  console.log(`${LOG_PREFIX} Called with input email body.`);
+  console.log(`${LOG_PREFIX} Called with input text.`);
   try {
     const result = await processHungerboxEmailFlow(input);
-    console.log(`${LOG_PREFIX} Successfully processed email.`);
+    console.log(`${LOG_PREFIX} Successfully processed document.`);
     return result;
   } catch (error: any) {
-    console.error(`${LOG_PREFIX} Error processing email:`, error.message, error.stack);
-    throw new Error(`Failed to process email: ${error.message || error.toString()}`);
+    console.error(`${LOG_PREFIX} Error processing document:`, error.message, error.stack);
+    throw new Error(`Failed to process document: ${error.message || error.toString()}`);
   }
 }
 
@@ -39,22 +39,23 @@ const prompt = ai.definePrompt({
   name: 'processHungerboxEmailPrompt',
   input: {schema: ProcessHungerboxEmailInputSchema},
   output: {schema: ProcessHungerboxEmailOutputSchema},
-  prompt: `You are an intelligent data extraction assistant for a food stall business.
-Your task is to analyze the text content of an email and determine if it is a sales or payment confirmation from a service like Hungerbox.
+  prompt: `Invoice Data Extraction Prompt
+You are a highly accurate data extraction AI. Your task is to analyze text extracted from a payment advice PDF from Hungerbox and extract specific data points. The text may have formatting issues due to PDF-to-text conversion. Follow these rules precisely:
 
-If it is a relevant sales confirmation, extract the following information:
-1. The total sales amount.
-2. The date of the sale.
-3. Summarize any other key details in the notes.
+1.  **\`serviceContext\`**: Find the text immediately following "Payment Advice Raised To". This is the name of the recipient company. In the example "Payment Advice Raised To The Gut Guru DSM...", the value should be "The Gut Guru". Extract just the primary company name.
 
-If the email is not a sales confirmation (e.g., a marketing email, a password reset, etc.), set 'isRelevantEmail' to false and leave the other fields empty.
+2.  **\`amountReceived\`**: Find the exact line "Net Payable Amount". Extract the numeric value from that line. Ignore any currency symbols like "Rs" or "INR". For example, from "Net Payable Amount 689", extract \`689\`. This is the most important field. If you cannot find this exact phrase, you must return \`0\`.
 
-Email Content:
+3.  **\`paymentDate\`**: Find the date on the line that starts with "Raised On". It will be in YYYY-MM-DD format. For example, from "Raised On :2025-06-24", extract "2025-06-24".
+
+4.  **\`referenceNumber\`**: Find the number immediately following "SettlementId:". For example, from "SettlementId: 593694", extract "593694".
+
+**Source Text to Analyze:**
 ---
-{{{emailBody}}}
+{{{sourceText}}}
 ---
 
-Extract the data based on these instructions.
+Provide the output in a valid JSON format matching the schema. Adhere strictly to the rules above.
 `,
 });
 
@@ -70,10 +71,10 @@ const processHungerboxEmailFlow = ai.defineFlow(
     const outputData = response.output;
 
     if (!outputData) {
-        console.warn(`${LOG_PREFIX} AI model returned no output for email processing.`);
+        console.warn(`${LOG_PREFIX} AI model returned no output for document processing.`);
         throw new Error("AI model returned an invalid or empty output.");
     }
-    console.log(`${LOG_PREFIX} Flow successfully processed email. Is relevant: ${outputData.isRelevantEmail}`);
+    console.log(`${LOG_PREFIX} Flow successfully processed document. Amount: ${outputData.amountReceived}`);
     return outputData;
   }
 );

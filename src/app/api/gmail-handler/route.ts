@@ -107,18 +107,18 @@ export async function POST(request: NextRequest) {
     const emailBody = decodeBase64Url(emailBodyPart.body.data);
     
     console.log(`${LOG_PREFIX} Processing email body with AI flow...`);
-    const processedData = await processHungerboxEmail({ emailBody });
+    const processedData = await processHungerboxEmail({ sourceText: emailBody });
 
-    if (!processedData.isRelevantEmail || !processedData.saleDate || !processedData.totalAmount) {
+    if (!processedData.paymentDate || !processedData.amountReceived) {
         await gmail.users.messages.modify({ userId: 'me', id: messageId, requestBody: { removeLabelIds: ['UNREAD'] } });
-        return NextResponse.json({ message: "Email was not a relevant sales summary. Marked as read." }, { status: 200 });
+        return NextResponse.json({ message: "Email was not a relevant sales summary or failed to extract key data. Marked as read." }, { status: 200 });
     }
 
-    const saleDate = new Date(processedData.saleDate);
-    const docId = `${processedData.saleDate}_${stallId}`;
+    const saleDate = new Date(processedData.paymentDate);
+    const docId = `${processedData.paymentDate}_${stallId}`;
     const docRef = adminDb.collection("foodSaleTransactions").doc(docId);
     
-    const totalAmount = processedData.totalAmount || 0;
+    const totalAmount = processedData.amountReceived || 0;
     const saleData = {
         saleDate: Timestamp.fromDate(saleDate),
         lunch: { hungerbox: totalAmount, upi: 0, other: 0 },
@@ -126,7 +126,7 @@ export async function POST(request: NextRequest) {
         dinner: { hungerbox: 0, upi: 0, other: 0 },
         snacks: { hungerbox: 0, upi: 0, other: 0 },
         totalAmount: totalAmount,
-        notes: processedData.notes || `Imported from Gmail on ${new Date().toLocaleDateString()}`,
+        notes: `Imported from Gmail on ${new Date().toLocaleDateString()}. Ref: ${processedData.referenceNumber}`,
         siteId: siteId, stallId: stallId,
         recordedByUid: callingUser.uid, recordedByName: callingUser.displayName || callingUser.email,
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
@@ -140,10 +140,10 @@ export async function POST(request: NextRequest) {
     await logFoodStallActivity(callingUser, {
         siteId: siteId, stallId: stallId, type: 'SALE_RECORDED_OR_UPDATED',
         relatedDocumentId: docId,
-        details: { notes: `Successfully imported sales of INR ${totalAmount.toFixed(2)} for ${processedData.saleDate} from Gmail.` }
+        details: { notes: `Successfully imported sales of INR ${totalAmount.toFixed(2)} for ${processedData.paymentDate} from Gmail.` }
     });
 
-    return NextResponse.json({ message: `Successfully imported sales of INR ${totalAmount.toFixed(2)} for ${processedData.saleDate}.` }, { status: 200 });
+    return NextResponse.json({ message: `Successfully imported sales of INR ${totalAmount.toFixed(2)} for ${processedData.paymentDate}.` }, { status: 200 });
 
   } catch (error: any) {
     console.error(`${LOG_PREFIX} Error:`, error);
