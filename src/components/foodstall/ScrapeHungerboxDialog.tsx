@@ -35,7 +35,7 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
   const { user } = useAuth();
   
   useEffect(() => {
-    if (!isOpen || !user) {
+    if (!isOpen || !user || !db) {
         setIsCheckingConnection(true);
         setIsGmailConnected(false);
         return;
@@ -60,7 +60,7 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
     });
 
     return () => unsubSites();
-  }, [isOpen, user]);
+  }, [isOpen, user, db]);
 
   useEffect(() => {
     if (selectedSiteId && db) {
@@ -74,13 +74,12 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
     }
     setStallsForSite([]);
     setSelectedStallId('');
-  }, [selectedSiteId]);
+  }, [selectedSiteId, db]);
 
   const handleConnectGmail = async () => {
       if (!user) return;
-      // THE FIX: Pass the user's UID as a query parameter to the initiation route.
-      // This is secure because the API route only uses it to generate a URL.
-      window.location.href = `/api/auth/google/initiate?uid=${user.uid}`;
+      // This is the FIX: using window.top.location.href breaks out of the iframe
+      window.top.location.href = `/api/auth/google/initiate?uid=${user.uid}`;
   };
 
   const handleFetchAndProcess = async () => {
