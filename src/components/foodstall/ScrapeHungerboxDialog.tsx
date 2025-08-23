@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { getFirestore, collection, query, orderBy, onSnapshot, where, doc, getDoc } from 'firebase/firestore';
 import type { Site, Stall } from '@/types';
 import { Building, Store } from 'lucide-react';
-import { google } from 'googleapis';
+import Link from 'next/link';
 
 interface ScrapeHungerboxDialogProps {
   isOpen: boolean;
@@ -31,28 +31,33 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
   const [selectedSiteId, setSelectedSiteId] = useState<string>('');
   const [selectedStallId, setSelectedStallId] = useState<string>('');
   const [loadingContext, setLoadingContext] = useState(true);
+  const [initiateUrl, setInitiateUrl] = useState<string>('');
 
   const { toast } = useToast();
   const { user } = useAuth();
   
   useEffect(() => {
-    if (!isOpen || !user || !db) {
+    if (!isOpen || !user || !db || !auth.currentUser) {
         setIsCheckingConnection(true);
         setIsGmailConnected(false);
+        setInitiateUrl('');
         return;
     }
+    
+    const setup = async () => {
+        setIsCheckingConnection(true);
+        const tokensDocRef = doc(db, 'user_tokens', user.uid);
+        const tokensDocSnap = await getDoc(tokensDocRef);
+        setIsGmailConnected(tokensDocSnap.exists());
+        setIsCheckingConnection(false);
 
-    const checkConnectionStatus = async () => {
-      setIsCheckingConnection(true);
-      if (db) {
-          const tokensDocRef = doc(db, 'user_tokens', user.uid);
-          const tokensDocSnap = await getDoc(tokensDocRef);
-          setIsGmailConnected(tokensDocSnap.exists());
-      }
-      setIsCheckingConnection(false);
+        const idToken = await auth.currentUser.getIdToken();
+        // This is a dummy URL creation for the link. The real redirect happens on the server.
+        const url = `/api/auth/google/initiate?token=${idToken}`;
+        setInitiateUrl(url);
     };
 
-    checkConnectionStatus();
+    setup();
 
     const sitesQuery = query(collection(db, "sites"), orderBy("name"));
     const unsubSites = onSnapshot(sitesQuery, (snapshot) => {
@@ -61,7 +66,7 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
     });
 
     return () => unsubSites();
-  }, [isOpen, user, db]);
+  }, [isOpen, user, db, auth.currentUser]);
 
   useEffect(() => {
     if (selectedSiteId && db) {
@@ -77,21 +82,6 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
     setSelectedStallId('');
   }, [selectedSiteId, db]);
 
-  const handleConnectGmail = async () => {
-      if (!user) return;
-      
-      const response = await fetch('/api/auth/google/initiate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ uid: user.uid }),
-      });
-      const { authUrl } = await response.json();
-      if(authUrl){
-         window.top!.location.href = authUrl;
-      } else {
-        toast({ title: "Error", description: "Could not generate authentication URL.", variant: "destructive"});
-      }
-  };
 
   const handleFetchAndProcess = async () => {
      if (!selectedSiteId || !selectedStallId) {
@@ -172,18 +162,15 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
                   <AlertTitle>Gmail Account Not Connected</AlertTitle>
                   <AlertDescription>
                       You must connect your Gmail account to allow StallSync to read your sales emails.
+                       <Button asChild variant="link" className="p-0 h-auto font-semibold ml-1">
+                          <Link href={initiateUrl} target="_blank" rel="noopener noreferrer">Click here to connect.</Link>
+                       </Button>
                   </AlertDescription>
               </Alert>
           )}
         </div>
         <DialogFooter className="flex flex-col sm:flex-row gap-2">
           <Button variant="outline" onClick={handleDialogClose} disabled={isProcessing}>Cancel</Button>
-          {!isGmailConnected && (
-            <Button onClick={handleConnectGmail} disabled={isProcessing || isCheckingConnection}>
-                {isProcessing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <LinkIcon className="h-4 w-4 mr-2" />}
-                Connect to Gmail
-            </Button>
-          )}
           {isGmailConnected && (
              <Button onClick={handleFetchAndProcess} disabled={isProcessing || isCheckingConnection || !selectedSiteId || !selectedStallId}>
                 {isProcessing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Bot className="h-4 w-4 mr-2" />}
