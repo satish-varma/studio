@@ -98,7 +98,7 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
       if (!response.ok) throw new Error(result.error || `Server responded with status ${response.status}`);
       toast({ title: "Process Complete", description: result.message, variant: "default", duration: 7000 });
       if (!result.error) {
-        onClose();
+        handleDialogClose();
       }
 
     } catch (error: any) {
@@ -113,6 +113,13 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
     setSelectedStallId('');
     setStallsForSite([]);
     onClose();
+  };
+
+  const handleConnectGmail = () => {
+    if (typeof window !== 'undefined' && user) {
+        // This is the correct way to break out of the iframe and redirect the top-level page
+        window.top.location.href = `/api/auth/google/initiate?uid=${user.uid}`;
+    }
   };
 
   return (
@@ -157,8 +164,8 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
                   <AlertTitle>Gmail Account Not Connected</AlertTitle>
                   <AlertDescription>
                        You must connect your Gmail account to allow StallSync to read your sales emails.
-                       <Button asChild variant="link" className="p-0 h-auto font-semibold ml-1">
-                          <a href={`/api/auth/google/initiate?uid=${user?.uid}`}>Click here to connect.</a>
+                       <Button variant="link" className="p-0 h-auto font-semibold ml-1" onClick={handleConnectGmail}>
+                          Click here to connect.
                        </Button>
                   </AlertDescription>
               </Alert>
