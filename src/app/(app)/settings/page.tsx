@@ -74,6 +74,15 @@ export default function SettingsPage() {
     link.click();
     document.body.removeChild(link);
   };
+  
+  const toDateSafe = (date: Date | Timestamp | string | undefined | null): Date => {
+      if (!date) return new Date();
+      if (date instanceof Timestamp) return date.toDate();
+      if (date instanceof Date) return date;
+      // Handle ISO string
+      return new Date(date);
+  };
+
 
   const handleExport = async (dataType: 'stock' | 'sales' | 'foodExpenses') => {
     if (!db) {
@@ -135,7 +144,7 @@ export default function SettingsPage() {
          const headers = ["Expense ID", "Category", "Total Cost", "Payment Method", "Other Payment Details", "Purchase Date", "Vendor", "Other Vendor Details", "Notes", "Bill Image URL", "Site Name", "Stall Name", "Recorded By (Name)", "Recorded By (UID)"];
          const rows = [headers.join(',')];
          itemsToExport.forEach(expense => {
-            const purchaseDate = (expense.purchaseDate as Timestamp)?.toDate ? (expense.purchaseDate as Timestamp).toDate() : new Date(expense.purchaseDate as string);
+            const purchaseDate = toDateSafe(expense.purchaseDate);
             rows.push([
               escapeCsvCell(expense.id), escapeCsvCell(expense.category), escapeCsvCell(expense.totalCost.toFixed(2)),
               escapeCsvCell(expense.paymentMethod), escapeCsvCell(expense.otherPaymentMethodDetails || ""),
