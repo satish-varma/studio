@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -91,16 +90,10 @@ export default function FoodSalesClientPage() {
     }
   }, [db, user]);
 
-  const fetchSales = useCallback((direction: 'initial' | 'next' | 'prev' = 'initial') => {
-    if (!user || !db || authLoading) return;
-    if (user.role !== 'admin' && !activeSiteId) {
-      setSales([]);
-      setTotalSalesAmount(0);
-      setLoadingSales(false);
-      return;
-    }
-    
-    setLoadingSales(true);
+  const buildTransactionQuery = useCallback(() => {
+    if (!user) return null;
+    if (user.role !== 'admin' && !activeSiteId) return null;
+
     let constraints: QueryConstraint[] = [orderBy("saleDate", "desc")];
     if (effectiveSiteId) constraints.push(where("siteId", "==", effectiveSiteId));
     if (activeStallId) constraints.push(where("stallId", "==", activeStallId));
@@ -118,8 +111,23 @@ export default function FoodSalesClientPage() {
     if (startDate) constraints.push(where("saleDate", ">=", Timestamp.fromDate(startDate)));
     if (endDate) constraints.push(where("saleDate", "<=", Timestamp.fromDate(endDate)));
 
+    return constraints;
+  }, [user, activeSiteId, activeStallId, dateFilter, effectiveSiteId]);
+
+  useEffect(() => {
+    if (authLoading || !db) return;
+
+    const baseConstraints = buildTransactionQuery();
+    if (!baseConstraints) {
+      setSales([]);
+      setTotalSalesAmount(0);
+      setLoadingSales(false);
+      return;
+    }
+
+    setLoadingSales(true);
     const salesCollectionRef = collection(db, "foodSaleTransactions");
-    const q = query(salesCollectionRef, ...constraints, limit(SALES_PER_PAGE));
+    const q = query(salesCollectionRef, ...baseConstraints, limit(SALES_PER_PAGE));
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
         const fetchedSales = snapshot.docs.map(doc => ({
@@ -144,15 +152,8 @@ export default function FoodSalesClientPage() {
         setLoadingSales(false);
     });
 
-    return unsubscribe;
-  }, [user, db, authLoading, activeSiteId, activeStallId, dateFilter, effectiveSiteId]);
-
-  useEffect(() => {
-    const unsubscribe = fetchSales('initial');
-    return () => {
-      if (unsubscribe) unsubscribe();
-    };
-  }, [fetchSales]);
+    return () => unsubscribe();
+  }, [authLoading, db, buildTransactionQuery]);
   
   
   const escapeCsvCell = (cellData: any): string => {
@@ -169,23 +170,7 @@ export default function FoodSalesClientPage() {
     setIsExporting(true);
     toast({ title: "Exporting...", description: "Fetching all matching sales data." });
 
-    const exportConstraints: QueryConstraint[] = [];
-    if (effectiveSiteId) exportConstraints.push(where("siteId", "==", effectiveSiteId));
-    if (activeStallId) exportConstraints.push(where("stallId", "==", activeStallId));
-
-    const now = new Date();
-    let startDate: Date | null = null;
-    let endDate: Date | null = endOfDay(now);
-
-    switch (dateFilter) {
-      case 'today': startDate = startOfDay(now); break;
-      case 'last_7_days': startDate = startOfDay(subDays(now, 6)); break;
-      case 'this_month': startDate = startOfMonth(now); break;
-      case 'all_time': startDate = null; endDate = null; break;
-    }
-
-    if (startDate) exportConstraints.push(where("saleDate", ">=", Timestamp.fromDate(startDate)));
-    if (endDate) exportConstraints.push(where("saleDate", "<=", Timestamp.fromDate(endDate)));
+    const exportConstraints: QueryConstraint[] = buildTransactionQuery() || [];
     
     try {
         const salesCollectionRef = collection(db, "foodSaleTransactions");
@@ -328,7 +313,7 @@ export default function FoodSalesClientPage() {
         isOpen={showImportDialog}
         onClose={() => {
           setShowImportDialog(false);
-          fetchSales('initial');
+          // fetchSales('initial');
         }}
       />
     </div>
