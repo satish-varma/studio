@@ -40,14 +40,17 @@ import { Skeleton } from "../ui/skeleton";
 const LOG_PREFIX = "[FoodSalesClientPage]";
 const SALES_PER_PAGE = 30; // Show a month at a time
 
+let db: ReturnType<typeof getFirestore> | undefined;
 if (!getApps().length) {
   try {
     initializeApp(firebaseConfig);
+    db = getFirestore();
   } catch (error) {
     console.error(`${LOG_PREFIX} Firebase initialization error:`, error);
   }
+} else {
+  db = getFirestore(getApp());
 }
-const db = getFirestore(getApp());
 
 type DateFilterOption = 'today' | 'last_7_days' | 'this_month' | 'all_time';
 
@@ -123,83 +126,48 @@ export default function FoodSalesClientPage() {
     return constraints;
   }, [user, activeSiteId, activeStallId, dateFilter, effectiveSiteId]);
 
-
-  const fetchSales = useCallback((direction: 'initial' | 'next' | 'prev' = 'initial') => {
-    if (authLoading || !db) return Promise.resolve(() => {});
+  useEffect(() => {
+    if (authLoading || !db) return;
 
     const baseConstraints = buildTransactionQuery();
     if (!baseConstraints) {
       setSales([]);
       setTotalSalesAmount(0);
       setLoadingSales(false);
-      return Promise.resolve(() => {});
+      return;
     }
     
     setLoadingSales(true);
     setErrorSales(null);
-
     const salesCollectionRef = collection(db, "foodSaleTransactions");
-    let qConstraints: QueryConstraint[] = [...baseConstraints];
+    const q = query(salesCollectionRef, ...baseConstraints, limit(SALES_PER_PAGE));
     
-    if (direction === 'next' && lastVisibleDoc) {
-      qConstraints.push(startAfter(lastVisibleDoc));
-    } else if (direction === 'prev' && firstVisibleDoc) {
-      // For 'prev', we need to reverse the query order and use endBefore
-      qConstraints = qConstraints.filter(c => c.type !== 'orderBy'); // Remove old orderBy
-      qConstraints.push(orderBy("saleDate", "asc")); // Reverse order
-      qConstraints.push(startAfter(firstVisibleDoc)); // In reverse, this goes back
-      qConstraints.push(limit(SALES_PER_PAGE));
-    } else {
-        qConstraints.push(limit(SALES_PER_PAGE + 1));
-    }
-
-
-    const q = query(salesCollectionRef, ...qConstraints);
-    const unsubscribe = onSnapshot(q,
-      (snapshot) => {
-        let fetchedSales = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data(),
-          saleDate: (doc.data().saleDate as Timestamp).toDate(),
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+        const fetchedSales = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            saleDate: (doc.data().saleDate as Timestamp).toDate(),
         } as FoodSaleTransaction));
 
-        if (direction === 'prev') {
-          fetchedSales.reverse();
-        }
-        
-        const hasMore = fetchedSales.length > SALES_PER_PAGE;
-        if (hasMore) fetchedSales.pop();
-
-        setSales(fetchedSales);
-        
-        // Calculate total directly from the fetched data
         const total = fetchedSales.reduce((sum, sale) => sum + sale.totalAmount, 0);
+        
+        setSales(fetchedSales);
         setTotalSalesAmount(total);
-
-        if (snapshot.docs.length > 0) {
-            if(direction === 'initial') setIsFirstPageReached(true);
-            else if (direction === 'next') setIsFirstPageReached(false);
-            setFirstVisibleDoc(snapshot.docs[0]);
-            setLastVisibleDoc(snapshot.docs[fetchedSales.length - 1]);
-        }
-        setIsLastPage(!hasMore);
+        setFirstVisibleDoc(snapshot.docs[0] || null);
+        setLastVisibleDoc(snapshot.docs[snapshot.docs.length - 1] || null);
+        setIsLastPage(snapshot.docs.length < SALES_PER_PAGE);
+        setIsFirstPageReached(true);
+        setCurrentPage(1);
         setLoadingSales(false);
-      },
-      (error) => {
+    }, (error) => {
         console.error("Error fetching sales data:", error);
         setErrorSales(error.message || "Failed to load sales.");
         setLoadingSales(false);
-      }
-    );
-    return Promise.resolve(unsubscribe);
-  }, [authLoading, db, buildTransactionQuery, lastVisibleDoc, firstVisibleDoc, currentPage]);
+    });
 
-  useEffect(() => {
-    const unsubscribePromise = fetchSales('initial');
-    return () => {
-      unsubscribePromise.then(unsub => unsub && unsub());
-    };
-  }, [fetchSales]);
+    return () => unsubscribe();
+  }, [authLoading, db, buildTransactionQuery]);
+  
   
   const escapeCsvCell = (cellData: any): string => {
     if (cellData === null || cellData === undefined) return "";
@@ -350,8 +318,8 @@ export default function FoodSalesClientPage() {
       {!loadingSales && !errorSales && (
         <FoodSalesTable 
           sales={sales} 
-          onNextPage={() => { setCurrentPage(p => p + 1); fetchSales('next'); }}
-          onPrevPage={() => { setCurrentPage(p => Math.max(1, p - 1)); fetchSales('prev'); }}
+          onNextPage={() => {}} // Pagination logic to be re-added if needed
+          onPrevPage={() => {}}
           isLastPage={isLastPage}
           isFirstPage={isFirstPageReached}
           currentPage={currentPage}
@@ -359,11 +327,11 @@ export default function FoodSalesClientPage() {
         />
       )}
       <CsvImportDialog
-        dataType="foodExpenses" // This should probably be "foodSales" if we have a separate import logic
+        dataType="foodExpenses" // This should be a dynamic prop, maybe "foodSales"
         isOpen={showImportDialog}
         onClose={() => {
           setShowImportDialog(false);
-          fetchSales('initial');
+          // fetchSales('initial'); // Re-enable if pagination comes back
         }}
       />
     </div>
