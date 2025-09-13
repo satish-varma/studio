@@ -130,7 +130,7 @@ export default function FoodSalesClientPage() {
             saleDate: (doc.data().saleDate as Timestamp).toDate(),
         } as FoodSaleTransaction));
 
-        const total = fetchedSales.reduce((sum, sale) => sum + sale.totalAmount, 0);
+        const total = fetchedSales.reduce((sum, sale) => sum + (sale.sales?.hungerbox || 0) + (sale.sales?.upi || 0), 0);
         
         setSales(fetchedSales);
         setTotalSalesAmount(total);
@@ -213,9 +213,11 @@ export default function FoodSalesClientPage() {
 
         for (const sale of salesToExport) {
             const hungerboxSales = sale.sales?.hungerbox || 0;
+            const upiSales = sale.sales?.upi || 0;
+            const totalAmount = hungerboxSales + upiSales;
             const commissionRate = sale.saleType === 'MRP' ? 0.08 : 0.18;
             const deduction = hungerboxSales * commissionRate;
-            const amountWithDeduction = sale.totalAmount - deduction;
+            const amountWithDeduction = totalAmount - deduction;
 
             const row = [
                 escapeCsvCell(sale.id),
@@ -223,9 +225,9 @@ export default function FoodSalesClientPage() {
                 escapeCsvCell(sitesMap[sale.siteId] || sale.siteId),
                 escapeCsvCell(stallsMap[sale.stallId] || sale.stallId),
                 escapeCsvCell(sale.saleType),
-                escapeCsvCell(sale.sales?.hungerbox || 0),
-                escapeCsvCell(sale.sales?.upi || 0),
-                escapeCsvCell(sale.totalAmount),
+                escapeCsvCell(hungerboxSales),
+                escapeCsvCell(upiSales),
+                escapeCsvCell(totalAmount),
                 escapeCsvCell(amountWithDeduction.toFixed(2)),
                 escapeCsvCell(sale.notes),
                 escapeCsvCell(sale.recordedByName || sale.recordedByUid),
@@ -293,12 +295,9 @@ export default function FoodSalesClientPage() {
         description="View and edit daily sales totals for your food stall."
         actions={
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-            <Button variant="outline" onClick={() => setShowImportDialog(true)}>
-                <Upload className="mr-2 h-4 w-4"/> Import Sales
-            </Button>
             <Link href="/foodstall/sales/record">
               <Button>
-                <PlusCircle className="mr-2 h-4 w-4" /> Manage Today's Sales
+                <PlusCircle className="mr-2 h-4 w-4" /> Manage Daily Sales
               </Button>
             </Link>
           </div>
