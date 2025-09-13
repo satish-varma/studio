@@ -1,5 +1,4 @@
 
-import PageHeader from "@/components/shared/PageHeader";
 import FoodSalesClientPage from "@/components/foodstall/FoodSalesClientPage";
 
 export default function FoodStallSalesPage() {
