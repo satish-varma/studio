@@ -48,15 +48,19 @@ export default function RecordFoodSalePage() {
   
   const searchParams = useSearchParams();
   const dateParam = searchParams.get('date');
+  const typeParam = searchParams.get('type') as 'MRP' | 'Non-MRP' | null;
+
   const initialDate = dateParam && isValid(parseISO(dateParam)) ? parseISO(dateParam) : new Date();
-  
+  const initialType = typeParam && foodSaleTypes.includes(typeParam) ? typeParam : 'Non-MRP';
+
   const [selectedDate, setSelectedDate] = useState<Date>(initialDate);
+  const [selectedType, setSelectedType] = useState<'MRP' | 'Non-MRP'>(initialType);
 
   const form = useForm<FoodSaleTransactionFormValues>({
     resolver: zodResolver(foodSaleTransactionFormSchema),
     defaultValues: {
       saleDate: selectedDate,
-      saleType: "Non-MRP",
+      saleType: selectedType,
       sales: defaultSaleValues,
       totalAmount: 0,
       notes: "",
@@ -77,13 +81,13 @@ export default function RecordFoodSalePage() {
   }, [watchedSales, setValue, form]);
 
   
-  const fetchAndSetDataForDate = useCallback(async (date: Date) => {
+  const fetchAndSetDataForDate = useCallback(async (date: Date, type: 'MRP' | 'Non-MRP') => {
     if (!db || !activeStallId) {
       setIsLoadingData(false);
       return;
     }
     setIsLoadingData(true);
-    const docId = `${format(date, 'yyyy-MM-dd')}_${activeStallId}`;
+    const docId = `${format(date, 'yyyy-MM-dd')}_${activeStallId}_${type}`;
     const docRef = doc(db, "foodSaleTransactions", docId);
     
     try {
@@ -93,13 +97,13 @@ export default function RecordFoodSalePage() {
         form.reset({
           ...data,
           saleDate: (data.saleDate as Timestamp).toDate(),
-          saleType: data.saleType || "Non-MRP",
+          saleType: data.saleType || type,
           sales: data.sales || defaultSaleValues,
         });
       } else {
         form.reset({
           saleDate: date,
-          saleType: "Non-MRP",
+          saleType: type,
           sales: defaultSaleValues,
           totalAmount: 0,
           notes: "",
@@ -107,15 +111,15 @@ export default function RecordFoodSalePage() {
       }
     } catch (error) {
         console.error("Error fetching daily sales doc:", error);
-        toast({ title: "Error", description: "Could not fetch data for the selected date.", variant: "destructive"});
+        toast({ title: "Error", description: "Could not fetch data for the selected date and type.", variant: "destructive"});
     } finally {
         setIsLoadingData(false);
     }
   }, [activeStallId, form, toast]);
 
   useEffect(() => {
-    fetchAndSetDataForDate(selectedDate);
-  }, [selectedDate, fetchAndSetDataForDate]);
+    fetchAndSetDataForDate(selectedDate, selectedType);
+  }, [selectedDate, selectedType, fetchAndSetDataForDate]);
 
   async function onSubmit(values: FoodSaleTransactionFormValues) {
     if (!user || !activeSiteId || !activeStallId || !db) {
@@ -124,7 +128,7 @@ export default function RecordFoodSalePage() {
     }
     setIsSubmitting(true);
     
-    const docId = `${format(values.saleDate, 'yyyy-MM-dd')}_${activeStallId}`;
+    const docId = `${format(values.saleDate, 'yyyy-MM-dd')}_${activeStallId}_${values.saleType}`;
     const docRef = doc(db, "foodSaleTransactions", docId);
     
     try {
@@ -153,7 +157,7 @@ export default function RecordFoodSalePage() {
 
       toast({
         title: "Sales Saved",
-        description: `Sales data for ${format(values.saleDate, 'PPP')} has been saved.`,
+        description: `${values.saleType} sales for ${format(values.saleDate, 'PPP')} has been saved.`,
       });
     } catch (error: any) {
       console.error("Error saving food sale:", error);
@@ -173,7 +177,7 @@ export default function RecordFoodSalePage() {
     <div className="space-y-6">
       <PageHeader
         title="Manage Daily Sales"
-        description="Select a date to view or edit the sales summary for that day."
+        description="Select a date and sale type to view or edit the sales summary."
         actions={
           <Link href="/foodstall/sales">
             <Button variant="outline" disabled={isSubmitting}>
@@ -186,7 +190,7 @@ export default function RecordFoodSalePage() {
         <form onSubmit={form.handleSubmit(onSubmit)}>
           <Card className="max-w-2xl mx-auto shadow-lg">
             <CardHeader>
-              <div className="flex justify-between items-center">
+              <div className="flex flex-col sm:flex-row justify-between items-start gap-2">
                   <div>
                     <CardTitle>Daily Sales Entry</CardTitle>
                     <CardDescription>Enter total sales received for each payment method.</CardDescription>
@@ -206,8 +210,11 @@ export default function RecordFoodSalePage() {
                       <FormLabel>Sale Type</FormLabel>
                       <FormControl>
                         <RadioGroup
-                          onValueChange={field.onChange}
-                          defaultValue={field.value}
+                          onValueChange={(value) => {
+                            field.onChange(value);
+                            setSelectedType(value as 'MRP' | 'Non-MRP');
+                          }}
+                          value={field.value}
                           className="flex items-center space-x-4"
                         >
                           {foodSaleTypes.map(type => (
@@ -226,8 +233,8 @@ export default function RecordFoodSalePage() {
                 />
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 p-4 border rounded-md">
-                    <FormField control={form.control} name="sales.hungerbox" render={({ field }) => (<FormItem><FormLabel>HungerBox Sales (₹)</FormLabel><FormControl><Input type="number" min="0" step="0.01" {...field} className="bg-input text-lg" disabled={isSubmitting || isLoadingData}/></FormControl><FormMessage/></FormItem>)}/>
-                    <FormField control={form.control} name="sales.upi" render={({ field }) => (<FormItem><FormLabel>UPI Sales (₹)</FormLabel><FormControl><Input type="number" min="0" step="0.01" {...field} className="bg-input text-lg" disabled={isSubmitting || isLoadingData}/></FormControl><FormMessage/></FormItem>)}/>
+                    <FormField control={form.control} name="sales.hungerbox" render={({ field }) => (<FormItem><FormLabel>HungerBox Sales (₹)</FormLabel><FormControl><Input type="number" min="0" step="0.01" {...field} onChange={e => field.onChange(parseFloat(e.target.value) || 0)} className="bg-input text-lg" disabled={isSubmitting || isLoadingData}/></FormControl><FormMessage/></FormItem>)}/>
+                    <FormField control={form.control} name="sales.upi" render={({ field }) => (<FormItem><FormLabel>UPI Sales (₹)</FormLabel><FormControl><Input type="number" min="0" step="0.01" {...field} onChange={e => field.onChange(parseFloat(e.target.value) || 0)} className="bg-input text-lg" disabled={isSubmitting || isLoadingData}/></FormControl><FormMessage/></FormItem>)}/>
                 </div>
                 
                  <div className="pt-6 border-t">
