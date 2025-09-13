@@ -226,7 +226,7 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
       continue;
     }
     const saleType = (row['Sale Type'] === 'MRP' ? 'MRP' : 'Non-MRP') as FoodSaleType;
-    const docId = row.ID || `${row['Sale Date']}_${stallId}_${saleType}`;
+    const docId = `${row['Sale Date']}_${stallId}_${saleType}`;
     
     const hungerboxSales = parseFloat(row['Hungerbox Sales']) || 0;
     const upiSales = parseFloat(row['UPI Sales']) || 0;
