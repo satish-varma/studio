@@ -230,7 +230,7 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
     const hungerbox = parseFloat(row['Hungerbox Sales']) || 0;
     const upi = parseFloat(row['UPI Sales']) || 0;
 
-    const saleData = {
+    const saleData: Omit<FoodSaleTransaction, 'id' | 'saleDate'> & { saleDate: Timestamp } = {
       saleDate: Timestamp.fromDate(new Date(row['Sale Date'])),
       siteId,
       stallId,
