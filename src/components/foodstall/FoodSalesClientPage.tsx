@@ -26,19 +26,17 @@ import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Info, DollarSign, Upload, Download, Building, PlusCircle, Bot } from "lucide-react";
+import { Loader2, Info, DollarSign, Upload, Download, Building, PlusCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { FoodSalesTable } from "./FoodSalesTable";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
-import { format, subDays, startOfDay, endOfDay, startOfMonth } from "date-fns";
 import CsvImportDialog from "@/components/shared/CsvImportDialog";
 import PageHeader from "../shared/PageHeader";
 import Link from "next/link";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../ui/select";
 import { Skeleton } from "../ui/skeleton";
 import { logFoodStallActivity } from "@/lib/foodStallLogger";
-import ScrapeHungerboxDialog from "./ScrapeHungerboxDialog";
 
 
 const LOG_PREFIX = "[FoodSalesClientPage]";
@@ -81,7 +79,6 @@ export default function FoodSalesClientPage() {
   
   const [isExporting, setIsExporting] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
-  const [showGmailImportDialog, setShowGmailImportDialog] = useState(false);
   
   const effectiveSiteId = user?.role === 'admin' ? (siteFilter === 'all' ? null : siteFilter) : activeSiteId;
 
@@ -297,9 +294,6 @@ export default function FoodSalesClientPage() {
         description="View and edit daily sales totals for your food stall."
         actions={
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-            <Button variant="outline" onClick={() => setShowGmailImportDialog(true)}>
-                <Bot className="mr-2 h-4 w-4" /> Import from Gmail
-            </Button>
             <Link href="/foodstall/sales/record">
               <Button>
                 <PlusCircle className="mr-2 h-4 w-4" /> Manage Daily Sales
@@ -338,6 +332,7 @@ export default function FoodSalesClientPage() {
                 <SelectContent><SelectItem value="all">All Sites</SelectItem>{allSites.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
             </Select>
           )}
+          <Button variant="outline" onClick={() => setShowImportDialog(true)}><Upload className="mr-2 h-4 w-4" />Import Sales</Button>
           <Button variant="outline" onClick={handleExport} disabled={isExporting}>
             {isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Download className="mr-2 h-4 w-4" />}
             Export
@@ -364,16 +359,10 @@ export default function FoodSalesClientPage() {
         />
       )}
       <CsvImportDialog
-        dataType="foodExpenses" // This should probably be "foodSales", but the dialog seems generic
+        dataType="foodSales"
         isOpen={showImportDialog}
         onClose={() => setShowImportDialog(false)}
-      />
-      <ScrapeHungerboxDialog
-        isOpen={showGmailImportDialog}
-        onClose={() => setShowGmailImportDialog(false)}
       />
     </div>
   );
 }
-
-    
