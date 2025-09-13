@@ -128,6 +128,7 @@ export default function FoodSalesClientPage() {
     const baseConstraints = buildTransactionQuery();
     if (!baseConstraints) {
       setSales([]);
+      setTotalSalesAmount(0); // Ensure total is cleared
       setLoadingSales(false);
       return Promise.resolve(() => {});
     }
@@ -160,13 +161,13 @@ export default function FoodSalesClientPage() {
 
         setSales(fetchedSales);
         
-        if (direction === 'initial') {
-            const totalQuery = query(salesCollectionRef, ...baseConstraints.filter(c => c.type !== 'orderBy'));
-            getDocs(totalQuery).then(totalSnapshot => {
-                const total = totalSnapshot.docs.reduce((sum, doc) => sum + (doc.data().totalAmount || 0), 0);
-                setTotalSalesAmount(total);
-            });
-        }
+        // This is the FIX: Calculate total sales on every snapshot for real-time updates.
+        // The query for total needs to be separate from the paginated query.
+        const totalQuery = query(salesCollectionRef, ...baseConstraints.filter(c => c.type !== 'orderBy'));
+        getDocs(totalQuery).then(totalSnapshot => {
+            const total = totalSnapshot.docs.reduce((sum, doc) => sum + (doc.data().totalAmount || 0), 0);
+            setTotalSalesAmount(total);
+        });
         
         if (snapshot.docs.length > 0) {
             setFirstVisibleDoc(snapshot.docs[0]);
