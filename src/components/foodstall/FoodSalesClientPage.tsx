@@ -130,7 +130,7 @@ export default function FoodSalesClientPage() {
             saleDate: (doc.data().saleDate as Timestamp).toDate(),
         } as FoodSaleTransaction));
 
-        const total = fetchedSales.reduce((sum, sale) => sum + (sale.sales?.hungerbox || 0) + (sale.sales?.upi || 0), 0);
+        const total = fetchedSales.reduce((sum, sale) => sum + (sale.hungerboxSales || 0) + (sale.upiSales || 0), 0);
         
         setSales(fetchedSales);
         setTotalSalesAmount(total);
@@ -212,8 +212,8 @@ export default function FoodSalesClientPage() {
         const csvRows = [headers.join(',')];
 
         for (const sale of salesToExport) {
-            const hungerboxSales = sale.sales?.hungerbox || 0;
-            const upiSales = sale.sales?.upi || 0;
+            const hungerboxSales = sale.hungerboxSales || 0;
+            const upiSales = sale.upiSales || 0;
             const totalAmount = hungerboxSales + upiSales;
             const commissionRate = sale.saleType === 'MRP' ? 0.08 : 0.18;
             const deduction = hungerboxSales * commissionRate;

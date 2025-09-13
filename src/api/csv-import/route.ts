@@ -207,6 +207,7 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
   const parsedData = await parseCsv<any>(csvData);
   const sitesMap = new Map<string, string>();
   const stallsMap = new Map<string, string>();
+  const callingUser = await getAdminAuth().getUser(uid);
 
   const sitesSnapshot = await adminDb.collection('sites').get();
   sitesSnapshot.forEach(doc => sitesMap.set(doc.data().name.toLowerCase(), doc.id));
@@ -227,19 +228,20 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
     const saleType = (row['Sale Type'] === 'MRP' ? 'MRP' : 'Non-MRP') as FoodSaleType;
     const docId = row.ID || `${row['Sale Date']}_${stallId}_${saleType}`;
     
-    const hungerbox = parseFloat(row['Hungerbox Sales']) || 0;
-    const upi = parseFloat(row['UPI Sales']) || 0;
+    const hungerboxSales = parseFloat(row['Hungerbox Sales']) || 0;
+    const upiSales = parseFloat(row['UPI Sales']) || 0;
 
     const saleData: Omit<FoodSaleTransaction, 'id' | 'saleDate'> & { saleDate: Timestamp } = {
       saleDate: Timestamp.fromDate(new Date(row['Sale Date'])),
       siteId,
       stallId,
       saleType,
-      sales: { hungerbox, upi },
-      totalAmount: hungerbox + upi,
+      hungerboxSales,
+      upiSales,
+      totalAmount: hungerboxSales + upiSales,
       notes: row.Notes || "",
       recordedByUid: uid,
-      recordedByName: (await getAdminAuth().getUser(uid)).displayName || '',
+      recordedByName: callingUser.displayName || callingUser.email || '',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -288,8 +290,8 @@ export async function POST(request: NextRequest) {
     const decodedToken = await adminAuth.verifyIdToken(idToken);
     callingUserUid = decodedToken.uid;
     const adminUserDoc = await adminDb.collection('users').doc(callingUserUid).get();
-    if (!adminUserDoc.exists || adminUserDoc.data()?.role !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden: Caller is not an admin.' }, { status: 403 });
+    if (!adminUserDoc.exists || (adminUserDoc.data()?.role !== 'admin' && adminUserDoc.data()?.role !== 'manager')) {
+      return NextResponse.json({ error: 'Forbidden: Caller is not an admin or manager.' }, { status: 403 });
     }
     
     const { dataType, csvData } = await request.json();

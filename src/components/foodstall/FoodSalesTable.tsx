@@ -133,8 +133,8 @@ export function FoodSalesTable({
           </TableHeader>
           <TableBody>
             {sales.map((sale) => {
-              const hungerboxSales = sale.sales?.hungerbox || 0;
-              const upiSales = sale.sales?.upi || 0;
+              const hungerboxSales = sale.hungerboxSales || 0;
+              const upiSales = sale.upiSales || 0;
               const totalAmount = hungerboxSales + upiSales;
               const commissionRate = sale.saleType === 'MRP' ? 0.08 : 0.18;
               const deduction = hungerboxSales * commissionRate;
@@ -158,8 +158,8 @@ export function FoodSalesTable({
                   <TableCell>
                     <Badge variant={sale.saleType === "MRP" ? "outline" : "secondary"}>{sale.saleType || "Non-MRP"}</Badge>
                   </TableCell>
-                  <TableCell className="text-right text-muted-foreground">{formatCurrency(sale.sales?.hungerbox)}</TableCell>
-                  <TableCell className="text-right text-muted-foreground">{formatCurrency(sale.sales?.upi)}</TableCell>
+                  <TableCell className="text-right text-muted-foreground">{formatCurrency(sale.hungerboxSales)}</TableCell>
+                  <TableCell className="text-right text-muted-foreground">{formatCurrency(sale.upiSales)}</TableCell>
                   <TableCell className="text-right font-semibold text-accent">{formatCurrency(totalAmount)}</TableCell>
                   <TableCell className="text-right font-bold text-primary">{formatCurrency(amountWithDeduction)}</TableCell>
                   <TableCell className="flex gap-2">
@@ -204,5 +204,3 @@ export function FoodSalesTable({
     </TooltipProvider>
   );
 }
-
-    

@@ -139,17 +139,11 @@ export type FoodExpensePresetFormValues = z.infer<typeof foodExpensePresetFormSc
 export const foodSaleTypes = ["Non-MRP", "MRP"] as const;
 export type FoodSaleType = (typeof foodSaleTypes)[number];
 
-const dailySalesSchema = z.object({
-  hungerbox: z.coerce.number().min(0).default(0),
-  upi: z.coerce.number().min(0).default(0),
-});
-
-export type DailySalesBreakdown = z.infer<typeof dailySalesSchema>;
-
 export const foodSaleTransactionFormSchema = z.object({
   saleDate: z.date({ required_error: "Sale date is required." }),
   saleType: z.enum(foodSaleTypes).default("Non-MRP"),
-  sales: dailySalesSchema.optional().default({ hungerbox: 0, upi: 0 }),
+  hungerboxSales: z.coerce.number().min(0).default(0),
+  upiSales: z.coerce.number().min(0).default(0),
   totalAmount: z.coerce.number().min(0),
   notes: z.string().optional().nullable(),
 });
@@ -157,10 +151,10 @@ export const foodSaleTransactionFormSchema = z.object({
 
 export type FoodSaleTransactionFormValues = z.infer<typeof foodSaleTransactionFormSchema>;
 
-export interface FoodSaleTransaction extends Omit<FoodSaleTransactionFormValues, 'sales'> {
-  id: string; // Firestore document ID (YYYY-MM-DD_stallId)
-  saleType: FoodSaleType;
-  sales: DailySalesBreakdown;
+export interface FoodSaleTransaction extends Omit<FoodSaleTransactionFormValues, 'hungerboxSales' | 'upiSales'> {
+  id: string; // Firestore document ID (YYYY-MM-DD_stallId_saleType)
+  hungerboxSales: number;
+  upiSales: number;
   siteId: string;
   stallId: string;
   recordedByUid: string;

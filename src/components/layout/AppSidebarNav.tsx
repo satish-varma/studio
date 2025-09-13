@@ -85,6 +85,7 @@ const navItems: NavItem[] = [
     subItems: [
       { href: "/foodstall/dashboard", label: "Dashboard", roles: ['staff', 'manager', 'admin'] },
       { href: "/foodstall/expenses/record", label: "Add Expense", roles: ['staff', 'manager', 'admin'], icon: PlusCircle },
+      { href: "/foodstall/sales/record", label: "Add Sales", roles: ['staff', 'manager', 'admin'], icon: PlusCircle },
       { href: "/foodstall/sales", label: "Sales Summaries", roles: ['staff', 'manager', 'admin'] },
       { href: "/foodstall/expenses", label: "Expense History", roles: ['staff', 'manager', 'admin'] },
       { href: "/foodstall/reports", label: "Reports", roles: ['manager', 'admin'] },
@@ -129,35 +130,26 @@ export function AppSidebarNav() {
   const { user } = useAuth();
   const { setOpenMobile } = useSidebar(); // Get function to close mobile sidebar
   
-  const [openMenus, setOpenMenus] = useState<Set<string>>(() => {
-    // Initialize with '/foodstall' open
-    const initialOpen = new Set<string>();
-    initialOpen.add('/foodstall');
-    
-    // Also check if the current path is under a different parent
+  const [openMenus, setOpenMenus] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    // Determine the active parent menu based on the current path
     const activeParent = navItems.find(item => 
       item.subItems && 
       pathname.startsWith(item.href) && 
-      !item.exactMatch &&
-      item.href !== '/foodstall'
+      !item.exactMatch
     );
-    if (activeParent) {
-      initialOpen.add(activeParent.href);
-    }
-    
-    return initialOpen;
-  });
 
-  useEffect(() => {
-    const activeParent = navItems.find(item => item.subItems && pathname.startsWith(item.href) && !item.exactMatch);
-    if (activeParent && !openMenus.has(activeParent.href)) {
+    // If an active parent is found, ensure its menu is open
+    if (activeParent) {
       setOpenMenus(prev => {
+        if (prev.has(activeParent.href)) return prev; // Already open, do nothing
         const newSet = new Set(prev);
         newSet.add(activeParent.href);
         return newSet;
       });
     }
-  }, [pathname, openMenus]);
+  }, [pathname]);
 
   const toggleMenu = (href: string) => {
     setOpenMenus(prev => {

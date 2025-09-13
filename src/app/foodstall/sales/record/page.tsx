@@ -38,8 +38,6 @@ if (!getApps().length) {
   db = getFirestore(getApp());
 }
 
-const defaultSaleValues = { hungerbox: 0, upi: 0 };
-
 export default function RecordFoodSalePage() {
   const { user, activeSiteId, activeStallId } = useAuth();
   const { toast } = useToast();
@@ -61,24 +59,26 @@ export default function RecordFoodSalePage() {
     defaultValues: {
       saleDate: selectedDate,
       saleType: selectedType,
-      sales: defaultSaleValues,
+      hungerboxSales: 0,
+      upiSales: 0,
       totalAmount: 0,
       notes: "",
     },
   });
 
   const { watch, setValue } = form;
-  const watchedSales = watch("sales");
+  const watchedHungerbox = watch("hungerboxSales");
+  const watchedUpi = watch("upiSales");
 
   useEffect(() => {
     const calculateTotal = () => {
-      const grandTotal = (watchedSales?.hungerbox || 0) + (watchedSales?.upi || 0);
+      const grandTotal = (watchedHungerbox || 0) + (watchedUpi || 0);
       if (form.getValues("totalAmount") !== grandTotal) {
           setValue('totalAmount', grandTotal, { shouldValidate: true });
       }
     }
     calculateTotal();
-  }, [watchedSales, setValue, form]);
+  }, [watchedHungerbox, watchedUpi, setValue, form]);
 
   
   const fetchAndSetDataForDate = useCallback(async (date: Date, type: 'MRP' | 'Non-MRP') => {
@@ -98,13 +98,15 @@ export default function RecordFoodSalePage() {
           ...data,
           saleDate: (data.saleDate as Timestamp).toDate(),
           saleType: data.saleType || type,
-          sales: data.sales || defaultSaleValues,
+          hungerboxSales: data.hungerboxSales || 0,
+          upiSales: data.upiSales || 0,
         });
       } else {
         form.reset({
           saleDate: date,
           saleType: type,
-          sales: defaultSaleValues,
+          hungerboxSales: 0,
+          upiSales: 0,
           totalAmount: 0,
           notes: "",
         });
@@ -233,8 +235,8 @@ export default function RecordFoodSalePage() {
                 />
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 p-4 border rounded-md">
-                    <FormField control={form.control} name="sales.hungerbox" render={({ field }) => (<FormItem><FormLabel>HungerBox Sales (₹)</FormLabel><FormControl><Input type="number" min="0" step="0.01" {...field} onChange={e => field.onChange(parseFloat(e.target.value) || 0)} className="bg-input text-lg" disabled={isSubmitting || isLoadingData}/></FormControl><FormMessage/></FormItem>)}/>
-                    <FormField control={form.control} name="sales.upi" render={({ field }) => (<FormItem><FormLabel>UPI Sales (₹)</FormLabel><FormControl><Input type="number" min="0" step="0.01" {...field} onChange={e => field.onChange(parseFloat(e.target.value) || 0)} className="bg-input text-lg" disabled={isSubmitting || isLoadingData}/></FormControl><FormMessage/></FormItem>)}/>
+                    <FormField control={form.control} name="hungerboxSales" render={({ field }) => (<FormItem><FormLabel>HungerBox Sales (₹)</FormLabel><FormControl><Input type="number" min="0" step="0.01" {...field} onChange={e => field.onChange(parseFloat(e.target.value) || 0)} className="bg-input text-lg" disabled={isSubmitting || isLoadingData}/></FormControl><FormMessage/></FormItem>)}/>
+                    <FormField control={form.control} name="upiSales" render={({ field }) => (<FormItem><FormLabel>UPI Sales (₹)</FormLabel><FormControl><Input type="number" min="0" step="0.01" {...field} onChange={e => field.onChange(parseFloat(e.target.value) || 0)} className="bg-input text-lg" disabled={isSubmitting || isLoadingData}/></FormControl><FormMessage/></FormItem>)}/>
                 </div>
                 
                  <div className="pt-6 border-t">
