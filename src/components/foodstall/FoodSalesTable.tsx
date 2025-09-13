@@ -134,9 +134,11 @@ export function FoodSalesTable({
           <TableBody>
             {sales.map((sale) => {
               const hungerboxSales = sale.sales?.hungerbox || 0;
+              const upiSales = sale.sales?.upi || 0;
+              const totalAmount = hungerboxSales + upiSales;
               const commissionRate = sale.saleType === 'MRP' ? 0.08 : 0.18;
               const deduction = hungerboxSales * commissionRate;
-              const amountWithDeduction = sale.totalAmount - deduction;
+              const amountWithDeduction = totalAmount - deduction;
 
               return (
                 <TableRow key={sale.id}>
@@ -158,7 +160,7 @@ export function FoodSalesTable({
                   </TableCell>
                   <TableCell className="text-right text-muted-foreground">{formatCurrency(sale.sales?.hungerbox)}</TableCell>
                   <TableCell className="text-right text-muted-foreground">{formatCurrency(sale.sales?.upi)}</TableCell>
-                  <TableCell className="text-right font-semibold text-accent">{formatCurrency(sale.totalAmount)}</TableCell>
+                  <TableCell className="text-right font-semibold text-accent">{formatCurrency(totalAmount)}</TableCell>
                   <TableCell className="text-right font-bold text-primary">{formatCurrency(amountWithDeduction)}</TableCell>
                   <TableCell className="flex gap-2">
                       <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => handleEdit(sale)}>
