@@ -131,13 +131,13 @@ export default function FoodSalesClientPage() {
         const total = fetchedSales.reduce((sum, sale) => sum + sale.totalAmount, 0);
         
         setSales(fetchedSales);
-        setTotalSalesAmount(total);
+        setTotalSalesAmount(total); // Calculate and set total here
         setFirstVisibleDoc(snapshot.docs[0] || null);
         setLastVisibleDoc(snapshot.docs[snapshot.docs.length - 1] || null);
         setIsLastPage(snapshot.docs.length < SALES_PER_PAGE);
         setIsFirstPageReached(true);
         setCurrentPage(1);
-        setLoadingSales(false);
+        setLoadingSales(false); // Set loading to false after calculation
     }, (error) => {
         console.error("Error fetching sales data:", error);
         setErrorSales(error.message || "Failed to load sales.");
