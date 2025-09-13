@@ -131,16 +131,16 @@ export default function FoodStallReportClientPage() {
       const salesTransactions = salesSnapshot.docs.map(doc => doc.data() as FoodSaleTransaction);
       
       let totalSalesAmount = 0;
+      let totalCommission = 0;
       let totalHungerboxSales = 0;
 
       salesTransactions.forEach(sale => {
         totalSalesAmount += sale.totalAmount;
-        if (sale.breakfast) totalHungerboxSales += sale.breakfast.hungerbox || 0;
-        if (sale.lunch) totalHungerboxSales += sale.lunch.hungerbox || 0;
-        if (sale.dinner) totalHungerboxSales += sale.dinner.hungerbox || 0;
-        if (sale.snacks) totalHungerboxSales += sale.snacks.hungerbox || 0;
+        const hungerboxAmount = sale.sales?.hungerbox || 0;
+        totalHungerboxSales += hungerboxAmount;
+        const commissionRate = sale.saleType === 'MRP' ? 0.08 : 0.18;
+        totalCommission += hungerboxAmount * commissionRate;
       });
-      const totalCommission = totalHungerboxSales * 0.20;
       console.log(`${LOG_PREFIX} Fetched ${salesTransactions.length} sales transactions, total amount: ${totalSalesAmount}, commission: ${totalCommission}`);
 
 
@@ -224,7 +224,7 @@ export default function FoodStallReportClientPage() {
   
   const summaryCards = summaryData ? [
     { title: "Gross Sales", value: `₹${summaryData.totalSalesAmount.toFixed(2)}`, icon: IndianRupee, color: "text-green-600", description: `Across ${summaryData.numberOfSales} sale days` },
-    { title: "Aggregator Commission", value: `- ₹${summaryData.totalCommission.toFixed(2)}`, icon: Percent, color: "text-orange-500", description: `20% on ₹${summaryData.totalHungerboxSales.toFixed(2)} (HungerBox)` },
+    { title: "Aggregator Commission", value: `- ₹${summaryData.totalCommission.toFixed(2)}`, icon: Percent, color: "text-orange-500", description: `On ₹${summaryData.totalHungerboxSales.toFixed(2)} (HungerBox)` },
     { title: "Total Expenses", value: `- ₹${summaryData.totalExpensesAmount.toFixed(2)}`, icon: ShoppingBag, color: "text-red-500", description: `From ${summaryData.numberOfExpenses} expense records` },
     { title: "Net Profit", value: `₹${summaryData.netProfit.toFixed(2)}`, icon: TrendingUp, color: summaryData.netProfit >= 0 ? "text-accent" : "text-destructive", description: "Gross Sales - Commission - Expenses" },
   ] : [];
@@ -237,7 +237,7 @@ export default function FoodStallReportClientPage() {
   if (!user || (user.role !== 'admin' && user.role !== 'manager')) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Food Stall Reports" description="Access to reports is restricted." />
+        <PageHeader title="Food Stall Financial Report" description="Access to reports is restricted." />
         <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Access Denied</AlertTitle><AlertDescription>You do not have permission to view reports.</AlertDescription></Alert>
       </div>
     );
@@ -245,7 +245,7 @@ export default function FoodStallReportClientPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Food Stall Financial Report" description={pageHeaderDescription} />
+       <PageHeader title="Food Stall Financial Report" description="Analyze your food stall's performance with detailed sales, expense, and profit reports." />
       <ReportControls dateRange={dateRange} onDateRangeChange={setDateRange} />
 
       {loadingReport ? (
