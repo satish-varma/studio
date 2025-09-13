@@ -64,12 +64,11 @@ export default function FoodSalesClientPage() {
   const [allSites, setAllSites] = useState<Site[]>([]);
   const [stallsMap, setStallsMap] = useState<Record<string, string>>({});
   const [totalSalesAmount, setTotalSalesAmount] = useState(0);
-  const [loadingTotal, setLoadingTotal] = useState(true);
   
   const [firstVisibleDoc, setFirstVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
   const [lastVisibleDoc, setLastVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
   const [isLastPage, setIsLastPage] = useState(false);
-  const [isFirstPageReached, setIsFirstPageReached] = useState(true); // FIX: Add state definition
+  const [isFirstPageReached, setIsFirstPageReached] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   
   const [isExporting, setIsExporting] = useState(false);
@@ -131,14 +130,12 @@ export default function FoodSalesClientPage() {
     const baseConstraints = buildTransactionQuery();
     if (!baseConstraints) {
       setSales([]);
-      setTotalSalesAmount(0); // Ensure total is cleared
+      setTotalSalesAmount(0);
       setLoadingSales(false);
-      setLoadingTotal(false);
       return Promise.resolve(() => {});
     }
     
     setLoadingSales(true);
-    setLoadingTotal(true);
     setErrorSales(null);
 
     const salesCollectionRef = collection(db, "foodSaleTransactions");
@@ -167,7 +164,7 @@ export default function FoodSalesClientPage() {
         } as FoodSaleTransaction));
 
         if (direction === 'prev') {
-          fetchedSales.reverse(); // Re-reverse for display
+          fetchedSales.reverse();
         }
         
         const hasMore = fetchedSales.length > SALES_PER_PAGE;
@@ -175,26 +172,15 @@ export default function FoodSalesClientPage() {
 
         setSales(fetchedSales);
         
-        const totalQuery = query(salesCollectionRef, ...baseConstraints.filter(c => c.type !== 'orderBy'));
-        getDocs(totalQuery).then(totalSnapshot => {
-            const total = totalSnapshot.docs.reduce((sum, doc) => sum + (doc.data().totalAmount || 0), 0);
-            setTotalSalesAmount(total);
-            setLoadingTotal(false);
-        }).catch(() => setLoadingTotal(false));
-        
+        // Calculate total directly from the fetched data
+        const total = fetchedSales.reduce((sum, sale) => sum + sale.totalAmount, 0);
+        setTotalSalesAmount(total);
+
         if (snapshot.docs.length > 0) {
-            if(direction === 'prev') {
-              // Logic to handle if 'prev' lands you back on page 1.
-              // This part requires more complex state management (e.g., page history stack)
-              // For simplicity, we'll assume the user interface reflects the state correctly.
-              setIsFirstPageReached(currentPage === 1); // Simplistic check
-            } else if (direction === 'initial') {
-                setIsFirstPageReached(true);
-            } else if (direction === 'next') {
-                setIsFirstPageReached(false);
-            }
+            if(direction === 'initial') setIsFirstPageReached(true);
+            else if (direction === 'next') setIsFirstPageReached(false);
             setFirstVisibleDoc(snapshot.docs[0]);
-            setLastVisibleDoc(snapshot.docs[snapshot.docs.length - 1]);
+            setLastVisibleDoc(snapshot.docs[fetchedSales.length - 1]);
         }
         setIsLastPage(!hasMore);
         setLoadingSales(false);
@@ -203,7 +189,6 @@ export default function FoodSalesClientPage() {
         console.error("Error fetching sales data:", error);
         setErrorSales(error.message || "Failed to load sales.");
         setLoadingSales(false);
-        setLoadingTotal(false);
       }
     );
     return Promise.resolve(unsubscribe);
@@ -335,7 +320,7 @@ export default function FoodSalesClientPage() {
             <div className="text-left sm:text-right">
               <p className="text-sm text-muted-foreground">Total Sales</p>
               <div className="text-2xl font-bold">
-                {loadingTotal ? <Skeleton className="h-8 w-32 mt-1" /> : `₹${totalSalesAmount.toFixed(2)}`}
+                {loadingSales ? <Skeleton className="h-8 w-32 mt-1" /> : `₹${totalSalesAmount.toFixed(2)}`}
               </div>
             </div>
           </div>
