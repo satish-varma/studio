@@ -196,7 +196,7 @@ export default function FoodSalesClientPage() {
     
     try {
         const salesCollectionRef = collection(db, "foodSaleTransactions");
-        const exportQuery = query(salesCollectionRef, ...exportConstraints.filter(c => c.type !== 'orderBy'), orderBy("saleDate", "desc"));
+        const exportQuery = query(salesCollectionRef, ...exportConstraints);
         const querySnapshot = await getDocs(exportQuery);
         const salesToExport: FoodSaleTransaction[] = querySnapshot.docs.map(d => ({
             id: d.id, ...d.data(), saleDate: (d.data().saleDate as Timestamp).toDate(),
@@ -249,18 +249,18 @@ export default function FoodSalesClientPage() {
     }
   };
 
-  const handleDelete = async (saleId: string) => {
-    if (!db || !user || !activeSiteId) return;
-    const docRef = doc(db, "foodSaleTransactions", saleId);
+  const handleDelete = async (sale: FoodSaleTransaction) => {
+    if (!db || !user ) return;
+    const docRef = doc(db, "foodSaleTransactions", sale.id);
     try {
       await deleteDoc(docRef);
       await logFoodStallActivity(user, {
-        siteId: activeSiteId,
-        stallId: activeStallId || "N/A", // Use activeStallId or a placeholder
-        type: 'SALE_RECORDED_OR_UPDATED',
-        relatedDocumentId: saleId,
+        siteId: sale.siteId,
+        stallId: sale.stallId,
+        type: 'SALE_RECORDED_OR_UPDATED', // Using existing type for simplicity
+        relatedDocumentId: sale.id,
         details: {
-          notes: `Deleted daily sales record for document ID ${saleId}.`
+          notes: `Deleted ${sale.saleType} sales record for document ID ${sale.id}.`
         }
       });
       toast({ title: "Success", description: "Daily sales record deleted." });

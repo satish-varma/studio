@@ -30,7 +30,7 @@ interface FoodSalesTableProps {
   isFirstPage: boolean;
   currentPage: number;
   isLoading: boolean;
-  onDelete: (saleId: string) => void;
+  onDelete: (sale: FoodSaleTransaction) => void;
 }
 
 const TableRowSkeleton = () => (
@@ -181,7 +181,7 @@ export function FoodSalesTable({
                           </AlertDialogHeader>
                           <AlertDialogFooter>
                             <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => onDelete(sale.id)}>Delete</AlertDialogAction>
+                            <AlertDialogAction onClick={() => onDelete(sale)}>Delete</AlertDialogAction>
                           </AlertDialogFooter>
                         </AlertDialogContent>
                       </AlertDialog>
