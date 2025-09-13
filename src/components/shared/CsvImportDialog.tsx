@@ -109,7 +109,7 @@ export default function CsvImportDialog({ dataType, isOpen, onClose }: CsvImport
       switch (dataType) {
           case 'stock': return 'Upload a CSV file to add or update stock items. The format must match the exported CSV file, including the "ID" column for updates.';
           case 'foodExpenses': return 'Upload a CSV of food expenses. Rows with an "Expense ID" will be updated; rows without one will be created as new expenses.';
-          case 'foodSales': return 'Upload a CSV of daily sales summaries. An existing entry for a given Date, Stall, and Sale Type will be updated; otherwise, a new one is created.';
+          case 'foodSales': return 'Upload a CSV of daily sales summaries. An existing entry for a given Date, Stall Name, and Sale Type will be updated; otherwise, a new one is created. Required columns: Sale Date, Site Name, Stall Name, Sale Type, Hungerbox Sales, UPI Sales.';
           default: return 'Upload a CSV file.';
       }
   }
