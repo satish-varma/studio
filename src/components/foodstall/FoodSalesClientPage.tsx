@@ -1,6 +1,7 @@
+
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import type { FoodSaleTransaction, Site, Stall, AppUser } from "@/types";
 import { 
   getFirestore, 
@@ -17,13 +18,15 @@ import {
   DocumentData,
   endBefore,
   limitToLast,
-  onSnapshot
+  onSnapshot,
+  deleteDoc,
+  doc,
 } from "firebase/firestore";
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Info, DollarSign, Upload, Download, Building } from "lucide-react";
+import { Loader2, Info, DollarSign, Upload, Download, Building, PlusCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { FoodSalesTable } from "./FoodSalesTable";
 import { Button } from "@/components/ui/button";
@@ -31,10 +34,11 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/com
 import { format, subDays, startOfDay, endOfDay, startOfMonth } from "date-fns";
 import CsvImportDialog from "@/components/shared/CsvImportDialog";
 import PageHeader from "../shared/PageHeader";
-import { PlusCircle } from "lucide-react";
 import Link from "next/link";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../ui/select";
 import { Skeleton } from "../ui/skeleton";
+import { logFoodStallActivity } from "@/lib/foodStallLogger";
+
 
 const LOG_PREFIX = "[FoodSalesClientPage]";
 const SALES_PER_PAGE = 30; // Show a month at a time
@@ -221,6 +225,27 @@ export default function FoodSalesClientPage() {
     }
   };
 
+  const handleDelete = async (saleId: string) => {
+    if (!db || !user) return;
+    const docRef = doc(db, "foodSaleTransactions", saleId);
+    try {
+      await deleteDoc(docRef);
+      await logFoodStallActivity(user, {
+        siteId: activeSiteId!,
+        stallId: activeStallId!,
+        type: 'SALE_RECORDED_OR_UPDATED',
+        relatedDocumentId: saleId,
+        details: {
+          notes: `Deleted daily sales record for document ID ${saleId}.`
+        }
+      });
+      toast({ title: "Success", description: "Daily sales record deleted." });
+      // The onSnapshot listener will automatically update the UI.
+    } catch (error: any) {
+      toast({ title: "Error", description: `Failed to delete record: ${error.message}`, variant: "destructive" });
+    }
+  };
+
 
   if (authLoading) {
     return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading user context...</p></div>;
@@ -300,21 +325,19 @@ export default function FoodSalesClientPage() {
       {!loadingSales && !errorSales && (
         <FoodSalesTable 
           sales={sales} 
-          onNextPage={() => {}} // Pagination logic to be re-added if needed
+          onNextPage={() => {}}
           onPrevPage={() => {}}
           isLastPage={isLastPage}
           isFirstPage={isFirstPageReached}
           currentPage={currentPage}
           isLoading={loadingSales}
+          onDelete={handleDelete}
         />
       )}
       <CsvImportDialog
-        dataType="foodExpenses" // This should be a dynamic prop, maybe "foodSales"
+        dataType="foodExpenses" 
         isOpen={showImportDialog}
-        onClose={() => {
-          setShowImportDialog(false);
-          // fetchSales('initial');
-        }}
+        onClose={() => setShowImportDialog(false)}
       />
     </div>
   );

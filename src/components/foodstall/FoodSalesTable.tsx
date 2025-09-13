@@ -14,9 +14,10 @@ import type { FoodSaleTransaction } from "@/types/food";
 import { format } from "date-fns";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { ChevronLeft, ChevronRight, ShoppingCart, Edit } from "lucide-react";
+import { ChevronLeft, ChevronRight, ShoppingCart, Edit, Trash2 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRouter } from 'next/navigation';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "../ui/alert-dialog";
 
 interface FoodSalesTableProps {
   sales: FoodSaleTransaction[];
@@ -26,6 +27,7 @@ interface FoodSalesTableProps {
   isFirstPage: boolean;
   currentPage: number;
   isLoading: boolean;
+  onDelete: (saleId: string) => void;
 }
 
 const TableRowSkeleton = () => (
@@ -47,7 +49,8 @@ export function FoodSalesTable({
   isLastPage,
   isFirstPage,
   currentPage,
-  isLoading
+  isLoading,
+  onDelete,
 }: FoodSalesTableProps) {
   const router = useRouter();
 
@@ -134,11 +137,31 @@ export function FoodSalesTable({
                     <Tooltip><TooltipTrigger asChild><span className="cursor-help underline decoration-dotted">{sale.notes.substring(0, 35)}{sale.notes.length > 35 ? "..." : ""}</span></TooltipTrigger><TooltipContent className="max-w-xs"><p>{sale.notes}</p></TooltipContent></Tooltip>
                   ) : "N/A"}
                 </TableCell>
-                <TableCell>
+                <TableCell className="flex gap-2">
                     <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => handleEdit(sale.saleDate as Date)}>
                         <Edit className="h-4 w-4" />
                         <span className="sr-only">Edit</span>
                     </Button>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="destructive" size="icon" className="h-8 w-8">
+                          <Trash2 className="h-4 w-4" />
+                          <span className="sr-only">Delete</span>
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This action cannot be undone. This will permanently delete the sales record for {formatDateForDisplay(sale.saleDate)}.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction onClick={() => onDelete(sale.id)}>Delete</AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                 </TableCell>
               </TableRow>
             ))}
