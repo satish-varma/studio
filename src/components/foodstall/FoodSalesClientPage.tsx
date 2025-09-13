@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { FoodSaleTransaction } from "@/types/food";
+import type { FoodSaleTransaction, Site, Stall } from "@/types";
 import { 
   getFirestore, 
   collection, 
@@ -23,12 +23,17 @@ import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Info, DollarSign } from "lucide-react";
+import { Loader2, Info, DollarSign, Upload, Download, Building } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { FoodSalesTable } from "./FoodSalesTable";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { format, subDays, startOfDay, endOfDay, startOfMonth } from "date-fns";
+import CsvImportDialog from "@/components/shared/CsvImportDialog";
+import PageHeader from "../shared/PageHeader";
+import { PlusCircle } from "lucide-react";
+import Link from "next/link";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../ui/select";
 
 const LOG_PREFIX = "[FoodSalesClientPage]";
 const SALES_PER_PAGE = 30; // Show a month at a time
@@ -53,21 +58,77 @@ export default function FoodSalesClientPage() {
   const [errorSales, setErrorSales] = useState<string | null>(null);
 
   const [dateFilter, setDateFilter] = useState<DateFilterOption>('this_month');
+  const [siteFilter, setSiteFilter] = useState<string>('all');
+  const [allSites, setAllSites] = useState<Site[]>([]);
+  const [stallsMap, setStallsMap] = useState<Record<string, string>>({});
   const [totalSalesAmount, setTotalSalesAmount] = useState(0);
   
   const [firstVisibleDoc, setFirstVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
   const [lastVisibleDoc, setLastVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
   const [isLastPage, setIsLastPage] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  
+  const [isExporting, setIsExporting] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
+  
+  const effectiveSiteId = user?.role === 'admin' ? (siteFilter === 'all' ? null : siteFilter) : activeSiteId;
+
+
+  useEffect(() => {
+    if (!db || !user) return;
+    if (user.role === 'admin') {
+      const sitesQuery = query(collection(db, "sites"), orderBy("name"));
+      const unsub = onSnapshot(sitesQuery, (snapshot) => {
+        setAllSites(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()} as Site)));
+      });
+      return () => unsub();
+    }
+  }, [db, user]);
+
+  const buildTransactionQuery = useCallback(() => {
+    if (!user) return null;
+    
+    // For managers/staff, an active site MUST be selected. For admins, it's optional.
+    if (user.role !== 'admin' && !activeSiteId) return null;
+
+    let constraints: QueryConstraint[] = [orderBy("saleDate", "desc")];
+    
+    // Apply site filter
+    if (effectiveSiteId) {
+        constraints.push(where("siteId", "==", effectiveSiteId));
+    }
+    
+    // Apply stall filter if site is also selected
+    if (effectiveSiteId && activeStallId) {
+        constraints.push(where("stallId", "==", activeStallId));
+    }
+
+    const now = new Date();
+    let startDate: Date | null = null;
+    let endDate: Date | null = endOfDay(now);
+
+    switch (dateFilter) {
+      case 'today': startDate = startOfDay(now); break;
+      case 'last_7_days': startDate = startOfDay(subDays(now, 6)); break;
+      case 'this_month': startDate = startOfMonth(now); break;
+      case 'all_time': startDate = null; endDate = null; break;
+    }
+
+    if (startDate) constraints.push(where("saleDate", ">=", Timestamp.fromDate(startDate)));
+    if (endDate) constraints.push(where("saleDate", "<=", Timestamp.fromDate(endDate)));
+    
+    return constraints;
+  }, [user, activeSiteId, activeStallId, dateFilter, effectiveSiteId]);
+
 
   const fetchSales = useCallback(async (direction: 'initial' | 'next' | 'prev' = 'initial') => {
-    if (authLoading || !db || !user) {
-      if (!authLoading) setLoadingSales(false);
+    if (authLoading || !db) return;
+
+    const baseConstraints = buildTransactionQuery();
+    if (!baseConstraints) {
+      setSales([]);
+      setLoadingSales(false);
       return;
-    }
-    if (user.role !== 'admin' && !activeSiteId) {
-        if (!authLoading) setLoadingSales(false);
-        return;
     }
     
     setLoadingSales(true);
@@ -75,154 +136,159 @@ export default function FoodSalesClientPage() {
         setTotalSalesAmount(0);
     }
     setErrorSales(null);
-    console.log(`${LOG_PREFIX} Fetching sales. Direction: ${direction}, Site: ${activeSiteId}, Stall: ${activeStallId}, DateFilter: ${dateFilter}`);
 
     const salesCollectionRef = collection(db, "foodSaleTransactions");
-    let qConstraints: QueryConstraint[] = [];
+    let qConstraints: QueryConstraint[] = [...baseConstraints];
     
-    if (activeSiteId) {
-        qConstraints.push(where("siteId", "==", activeSiteId));
-        if (activeStallId) {
-          qConstraints.push(where("stallId", "==", activeStallId));
-        }
+    if (direction === 'next' && lastVisibleDoc) {
+      qConstraints.push(startAfter(lastVisibleDoc));
+    } else if (direction === 'prev' && firstVisibleDoc) {
+      qConstraints.push(endBefore(firstVisibleDoc));
     }
-    
-    const now = new Date();
-    let startDate: Date | null = null;
-    let endDate: Date | null = endOfDay(now);
-
-    switch (dateFilter) {
-        case 'today':
-            startDate = startOfDay(now);
-            break;
-        case 'last_7_days':
-            startDate = startOfDay(subDays(now, 6));
-            break;
-        case 'this_month':
-            startDate = startOfMonth(now);
-            break;
-        case 'all_time':
-            startDate = null; 
-            endDate = null;   
-            break;
-    }
-
-    if(startDate) qConstraints.push(where("saleDate", ">=", Timestamp.fromDate(startDate)));
-    if(endDate) qConstraints.push(where("saleDate", "<=", Timestamp.fromDate(endDate)));
-    
-    if (direction === 'prev' && firstVisibleDoc) {
-        qConstraints.push(orderBy("saleDate", "desc"));
-        qConstraints.push(endBefore(firstVisibleDoc));
-        qConstraints.push(limitToLast(SALES_PER_PAGE));
-    } else { // initial or next
-        qConstraints.push(orderBy("saleDate", "desc"));
-        if (direction === 'next' && lastVisibleDoc) {
-            qConstraints.push(startAfter(lastVisibleDoc));
-        }
-        qConstraints.push(limit(SALES_PER_PAGE + 1));
-    }
+    qConstraints.push(limit(SALES_PER_PAGE));
 
 
     try {
       const q = query(salesCollectionRef, ...qConstraints);
       const querySnapshot = await getDocs(q);
-      let fetchedSales: FoodSaleTransaction[] = querySnapshot.docs.map(doc => ({
+      const fetchedSales = querySnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
         saleDate: (doc.data().saleDate as Timestamp).toDate(),
       } as FoodSaleTransaction));
 
-      const hasMore = direction !== 'prev' && fetchedSales.length > SALES_PER_PAGE;
-      if (hasMore) {
-        fetchedSales.pop();
-      }
-      
       setSales(fetchedSales);
       
       if(direction === 'initial') {
-        const totalQueryConstraints = qConstraints.filter(c => c.type !== 'limit' && c.type !== 'startAfter' && c.type !== 'endBefore' && c.type !== 'limitToLast');
-        const totalQuery = query(salesCollectionRef, ...totalQueryConstraints);
+        const totalQuery = query(salesCollectionRef, ...baseConstraints.filter(c => c.type !== 'orderBy'));
         const totalSnapshot = await getDocs(totalQuery);
         const total = totalSnapshot.docs.reduce((sum, doc) => sum + (doc.data().totalAmount || 0), 0);
         setTotalSalesAmount(total);
       }
       
-      if (querySnapshot.docs.length > 0) {
-        setFirstVisibleDoc(querySnapshot.docs[0]);
-        setLastVisibleDoc(querySnapshot.docs[querySnapshot.docs.length - (hasMore ? 2 : 1)]);
-        if (direction === 'next') setCurrentPage(prev => prev + 1);
-        if (direction === 'prev') setCurrentPage(prev => Math.max(1, prev - 1));
-        setIsLastPage(!hasMore);
-      } else {
-        if (direction === 'next') setIsLastPage(true);
-        if (direction === 'initial') {
-            setTotalSalesAmount(0);
-            setIsLastPage(true);
+       if (querySnapshot.docs.length > 0) {
+            setFirstVisibleDoc(querySnapshot.docs[0]);
+            setLastVisibleDoc(querySnapshot.docs[querySnapshot.docs.length - 1]);
         }
-      }
-      console.log(`${LOG_PREFIX} Fetched ${fetchedSales.length} sales. HasMore: ${hasMore}`);
+        setIsLastPage(querySnapshot.docs.length < SALES_PER_PAGE);
+
     } catch (error: any) {
-      console.error(`${LOG_PREFIX} Error fetching sales:`, error.message, error.stack);
       setErrorSales(error.message || "Failed to load sales.");
     } finally {
       setLoadingSales(false);
     }
-  }, [authLoading, user, activeSiteId, activeStallId, db, dateFilter, firstVisibleDoc, lastVisibleDoc]);
+  }, [authLoading, db, buildTransactionQuery, lastVisibleDoc, firstVisibleDoc]);
 
-  // Effect for initial fetch and filter changes
   useEffect(() => {
-    document.title = "Food Stall Sales - StallSync";
-    setFirstVisibleDoc(null);
-    setLastVisibleDoc(null);
-    setCurrentPage(1);
     fetchSales('initial');
-    return () => { document.title = "StallSync - Stock Management"; }
-  }, [dateFilter, user, activeSiteId, activeStallId, fetchSales]);
-
-
-  const handleDateFilterChange = (filter: DateFilterOption) => {
-    setDateFilter(filter);
-  };
-
-  const handleNextPage = () => {
-    fetchSales('next');
-  };
-
-  const handlePrevPage = () => {
-    fetchSales('prev');
-  };
+  }, [fetchSales]);
   
+  const escapeCsvCell = (cellData: any): string => {
+    if (cellData === null || cellData === undefined) return "";
+    const stringData = String(cellData);
+    if (stringData.includes(",") || stringData.includes("\n") || stringData.includes('"')) {
+      return `"${stringData.replace(/"/g, '""')}"`;
+    }
+    return stringData;
+  };
+
+  const handleExport = async () => {
+    if (!db) return;
+    setIsExporting(true);
+    toast({ title: "Exporting...", description: "Fetching all matching sales data." });
+
+    const exportConstraints = buildTransactionQuery();
+    if (!exportConstraints) {
+      toast({ title: "Export Failed", description: "A valid site and date range must be selected to export.", variant: "destructive" });
+      setIsExporting(false);
+      return;
+    }
+    
+    try {
+        const salesCollectionRef = collection(db, "foodSaleTransactions");
+        const exportQuery = query(salesCollectionRef, ...exportConstraints);
+        const querySnapshot = await getDocs(exportQuery);
+        const salesToExport: FoodSaleTransaction[] = querySnapshot.docs.map(d => ({
+            id: d.id, ...d.data(), saleDate: (d.data().saleDate as Timestamp).toDate(),
+        } as FoodSaleTransaction));
+
+        if (salesToExport.length === 0) {
+            toast({ title: "No Data", description: "No sales to export with current filters.", variant: "default" });
+            setIsExporting(false);
+            return;
+        }
+        
+        const headers = ["ID", "Sale Date", "Site ID", "Stall ID", "Hungerbox Sales", "UPI Sales", "Total Amount", "Notes", "Recorded By", "Created At"];
+        const csvRows = [headers.join(',')];
+
+        for (const sale of salesToExport) {
+            const row = [
+                escapeCsvCell(sale.id),
+                escapeCsvCell(format(sale.saleDate as Date, 'yyyy-MM-dd')),
+                escapeCsvCell(sale.siteId),
+                escapeCsvCell(sale.stallId),
+                escapeCsvCell(sale.sales.hungerbox || 0),
+                escapeCsvCell(sale.sales.upi || 0),
+                escapeCsvCell(sale.totalAmount),
+                escapeCsvCell(sale.notes),
+                escapeCsvCell(sale.recordedByName || sale.recordedByUid),
+                escapeCsvCell(sale.createdAt),
+            ];
+            csvRows.push(row.join(','));
+        }
+        
+        const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = `food_sales_${format(new Date(), 'yyyy-MM-dd')}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        toast({ title: "Export Successful", description: `${salesToExport.length} records exported.` });
+    } catch (error: any) {
+        toast({ title: "Export Failed", description: `An error occurred: ${error.message}`, variant: "destructive" });
+    } finally {
+        setIsExporting(false);
+    }
+  };
+
+
   if (authLoading) {
     return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading user context...</p></div>;
   }
-  
-  if (!user) {
-    return (
-      <Alert variant="destructive">
-        <Info className="h-4 w-4" /><AlertTitle>Authentication Error</AlertTitle>
-        <AlertDescription>Could not verify user. Please try logging in again.</AlertDescription>
-      </Alert>
-    )
-  }
 
-  if (user.role !== 'admin' && !activeSiteId) {
+  if (user?.role !== 'admin' && !activeSiteId) {
     return (
-      <Alert variant="default" className="border-primary/50">
-        <Info className="h-4 w-4" /><AlertTitle>Site Selection Required</AlertTitle>
-        <AlertDescription>Please select an active site from the header to view food stall sales.</AlertDescription>
-      </Alert>
+      <>
+        <PageHeader title="Food Stall Daily Sales Summaries" description="View and edit daily sales totals." />
+        <Alert variant="default" className="border-primary/50">
+          <Info className="h-4 w-4" /><AlertTitle>Site Selection Required</AlertTitle>
+          <AlertDescription>Please select an active site from the header to view food stall sales.</AlertDescription>
+        </Alert>
+      </>
     );
   }
 
   return (
     <div className="space-y-4">
-      {user.role === 'admin' && !activeSiteId && (
-          <Alert variant="default" className="border-primary/50">
-            <Info className="h-4 w-4" /><AlertTitle>Viewing All Sites</AlertTitle>
-            <AlertDescription>You are currently viewing aggregated sales data for all stalls across all sites.</AlertDescription>
-        </Alert>
-      )}
-
+      <PageHeader
+        title="Food Stall Daily Sales Summaries"
+        description="View and edit daily sales totals for your food stall."
+        actions={
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+            <Button variant="outline" onClick={() => setShowImportDialog(true)}>
+                <Upload className="mr-2 h-4 w-4"/> Import Sales
+            </Button>
+            <Link href="/foodstall/sales/record">
+              <Button>
+                <PlusCircle className="mr-2 h-4 w-4" /> Manage Today's Sales
+              </Button>
+            </Link>
+          </div>
+        }
+      />
+      
       <Card>
         <CardHeader>
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
@@ -230,7 +296,7 @@ export default function FoodSalesClientPage() {
               <CardTitle>Filter & Summary</CardTitle>
               <CardDescription className="mt-1">
                 Total sales for the selected period.
-                {!activeSiteId ? ' (Aggregated for all sites)' : !activeStallId ? ' (Aggregated for all stalls in site)' : ''}
+                {!effectiveSiteId ? ' (Aggregated for all sites)' : !activeStallId ? ' (Aggregated for all stalls in site)' : ''}
               </CardDescription>
             </div>
             <div className="text-left sm:text-right">
@@ -242,10 +308,20 @@ export default function FoodSalesClientPage() {
           </div>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2 border-t pt-4">
-          <Button variant={dateFilter === 'today' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('today')}>Today</Button>
-          <Button variant={dateFilter === 'last_7_days' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('last_7_days')}>Last 7 Days</Button>
-          <Button variant={dateFilter === 'this_month' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('this_month')}>This Month</Button>
-          <Button variant={dateFilter === 'all_time' ? 'default' : 'outline'} onClick={() => handleDateFilterChange('all_time')}>All Time</Button>
+          <Button variant={dateFilter === 'today' ? 'default' : 'outline'} onClick={() => setDateFilter('today')}>Today</Button>
+          <Button variant={dateFilter === 'last_7_days' ? 'default' : 'outline'} onClick={() => setDateFilter('last_7_days')}>Last 7 Days</Button>
+          <Button variant={dateFilter === 'this_month' ? 'default' : 'outline'} onClick={() => setDateFilter('this_month')}>This Month</Button>
+          <Button variant={dateFilter === 'all_time' ? 'default' : 'outline'} onClick={() => setDateFilter('all_time')}>All Time</Button>
+          {user?.role === 'admin' && (
+            <Select value={siteFilter} onValueChange={setSiteFilter}>
+                <SelectTrigger className="w-full sm:w-[200px] bg-input"><Building className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by site"/></SelectTrigger>
+                <SelectContent><SelectItem value="all">All Sites</SelectItem>{allSites.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+            </Select>
+          )}
+          <Button variant="outline" onClick={handleExport} disabled={isExporting}>
+            {isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Download className="mr-2 h-4 w-4" />}
+            Export
+          </Button>
         </CardContent>
       </Card>
 
@@ -256,14 +332,22 @@ export default function FoodSalesClientPage() {
       {!loadingSales && !errorSales && (
         <FoodSalesTable 
           sales={sales} 
-          onNextPage={handleNextPage}
-          onPrevPage={handlePrevPage}
+          onNextPage={() => fetchSales('next')}
+          onPrevPage={() => fetchSales('prev')}
           isLastPage={isLastPage}
           isFirstPage={currentPage === 1}
           currentPage={currentPage}
           isLoading={loadingSales}
         />
       )}
+      <CsvImportDialog
+        dataType="foodExpenses" // This should probably be "foodSales" if we have a separate import logic
+        isOpen={showImportDialog}
+        onClose={() => {
+          setShowImportDialog(false);
+          fetchSales('initial');
+        }}
+      />
     </div>
   );
 }
