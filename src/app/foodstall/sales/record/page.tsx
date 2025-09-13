@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { foodSaleTransactionFormSchema, type FoodSaleTransactionFormValues } from "@/types/food";
-import { ArrowLeft, Loader2, Info, IndianRupee, PlusCircle } from "lucide-react";
+import { ArrowLeft, Loader2, Info, IndianRupee } from "lucide-react";
 import Link from "next/link";
 import { useState, useEffect, useCallback } from "react";
 import { useForm } from "react-hook-form";
@@ -36,10 +36,7 @@ if (!getApps().length) {
   db = getFirestore(getApp());
 }
 
-const defaultMealValues = { hungerbox: 0, upi: 0, other: 0 };
-
-const mealCategories = ["breakfast", "lunch", "dinner", "snacks"] as const;
-type MealCategory = typeof mealCategories[number];
+const defaultSaleValues = { hungerbox: 0, upi: 0 };
 
 export default function RecordFoodSalePage() {
   const { user, activeSiteId, activeStallId } = useAuth();
@@ -52,66 +49,29 @@ export default function RecordFoodSalePage() {
   const initialDate = dateParam && isValid(parseISO(dateParam)) ? parseISO(dateParam) : new Date();
   
   const [selectedDate, setSelectedDate] = useState<Date>(initialDate);
-  const [subtotals, setSubtotals] = useState<Record<MealCategory, number>>({ breakfast: 0, lunch: 0, dinner: 0, snacks: 0 });
-  const [paymentTotals, setPaymentTotals] = useState({ hungerbox: 0, upi: 0, other: 0 });
-  const [showOther, setShowOther] = useState<Record<MealCategory, boolean>>({
-    breakfast: false,
-    lunch: false,
-    dinner: false,
-    snacks: false,
-  });
 
   const form = useForm<FoodSaleTransactionFormValues>({
     resolver: zodResolver(foodSaleTransactionFormSchema),
     defaultValues: {
       saleDate: selectedDate,
-      breakfast: defaultMealValues,
-      lunch: defaultMealValues,
-      dinner: defaultMealValues,
-      snacks: defaultMealValues,
+      sales: defaultSaleValues,
       totalAmount: 0,
       notes: "",
     },
   });
 
   const { watch, setValue } = form;
-  const watchedBreakfast = watch("breakfast");
-  const watchedLunch = watch("lunch");
-  const watchedDinner = watch("dinner");
-  const watchedSnacks = watch("snacks");
+  const watchedSales = watch("sales");
 
   useEffect(() => {
-    const calculateTotals = () => {
-      const watchedFields = {
-          breakfast: watchedBreakfast,
-          lunch: watchedLunch,
-          dinner: watchedDinner,
-          snacks: watchedSnacks,
-      };
-      const newSubtotals: Record<MealCategory, number> = { breakfast: 0, lunch: 0, dinner: 0, snacks: 0 };
-      const newPaymentTotals = { hungerbox: 0, upi: 0, other: 0 };
-      let grandTotal = 0;
-      
-      mealCategories.forEach(meal => {
-          const mealData = watchedFields[meal];
-          const subtotal = (mealData?.hungerbox || 0) + (mealData?.upi || 0) + (mealData?.other || 0);
-          newSubtotals[meal] = subtotal;
-          grandTotal += subtotal;
-          
-          newPaymentTotals.hungerbox += (mealData?.hungerbox || 0);
-          newPaymentTotals.upi += (mealData?.upi || 0);
-          newPaymentTotals.other += (mealData?.other || 0);
-      });
-      
-      setSubtotals(newSubtotals);
-      setPaymentTotals(newPaymentTotals);
-      
+    const calculateTotal = () => {
+      const grandTotal = (watchedSales?.hungerbox || 0) + (watchedSales?.upi || 0);
       if (form.getValues("totalAmount") !== grandTotal) {
           setValue('totalAmount', grandTotal, { shouldValidate: true });
       }
     }
-    calculateTotals();
-  }, [watchedBreakfast, watchedLunch, watchedDinner, watchedSnacks, setValue, form]);
+    calculateTotal();
+  }, [watchedSales, setValue, form]);
 
   
   const fetchAndSetDataForDate = useCallback(async (date: Date) => {
@@ -130,26 +90,15 @@ export default function RecordFoodSalePage() {
         form.reset({
           ...data,
           saleDate: (data.saleDate as Timestamp).toDate(),
-          breakfast: data.breakfast || defaultMealValues,
-          lunch: data.lunch || defaultMealValues,
-          dinner: data.dinner || defaultMealValues,
-          snacks: data.snacks || defaultMealValues,
+          sales: data.sales || defaultSaleValues,
         });
-        const newShowOtherState: Record<MealCategory, boolean> = { breakfast: false, lunch: false, dinner: false, snacks: false };
-        mealCategories.forEach(meal => {
-            if (data[meal]?.other > 0) {
-                newShowOtherState[meal] = true;
-            }
-        });
-        setShowOther(newShowOtherState);
       } else {
         form.reset({
           saleDate: date,
-          breakfast: defaultMealValues, lunch: defaultMealValues,
-          dinner: defaultMealValues, snacks: defaultMealValues,
-          totalAmount: 0, notes: "",
+          sales: defaultSaleValues,
+          totalAmount: 0,
+          notes: "",
         });
-        setShowOther({ breakfast: false, lunch: false, dinner: false, snacks: false });
       }
     } catch (error) {
         console.error("Error fetching daily sales doc:", error);
@@ -215,41 +164,11 @@ export default function RecordFoodSalePage() {
     return <div className="max-w-2xl mx-auto mt-10"><Alert variant="default" className="border-primary/50"><Info className="h-4 w-4" /><AlertTitle>Site & Stall Context Required</AlertTitle><AlertDescription>To manage daily sales, please ensure you have an active Site and Stall selected in the header.</AlertDescription></Alert></div>;
   }
   
-  const renderMealCard = (meal: MealCategory, title: string) => (
-    <Card>
-      <CardHeader className="pb-4 flex flex-row items-center justify-between">
-        <div>
-            <CardTitle className="text-lg">{title}</CardTitle>
-            <CardDescription>Subtotal: ₹{subtotals[meal].toFixed(2)}</CardDescription>
-        </div>
-        {!showOther[meal] && (
-            <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowOther(prev => ({...prev, [meal]: true}))}
-                className="text-muted-foreground hover:text-primary"
-                aria-label={`Add other payment for ${title}`}
-            >
-                <PlusCircle className="h-4 w-4 mr-1" /> Add Other
-            </Button>
-        )}
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <FormField control={form.control} name={`${meal}.hungerbox`} render={({ field }) => (<FormItem><FormLabel className="text-xs font-normal">HungerBox</FormLabel><FormControl><Input type="number" min="0" step="0.01" {...field} className="bg-input" disabled={isSubmitting || isLoadingData}/></FormControl><FormMessage/></FormItem>)}/>
-        <FormField control={form.control} name={`${meal}.upi`} render={({ field }) => (<FormItem><FormLabel className="text-xs font-normal">UPI</FormLabel><FormControl><Input type="number" min="0" step="0.01" {...field} className="bg-input" disabled={isSubmitting || isLoadingData}/></FormControl><FormMessage/></FormItem>)}/>
-        {showOther[meal] && (
-            <FormField control={form.control} name={`${meal}.other`} render={({ field }) => (<FormItem><FormLabel className="text-xs font-normal">Other (Cash/Card)</FormLabel><FormControl><Input type="number" min="0" step="0.01" {...field} className="bg-input" disabled={isSubmitting || isLoadingData}/></FormControl><FormMessage/></FormItem>)}/>
-        )}
-      </CardContent>
-    </Card>
-  );
-
   return (
     <div className="space-y-6">
       <PageHeader
         title="Manage Daily Sales"
-        description="Select a date to view or edit the sales summary for that day, broken down by meal times."
+        description="Select a date to view or edit the sales summary for that day."
         actions={
           <Link href="/foodstall/sales">
             <Button variant="outline" disabled={isSubmitting}>
@@ -260,12 +179,12 @@ export default function RecordFoodSalePage() {
       />
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)}>
-          <Card className="max-w-4xl mx-auto shadow-lg">
+          <Card className="max-w-2xl mx-auto shadow-lg">
             <CardHeader>
               <div className="flex justify-between items-center">
                   <div>
                     <CardTitle>Daily Sales Entry</CardTitle>
-                    <CardDescription>Enter total sales received for each meal type and payment method.</CardDescription>
+                    <CardDescription>Enter total sales received for each payment method.</CardDescription>
                   </div>
                   <DatePicker date={selectedDate} onDateChange={(date) => setSelectedDate(date || new Date())} disabled={isSubmitting || isLoadingData} />
               </div>
@@ -274,32 +193,15 @@ export default function RecordFoodSalePage() {
                 <div className="h-96 flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /></div>
             ) : (
             <CardContent className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {renderMealCard("breakfast", "Breakfast Sales")}
-                    {renderMealCard("lunch", "Lunch Sales")}
-                    {renderMealCard("dinner", "Dinner Sales")}
-                    {renderMealCard("snacks", "Snacks / Other Sales")}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 p-4 border rounded-md">
+                    <FormField control={form.control} name="sales.hungerbox" render={({ field }) => (<FormItem><FormLabel>HungerBox Sales (₹)</FormLabel><FormControl><Input type="number" min="0" step="0.01" {...field} className="bg-input text-lg" disabled={isSubmitting || isLoadingData}/></FormControl><FormMessage/></FormItem>)}/>
+                    <FormField control={form.control} name="sales.upi" render={({ field }) => (<FormItem><FormLabel>UPI Sales (₹)</FormLabel><FormControl><Input type="number" min="0" step="0.01" {...field} className="bg-input text-lg" disabled={isSubmitting || isLoadingData}/></FormControl><FormMessage/></FormItem>)}/>
                 </div>
                 
                  <div className="pt-6 border-t">
-                    <CardTitle className="text-lg mb-2">Payment-wise Totals</CardTitle>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-                        <div className="p-3 rounded-md bg-muted/50">
-                            <p className="text-xs text-muted-foreground">HungerBox</p>
-                            <p className="font-semibold text-lg">₹{paymentTotals.hungerbox.toFixed(2)}</p>
-                        </div>
-                        <div className="p-3 rounded-md bg-muted/50">
-                            <p className="text-xs text-muted-foreground">UPI</p>
-                            <p className="font-semibold text-lg">₹{paymentTotals.upi.toFixed(2)}</p>
-                        </div>
-                        <div className="p-3 rounded-md bg-muted/50">
-                            <p className="text-xs text-muted-foreground">Other (Cash/Card)</p>
-                            <p className="font-semibold text-lg">₹{paymentTotals.other.toFixed(2)}</p>
-                        </div>
-                        <div className="p-3 rounded-md bg-primary/10 border border-primary/20">
-                            <p className="text-xs text-primary/80">Grand Total</p>
-                            <p className="font-bold text-lg text-primary">₹{form.getValues('totalAmount').toFixed(2)}</p>
-                        </div>
+                    <div className="flex justify-between items-center">
+                        <CardTitle className="text-lg">Grand Total</CardTitle>
+                        <p className="font-bold text-2xl text-primary">₹{form.getValues('totalAmount').toFixed(2)}</p>
                     </div>
                 </div>
 

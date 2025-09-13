@@ -12,7 +12,7 @@ import { getFirestore, collection, query, where, onSnapshot, Timestamp, QueryCon
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { startOfDay, endOfDay, subDays, startOfMonth } from "date-fns";
-import type { FoodItemExpense, FoodSaleTransaction, PaymentBreakdown } from "@/types";
+import type { FoodItemExpense, FoodSaleTransaction, DailySalesBreakdown } from "@/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -32,7 +32,7 @@ if (!getApps().length) {
 }
 
 type DateFilterOption = 'today' | 'last_7_days' | 'this_month' | 'all_time';
-type SummaryViewOption = 'by_expense_category' | 'by_payment_method' | 'by_meal_time' | 'by_vendor' | 'by_expense_payment_method';
+type SummaryViewOption = 'by_expense_category' | 'by_payment_method' | 'by_vendor' | 'by_expense_payment_method';
 
 interface ExpenseCategorySummary {
   category: string;
@@ -41,11 +41,6 @@ interface ExpenseCategorySummary {
 
 interface PaymentMethodSummary {
   method: string;
-  totalAmount: number;
-}
-
-interface MealTimeSummary {
-  meal: string;
   totalAmount: number;
 }
 
@@ -69,7 +64,6 @@ export default function FoodStallDashboardPage() {
   
   const [expenseSummary, setExpenseSummary] = useState<ExpenseCategorySummary[]>([]);
   const [paymentSummary, setPaymentSummary] = useState<PaymentMethodSummary[]>([]);
-  const [mealTimeSummary, setMealTimeSummary] = useState<MealTimeSummary[]>([]);
   const [vendorSummary, setVendorSummary] = useState<VendorSummary[]>([]);
   const [expensePaymentSummary, setExpensePaymentSummary] = useState<ExpensePaymentMethodSummary[]>([]);
 
@@ -122,36 +116,21 @@ export default function FoodStallDashboardPage() {
     const unsubscribeSales = onSnapshot(salesQuery, (snapshot) => {
         let salesTotal = 0;
         let hbSalesTotal = 0;
-        const paymentMethodTotals: Record<string, number> = { HungerBox: 0, UPI: 0, Other: 0 };
-        const mealTimeTotals: Record<string, number> = { Breakfast: 0, Lunch: 0, Dinner: 0, Snacks: 0 };
+        const paymentMethodTotals: Record<string, number> = { HungerBox: 0, UPI: 0 };
         
         snapshot.forEach(doc => {
             const sale = doc.data() as FoodSaleTransaction;
             salesTotal += sale.totalAmount;
             
-            const processMeal = (mealData: PaymentBreakdown | undefined, mealName: string) => {
-                if (!mealData) return;
-                const mealTotal = (mealData.hungerbox || 0) + (mealData.upi || 0) + (mealData.other || 0);
-                if (mealTotal === 0) return;
-
-                hbSalesTotal += mealData.hungerbox || 0;
-                paymentMethodTotals.HungerBox += mealData.hungerbox || 0;
-                paymentMethodTotals.UPI += mealData.upi || 0;
-                paymentMethodTotals.Other += mealData.other || 0;
-                mealTimeTotals[mealName] += mealTotal;
-            };
-
-            processMeal(sale.breakfast, 'Breakfast');
-            processMeal(sale.lunch, 'Lunch');
-            processMeal(sale.dinner, 'Dinner');
-            processMeal(sale.snacks, 'Snacks');
+            hbSalesTotal += sale.sales?.hungerbox || 0;
+            paymentMethodTotals.HungerBox += sale.sales?.hungerbox || 0;
+            paymentMethodTotals.UPI += sale.sales?.upi || 0;
         });
 
         setTotalSales(salesTotal);
         setHungerboxSales(hbSalesTotal);
         setCommission(hbSalesTotal * 0.20);
         setPaymentSummary(Object.entries(paymentMethodTotals).map(([method, totalAmount]) => ({ method, totalAmount })));
-        setMealTimeSummary(Object.entries(mealTimeTotals).map(([meal, totalAmount]) => ({ meal, totalAmount })));
         setLoading(false);
     }, (error) => {
         console.error("Error fetching food sales:", error); setLoading(false);
@@ -254,17 +233,6 @@ export default function FoodStallDashboardPage() {
                     </TableBody>
                 </Table>
             );
-        case 'by_meal_time':
-             return (
-                 <Table>
-                    <TableHeader><TableRow><TableHead>Meal Time</TableHead><TableHead className="text-right">Total Sales</TableHead></TableRow></TableHeader>
-                    <TableBody>
-                       {mealTimeSummary.length > 0 ? mealTimeSummary.sort((a,b) => b.totalAmount - a.totalAmount).map(item => (
-                            <TableRow key={item.meal}><TableCell>{item.meal}</TableCell><TableCell className="text-right font-medium">₹{item.totalAmount.toFixed(2)}</TableCell></TableRow>
-                        )) : <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground">No sales data for this period.</TableCell></TableRow>}
-                    </TableBody>
-                </Table>
-            );
         case 'by_vendor':
              return (
                  <Table>
@@ -345,7 +313,6 @@ export default function FoodStallDashboardPage() {
                                 <SelectItem value="by_expense_category"><ShoppingBag className="mr-2 h-4 w-4" />Summary by Expense Category</SelectItem>
                                 <SelectItem value="by_payment_method"><DollarSign className="mr-2 h-4 w-4" />Summary by Sales Payment</SelectItem>
                                 <SelectItem value="by_expense_payment_method"><WalletCards className="mr-2 h-4 w-4" />Summary by Expense Payment</SelectItem>
-                                <SelectItem value="by_meal_time"><Soup className="mr-2 h-4 w-4" />Summary by Meal Time</SelectItem>
                                 <SelectItem value="by_vendor"><Truck className="mr-2 h-4 w-4" />Summary by Vendor</SelectItem>
                             </SelectContent>
                         </Select>
@@ -377,5 +344,3 @@ export default function FoodStallDashboardPage() {
     </div>
   );
 }
-
-    

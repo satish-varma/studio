@@ -10,14 +10,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import type { FoodSaleTransaction, PaymentBreakdown } from "@/types/food";
+import type { FoodSaleTransaction } from "@/types/food";
 import { format } from "date-fns";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { ChevronLeft, ChevronRight, Loader2, ShoppingCart, Edit } from "lucide-react";
+import { ChevronLeft, ChevronRight, ShoppingCart, Edit } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRouter } from 'next/navigation';
-import { Badge } from "@/components/ui/badge";
 
 interface FoodSalesTableProps {
   sales: FoodSaleTransaction[];
@@ -40,24 +39,6 @@ const TableRowSkeleton = () => (
 );
 
 const formatCurrency = (amount: number | null | undefined) => `₹${(amount || 0).toFixed(2)}`;
-
-const renderBreakdownTooltip = (meal: string, breakdown?: PaymentBreakdown) => {
-  if (!breakdown) return null;
-  const total = (breakdown.hungerbox || 0) + (breakdown.upi || 0) + (breakdown.other || 0);
-  if (total === 0) return null;
-
-  return (
-    <div key={meal}>
-      <p className="text-sm font-medium">{meal}: {formatCurrency(total)}</p>
-      <div className="pl-4 text-xs text-muted-foreground">
-        {breakdown.hungerbox > 0 && <p>HB: {formatCurrency(breakdown.hungerbox)}</p>}
-        {breakdown.upi > 0 && <p>UPI: {formatCurrency(breakdown.upi)}</p>}
-        {breakdown.other > 0 && <p>Other: {formatCurrency(breakdown.other)}</p>}
-      </div>
-    </div>
-  );
-};
-
 
 export function FoodSalesTable({
   sales,
@@ -134,22 +115,18 @@ export function FoodSalesTable({
               <TableRow key={sale.id}>
                 <TableCell className="font-medium text-foreground">{formatDateForDisplay(sale.saleDate)}</TableCell>
                 <TableCell className="text-right">
-                   <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                           <span className="font-semibold text-accent cursor-help underline decoration-dotted">{formatCurrency(sale.totalAmount)}</span>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <div className="p-2 space-y-2">
-                            <p className="font-bold border-b pb-1 mb-1">Sales Breakdown:</p>
-                            {renderBreakdownTooltip('Breakfast', sale.breakfast)}
-                            {renderBreakdownTooltip('Lunch', sale.lunch)}
-                            {renderBreakdownTooltip('Dinner', sale.dinner)}
-                            {renderBreakdownTooltip('Snacks', sale.snacks)}
-                          </div>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
+                   <Tooltip>
+                      <TooltipTrigger asChild>
+                         <span className="font-semibold text-accent cursor-help underline decoration-dotted">{formatCurrency(sale.totalAmount)}</span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <div className="p-2 space-y-1">
+                          <p className="font-bold border-b pb-1 mb-1">Sales Breakdown:</p>
+                          <p>Hungerbox: {formatCurrency(sale.sales?.hungerbox)}</p>
+                          <p>UPI: {formatCurrency(sale.sales?.upi)}</p>
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
                 </TableCell>
                 <TableCell className="text-muted-foreground text-xs hidden md:table-cell">{sale.recordedByName || sale.recordedByUid.substring(0, 8)}</TableCell>
                 <TableCell className="text-xs text-muted-foreground max-w-[250px] truncate">

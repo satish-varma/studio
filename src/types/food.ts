@@ -135,22 +135,18 @@ export const foodExpensePresetFormSchema = z.object({
 export type FoodExpensePresetFormValues = z.infer<typeof foodExpensePresetFormSchema>;
 
 
-// --------------- Food Sale Tracking (Meal Time & Payment Type Based) ---------------
+// --------------- Food Sale Tracking (Simplified Daily Total) ---------------
 
-const paymentBreakdownSchema = z.object({
+const dailySalesSchema = z.object({
   hungerbox: z.coerce.number().min(0).default(0),
   upi: z.coerce.number().min(0).default(0),
-  other: z.coerce.number().min(0).default(0),
 });
 
-export type PaymentBreakdown = z.infer<typeof paymentBreakdownSchema>;
+export type DailySalesBreakdown = z.infer<typeof dailySalesSchema>;
 
 export const foodSaleTransactionFormSchema = z.object({
   saleDate: z.date({ required_error: "Sale date is required." }),
-  breakfast: paymentBreakdownSchema.optional().default({ hungerbox: 0, upi: 0, other: 0 }),
-  lunch: paymentBreakdownSchema.optional().default({ hungerbox: 0, upi: 0, other: 0 }),
-  dinner: paymentBreakdownSchema.optional().default({ hungerbox: 0, upi: 0, other: 0 }),
-  snacks: paymentBreakdownSchema.optional().default({ hungerbox: 0, upi: 0, other: 0 }),
+  sales: dailySalesSchema.optional().default({ hungerbox: 0, upi: 0 }),
   totalAmount: z.coerce.number().min(0),
   notes: z.string().optional().nullable(),
 });
@@ -158,12 +154,9 @@ export const foodSaleTransactionFormSchema = z.object({
 
 export type FoodSaleTransactionFormValues = z.infer<typeof foodSaleTransactionFormSchema>;
 
-export interface FoodSaleTransaction extends Omit<FoodSaleTransactionFormValues, 'breakfast' | 'lunch' | 'dinner' | 'snacks'> {
+export interface FoodSaleTransaction extends Omit<FoodSaleTransactionFormValues, 'sales'> {
   id: string; // Firestore document ID (YYYY-MM-DD_stallId)
-  breakfast: PaymentBreakdown;
-  lunch: PaymentBreakdown;
-  dinner: PaymentBreakdown;
-  snacks: PaymentBreakdown;
+  sales: DailySalesBreakdown;
   siteId: string;
   stallId: string;
   recordedByUid: string;
