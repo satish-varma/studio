@@ -136,6 +136,8 @@ export type FoodExpensePresetFormValues = z.infer<typeof foodExpensePresetFormSc
 
 
 // --------------- Food Sale Tracking (Simplified Daily Total) ---------------
+export const foodSaleTypes = ["Non-MRP", "MRP"] as const;
+export type FoodSaleType = (typeof foodSaleTypes)[number];
 
 const dailySalesSchema = z.object({
   hungerbox: z.coerce.number().min(0).default(0),
@@ -146,6 +148,7 @@ export type DailySalesBreakdown = z.infer<typeof dailySalesSchema>;
 
 export const foodSaleTransactionFormSchema = z.object({
   saleDate: z.date({ required_error: "Sale date is required." }),
+  saleType: z.enum(foodSaleTypes).default("Non-MRP"),
   sales: dailySalesSchema.optional().default({ hungerbox: 0, upi: 0 }),
   totalAmount: z.coerce.number().min(0),
   notes: z.string().optional().nullable(),
@@ -156,6 +159,7 @@ export type FoodSaleTransactionFormValues = z.infer<typeof foodSaleTransactionFo
 
 export interface FoodSaleTransaction extends Omit<FoodSaleTransactionFormValues, 'sales'> {
   id: string; // Firestore document ID (YYYY-MM-DD_stallId)
+  saleType: FoodSaleType;
   sales: DailySalesBreakdown;
   siteId: string;
   stallId: string;

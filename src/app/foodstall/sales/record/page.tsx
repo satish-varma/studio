@@ -5,7 +5,7 @@ import PageHeader from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { foodSaleTransactionFormSchema, type FoodSaleTransactionFormValues } from "@/types/food";
+import { foodSaleTransactionFormSchema, type FoodSaleTransactionFormValues, foodSaleTypes } from "@/types/food";
 import { ArrowLeft, Loader2, Info, IndianRupee } from "lucide-react";
 import Link from "next/link";
 import { useState, useEffect, useCallback } from "react";
@@ -23,6 +23,8 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { useSearchParams } from 'next/navigation';
 import { format, isValid, parseISO } from "date-fns";
 import { logFoodStallActivity } from "@/lib/foodStallLogger";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+
 
 let db: ReturnType<typeof getFirestore> | undefined;
 if (!getApps().length) {
@@ -54,6 +56,7 @@ export default function RecordFoodSalePage() {
     resolver: zodResolver(foodSaleTransactionFormSchema),
     defaultValues: {
       saleDate: selectedDate,
+      saleType: "Non-MRP",
       sales: defaultSaleValues,
       totalAmount: 0,
       notes: "",
@@ -90,11 +93,13 @@ export default function RecordFoodSalePage() {
         form.reset({
           ...data,
           saleDate: (data.saleDate as Timestamp).toDate(),
+          saleType: data.saleType || "Non-MRP",
           sales: data.sales || defaultSaleValues,
         });
       } else {
         form.reset({
           saleDate: date,
+          saleType: "Non-MRP",
           sales: defaultSaleValues,
           totalAmount: 0,
           notes: "",
@@ -142,7 +147,7 @@ export default function RecordFoodSalePage() {
         relatedDocumentId: docId,
         details: {
             totalAmount: values.totalAmount,
-            notes: values.notes,
+            notes: `Type: ${values.saleType}. Notes: ${values.notes || 'N/A'}`,
         },
       });
 
@@ -193,6 +198,33 @@ export default function RecordFoodSalePage() {
                 <div className="h-96 flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /></div>
             ) : (
             <CardContent className="space-y-6">
+                <FormField
+                  control={form.control}
+                  name="saleType"
+                  render={({ field }) => (
+                    <FormItem className="space-y-3">
+                      <FormLabel>Sale Type</FormLabel>
+                      <FormControl>
+                        <RadioGroup
+                          onValueChange={field.onChange}
+                          defaultValue={field.value}
+                          className="flex items-center space-x-4"
+                        >
+                          {foodSaleTypes.map(type => (
+                            <FormItem key={type} className="flex items-center space-x-2 space-y-0">
+                                <FormControl>
+                                    <RadioGroupItem value={type} />
+                                </FormControl>
+                                <FormLabel className="font-normal">{type}</FormLabel>
+                            </FormItem>
+                          ))}
+                        </RadioGroup>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 p-4 border rounded-md">
                     <FormField control={form.control} name="sales.hungerbox" render={({ field }) => (<FormItem><FormLabel>HungerBox Sales (₹)</FormLabel><FormControl><Input type="number" min="0" step="0.01" {...field} className="bg-input text-lg" disabled={isSubmitting || isLoadingData}/></FormControl><FormMessage/></FormItem>)}/>
                     <FormField control={form.control} name="sales.upi" render={({ field }) => (<FormItem><FormLabel>UPI Sales (₹)</FormLabel><FormControl><Input type="number" min="0" step="0.01" {...field} className="bg-input text-lg" disabled={isSubmitting || isLoadingData}/></FormControl><FormMessage/></FormItem>)}/>

@@ -19,6 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useRouter } from 'next/navigation';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "../ui/alert-dialog";
 import type { Timestamp } from "firebase/firestore";
+import { Badge } from "../ui/badge";
 
 interface FoodSalesTableProps {
   sales: FoodSaleTransaction[];
@@ -36,6 +37,7 @@ const TableRowSkeleton = () => (
   <TableRow>
     <TableCell><Skeleton className="h-4 w-24" /></TableCell>
     <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-28" /></TableCell>
+    <TableCell><Skeleton className="h-4 w-20" /></TableCell>
     <TableCell className="text-right"><Skeleton className="h-4 w-20 inline-block" /></TableCell>
     <TableCell className="text-right"><Skeleton className="h-4 w-20 inline-block" /></TableCell>
     <TableCell className="text-right"><Skeleton className="h-4 w-24 inline-block" /></TableCell>
@@ -83,6 +85,7 @@ export function FoodSalesTable({
             <TableRow>
                 <TableHead>Date</TableHead>
                 <TableHead className="hidden md:table-cell">Site</TableHead>
+                <TableHead>Sale Type</TableHead>
                 <TableHead className="text-right">Hungerbox</TableHead>
                 <TableHead className="text-right">UPI</TableHead>
                 <TableHead className="text-right">Total Amount</TableHead>
@@ -118,6 +121,7 @@ export function FoodSalesTable({
             <TableRow>
               <TableHead className="w-[120px]">Date</TableHead>
               <TableHead className="hidden md:table-cell w-[150px]">Site</TableHead>
+              <TableHead>Sale Type</TableHead>
               <TableHead className="w-[120px] text-right">Hungerbox</TableHead>
               <TableHead className="w-[120px] text-right">UPI</TableHead>
               <TableHead className="w-[150px] text-right font-semibold">Total Amount</TableHead>
@@ -135,6 +139,9 @@ export function FoodSalesTable({
                         <Building size={12} className="mr-1.5 text-primary/70 flex-shrink-0" />
                         <span>{sitesMap[sale.siteId] || sale.siteId.substring(0,10)}</span>
                     </div>
+                </TableCell>
+                 <TableCell>
+                  <Badge variant={sale.saleType === "MRP" ? "outline" : "secondary"}>{sale.saleType || "Non-MRP"}</Badge>
                 </TableCell>
                 <TableCell className="text-right text-muted-foreground">{formatCurrency(sale.sales?.hungerbox)}</TableCell>
                 <TableCell className="text-right text-muted-foreground">{formatCurrency(sale.sales?.upi)}</TableCell>
