@@ -84,24 +84,6 @@ export default function FoodSalesClientPage() {
   const effectiveSiteId = user?.role === 'admin' ? (siteFilter === 'all' ? null : siteFilter) : activeSiteId;
 
 
-  useEffect(() => {
-    if (!db || !user) return;
-    
-    // Fetch sites for admin filter and sitesMap for everyone
-    const sitesQuery = query(collection(db, "sites"), orderBy("name"));
-    const unsubSites = onSnapshot(sitesQuery, (snapshot) => {
-        const fetchedSites = snapshot.docs.map(doc => ({id: doc.id, ...doc.data()} as Site));
-        const newSitesMap: Record<string, string> = {};
-        fetchedSites.forEach(site => {
-            newSitesMap[site.id] = site.name;
-        });
-        setAllSites(fetchedSites);
-        setSitesMap(newSitesMap);
-    });
-
-    return () => unsubSites();
-  }, [db, user]);
-
   const buildTransactionQuery = useCallback(() => {
     if (!user) return null;
     if (user.role !== 'admin' && !activeSiteId) return null;
@@ -126,7 +108,7 @@ export default function FoodSalesClientPage() {
     return constraints;
   }, [user, activeSiteId, activeStallId, dateFilter, effectiveSiteId]);
 
-  useEffect(() => {
+  const fetchSalesAndContext = useCallback(() => {
     if (authLoading || !db) return;
 
     const baseConstraints = buildTransactionQuery();
@@ -151,7 +133,7 @@ export default function FoodSalesClientPage() {
         const total = fetchedSales.reduce((sum, sale) => sum + sale.totalAmount, 0);
         
         setSales(fetchedSales);
-        setTotalSalesAmount(total); // Calculate total here
+        setTotalSalesAmount(total);
         setFirstVisibleDoc(snapshot.docs[0] || null);
         setLastVisibleDoc(snapshot.docs[snapshot.docs.length - 1] || null);
         setIsLastPage(snapshot.docs.length < SALES_PER_PAGE);
@@ -164,6 +146,15 @@ export default function FoodSalesClientPage() {
         setLoadingSales(false);
     });
 
+    const sitesQuery = query(collection(db, "sites"), orderBy("name"));
+    const unsubSites = onSnapshot(sitesQuery, (snapshot) => {
+        const fetchedSites = snapshot.docs.map(doc => ({id: doc.id, ...doc.data()} as Site));
+        const newSitesMap: Record<string, string> = {};
+        fetchedSites.forEach(site => newSitesMap[site.id] = site.name);
+        setAllSites(fetchedSites);
+        setSitesMap(newSitesMap);
+    });
+
     const stallsQuery = query(collection(db, "stalls"));
     const unsubStalls = onSnapshot(stallsQuery, (snapshot) => {
       const newStallsMap: Record<string, string> = {};
@@ -173,10 +164,19 @@ export default function FoodSalesClientPage() {
 
     return () => {
       unsubscribe();
+      unsubSites();
       unsubStalls();
     };
   }, [authLoading, db, buildTransactionQuery]);
-  
+
+  useEffect(() => {
+    const unsubscribe = fetchSalesAndContext();
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
+  }, [fetchSalesAndContext]);
   
   const escapeCsvCell = (cellData: any): string => {
     if (cellData === null || cellData === undefined) return "";

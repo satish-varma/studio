@@ -1,3 +1,4 @@
+
 "use client";
 
 import {
@@ -12,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import type { FoodSaleTransaction } from "@/types/food";
 import { format } from "date-fns";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { ChevronLeft, ChevronRight, ShoppingCart, Edit, Trash2, Building } from "lucide-react";
+import { ChevronLeft, ChevronRight, ShoppingCart, Edit, Trash2, Building, Store } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRouter } from 'next/navigation';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "../ui/alert-dialog";
@@ -22,6 +23,7 @@ import { Badge } from "../ui/badge";
 interface FoodSalesTableProps {
   sales: FoodSaleTransaction[];
   sitesMap: Record<string, string>;
+  stallsMap: Record<string, string>;
   onNextPage: () => void;
   onPrevPage: () => void;
   isLastPage: boolean;
@@ -35,13 +37,12 @@ const TableRowSkeleton = () => (
   <TableRow>
     <TableCell><Skeleton className="h-4 w-24" /></TableCell>
     <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-28" /></TableCell>
+    <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-28" /></TableCell>
     <TableCell><Skeleton className="h-4 w-20" /></TableCell>
     <TableCell className="text-right"><Skeleton className="h-4 w-20 inline-block" /></TableCell>
     <TableCell className="text-right"><Skeleton className="h-4 w-20 inline-block" /></TableCell>
     <TableCell className="text-right"><Skeleton className="h-4 w-24 inline-block" /></TableCell>
     <TableCell className="text-right"><Skeleton className="h-4 w-24 inline-block" /></TableCell>
-    <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-24" /></TableCell>
-    <TableCell><Skeleton className="h-4 w-full" /></TableCell>
     <TableCell><Skeleton className="h-8 w-8" /></TableCell>
   </TableRow>
 );
@@ -51,6 +52,7 @@ const formatCurrency = (amount: number | null | undefined) => `₹${(amount || 0
 export function FoodSalesTable({
   sales,
   sitesMap,
+  stallsMap,
   onNextPage,
   onPrevPage,
   isLastPage,
@@ -71,9 +73,9 @@ export function FoodSalesTable({
     }
   };
   
-  const handleEdit = (date: Date) => {
-    const dateString = format(date, 'yyyy-MM-dd');
-    router.push(`/foodstall/sales/record?date=${dateString}`);
+  const handleEdit = (sale: FoodSaleTransaction) => {
+    const dateString = format(sale.saleDate as Date, 'yyyy-MM-dd');
+    router.push(`/foodstall/sales/record?date=${dateString}&type=${sale.saleType}`);
   };
 
   if (isLoading && sales.length === 0) {
@@ -84,13 +86,12 @@ export function FoodSalesTable({
             <TableRow>
                 <TableHead>Date</TableHead>
                 <TableHead className="hidden md:table-cell">Site</TableHead>
+                <TableHead className="hidden md:table-cell">Stall</TableHead>
                 <TableHead>Sale Type</TableHead>
                 <TableHead className="text-right">Hungerbox</TableHead>
                 <TableHead className="text-right">UPI</TableHead>
                 <TableHead className="text-right">Total Amount</TableHead>
                 <TableHead className="text-right">With Deduction</TableHead>
-                <TableHead className="hidden md:table-cell">Recorded By</TableHead>
-                <TableHead>Notes</TableHead>
                 <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -121,13 +122,12 @@ export function FoodSalesTable({
             <TableRow>
               <TableHead className="w-[120px]">Date</TableHead>
               <TableHead className="hidden md:table-cell w-[150px]">Site</TableHead>
+              <TableHead className="hidden md:table-cell w-[150px]">Stall</TableHead>
               <TableHead>Sale Type</TableHead>
               <TableHead className="w-[120px] text-right">Hungerbox</TableHead>
               <TableHead className="w-[120px] text-right">UPI</TableHead>
               <TableHead className="w-[150px] text-right font-semibold">Total Amount</TableHead>
               <TableHead className="w-[150px] text-right font-semibold">With Deduction</TableHead>
-              <TableHead className="w-[150px] hidden md:table-cell">Recorded By</TableHead>
-              <TableHead className="min-w-[150px]">Notes</TableHead>
               <TableHead className="w-[80px]">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -147,6 +147,12 @@ export function FoodSalesTable({
                           <span>{sitesMap[sale.siteId] || sale.siteId.substring(0,10)}</span>
                       </div>
                   </TableCell>
+                   <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
+                      <div className="flex items-center">
+                          <Store size={12} className="mr-1.5 text-accent/70 flex-shrink-0" />
+                          <span>{stallsMap[sale.stallId] || sale.stallId.substring(0,10)}</span>
+                      </div>
+                  </TableCell>
                   <TableCell>
                     <Badge variant={sale.saleType === "MRP" ? "outline" : "secondary"}>{sale.saleType || "Non-MRP"}</Badge>
                   </TableCell>
@@ -154,14 +160,8 @@ export function FoodSalesTable({
                   <TableCell className="text-right text-muted-foreground">{formatCurrency(sale.sales?.upi)}</TableCell>
                   <TableCell className="text-right font-semibold text-accent">{formatCurrency(sale.totalAmount)}</TableCell>
                   <TableCell className="text-right font-bold text-primary">{formatCurrency(amountWithDeduction)}</TableCell>
-                  <TableCell className="text-muted-foreground text-xs hidden md:table-cell">{sale.recordedByName || sale.recordedByUid.substring(0, 8)}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground max-w-[250px] truncate">
-                    {sale.notes ? (
-                      <Tooltip><TooltipTrigger asChild><span className="cursor-help underline decoration-dotted">{sale.notes.substring(0, 35)}{sale.notes.length > 35 ? "..." : ""}</span></TooltipTrigger><TooltipContent className="max-w-xs"><p>{sale.notes}</p></TooltipContent></Tooltip>
-                    ) : "N/A"}
-                  </TableCell>
                   <TableCell className="flex gap-2">
-                      <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => handleEdit(sale.saleDate as Date)}>
+                      <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => handleEdit(sale)}>
                           <Edit className="h-4 w-4" />
                           <span className="sr-only">Edit</span>
                       </Button>
@@ -176,7 +176,7 @@ export function FoodSalesTable({
                           <AlertDialogHeader>
                             <AlertDialogTitle>Are you sure?</AlertDialogTitle>
                             <AlertDialogDescription>
-                              This action cannot be undone. This will permanently delete the sales record for {formatDateForDisplay(sale.saleDate)}.
+                              This action cannot be undone. This will permanently delete the {sale.saleType} sales record for {formatDateForDisplay(sale.saleDate)}.
                             </AlertDialogDescription>
                           </AlertDialogHeader>
                           <AlertDialogFooter>
