@@ -35,10 +35,10 @@ export type PaymentMethod = (typeof paymentMethods)[number];
 
 // Define a base object schema without refinements
 const baseFoodExpenseSchema = z.object({
-  category: z.string().min(1, { message: "Category is required." }), // Changed to string to allow 'Other' before validation
+  category: z.string().min(1, { message: "Category is required." }),
   otherCategoryDetails: z.string().optional().nullable(),
   totalCost: z.coerce.number().positive("Total cost must be a positive number"),
-  paymentMethod: z.string().min(1, { message: "Payment method is required." }), // Changed to string
+  paymentMethod: z.string().min(1, { message: "Payment method is required." }),
   otherPaymentMethodDetails: z.string().optional().nullable(),
   purchaseDate: z.date({ required_error: "Purchase date is required." }),
   vendor: z.string({ required_error: "Vendor selection is required." }).min(1, "Vendor selection is required."),
@@ -139,6 +139,7 @@ export type FoodExpensePresetFormValues = z.infer<typeof foodExpensePresetFormSc
 export const foodSaleTypes = ["Non-MRP", "MRP"] as const;
 export type FoodSaleType = (typeof foodSaleTypes)[number];
 
+// Refactored to a flat structure for easier CSV mapping and form handling.
 export const foodSaleTransactionFormSchema = z.object({
   saleDate: z.date({ required_error: "Sale date is required." }),
   saleType: z.enum(foodSaleTypes).default("Non-MRP"),
@@ -151,17 +152,23 @@ export const foodSaleTransactionFormSchema = z.object({
 
 export type FoodSaleTransactionFormValues = z.infer<typeof foodSaleTransactionFormSchema>;
 
-export interface FoodSaleTransaction extends Omit<FoodSaleTransactionFormValues, 'hungerboxSales' | 'upiSales'> {
+export interface FoodSaleTransaction {
   id: string; // Firestore document ID (YYYY-MM-DD_stallId_saleType)
-  hungerboxSales: number;
-  upiSales: number;
+  saleDate: Date | Timestamp;
   siteId: string;
   stallId: string;
+  saleType: FoodSaleType;
+  // Refactored from a nested 'sales' object to flat properties
+  hungerboxSales: number;
+  upiSales: number;
+  totalAmount: number;
+  notes: string | null | undefined;
   recordedByUid: string;
   recordedByName?: string; // Optional
   createdAt: string; // ISO date string
   updatedAt: string; // ISO date string
 }
+
 
 export interface FoodSaleTransactionAdmin extends Omit<FoodSaleTransaction, 'saleDate' | 'createdAt' | 'updatedAt'> {
   saleDate: Timestamp;

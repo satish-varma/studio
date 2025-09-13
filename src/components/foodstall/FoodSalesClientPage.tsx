@@ -26,7 +26,7 @@ import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Info, DollarSign, Upload, Download, Building, PlusCircle } from "lucide-react";
+import { Loader2, Info, DollarSign, Upload, Download, Building, PlusCircle, Mail } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { FoodSalesTable } from "./FoodSalesTable";
 import { Button } from "@/components/ui/button";
@@ -80,6 +80,7 @@ export default function FoodSalesClientPage() {
   
   const [isExporting, setIsExporting] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
+  const [isGmailImporting, setIsGmailImporting] = useState(false);
   
   const effectiveSiteId = user?.role === 'admin' ? (siteFilter === 'all' ? null : siteFilter) : activeSiteId;
 
@@ -130,7 +131,7 @@ export default function FoodSalesClientPage() {
             saleDate: (doc.data().saleDate as Timestamp).toDate(),
         } as FoodSaleTransaction));
 
-        const total = fetchedSales.reduce((sum, sale) => sum + (sale.hungerboxSales || 0) + (sale.upiSales || 0), 0);
+        const total = fetchedSales.reduce((sum, sale) => sum + (sale.totalAmount || 0), 0);
         
         setSales(fetchedSales);
         setTotalSalesAmount(total);
@@ -178,78 +179,52 @@ export default function FoodSalesClientPage() {
     };
   }, [fetchSalesAndContext]);
   
-  const escapeCsvCell = (cellData: any): string => {
-    if (cellData === null || cellData === undefined) return "";
-    const stringData = String(cellData);
-    if (stringData.includes(",") || stringData.includes("\n") || stringData.includes('"')) {
-      return `"${stringData.replace(/"/g, '""')}"`;
+  const handleGmailImport = async () => {
+    if (!user || !activeSiteId || !activeStallId) {
+        toast({ title: "Context Required", description: "Please select a specific site and stall before importing from Gmail.", variant: "destructive"});
+        return;
     }
-    return stringData;
-  };
+    
+    // Check for user tokens, if not present, initiate OAuth flow
+    const tokensRef = doc(db, 'user_tokens', user.uid);
+    const tokenSnap = await getDocs(query(collection(db, 'user_tokens'), where('uid', '==', user.uid)));
 
-  const handleExport = async () => {
-    if (!db) return;
-    setIsExporting(true);
-    toast({ title: "Exporting...", description: "Fetching all matching sales data." });
+    if (tokenSnap.empty) {
+        const authUrl = `/api/auth/google/initiate?uid=${user.uid}`;
+        const authWindow = window.open(authUrl, '_blank', 'width=500,height=600');
+        
+        const messageListener = async (event: MessageEvent) => {
+            if (event.origin !== window.location.origin) return;
+            if (event.data === 'auth_success') {
+                toast({ title: "Gmail Connected!", description: "Your account is connected. You can now try importing again." });
+                window.removeEventListener('message', messageListener);
+                authWindow?.close();
+            }
+        };
+        window.addEventListener('message', messageListener);
+        return;
+    }
 
-    const exportConstraints: QueryConstraint[] = buildTransactionQuery() || [];
+    setIsGmailImporting(true);
+    toast({ title: "Importing from Gmail...", description: "Checking for new Hungerbox sales emails. This may take a moment." });
     
     try {
-        const salesCollectionRef = collection(db, "foodSaleTransactions");
-        const exportQuery = query(salesCollectionRef, ...exportConstraints);
-        const querySnapshot = await getDocs(exportQuery);
-        const salesToExport: FoodSaleTransaction[] = querySnapshot.docs.map(d => ({
-            id: d.id, ...d.data(), saleDate: (d.data().saleDate as Timestamp).toDate(),
-        } as FoodSaleTransaction));
-
-        if (salesToExport.length === 0) {
-            toast({ title: "No Data", description: "No sales to export with current filters.", variant: "default" });
-            setIsExporting(false);
-            return;
-        }
-        
-        const headers = ["ID", "Sale Date", "Site Name", "Stall Name", "Sale Type", "Hungerbox Sales", "UPI Sales", "Total Amount", "Amount After Deduction", "Notes", "Recorded By"];
-        const csvRows = [headers.join(',')];
-
-        for (const sale of salesToExport) {
-            const hungerboxSales = sale.hungerboxSales || 0;
-            const upiSales = sale.upiSales || 0;
-            const totalAmount = hungerboxSales + upiSales;
-            const commissionRate = sale.saleType === 'MRP' ? 0.08 : 0.18;
-            const deduction = hungerboxSales * commissionRate;
-            const amountWithDeduction = totalAmount - deduction;
-
-            const row = [
-                escapeCsvCell(sale.id),
-                escapeCsvCell(format(sale.saleDate as Date, 'yyyy-MM-dd')),
-                escapeCsvCell(sitesMap[sale.siteId] || sale.siteId),
-                escapeCsvCell(stallsMap[sale.stallId] || sale.stallId),
-                escapeCsvCell(sale.saleType),
-                escapeCsvCell(hungerboxSales),
-                escapeCsvCell(upiSales),
-                escapeCsvCell(totalAmount),
-                escapeCsvCell(amountWithDeduction.toFixed(2)),
-                escapeCsvCell(sale.notes),
-                escapeCsvCell(sale.recordedByName || sale.recordedByUid),
-            ];
-            csvRows.push(row.join(','));
-        }
-        
-        const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement("a");
-        link.href = URL.createObjectURL(blob);
-        link.download = `food_sales_${format(new Date(), 'yyyy-MM-dd')}.csv`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        
-        toast({ title: "Export Successful", description: `${salesToExport.length} records exported.` });
+        const idToken = await auth.currentUser?.getIdToken(true);
+        const response = await fetch('/api/gmail-handler', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+            body: JSON.stringify({ siteId: activeSiteId, stallId: activeStallId }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || result.message);
+        toast({ title: "Import Complete", description: result.message, duration: 7000 });
     } catch (error: any) {
-        toast({ title: "Export Failed", description: `An error occurred: ${error.message}`, variant: "destructive" });
+        toast({ title: "Gmail Import Failed", description: error.message, variant: "destructive", duration: 7000 });
     } finally {
-        setIsExporting(false);
+        setIsGmailImporting(false);
     }
   };
+
 
   const handleDelete = async (sale: FoodSaleTransaction) => {
     if (!db || !user ) return;
@@ -333,10 +308,9 @@ export default function FoodSalesClientPage() {
                 <SelectContent><SelectItem value="all">All Sites</SelectItem>{allSites.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
             </Select>
           )}
-          <Button variant="outline" onClick={() => setShowImportDialog(true)}><Upload className="mr-2 h-4 w-4" />Import Sales</Button>
-          <Button variant="outline" onClick={handleExport} disabled={isExporting}>
-            {isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Download className="mr-2 h-4 w-4" />}
-            Export
+          <Button variant="outline" onClick={handleGmailImport} disabled={isGmailImporting}>
+            {isGmailImporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Mail className="mr-2 h-4 w-4" />}
+            Import from Gmail
           </Button>
         </CardContent>
       </Card>
@@ -359,11 +333,6 @@ export default function FoodSalesClientPage() {
           onDelete={handleDelete}
         />
       )}
-      <CsvImportDialog
-        dataType="foodSales"
-        isOpen={showImportDialog}
-        onClose={() => setShowImportDialog(false)}
-      />
     </div>
   );
 }
