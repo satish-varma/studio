@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription as UiCardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2, Save, History } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
@@ -154,7 +154,7 @@ export default function StaffDetailsForm({ staffUid, initialData, staffUser }: S
       <Card className="max-w-2xl mx-auto shadow-lg">
         <CardHeader>
           <CardTitle>{staffUser.displayName}</CardTitle>
-          <CardDescription>Role: <span className="capitalize">{staffUser.role}</span> | Email: {staffUser.email}</CardDescription>
+          <UiCardDescription>Role: <span className="capitalize">{staffUser.role}</span> | Email: {staffUser.email}</UiCardDescription>
         </CardHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)}>
@@ -183,7 +183,7 @@ export default function StaffDetailsForm({ staffUid, initialData, staffUser }: S
       <Card className="max-w-2xl mx-auto shadow-lg mt-6">
         <CardHeader>
             <CardTitle className="flex items-center"><History className="mr-2 h-5 w-5 text-primary"/> Employment History</CardTitle>
-            <CardDescription>A log of key events for this staff member.</CardDescription>
+            <UiCardDescription>A log of key events for this staff member.</UiCardDescription>
         </CardHeader>
         <CardContent>
             {loadingHistory ? (
