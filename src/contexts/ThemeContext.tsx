@@ -26,7 +26,7 @@ const initialState: ThemeProviderState = {
   setTheme: () => null,
 };
 
-const ThemeContext = createContext<ThemeProviderState>(initialState);
+const ThemeContext = React.createContext<ThemeProviderState>(initialState);
 
 export function ThemeProvider({
   children,
@@ -36,7 +36,7 @@ export function ThemeProvider({
   enableSystem = true, // Default enableSystem
   ...props
 }: ThemeProviderProps) {
-  const [theme, setTheme] = useState<Theme>(() => {
+  const [theme, setTheme] = React.useState<Theme>(() => {
     if (typeof window === 'undefined') {
       return defaultTheme;
     }
@@ -48,7 +48,7 @@ export function ThemeProvider({
     }
   });
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (typeof window === 'undefined') return;
 
     const root = window.document.documentElement;
@@ -78,7 +78,7 @@ export function ThemeProvider({
 
 
   // Listener for system theme changes when theme is 'system'
-  useEffect(() => {
+  React.useEffect(() => {
     if (typeof window === 'undefined' || theme !== 'system' || !enableSystem) return;
 
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
@@ -121,7 +121,7 @@ export function ThemeProvider({
 }
 
 export const useTheme = (): ThemeProviderState => {
-  const context = useContext(ThemeContext);
+  const context = React.useContext(ThemeContext);
 
   if (context === undefined)
     throw new Error("useTheme must be used within a ThemeProvider");
