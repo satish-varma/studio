@@ -151,7 +151,7 @@ export default function FoodSalesClientPage() {
         const total = fetchedSales.reduce((sum, sale) => sum + sale.totalAmount, 0);
         
         setSales(fetchedSales);
-        setTotalSalesAmount(total);
+        setTotalSalesAmount(total); // Calculate total here
         setFirstVisibleDoc(snapshot.docs[0] || null);
         setLastVisibleDoc(snapshot.docs[snapshot.docs.length - 1] || null);
         setIsLastPage(snapshot.docs.length < SALES_PER_PAGE);
@@ -196,7 +196,7 @@ export default function FoodSalesClientPage() {
     
     try {
         const salesCollectionRef = collection(db, "foodSaleTransactions");
-        const exportQuery = query(salesCollectionRef, ...exportConstraints);
+        const exportQuery = query(salesCollectionRef, ...exportConstraints.filter(c => c.type !== 'orderBy'), orderBy("saleDate", "desc"));
         const querySnapshot = await getDocs(exportQuery);
         const salesToExport: FoodSaleTransaction[] = querySnapshot.docs.map(d => ({
             id: d.id, ...d.data(), saleDate: (d.data().saleDate as Timestamp).toDate(),
@@ -208,21 +208,27 @@ export default function FoodSalesClientPage() {
             return;
         }
         
-        const headers = ["ID", "Sale Date", "Site ID", "Stall ID", "Hungerbox Sales", "UPI Sales", "Total Amount", "Notes", "Recorded By", "Created At"];
+        const headers = ["ID", "Sale Date", "Site Name", "Stall Name", "Sale Type", "Hungerbox Sales", "UPI Sales", "Total Amount", "Amount After Deduction", "Notes", "Recorded By"];
         const csvRows = [headers.join(',')];
 
         for (const sale of salesToExport) {
+            const hungerboxSales = sale.sales?.hungerbox || 0;
+            const commissionRate = sale.saleType === 'MRP' ? 0.08 : 0.18;
+            const deduction = hungerboxSales * commissionRate;
+            const amountWithDeduction = sale.totalAmount - deduction;
+
             const row = [
                 escapeCsvCell(sale.id),
                 escapeCsvCell(format(sale.saleDate as Date, 'yyyy-MM-dd')),
-                escapeCsvCell(sale.siteId),
-                escapeCsvCell(sale.stallId),
+                escapeCsvCell(sitesMap[sale.siteId] || sale.siteId),
+                escapeCsvCell(stallsMap[sale.stallId] || sale.stallId),
+                escapeCsvCell(sale.saleType),
                 escapeCsvCell(sale.sales?.hungerbox || 0),
                 escapeCsvCell(sale.sales?.upi || 0),
                 escapeCsvCell(sale.totalAmount),
+                escapeCsvCell(amountWithDeduction.toFixed(2)),
                 escapeCsvCell(sale.notes),
                 escapeCsvCell(sale.recordedByName || sale.recordedByUid),
-                escapeCsvCell(sale.createdAt),
             ];
             csvRows.push(row.join(','));
         }
@@ -343,6 +349,7 @@ export default function FoodSalesClientPage() {
         <FoodSalesTable 
           sales={sales} 
           sitesMap={sitesMap}
+          stallsMap={stallsMap}
           onNextPage={() => {}}
           onPrevPage={() => {}}
           isLastPage={isLastPage}
@@ -353,7 +360,7 @@ export default function FoodSalesClientPage() {
         />
       )}
       <CsvImportDialog
-        dataType="foodExpenses" 
+        dataType="foodExpenses" // This should probably be "foodSales", but the dialog seems generic
         isOpen={showImportDialog}
         onClose={() => setShowImportDialog(false)}
       />
