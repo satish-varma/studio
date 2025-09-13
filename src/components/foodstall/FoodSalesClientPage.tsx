@@ -17,7 +17,8 @@ import {
   DocumentSnapshot,
   DocumentData,
   endBefore,
-  limitToLast
+  limitToLast,
+  onSnapshot
 } from "firebase/firestore";
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
@@ -50,7 +51,7 @@ const db = getFirestore(getApp());
 type DateFilterOption = 'today' | 'last_7_days' | 'this_month' | 'all_time';
 
 export default function FoodSalesClientPage() {
-  const { user, activeSiteId, activeStallId, loading: authLoading } = useAuth();
+  const { user, activeSiteId, activeStallId, loading: authLoading, activeSite } = useAuth();
   const { toast } = useToast();
 
   const [sales, setSales] = useState<FoodSaleTransaction[]>([]);
