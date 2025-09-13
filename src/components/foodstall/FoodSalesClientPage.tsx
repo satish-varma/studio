@@ -245,6 +245,96 @@ export default function FoodSalesClientPage() {
       toast({ title: "Error", description: `Failed to delete record: ${error.message}`, variant: "destructive" });
     }
   };
+  
+  const escapeCsvCell = (cellData: any): string => {
+    if (cellData === null || cellData === undefined) return "";
+    const stringData = String(cellData);
+    if (stringData.includes(",") || stringData.includes("\n") || stringData.includes('"')) {
+      return `"${stringData.replace(/"/g, '""')}"`;
+    }
+    return stringData;
+  };
+
+  const getFormattedTimestamp = () => new Date().toISOString().replace(/:/g, '-').slice(0, 19);
+
+  const downloadCsv = (csvString: string, filename: string) => {
+    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+  
+  const handleExport = async () => {
+    if (!db) {
+        toast({ title: "Export Error", description: "Database is not available.", variant: "destructive"});
+        return;
+    }
+    setIsExporting(true);
+    toast({ title: "Exporting...", description: "Fetching all matching sales for export. Please wait."});
+    
+    const exportConstraints = buildTransactionQuery();
+    if (!exportConstraints) {
+        toast({ title: "Export Error", description: "Cannot export without a valid context (site, date range).", variant: "destructive"});
+        setIsExporting(false);
+        return;
+    }
+
+    try {
+      const salesCollectionRef = collection(db, "foodSaleTransactions");
+      const exportQuery = query(salesCollectionRef, ...exportConstraints);
+      const querySnapshot = await getDocs(exportQuery);
+      const itemsToExport: FoodSaleTransaction[] = querySnapshot.docs.map(doc => ({
+          id: doc.id, ...doc.data(), saleDate: (doc.data().saleDate as Timestamp).toDate(),
+      } as FoodSaleTransaction));
+
+      if (itemsToExport.length === 0) {
+        toast({ title: "No Data", description: "No sales to export with current filters.", variant: "default" });
+        setIsExporting(false);
+        return;
+      }
+      
+      const headers = ["ID", "Sale Date", "Site Name", "Stall Name", "Sale Type", "Hungerbox Sales", "UPI Sales", "Total Amount", "Notes", "Recorded By (UID)", "Recorded By (Name)"];
+      const csvRows = [headers.join(',')];
+      
+      const usersMapForExport: Record<string, string> = {};
+      if (itemsToExport.some(item => !item.recordedByName)) {
+        const userIds = [...new Set(itemsToExport.map(item => item.recordedByUid))];
+        const usersSnapshot = await getDocs(query(collection(db, "users"), where("__name__", "in", userIds)));
+        usersSnapshot.forEach(doc => {
+            const u = doc.data() as AppUser;
+            usersMapForExport[doc.id] = u.displayName || u.email || doc.id;
+        });
+      }
+
+      itemsToExport.forEach(sale => {
+        const row = [
+          escapeCsvCell(sale.id),
+          escapeCsvCell(format(sale.saleDate as Date, "yyyy-MM-dd")),
+          escapeCsvCell(sitesMap[sale.siteId] || sale.siteId),
+          escapeCsvCell(stallsMap[sale.stallId] || sale.stallId),
+          escapeCsvCell(sale.saleType),
+          escapeCsvCell(sale.hungerboxSales),
+          escapeCsvCell(sale.upiSales),
+          escapeCsvCell(sale.totalAmount),
+          escapeCsvCell(sale.notes),
+          escapeCsvCell(sale.recordedByUid),
+          escapeCsvCell(sale.recordedByName || usersMapForExport[sale.recordedByUid]),
+        ];
+        csvRows.push(row.join(','));
+      });
+
+      const siteNameForFile = activeSite?.name.replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'export';
+      downloadCsv(csvRows.join("\n"), `stallsync_food_sales_${siteNameForFile}_${getFormattedTimestamp()}.csv`);
+      toast({ title: "Export Successful", description: `${itemsToExport.length} sales records exported.` });
+    } catch (error: any) {
+      toast({ title: "Export Failed", description: `Could not export sales. ${error.message}`, variant: "destructive" });
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
 
   if (authLoading) {
@@ -308,10 +398,10 @@ export default function FoodSalesClientPage() {
                 <SelectContent><SelectItem value="all">All Sites</SelectItem>{allSites.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
             </Select>
           )}
-          <Button variant="outline" onClick={handleGmailImport} disabled={isGmailImporting}>
-            {isGmailImporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Mail className="mr-2 h-4 w-4" />}
-            Import from Gmail
-          </Button>
+           <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => setShowImportDialog(true)}><Upload className="mr-2 h-4 w-4" />Import from CSV</Button>
+            <Button variant="outline" onClick={handleExport} disabled={isExporting}>{isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Download className="mr-2 h-4 w-4" />}Export to CSV</Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -333,6 +423,11 @@ export default function FoodSalesClientPage() {
           onDelete={handleDelete}
         />
       )}
+      <CsvImportDialog
+        dataType="foodSales"
+        isOpen={showImportDialog}
+        onClose={() => setShowImportDialog(false)}
+      />
     </div>
   );
 }
