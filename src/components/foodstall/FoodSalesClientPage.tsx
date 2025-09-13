@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { FoodSaleTransaction, Site, Stall } from "@/types";
+import type { FoodSaleTransaction, Site, Stall, AppUser } from "@/types";
 import { 
   getFirestore, 
   collection, 
@@ -122,14 +122,14 @@ export default function FoodSalesClientPage() {
   }, [user, activeSiteId, activeStallId, dateFilter, effectiveSiteId]);
 
 
-  const fetchSales = useCallback(async (direction: 'initial' | 'next' | 'prev' = 'initial') => {
-    if (authLoading || !db) return;
+  const fetchSales = useCallback((direction: 'initial' | 'next' | 'prev' = 'initial') => {
+    if (authLoading || !db) return Promise.resolve(() => {});
 
     const baseConstraints = buildTransactionQuery();
     if (!baseConstraints) {
       setSales([]);
       setLoadingSales(false);
-      return;
+      return Promise.resolve(() => {});
     }
     
     setLoadingSales(true);
@@ -149,39 +149,46 @@ export default function FoodSalesClientPage() {
     qConstraints.push(limit(SALES_PER_PAGE));
 
 
-    try {
-      const q = query(salesCollectionRef, ...qConstraints);
-      const querySnapshot = await getDocs(q);
-      const fetchedSales = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        saleDate: (doc.data().saleDate as Timestamp).toDate(),
-      } as FoodSaleTransaction));
+    const q = query(salesCollectionRef, ...qConstraints);
+    const unsubscribe = onSnapshot(q,
+      (snapshot) => {
+        const fetchedSales = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          saleDate: (doc.data().saleDate as Timestamp).toDate(),
+        } as FoodSaleTransaction));
 
-      setSales(fetchedSales);
-      
-      if(direction === 'initial') {
-        const totalQuery = query(salesCollectionRef, ...baseConstraints.filter(c => c.type !== 'orderBy'));
-        const totalSnapshot = await getDocs(totalQuery);
-        const total = totalSnapshot.docs.reduce((sum, doc) => sum + (doc.data().totalAmount || 0), 0);
-        setTotalSalesAmount(total);
-      }
-      
-       if (querySnapshot.docs.length > 0) {
-            setFirstVisibleDoc(querySnapshot.docs[0]);
-            setLastVisibleDoc(querySnapshot.docs[querySnapshot.docs.length - 1]);
+        setSales(fetchedSales);
+        
+        if (direction === 'initial') {
+            const totalQuery = query(salesCollectionRef, ...baseConstraints.filter(c => c.type !== 'orderBy'));
+            getDocs(totalQuery).then(totalSnapshot => {
+                const total = totalSnapshot.docs.reduce((sum, doc) => sum + (doc.data().totalAmount || 0), 0);
+                setTotalSalesAmount(total);
+            });
         }
-        setIsLastPage(querySnapshot.docs.length < SALES_PER_PAGE);
-
-    } catch (error: any) {
-      setErrorSales(error.message || "Failed to load sales.");
-    } finally {
-      setLoadingSales(false);
-    }
+        
+        if (snapshot.docs.length > 0) {
+            setFirstVisibleDoc(snapshot.docs[0]);
+            setLastVisibleDoc(snapshot.docs[snapshot.docs.length - 1]);
+        }
+        setIsLastPage(snapshot.docs.length < SALES_PER_PAGE);
+        setLoadingSales(false);
+      },
+      (error) => {
+        console.error("Error fetching sales data:", error);
+        setErrorSales(error.message || "Failed to load sales.");
+        setLoadingSales(false);
+      }
+    );
+    return Promise.resolve(unsubscribe);
   }, [authLoading, db, buildTransactionQuery, lastVisibleDoc, firstVisibleDoc]);
 
   useEffect(() => {
-    fetchSales('initial');
+    const unsubscribePromise = fetchSales('initial');
+    return () => {
+      unsubscribePromise.then(unsub => unsub && unsub());
+    };
   }, [fetchSales]);
   
   const escapeCsvCell = (cellData: any): string => {
