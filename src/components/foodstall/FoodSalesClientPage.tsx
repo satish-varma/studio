@@ -35,6 +35,7 @@ import PageHeader from "../shared/PageHeader";
 import { PlusCircle } from "lucide-react";
 import Link from "next/link";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../ui/select";
+import { Skeleton } from "../ui/skeleton";
 
 const LOG_PREFIX = "[FoodSalesClientPage]";
 const SALES_PER_PAGE = 30; // Show a month at a time
@@ -63,6 +64,7 @@ export default function FoodSalesClientPage() {
   const [allSites, setAllSites] = useState<Site[]>([]);
   const [stallsMap, setStallsMap] = useState<Record<string, string>>({});
   const [totalSalesAmount, setTotalSalesAmount] = useState(0);
+  const [loadingTotal, setLoadingTotal] = useState(true);
   
   const [firstVisibleDoc, setFirstVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
   const [lastVisibleDoc, setLastVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
@@ -130,13 +132,12 @@ export default function FoodSalesClientPage() {
       setSales([]);
       setTotalSalesAmount(0); // Ensure total is cleared
       setLoadingSales(false);
+      setLoadingTotal(false);
       return Promise.resolve(() => {});
     }
     
     setLoadingSales(true);
-    if(direction === 'initial') {
-        setTotalSalesAmount(0);
-    }
+    setLoadingTotal(true);
     setErrorSales(null);
 
     const salesCollectionRef = collection(db, "foodSaleTransactions");
@@ -161,13 +162,12 @@ export default function FoodSalesClientPage() {
 
         setSales(fetchedSales);
         
-        // This is the FIX: Calculate total sales on every snapshot for real-time updates.
-        // The query for total needs to be separate from the paginated query.
         const totalQuery = query(salesCollectionRef, ...baseConstraints.filter(c => c.type !== 'orderBy'));
         getDocs(totalQuery).then(totalSnapshot => {
             const total = totalSnapshot.docs.reduce((sum, doc) => sum + (doc.data().totalAmount || 0), 0);
             setTotalSalesAmount(total);
-        });
+            setLoadingTotal(false);
+        }).catch(() => setLoadingTotal(false));
         
         if (snapshot.docs.length > 0) {
             setFirstVisibleDoc(snapshot.docs[0]);
@@ -180,6 +180,7 @@ export default function FoodSalesClientPage() {
         console.error("Error fetching sales data:", error);
         setErrorSales(error.message || "Failed to load sales.");
         setLoadingSales(false);
+        setLoadingTotal(false);
       }
     );
     return Promise.resolve(unsubscribe);
@@ -310,9 +311,9 @@ export default function FoodSalesClientPage() {
             </div>
             <div className="text-left sm:text-right">
               <p className="text-sm text-muted-foreground">Total Sales</p>
-              <p className="text-2xl font-bold">
-                {loadingSales && totalSalesAmount === 0 ? <Loader2 className="h-6 w-6 animate-spin"/> : `₹${totalSalesAmount.toFixed(2)}`}
-              </p>
+              <div className="text-2xl font-bold">
+                {loadingTotal ? <Skeleton className="h-8 w-32 mt-1" /> : `₹${totalSalesAmount.toFixed(2)}`}
+              </div>
             </div>
           </div>
         </CardHeader>
@@ -344,7 +345,7 @@ export default function FoodSalesClientPage() {
           onNextPage={() => fetchSales('next')}
           onPrevPage={() => fetchSales('prev')}
           isLastPage={isLastPage}
-          isFirstPage={currentPage === 1}
+          isFirstPage={isFirstPageReached}
           currentPage={currentPage}
           isLoading={loadingSales}
         />
