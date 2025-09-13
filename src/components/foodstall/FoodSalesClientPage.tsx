@@ -68,6 +68,7 @@ export default function FoodSalesClientPage() {
   const [dateFilter, setDateFilter] = useState<DateFilterOption>('this_month');
   const [siteFilter, setSiteFilter] = useState<string>('all');
   const [allSites, setAllSites] = useState<Site[]>([]);
+  const [sitesMap, setSitesMap] = useState<Record<string, string>>({});
   const [stallsMap, setStallsMap] = useState<Record<string, string>>({});
   const [totalSalesAmount, setTotalSalesAmount] = useState(0);
   
@@ -85,13 +86,20 @@ export default function FoodSalesClientPage() {
 
   useEffect(() => {
     if (!db || !user) return;
-    if (user.role === 'admin') {
-      const sitesQuery = query(collection(db, "sites"), orderBy("name"));
-      const unsub = onSnapshot(sitesQuery, (snapshot) => {
-        setAllSites(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()} as Site)));
-      });
-      return () => unsub();
-    }
+    
+    // Fetch sites for admin filter and sitesMap for everyone
+    const sitesQuery = query(collection(db, "sites"), orderBy("name"));
+    const unsubSites = onSnapshot(sitesQuery, (snapshot) => {
+        const fetchedSites = snapshot.docs.map(doc => ({id: doc.id, ...doc.data()} as Site));
+        const newSitesMap: Record<string, string> = {};
+        fetchedSites.forEach(site => {
+            newSitesMap[site.id] = site.name;
+        });
+        setAllSites(fetchedSites);
+        setSitesMap(newSitesMap);
+    });
+
+    return () => unsubSites();
   }, [db, user]);
 
   const buildTransactionQuery = useCallback(() => {
@@ -143,20 +151,19 @@ export default function FoodSalesClientPage() {
         const total = fetchedSales.reduce((sum, sale) => sum + sale.totalAmount, 0);
         
         setSales(fetchedSales);
-        setTotalSalesAmount(total); // Calculate and set total here
+        setTotalSalesAmount(total);
         setFirstVisibleDoc(snapshot.docs[0] || null);
         setLastVisibleDoc(snapshot.docs[snapshot.docs.length - 1] || null);
         setIsLastPage(snapshot.docs.length < SALES_PER_PAGE);
         setIsFirstPageReached(true);
         setCurrentPage(1);
-        setLoadingSales(false); // Set loading to false after calculation
+        setLoadingSales(false);
     }, (error) => {
         console.error("Error fetching sales data:", error);
         setErrorSales(error.message || "Failed to load sales.");
         setLoadingSales(false);
     });
 
-    // Also fetch all stalls to create a map for display purposes
     const stallsQuery = query(collection(db, "stalls"));
     const unsubStalls = onSnapshot(stallsQuery, (snapshot) => {
       const newStallsMap: Record<string, string> = {};
@@ -251,7 +258,6 @@ export default function FoodSalesClientPage() {
         }
       });
       toast({ title: "Success", description: "Daily sales record deleted." });
-      // The onSnapshot listener will automatically update the UI.
     } catch (error: any) {
       toast({ title: "Error", description: `Failed to delete record: ${error.message}`, variant: "destructive" });
     }
@@ -347,7 +353,7 @@ export default function FoodSalesClientPage() {
         />
       )}
       <CsvImportDialog
-        dataType="foodExpenses" // This should probably be its own type if we make a food sales import
+        dataType="foodExpenses" 
         isOpen={showImportDialog}
         onClose={() => setShowImportDialog(false)}
       />
