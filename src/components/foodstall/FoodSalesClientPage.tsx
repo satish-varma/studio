@@ -196,7 +196,7 @@ export default function FoodSalesClientPage() {
     
     try {
         const salesCollectionRef = collection(db, "foodSaleTransactions");
-        const exportQuery = query(salesCollectionRef, ...exportConstraints, orderBy("saleDate", "desc"));
+        const exportQuery = query(salesCollectionRef, ...exportConstraints);
         const querySnapshot = await getDocs(exportQuery);
         const salesToExport: FoodSaleTransaction[] = querySnapshot.docs.map(d => ({
             id: d.id, ...d.data(), saleDate: (d.data().saleDate as Timestamp).toDate(),
