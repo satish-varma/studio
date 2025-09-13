@@ -91,46 +91,9 @@ export default function FoodSalesClientPage() {
     }
   }, [db, user]);
 
-  const buildTransactionQuery = useCallback(() => {
-    if (!user) return null;
-    
-    // For managers/staff, an active site MUST be selected. For admins, it's optional.
-    if (user.role !== 'admin' && !activeSiteId) return null;
-
-    let constraints: QueryConstraint[] = [orderBy("saleDate", "desc")];
-    
-    // Apply site filter
-    if (effectiveSiteId) {
-        constraints.push(where("siteId", "==", effectiveSiteId));
-    }
-    
-    // Apply stall filter if site is also selected
-    if (effectiveSiteId && activeStallId) {
-        constraints.push(where("stallId", "==", activeStallId));
-    }
-
-    const now = new Date();
-    let startDate: Date | null = null;
-    let endDate: Date | null = endOfDay(now);
-
-    switch (dateFilter) {
-      case 'today': startDate = startOfDay(now); break;
-      case 'last_7_days': startDate = startOfDay(subDays(now, 6)); break;
-      case 'this_month': startDate = startOfMonth(now); break;
-      case 'all_time': startDate = null; endDate = null; break;
-    }
-
-    if (startDate) constraints.push(where("saleDate", ">=", Timestamp.fromDate(startDate)));
-    if (endDate) constraints.push(where("saleDate", "<=", Timestamp.fromDate(endDate)));
-    
-    return constraints;
-  }, [user, activeSiteId, activeStallId, dateFilter, effectiveSiteId]);
-
-  useEffect(() => {
-    if (authLoading || !db) return;
-
-    const baseConstraints = buildTransactionQuery();
-    if (!baseConstraints) {
+  const fetchSales = useCallback((direction: 'initial' | 'next' | 'prev' = 'initial') => {
+    if (!user || !db || authLoading) return;
+    if (user.role !== 'admin' && !activeSiteId) {
       setSales([]);
       setTotalSalesAmount(0);
       setLoadingSales(false);
@@ -138,9 +101,25 @@ export default function FoodSalesClientPage() {
     }
     
     setLoadingSales(true);
-    setErrorSales(null);
+    let constraints: QueryConstraint[] = [orderBy("saleDate", "desc")];
+    if (effectiveSiteId) constraints.push(where("siteId", "==", effectiveSiteId));
+    if (activeStallId) constraints.push(where("stallId", "==", activeStallId));
+
+    const now = new Date();
+    let startDate: Date | null = null;
+    let endDate: Date | null = endOfDay(now);
+
+    switch (dateFilter) {
+        case 'today': startDate = startOfDay(now); break;
+        case 'last_7_days': startDate = startOfDay(subDays(now, 6)); break;
+        case 'this_month': startDate = startOfMonth(now); break;
+        case 'all_time': startDate = null; endDate = null; break;
+    }
+    if (startDate) constraints.push(where("saleDate", ">=", Timestamp.fromDate(startDate)));
+    if (endDate) constraints.push(where("saleDate", "<=", Timestamp.fromDate(endDate)));
+
     const salesCollectionRef = collection(db, "foodSaleTransactions");
-    const q = query(salesCollectionRef, ...baseConstraints, limit(SALES_PER_PAGE));
+    const q = query(salesCollectionRef, ...constraints, limit(SALES_PER_PAGE));
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
         const fetchedSales = snapshot.docs.map(doc => ({
@@ -165,8 +144,15 @@ export default function FoodSalesClientPage() {
         setLoadingSales(false);
     });
 
-    return () => unsubscribe();
-  }, [authLoading, db, buildTransactionQuery]);
+    return unsubscribe;
+  }, [user, db, authLoading, activeSiteId, activeStallId, dateFilter, effectiveSiteId]);
+
+  useEffect(() => {
+    const unsubscribe = fetchSales('initial');
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [fetchSales]);
   
   
   const escapeCsvCell = (cellData: any): string => {
@@ -183,16 +169,27 @@ export default function FoodSalesClientPage() {
     setIsExporting(true);
     toast({ title: "Exporting...", description: "Fetching all matching sales data." });
 
-    const exportConstraints = buildTransactionQuery();
-    if (!exportConstraints) {
-      toast({ title: "Export Failed", description: "A valid site and date range must be selected to export.", variant: "destructive" });
-      setIsExporting(false);
-      return;
+    const exportConstraints: QueryConstraint[] = [];
+    if (effectiveSiteId) exportConstraints.push(where("siteId", "==", effectiveSiteId));
+    if (activeStallId) exportConstraints.push(where("stallId", "==", activeStallId));
+
+    const now = new Date();
+    let startDate: Date | null = null;
+    let endDate: Date | null = endOfDay(now);
+
+    switch (dateFilter) {
+      case 'today': startDate = startOfDay(now); break;
+      case 'last_7_days': startDate = startOfDay(subDays(now, 6)); break;
+      case 'this_month': startDate = startOfMonth(now); break;
+      case 'all_time': startDate = null; endDate = null; break;
     }
+
+    if (startDate) exportConstraints.push(where("saleDate", ">=", Timestamp.fromDate(startDate)));
+    if (endDate) exportConstraints.push(where("saleDate", "<=", Timestamp.fromDate(endDate)));
     
     try {
         const salesCollectionRef = collection(db, "foodSaleTransactions");
-        const exportQuery = query(salesCollectionRef, ...exportConstraints);
+        const exportQuery = query(salesCollectionRef, ...exportConstraints, orderBy("saleDate", "desc"));
         const querySnapshot = await getDocs(exportQuery);
         const salesToExport: FoodSaleTransaction[] = querySnapshot.docs.map(d => ({
             id: d.id, ...d.data(), saleDate: (d.data().saleDate as Timestamp).toDate(),
@@ -213,8 +210,8 @@ export default function FoodSalesClientPage() {
                 escapeCsvCell(format(sale.saleDate as Date, 'yyyy-MM-dd')),
                 escapeCsvCell(sale.siteId),
                 escapeCsvCell(sale.stallId),
-                escapeCsvCell(sale.sales.hungerbox || 0),
-                escapeCsvCell(sale.sales.upi || 0),
+                escapeCsvCell(sale.sales?.hungerbox || 0),
+                escapeCsvCell(sale.sales?.upi || 0),
                 escapeCsvCell(sale.totalAmount),
                 escapeCsvCell(sale.notes),
                 escapeCsvCell(sale.recordedByName || sale.recordedByUid),
@@ -331,7 +328,7 @@ export default function FoodSalesClientPage() {
         isOpen={showImportDialog}
         onClose={() => {
           setShowImportDialog(false);
-          // fetchSales('initial'); // Re-enable if pagination comes back
+          fetchSales('initial');
         }}
       />
     </div>
