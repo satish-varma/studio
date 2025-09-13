@@ -156,7 +156,18 @@ export default function FoodSalesClientPage() {
         setLoadingSales(false);
     });
 
-    return () => unsubscribe();
+    // Also fetch all stalls to create a map for display purposes
+    const stallsQuery = query(collection(db, "stalls"));
+    const unsubStalls = onSnapshot(stallsQuery, (snapshot) => {
+      const newStallsMap: Record<string, string> = {};
+      snapshot.forEach(doc => { newStallsMap[doc.id] = (doc.data() as Stall).name; });
+      setStallsMap(newStallsMap);
+    });
+
+    return () => {
+      unsubscribe();
+      unsubStalls();
+    };
   }, [authLoading, db, buildTransactionQuery]);
   
   
@@ -226,13 +237,13 @@ export default function FoodSalesClientPage() {
   };
 
   const handleDelete = async (saleId: string) => {
-    if (!db || !user) return;
+    if (!db || !user || !activeSiteId) return;
     const docRef = doc(db, "foodSaleTransactions", saleId);
     try {
       await deleteDoc(docRef);
       await logFoodStallActivity(user, {
-        siteId: activeSiteId!,
-        stallId: activeStallId!,
+        siteId: activeSiteId,
+        stallId: activeStallId || "N/A", // Use activeStallId or a placeholder
         type: 'SALE_RECORDED_OR_UPDATED',
         relatedDocumentId: saleId,
         details: {
@@ -325,6 +336,7 @@ export default function FoodSalesClientPage() {
       {!loadingSales && !errorSales && (
         <FoodSalesTable 
           sales={sales} 
+          sitesMap={sitesMap}
           onNextPage={() => {}}
           onPrevPage={() => {}}
           isLastPage={isLastPage}
@@ -335,7 +347,7 @@ export default function FoodSalesClientPage() {
         />
       )}
       <CsvImportDialog
-        dataType="foodExpenses" 
+        dataType="foodExpenses" // This should probably be its own type if we make a food sales import
         isOpen={showImportDialog}
         onClose={() => setShowImportDialog(false)}
       />
