@@ -269,7 +269,7 @@ export default function FoodSalesClientPage() {
       });
       toast({ title: "Success", description: "Daily sales record deleted." });
     } catch (error: any) {
-      toast({ title: "Error", description: `Failed to delete record: ${error.message}`, variant = "destructive" });
+      toast({ title: "Error", description: `Failed to delete record: ${error.message}`, variant: "destructive" });
     }
   };
 
