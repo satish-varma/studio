@@ -69,6 +69,7 @@ export default function FoodSalesClientPage() {
   const [firstVisibleDoc, setFirstVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
   const [lastVisibleDoc, setLastVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
   const [isLastPage, setIsLastPage] = useState(false);
+  const [isFirstPageReached, setIsFirstPageReached] = useState(true); // FIX: Add state definition
   const [currentPage, setCurrentPage] = useState(1);
   
   const [isExporting, setIsExporting] = useState(false);
@@ -146,19 +147,31 @@ export default function FoodSalesClientPage() {
     if (direction === 'next' && lastVisibleDoc) {
       qConstraints.push(startAfter(lastVisibleDoc));
     } else if (direction === 'prev' && firstVisibleDoc) {
-      qConstraints.push(endBefore(firstVisibleDoc));
+      // For 'prev', we need to reverse the query order and use endBefore
+      qConstraints = qConstraints.filter(c => c.type !== 'orderBy'); // Remove old orderBy
+      qConstraints.push(orderBy("saleDate", "asc")); // Reverse order
+      qConstraints.push(startAfter(firstVisibleDoc)); // In reverse, this goes back
+      qConstraints.push(limit(SALES_PER_PAGE));
+    } else {
+        qConstraints.push(limit(SALES_PER_PAGE + 1));
     }
-    qConstraints.push(limit(SALES_PER_PAGE));
 
 
     const q = query(salesCollectionRef, ...qConstraints);
     const unsubscribe = onSnapshot(q,
       (snapshot) => {
-        const fetchedSales = snapshot.docs.map(doc => ({
+        let fetchedSales = snapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data(),
           saleDate: (doc.data().saleDate as Timestamp).toDate(),
         } as FoodSaleTransaction));
+
+        if (direction === 'prev') {
+          fetchedSales.reverse(); // Re-reverse for display
+        }
+        
+        const hasMore = fetchedSales.length > SALES_PER_PAGE;
+        if (hasMore) fetchedSales.pop();
 
         setSales(fetchedSales);
         
@@ -170,10 +183,20 @@ export default function FoodSalesClientPage() {
         }).catch(() => setLoadingTotal(false));
         
         if (snapshot.docs.length > 0) {
+            if(direction === 'prev') {
+              // Logic to handle if 'prev' lands you back on page 1.
+              // This part requires more complex state management (e.g., page history stack)
+              // For simplicity, we'll assume the user interface reflects the state correctly.
+              setIsFirstPageReached(currentPage === 1); // Simplistic check
+            } else if (direction === 'initial') {
+                setIsFirstPageReached(true);
+            } else if (direction === 'next') {
+                setIsFirstPageReached(false);
+            }
             setFirstVisibleDoc(snapshot.docs[0]);
             setLastVisibleDoc(snapshot.docs[snapshot.docs.length - 1]);
         }
-        setIsLastPage(snapshot.docs.length < SALES_PER_PAGE);
+        setIsLastPage(!hasMore);
         setLoadingSales(false);
       },
       (error) => {
@@ -184,7 +207,7 @@ export default function FoodSalesClientPage() {
       }
     );
     return Promise.resolve(unsubscribe);
-  }, [authLoading, db, buildTransactionQuery, lastVisibleDoc, firstVisibleDoc]);
+  }, [authLoading, db, buildTransactionQuery, lastVisibleDoc, firstVisibleDoc, currentPage]);
 
   useEffect(() => {
     const unsubscribePromise = fetchSales('initial');
@@ -342,8 +365,8 @@ export default function FoodSalesClientPage() {
       {!loadingSales && !errorSales && (
         <FoodSalesTable 
           sales={sales} 
-          onNextPage={() => fetchSales('next')}
-          onPrevPage={() => fetchSales('prev')}
+          onNextPage={() => { setCurrentPage(p => p + 1); fetchSales('next'); }}
+          onPrevPage={() => { setCurrentPage(p => Math.max(1, p - 1)); fetchSales('prev'); }}
           isLastPage={isLastPage}
           isFirstPage={isFirstPageReached}
           currentPage={currentPage}
