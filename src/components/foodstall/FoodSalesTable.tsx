@@ -19,6 +19,8 @@ import { useRouter } from 'next/navigation';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "../ui/alert-dialog";
 import type { Timestamp } from "firebase/firestore";
 import { Badge } from "../ui/badge";
+import { Checkbox } from "../ui/checkbox";
+import { useMemo } from "react";
 
 interface FoodSalesTableProps {
   sales: FoodSaleTransaction[];
@@ -31,10 +33,13 @@ interface FoodSalesTableProps {
   currentPage: number;
   isLoading: boolean;
   onDelete: (sale: FoodSaleTransaction) => void;
+  selectedIds: string[];
+  onSelectionChange: (ids: string[]) => void;
 }
 
 const TableRowSkeleton = () => (
   <TableRow>
+    <TableCell className="w-[50px]"><Skeleton className="h-5 w-5" /></TableCell>
     <TableCell><Skeleton className="h-4 w-24" /></TableCell>
     <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-28" /></TableCell>
     <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-28" /></TableCell>
@@ -60,8 +65,25 @@ export function FoodSalesTable({
   currentPage,
   isLoading,
   onDelete,
+  selectedIds,
+  onSelectionChange,
 }: FoodSalesTableProps) {
   const router = useRouter();
+
+  const isAllSelected = useMemo(() => sales.length > 0 && selectedIds.length === sales.length, [sales, selectedIds]);
+  const isIndeterminate = useMemo(() => selectedIds.length > 0 && selectedIds.length < sales.length, [sales, selectedIds]);
+
+  const handleSelectAll = (checked: boolean | 'indeterminate') => {
+    onSelectionChange(checked === true ? sales.map(s => s.id) : []);
+  };
+  
+  const handleSelectOne = (saleId: string, checked: boolean | 'indeterminate') => {
+    if (checked === true) {
+      onSelectionChange([...selectedIds, saleId]);
+    } else {
+      onSelectionChange(selectedIds.filter(id => id !== saleId));
+    }
+  };
 
   const formatDateForDisplay = (date: Date | string | Timestamp) => {
     if (!date) return "N/A";
@@ -84,6 +106,7 @@ export function FoodSalesTable({
         <Table>
           <TableHeader>
             <TableRow>
+                <TableHead className="w-[50px]"><Checkbox disabled /></TableHead>
                 <TableHead>Date</TableHead>
                 <TableHead className="hidden md:table-cell">Site</TableHead>
                 <TableHead className="hidden md:table-cell">Stall</TableHead>
@@ -120,6 +143,14 @@ export function FoodSalesTable({
         <Table>
           <TableHeader className="sticky top-0 bg-card z-10">
             <TableRow>
+               <TableHead className="w-[50px]">
+                <Checkbox
+                  checked={isAllSelected}
+                  onCheckedChange={handleSelectAll}
+                  aria-label="Select all sales"
+                  data-state={isIndeterminate ? 'indeterminate' : isAllSelected ? 'checked' : 'unchecked'}
+                />
+              </TableHead>
               <TableHead className="w-[120px]">Date</TableHead>
               <TableHead className="hidden md:table-cell w-[150px]">Site</TableHead>
               <TableHead className="hidden md:table-cell w-[150px]">Stall</TableHead>
@@ -139,9 +170,17 @@ export function FoodSalesTable({
               const commissionRate = sale.saleType === 'MRP' ? 0.08 : 0.18;
               const deduction = hungerboxSales * commissionRate;
               const amountWithDeduction = totalAmount - deduction;
+              const isSelected = selectedIds.includes(sale.id);
 
               return (
-                <TableRow key={sale.id}>
+                <TableRow key={sale.id} data-state={isSelected ? "selected" : ""}>
+                    <TableCell>
+                        <Checkbox
+                        checked={isSelected}
+                        onCheckedChange={(checked) => handleSelectOne(sale.id, checked)}
+                        aria-label={`Select sale from ${formatDateForDisplay(sale.saleDate)}`}
+                        />
+                    </TableCell>
                   <TableCell className="font-medium text-foreground">{formatDateForDisplay(sale.saleDate)}</TableCell>
                   <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
                       <div className="flex items-center">

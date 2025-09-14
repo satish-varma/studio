@@ -17,17 +17,16 @@ import {
   DocumentSnapshot,
   DocumentData,
   endBefore,
-  limitToLast,
-  onSnapshot,
   deleteDoc,
   doc,
+  writeBatch,
 } from "firebase/firestore";
-import { firebaseConfig, auth } from '@/lib/firebaseConfig'; // Import auth
+import { firebaseConfig, auth } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Info, DollarSign, Upload, Download, Building, PlusCircle, Mail } from "lucide-react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Loader2, Info, DollarSign, Upload, Download, Building, PlusCircle, Mail, Trash2 } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle, AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert";
 import { FoodSalesTable } from "./FoodSalesTable";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
@@ -41,7 +40,7 @@ import { format, subDays, startOfDay, endOfDay, startOfMonth } from 'date-fns';
 
 
 const LOG_PREFIX = "[FoodSalesClientPage]";
-const SALES_PER_PAGE = 30; // Show a month at a time
+const SALES_PER_PAGE = 30; 
 
 let db: ReturnType<typeof getFirestore> | undefined;
 if (!getApps().length) {
@@ -82,6 +81,9 @@ export default function FoodSalesClientPage() {
   const [isExporting, setIsExporting] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [isGmailImporting, setIsGmailImporting] = useState(false);
+
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isDeleting, setIsDeleting] = useState(false);
   
   const effectiveSiteId = user?.role === 'admin' ? (siteFilter === 'all' ? null : siteFilter) : activeSiteId;
 
@@ -170,23 +172,22 @@ export default function FoodSalesClientPage() {
   
   useEffect(() => {
     fetchSalesPage('initial');
-  }, [dateFilter, siteFilter, activeStallId]);
-
+  }, [dateFilter, siteFilter, activeStallId, fetchSalesPage]);
 
   useEffect(() => {
-    if (authLoading || !db) return;
-    
-    // Total calculation
-    const totalConstraints = buildTransactionQuery();
-    if (totalConstraints) {
-      const totalQuery = query(collection(db, "foodSaleTransactions"), ...totalConstraints);
-      const unsubTotal = onSnapshot(totalQuery, (snapshot) => {
-        const total = snapshot.docs.reduce((sum, doc) => sum + (doc.data().totalAmount || 0), 0);
-        setTotalSalesAmount(total);
-      });
-       return () => unsubTotal();
+    const baseConstraints = buildTransactionQuery();
+    if (!baseConstraints || !db) {
+        setTotalSalesAmount(0);
+        return;
     }
-  }, [dateFilter, siteFilter, activeStallId, authLoading, db, buildTransactionQuery]);
+    const totalQuery = query(collection(db, "foodSaleTransactions"), ...baseConstraints);
+    const unsubTotal = onSnapshot(totalQuery, (snapshot) => {
+      const total = snapshot.docs.reduce((sum, doc) => sum + (doc.data().totalAmount || 0), 0);
+      setTotalSalesAmount(total);
+    });
+     return () => unsubTotal();
+  }, [dateFilter, siteFilter, activeStallId, db, buildTransactionQuery]);
+
 
   useEffect(() => {
      if (!db) return;
@@ -281,8 +282,41 @@ export default function FoodSalesClientPage() {
         }
       });
       toast({ title: "Success", description: "Daily sales record deleted." });
+      fetchSalesPage('initial'); // Refresh page
     } catch (error: any) {
       toast({ title: "Error", description: `Failed to delete record: ${error.message}`, variant: "destructive" });
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (!db || !user) {
+        toast({ title: "Error", description: "You must be logged in to delete records.", variant: "destructive" });
+        return;
+    }
+    setIsDeleting(true);
+    const batch = writeBatch(db);
+    selectedIds.forEach(id => {
+        const docRef = doc(db, "foodSaleTransactions", id);
+        batch.delete(docRef);
+    });
+
+    try {
+        await batch.commit();
+        const deletedCount = selectedIds.length;
+        await logFoodStallActivity(user, {
+            siteId: activeSiteId || 'multiple',
+            stallId: activeStallId || 'multiple',
+            type: 'SALE_BULK_IMPORTED', // Re-using for generic bulk action
+            relatedDocumentId: `bulk-delete-${Date.now()}`,
+            details: { notes: `Bulk deleted ${deletedCount} sales records.` }
+        });
+        toast({ title: "Success", description: `${deletedCount} sales records have been deleted.` });
+        setSelectedIds([]);
+        fetchSalesPage('initial');
+    } catch (error: any) {
+        toast({ title: "Bulk Delete Failed", description: error.message, variant: "destructive" });
+    } finally {
+        setIsDeleting(false);
     }
   };
   
@@ -445,6 +479,34 @@ export default function FoodSalesClientPage() {
           </div>
         </CardContent>
       </Card>
+      
+       {selectedIds.length > 0 && (
+        <div className="flex justify-end">
+            <AlertDialog>
+                <AlertDialogTrigger asChild>
+                    <Button variant="destructive" disabled={isDeleting}>
+                        <Trash2 className="mr-2 h-4 w-4" /> Delete {selectedIds.length} Selected Record(s)
+                    </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This will permanently delete {selectedIds.length} sales records. This action cannot be undone.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleBulkDelete} disabled={isDeleting}>
+                            {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Confirm Delete
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+        </div>
+      )}
+
 
       {loadingSales && sales.length === 0 && (
         <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading sales...</p></div>
@@ -462,6 +524,8 @@ export default function FoodSalesClientPage() {
           currentPage={currentPage}
           isLoading={loadingSales}
           onDelete={handleDelete}
+          selectedIds={selectedIds}
+          onSelectionChange={setSelectedIds}
         />
       )}
       <CsvImportDialog
