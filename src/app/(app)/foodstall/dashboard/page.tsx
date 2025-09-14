@@ -12,7 +12,7 @@ import { getFirestore, collection, query, where, onSnapshot, Timestamp, QueryCon
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { startOfDay, endOfDay, subDays, startOfMonth, getDaysInMonth, endOfMonth } from "date-fns";
-import type { FoodItemExpense, FoodSaleTransaction, StaffAttendance, Holiday, StaffDetails, AppUser } from "@/types";
+import type { FoodItemExpense, FoodSaleTransaction, StaffAttendance, Holiday, StaffDetails, AppUser, SalaryPayment } from "@/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -184,12 +184,20 @@ export default function FoodStallDashboardPage() {
     }));
     
     const fetchSalaryData = async () => {
-        if (dateFilter === 'all_time' || !startDate || !endDate || staffList.length === 0) {
-            setTotalSalaryExpense(0);
-            return;
-        }
+      if (staffList.length === 0) {
+        setTotalSalaryExpense(0);
+        return;
+      }
+      const staffUids = staffList.map(s => s.uid);
 
-        const staffUids = staffList.map(s => s.uid);
+      if (dateFilter === 'all_time') {
+        // For all time, sum up all payments from salaryPayments collection
+        const paymentsQuery = query(collection(db, "salaryPayments"), where("staffUid", "in", staffUids));
+        const paymentsSnapshot = await getDocs(paymentsQuery);
+        const totalPaid = paymentsSnapshot.docs.reduce((sum, doc) => sum + (doc.data() as SalaryPayment).amountPaid, 0);
+        setTotalSalaryExpense(totalPaid);
+      } else if (startDate && endDate) {
+        // For specific date ranges, calculate earned salary based on attendance
         const uidsBatches: string[][] = [];
         for (let i = 0; i < staffUids.length; i += 30) {
             uidsBatches.push(staffUids.slice(i, i + 30));
@@ -213,7 +221,6 @@ export default function FoodStallDashboardPage() {
         ]);
 
         const holidays = holidaysSnapshot.docs.map(d => d.data() as Holiday);
-        
         const attendanceByStaff = new Map<string, { present: number, halfDay: number }>();
         
         attendanceSnapshots.flat().forEach(snapshot => snapshot.docs.forEach(doc => {
@@ -239,7 +246,11 @@ export default function FoodStallDashboardPage() {
             }
         });
         setTotalSalaryExpense(totalSalary);
+      } else {
+        setTotalSalaryExpense(0);
+      }
     };
+
 
     fetchSalaryData().finally(() => setLoading(false));
 
@@ -327,8 +338,6 @@ export default function FoodStallDashboardPage() {
     }
   };
 
-  const showSalaryCard = dateFilter !== 'all_time';
-
   return (
     <div className="space-y-6">
       <PageHeader title="Food Stall Dashboard" description="Overview of your food stall's financial health and operations." />
@@ -374,12 +383,10 @@ export default function FoodStallDashboardPage() {
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Total Expenses</CardTitle><ShoppingBag className="h-4 w-4 text-muted-foreground" /></CardHeader>
           <CardContent><div className="text-2xl font-bold text-red-600">- ₹{totalExpenses.toFixed(2)}</div><p className="text-xs text-muted-foreground">Total cost of all purchases.</p></CardContent>
         </Card>
-         {showSalaryCard && (
-            <Card className="shadow-md">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Staff Salary</CardTitle><UsersIcon className="h-4 w-4 text-muted-foreground" /></CardHeader>
-                <CardContent><div className="text-2xl font-bold text-red-600">- ₹{totalSalaryExpense.toFixed(2)}</div><p className="text-xs text-muted-foreground">Earned salary for this period.</p></CardContent>
-            </Card>
-         )}
+        <Card className="shadow-md">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Staff Salary</CardTitle><UsersIcon className="h-4 w-4 text-muted-foreground" /></CardHeader>
+            <CardContent><div className="text-2xl font-bold text-red-600">- ₹{totalSalaryExpense.toFixed(2)}</div><p className="text-xs text-muted-foreground">{dateFilter === 'all_time' ? 'Total salary paid' : 'Earned salary for this period.'}</p></CardContent>
+        </Card>
         <Card className="shadow-md lg:col-span-1">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Net Profit</CardTitle><Utensils className="h-4 w-4 text-muted-foreground" /></CardHeader>
           <CardContent><div className={`text-2xl font-bold ${netProfit >= 0 ? 'text-green-600' : 'text-destructive'}`}>₹{netProfit.toFixed(2)}</div><p className="text-xs text-muted-foreground">Sales - All Expenses.</p></CardContent>
@@ -430,6 +437,8 @@ export default function FoodStallDashboardPage() {
     </div>
   );
 }
+
+    
 
     
 
