@@ -11,7 +11,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { getFirestore, collection, query, where, onSnapshot, Timestamp, QueryConstraint, getDocs } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
-import { startOfDay, endOfDay, subDays, startOfMonth, endOfMonth, getDaysInMonth } from "date-fns";
+import { startOfDay, endOfDay, subDays, startOfMonth, getDaysInMonth } from "date-fns";
 import type { FoodItemExpense, FoodSaleTransaction, StaffAttendance, Holiday, StaffDetails, AppUser } from "@/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -153,7 +153,8 @@ export default function FoodStallDashboardPage() {
         });
         setTotalSales(salesTotal);
         setHungerboxSales(hbSalesTotal);
-        setCommission(hbSalesTotal * 0.20);
+        const commissionRate = 0.20; // Default commission rate
+        setCommission(hbSalesTotal * commissionRate);
         setPaymentSummary(Object.entries(paymentMethodTotals).map(([method, totalAmount]) => ({ method, totalAmount })));
     }));
 
@@ -227,7 +228,9 @@ export default function FoodStallDashboardPage() {
         staffList.forEach(staff => {
             const details = staffDetailsMap.get(staff.uid);
             if (details?.salary) {
-                const monthWorkingDays = calculateWorkingDays(startOfMonth(startDate), endOfMonth(startDate), holidays, staff);
+                const monthWorkingDays = calculateWorkingDays(startOfMonth(startDate), endOfMonth(startDate), [], staff);
+                const periodWorkingDays = calculateWorkingDays(startDate, endDate, holidays, staff);
+
                 if (monthWorkingDays > 0) {
                     const perDaySalary = details.salary / monthWorkingDays;
                     const attendance = attendanceByStaff.get(staff.uid) || { present: 0, halfDay: 0 };
