@@ -196,9 +196,12 @@ export default function FoodStallDashboardPage() {
       }
 
       if (dateFilter === 'all_time') {
-        const paymentsQuery = query(collection(db, "salaryPayments"), where("staffUid", "in", staffUids));
-        const paymentsSnapshot = await getDocs(paymentsQuery);
-        const totalPaid = paymentsSnapshot.docs.reduce((sum, doc) => sum + (doc.data() as SalaryPayment).amountPaid, 0);
+        const paymentPromises = uidsBatches.map(batch => 
+          getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", batch)))
+        );
+        const paymentsSnapshots = await Promise.all(paymentPromises);
+        const totalPaid = paymentsSnapshots.flat().reduce((sum, snapshot) => 
+            sum + snapshot.docs.reduce((docSum, doc) => docSum + (doc.data() as SalaryPayment).amountPaid, 0), 0);
         setTotalSalaryExpense(totalPaid);
       } else if (startDate && endDate) {
         const monthForSalaryCalc = startOfMonth(startDate);
@@ -433,3 +436,5 @@ export default function FoodStallDashboardPage() {
     </div>
   );
 }
+
+    
