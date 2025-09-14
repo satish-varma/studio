@@ -26,15 +26,10 @@ interface FoodSalesTableProps {
   sales: FoodSaleTransaction[];
   sitesMap: Record<string, string>;
   stallsMap: Record<string, string>;
-  onNextPage: () => void;
-  onPrevPage: () => void;
-  isLastPage: boolean;
-  isFirstPage: boolean;
-  currentPage: number;
-  isLoading: boolean;
   onDelete: (sale: FoodSaleTransaction) => void;
   selectedIds: string[];
   onSelectionChange: (ids: string[]) => void;
+  isLoading: boolean;
 }
 
 const TableRowSkeleton = () => (
@@ -58,15 +53,10 @@ export function FoodSalesTable({
   sales,
   sitesMap,
   stallsMap,
-  onNextPage,
-  onPrevPage,
-  isLastPage,
-  isFirstPage,
-  currentPage,
-  isLoading,
   onDelete,
   selectedIds,
   onSelectionChange,
+  isLoading,
 }: FoodSalesTableProps) {
   const router = useRouter();
 
@@ -232,14 +222,7 @@ export function FoodSalesTable({
             })}
           </TableBody>
         </Table>
-        </div>
-        {(sales.length > 0 || !isFirstPage || !isLastPage) && (
-            <div className="flex items-center justify-end space-x-2 py-4">
-            <span className="text-sm text-muted-foreground">Page {currentPage}</span>
-            <Button variant="outline" size="sm" onClick={onPrevPage} disabled={isFirstPage || isLoading}><ChevronLeft className="h-4 w-4" /><span className="ml-1 hidden sm:inline">Previous</span></Button>
-            <Button variant="outline" size="sm" onClick={onNextPage} disabled={isLastPage || isLoading}><span className="mr-1 hidden sm:inline">Next</span><ChevronRight className="h-4 w-4" /></Button>
-            </div>
-        )}
+      </div>
     </TooltipProvider>
   );
 }

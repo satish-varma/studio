@@ -10,13 +10,9 @@ import {
   where, 
   orderBy, 
   limit, 
-  startAfter, 
   getDocs,
   Timestamp,
   QueryConstraint,
-  DocumentSnapshot,
-  DocumentData,
-  endBefore,
   deleteDoc,
   doc,
   writeBatch,
@@ -83,13 +79,6 @@ export default function FoodSalesClientPage() {
   const [stallsMap, setStallsMap] = useState<Record<string, string>>({});
   const [totalSalesAmount, setTotalSalesAmount] = useState(0);
   
-  const [firstVisibleDoc, setFirstVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
-  const [lastVisibleDoc, setLastVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
-  const [isLastPage, setIsLastPage] = useState(false);
-  
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageHistory, setPageHistory] = useState<(DocumentSnapshot<DocumentData> | null)[]>([null]);
-  
   const [isExporting, setIsExporting] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [isGmailImporting, setIsGmailImporting] = useState(false);
@@ -104,7 +93,7 @@ export default function FoodSalesClientPage() {
     if (!user) return null;
     if (user.role !== 'admin' && !activeSiteId) return null;
 
-    let constraints: QueryConstraint[] = [orderBy("saleDate", "desc")];
+    let constraints: QueryConstraint[] = [orderBy("saleDate", "desc"), limit(SALES_PER_PAGE)];
     if (effectiveSiteId) constraints.push(where("siteId", "==", effectiveSiteId));
     if (activeStallId) constraints.push(where("stallId", "==", activeStallId));
 
@@ -124,68 +113,33 @@ export default function FoodSalesClientPage() {
     return constraints;
   }, [user, activeSiteId, activeStallId, dateFilter, effectiveSiteId]);
 
-  const fetchSalesPage = useCallback(async (direction: 'initial' | 'next' | 'prev' = 'initial') => {
+  useEffect(() => {
     if (authLoading || !db) return;
     const baseConstraints = buildTransactionQuery();
     if (!baseConstraints) {
-      setSales([]); setLoadingSales(false); return;
+      setSales([]);
+      setLoadingSales(false);
+      return;
     }
-    
+
     setLoadingSales(true);
-    let finalConstraints = [...baseConstraints];
-
-    if (direction === 'next' && lastVisibleDoc) {
-      finalConstraints.push(startAfter(lastVisibleDoc));
-    } else if (direction === 'prev' && currentPage > 1) {
-      const prevPageStartAfterDoc = pageHistory[currentPage - 2];
-      finalConstraints = prevPageStartAfterDoc ? [...baseConstraints, startAfter(prevPageStartAfterDoc)] : [...baseConstraints];
-    }
-    finalConstraints.push(limit(SALES_PER_PAGE + 1));
-    
     const salesCollectionRef = collection(db, "foodSaleTransactions");
-    const q = query(salesCollectionRef, ...finalConstraints);
-
-    try {
-        const snapshot = await getDocs(q);
-        const hasMore = snapshot.docs.length > SALES_PER_PAGE;
-        const fetchedSales: FoodSaleTransaction[] = snapshot.docs
-            .slice(0, SALES_PER_PAGE)
-            .map(doc => ({
-                id: doc.id, ...doc.data(), saleDate: (doc.data().saleDate as Timestamp).toDate(),
-            } as FoodSaleTransaction));
-
+    const q = query(salesCollectionRef, ...baseConstraints);
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+        const fetchedSales: FoodSaleTransaction[] = snapshot.docs.map(doc => ({
+            id: doc.id, ...doc.data(), saleDate: (doc.data().saleDate as Timestamp).toDate(),
+        } as FoodSaleTransaction));
         setSales(fetchedSales);
-        
-        if (snapshot.docs.length > 0) {
-          const firstDoc = snapshot.docs[0];
-          const lastDoc = snapshot.docs[fetchedSales.length - 1];
-          setFirstVisibleDoc(firstDoc);
-          setLastVisibleDoc(lastDoc);
-
-          if (direction === 'initial') {
-            setPageHistory([null]);
-            setCurrentPage(1);
-          } else if (direction === 'next') {
-            setPageHistory(prev => [...prev, firstDoc]);
-            setCurrentPage(prev => prev + 1);
-          } else if (direction === 'prev') {
-            setPageHistory(prev => prev.slice(0, -1));
-            setCurrentPage(prev => prev - 1);
-          }
-        }
-        
-        setIsLastPage(!hasMore);
-
-    } catch (error: any) {
-        setErrorSales(error.message || "Failed to load sales.");
-    } finally {
         setLoadingSales(false);
-    }
-  }, [authLoading, db, buildTransactionQuery, lastVisibleDoc, currentPage, pageHistory]);
+    }, (error) => {
+        setErrorSales(error.message || "Failed to load sales.");
+        setLoadingSales(false);
+    });
+
+    return () => unsubscribe();
+  }, [authLoading, db, buildTransactionQuery]);
   
-  useEffect(() => {
-    fetchSalesPage('initial');
-  }, [dateFilter, siteFilter, activeStallId, fetchSalesPage]);
 
   useEffect(() => {
     const baseConstraints = buildTransactionQuery();
@@ -193,10 +147,14 @@ export default function FoodSalesClientPage() {
         setTotalSalesAmount(0);
         return;
     }
-    const totalQuery = query(collection(db, "foodSaleTransactions"), ...baseConstraints);
+    // Remove orderBy and limit for total calculation
+    const totalQueryConstraints = baseConstraints.filter(c => c.type !== 'orderBy' && c.type !== 'limit');
+    const totalQuery = query(collection(db, "foodSaleTransactions"), ...totalQueryConstraints);
     const unsubTotal = onSnapshot(totalQuery, (snapshot) => {
       const total = snapshot.docs.reduce((sum, doc) => sum + (doc.data().totalAmount || 0), 0);
       setTotalSalesAmount(total);
+    }, (error) => {
+        console.error("Error fetching total sales: ", error);
     });
      return () => unsubTotal();
   }, [dateFilter, siteFilter, activeStallId, db, buildTransactionQuery]);
@@ -295,7 +253,6 @@ export default function FoodSalesClientPage() {
         }
       });
       toast({ title: "Success", description: "Daily sales record deleted." });
-      fetchSalesPage('initial'); // Refresh page
     } catch (error: any) {
       toast({ title: "Error", description: `Failed to delete record: ${error.message}`, variant: "destructive" });
     }
@@ -325,7 +282,6 @@ export default function FoodSalesClientPage() {
         });
         toast({ title: "Success", description: `${deletedCount} sales records have been deleted.` });
         setSelectedIds([]);
-        fetchSalesPage('initial');
     } catch (error: any) {
         toast({ title: "Bulk Delete Failed", description: error.message, variant: "destructive" });
     } finally {
@@ -371,7 +327,7 @@ export default function FoodSalesClientPage() {
 
     try {
       const salesCollectionRef = collection(db, "foodSaleTransactions");
-      const exportQuery = query(salesCollectionRef, ...exportConstraints);
+      const exportQuery = query(salesCollectionRef, ...exportConstraints.filter(c => c.type !== 'limit'));
       const querySnapshot = await getDocs(exportQuery);
       const itemsToExport: FoodSaleTransaction[] = querySnapshot.docs.map(doc => ({
           id: doc.id, ...doc.data(), saleDate: (doc.data().saleDate as Timestamp).toDate(),
@@ -530,12 +486,6 @@ export default function FoodSalesClientPage() {
           sales={sales} 
           sitesMap={sitesMap}
           stallsMap={stallsMap}
-          onNextPage={() => fetchSalesPage('next')}
-          onPrevPage={() => fetchSalesPage('prev')}
-          isLastPage={isLastPage}
-          isFirstPage={currentPage === 1}
-          currentPage={currentPage}
-          isLoading={loadingSales}
           onDelete={handleDelete}
           selectedIds={selectedIds}
           onSelectionChange={setSelectedIds}
