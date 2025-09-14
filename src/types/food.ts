@@ -158,7 +158,6 @@ export interface FoodSaleTransaction {
   siteId: string;
   stallId: string;
   saleType: FoodSaleType;
-  // Refactored from a nested 'sales' object to flat properties
   hungerboxSales: number;
   upiSales: number;
   totalAmount: number;

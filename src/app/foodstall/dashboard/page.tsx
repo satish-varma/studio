@@ -12,7 +12,7 @@ import { getFirestore, collection, query, where, onSnapshot, Timestamp, QueryCon
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { startOfDay, endOfDay, subDays, startOfMonth } from "date-fns";
-import type { FoodItemExpense, FoodSaleTransaction, DailySalesBreakdown } from "@/types";
+import type { FoodItemExpense, FoodSaleTransaction } from "@/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -122,9 +122,12 @@ export default function FoodStallDashboardPage() {
             const sale = doc.data() as FoodSaleTransaction;
             salesTotal += sale.totalAmount;
             
-            hbSalesTotal += sale.sales?.hungerbox || 0;
-            paymentMethodTotals.HungerBox += sale.sales?.hungerbox || 0;
-            paymentMethodTotals.UPI += sale.sales?.upi || 0;
+            const saleHungerbox = sale.hungerboxSales || 0;
+            const saleUpi = sale.upiSales || 0;
+
+            hbSalesTotal += saleHungerbox;
+            paymentMethodTotals.HungerBox += saleHungerbox;
+            paymentMethodTotals.UPI += saleUpi;
         });
 
         setTotalSales(salesTotal);
