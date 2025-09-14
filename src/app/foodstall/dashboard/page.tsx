@@ -11,7 +11,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { getFirestore, collection, query, where, onSnapshot, Timestamp, QueryConstraint, getDocs } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
-import { startOfDay, endOfDay, subDays, startOfMonth, getDaysInMonth } from "date-fns";
+import { startOfDay, endOfDay, subDays, startOfMonth, endOfMonth, getDaysInMonth } from "date-fns";
 import type { FoodItemExpense, FoodSaleTransaction, StaffAttendance, Holiday, StaffDetails, AppUser } from "@/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -349,35 +349,44 @@ export default function FoodStallDashboardPage() {
         </Alert>
       )}
 
+      {loading ? (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+            {[...Array(5)].map((_, i) => (
+                <Card key={i}><CardHeader><Skeleton className="h-5 w-32"/></CardHeader><CardContent><Skeleton className="h-8 w-24 mt-2"/><Skeleton className="h-4 w-40 mt-1"/></CardContent></Card>
+            ))}
+        </div>
+      ) : (
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
         <Card className="shadow-md">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Gross Sales ({dateFilterLabels[dateFilter]})</CardTitle><DollarSign className="h-4 w-4 text-muted-foreground" /></CardHeader>
-          <CardContent>{loading ? <Skeleton className="h-8 w-32 mt-1" /> : <div className="text-2xl font-bold">₹{totalSales.toFixed(2)}</div>}<p className="text-xs text-muted-foreground">Revenue from all sales channels.</p></CardContent>
+          <CardContent><div className="text-2xl font-bold">₹{totalSales.toFixed(2)}</div><p className="text-xs text-muted-foreground">Revenue from all sales channels.</p></CardContent>
         </Card>
         <Card className="shadow-md">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Aggregator Commission</CardTitle><Percent className="h-4 w-4 text-muted-foreground" /></CardHeader>
-          <CardContent>{loading ? <Skeleton className="h-8 w-32 mt-1" /> : <div className="text-2xl font-bold text-orange-600">- ₹{commission.toFixed(2)}</div>}<p className="text-xs text-muted-foreground">Est. 20% on ₹{hungerboxSales.toFixed(2)}</p></CardContent>
+          <CardContent><div className="text-2xl font-bold text-orange-600">- ₹{commission.toFixed(2)}</div><p className="text-xs text-muted-foreground">Est. 20% on ₹{hungerboxSales.toFixed(2)}</p></CardContent>
         </Card>
         <Card className="shadow-md">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Total Expenses</CardTitle><ShoppingBag className="h-4 w-4 text-muted-foreground" /></CardHeader>
-          <CardContent>{loading ? <Skeleton className="h-8 w-32 mt-1" /> : <div className="text-2xl font-bold text-red-600">- ₹{totalExpenses.toFixed(2)}</div>}<p className="text-xs text-muted-foreground">Total cost of all purchases.</p></CardContent>
+          <CardContent><div className="text-2xl font-bold text-red-600">- ₹{totalExpenses.toFixed(2)}</div><p className="text-xs text-muted-foreground">Total cost of all purchases.</p></CardContent>
         </Card>
          <Card className="shadow-md">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Staff Salary</CardTitle><UsersIcon className="h-4 w-4 text-muted-foreground" /></CardHeader>
-          <CardContent>{loading ? <Skeleton className="h-8 w-32 mt-1" /> : <div className="text-2xl font-bold text-red-600">- ₹{totalSalaryExpense.toFixed(2)}</div>}<p className="text-xs text-muted-foreground">Earned salary for this period.</p></CardContent>
+          <CardContent><div className="text-2xl font-bold text-red-600">- ₹{totalSalaryExpense.toFixed(2)}</div><p className="text-xs text-muted-foreground">Earned salary for this period.</p></CardContent>
         </Card>
         <Card className="shadow-md lg:col-span-1">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Net Profit</CardTitle><Utensils className="h-4 w-4 text-muted-foreground" /></CardHeader>
-          <CardContent>{loading ? <Skeleton className="h-8 w-32 mt-1" /> : <div className={`text-2xl font-bold ${netProfit >= 0 ? 'text-green-600' : 'text-destructive'}`}>₹{netProfit.toFixed(2)}</div>}<p className="text-xs text-muted-foreground">Sales - All Expenses.</p></CardContent>
+          <CardContent><div className={`text-2xl font-bold ${netProfit >= 0 ? 'text-green-600' : 'text-destructive'}`}>₹{netProfit.toFixed(2)}</div><p className="text-xs text-muted-foreground">Sales - All Expenses.</p></CardContent>
         </Card>
       </div>
+      )}
+
 
        <div className="grid gap-6 lg:grid-cols-2">
             <Card className="shadow-lg">
                 <CardHeader>
                     <div className="flex items-center justify-between">
                         <CardTitle className="flex items-center"><BarChart className="mr-2 h-5 w-5 text-primary"/>Dynamic Summary</CardTitle>
-                        <Select value={summaryView} onValueChange={(v) => setSummaryView(v as SummaryViewOption)}>
+                         <Select value={summaryView} onValueChange={(v) => setSummaryView(v as SummaryViewOption)}>
                             <SelectTrigger className="w-[240px] bg-input"><SelectValue /></SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="by_expense_category"><ShoppingBag className="mr-2 h-4 w-4" />Summary by Expense Category</SelectItem>
