@@ -61,10 +61,9 @@ export default function FoodStallDashboardPage() {
   const { users: staffList, staffDetails: staffDetailsMap, loading: userManagementLoading } = useUserManagement();
   
   const [totalSales, setTotalSales] = useState(0);
+  const [totalWithDeductions, setTotalWithDeductions] = useState(0);
   const [totalExpenses, setTotalExpenses] = useState(0);
   const [totalSalaryExpense, setTotalSalaryExpense] = useState(0);
-  const [commission, setCommission] = useState(0);
-  const [hungerboxSales, setHungerboxSales] = useState(0);
   
   const [expenseSummary, setExpenseSummary] = useState<ExpenseCategorySummary[]>([]);
   const [paymentSummary, setPaymentSummary] = useState<PaymentMethodSummary[]>([]);
@@ -110,7 +109,7 @@ export default function FoodStallDashboardPage() {
     
     if (user.role !== 'admin' && !activeSiteId) {
         setLoading(false);
-        setTotalSales(0); setTotalExpenses(0); setCommission(0); setHungerboxSales(0); setTotalSalaryExpense(0);
+        setTotalSales(0); setTotalExpenses(0); setTotalWithDeductions(0); setTotalSalaryExpense(0);
         return;
     }
     
@@ -140,21 +139,22 @@ export default function FoodStallDashboardPage() {
     if (toTimestamp) salesQueryConstraints.push(where("saleDate", "<=", toTimestamp));
     const salesQuery = query(salesCollectionRef, ...salesQueryConstraints);
     unsubs.push(onSnapshot(salesQuery, (snapshot) => {
-        let salesTotal = 0, hbSalesTotal = 0;
+        let salesTotal = 0;
+        let deductionsTotal = 0;
         const paymentMethodTotals: Record<string, number> = { HungerBox: 0, UPI: 0 };
         snapshot.forEach(doc => {
             const sale = doc.data() as FoodSaleTransaction;
             salesTotal += sale.totalAmount;
             const saleHungerbox = sale.hungerboxSales || 0;
             const saleUpi = sale.upiSales || 0;
-            hbSalesTotal += saleHungerbox;
             paymentMethodTotals.HungerBox += saleHungerbox;
             paymentMethodTotals.UPI += saleUpi;
+            
+            const commissionRate = sale.saleType === 'MRP' ? 0.08 : 0.18;
+            deductionsTotal += saleHungerbox * commissionRate;
         });
         setTotalSales(salesTotal);
-        setHungerboxSales(hbSalesTotal);
-        const commissionRate = 0.20; // Default commission rate
-        setCommission(hbSalesTotal * commissionRate);
+        setTotalWithDeductions(salesTotal - deductionsTotal);
         setPaymentSummary(Object.entries(paymentMethodTotals).map(([method, totalAmount]) => ({ method, totalAmount })));
     }));
 
@@ -185,70 +185,70 @@ export default function FoodStallDashboardPage() {
     
     // Encapsulate salary data fetching logic.
     const fetchSalaryData = async () => {
-      if (staffList.length === 0) {
-        setTotalSalaryExpense(0);
-        return;
-      }
-      const staffUids = staffList.map(s => s.uid);
-      const uidsBatches: string[][] = [];
-      for (let i = 0; i < staffUids.length; i += 30) {
-        uidsBatches.push(staffUids.slice(i, i + 30));
-      }
+        if (staffList.length === 0) {
+            setTotalSalaryExpense(0);
+            return;
+        }
+        const staffUids = staffList.map(s => s.uid);
+        const uidsBatches: string[][] = [];
+        for (let i = 0; i < staffUids.length; i += 30) {
+            uidsBatches.push(staffUids.slice(i, i + 30));
+        }
 
-      if (dateFilter === 'all_time') {
-        const paymentPromises = uidsBatches.map(batch => 
-          getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", batch)))
-        );
-        const paymentsSnapshots = await Promise.all(paymentPromises);
-        const totalPaid = paymentsSnapshots.flat().reduce((sum, snapshot) => 
-            sum + snapshot.docs.reduce((docSum, doc) => docSum + (doc.data() as SalaryPayment).amountPaid, 0), 0);
-        setTotalSalaryExpense(totalPaid);
-      } else if (startDate && endDate) {
-        const monthForSalaryCalc = startOfMonth(startDate);
-        const holidaysQuery = query(collection(db, "holidays"), where("date", ">=", monthForSalaryCalc.toISOString().split('T')[0]), where("date", "<=", endOfMonth(monthForSalaryCalc).toISOString().split('T')[0]));
-        
-        const attendancePromises = uidsBatches.map(batch => {
-            const attendanceQuery = query(collection(db, "staffAttendance"), 
-                where("staffUid", "in", batch), 
-                where("date", ">=", startDate.toISOString().split('T')[0]), 
-                where("date", "<=", endDate.toISOString().split('T')[0])
+        if (dateFilter === 'all_time') {
+            const paymentPromises = uidsBatches.map(batch => 
+                getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", batch)))
             );
-            return getDocs(attendanceQuery);
-        });
+            const paymentsSnapshots = await Promise.all(paymentPromises);
+            const totalPaid = paymentsSnapshots.flat().reduce((sum, snapshot) => 
+                sum + snapshot.docs.reduce((docSum, doc) => docSum + (doc.data() as SalaryPayment).amountPaid, 0), 0);
+            setTotalSalaryExpense(totalPaid);
+        } else if (startDate && endDate) {
+            const monthForSalaryCalc = startOfMonth(startDate);
+            const holidaysQuery = query(collection(db, "holidays"), where("date", ">=", monthForSalaryCalc.toISOString().split('T')[0]), where("date", "<=", endOfMonth(monthForSalaryCalc).toISOString().split('T')[0]));
+            
+            const attendancePromises = uidsBatches.map(batch => {
+                const attendanceQuery = query(collection(db, "staffAttendance"), 
+                    where("staffUid", "in", batch), 
+                    where("date", ">=", startDate.toISOString().split('T')[0]), 
+                    where("date", "<=", endDate.toISOString().split('T')[0])
+                );
+                return getDocs(attendanceQuery);
+            });
 
-        const [holidaysSnapshot, ...attendanceSnapshots] = await Promise.all([
-            getDocs(holidaysQuery),
-            ...attendancePromises
-        ]);
+            const [holidaysSnapshot, ...attendanceSnapshots] = await Promise.all([
+                getDocs(holidaysQuery),
+                ...attendancePromises
+            ]);
 
-        const holidays = holidaysSnapshot.docs.map(d => d.data() as Holiday);
-        const attendanceByStaff = new Map<string, { present: number, halfDay: number }>();
-        
-        attendanceSnapshots.flat().forEach(snapshot => snapshot.docs.forEach(doc => {
-            const att = doc.data() as StaffAttendance;
-            const current = attendanceByStaff.get(att.staffUid) || { present: 0, halfDay: 0 };
-            if (att.status === 'Present') current.present++;
-            if (att.status === 'Half-day') current.halfDay++;
-            attendanceByStaff.set(att.staffUid, current);
-        }));
+            const holidays = holidaysSnapshot.docs.map(d => d.data() as Holiday);
+            const attendanceByStaff = new Map<string, { present: number, halfDay: number }>();
+            
+            attendanceSnapshots.flat().forEach(snapshot => snapshot.docs.forEach(doc => {
+                const att = doc.data() as StaffAttendance;
+                const current = attendanceByStaff.get(att.staffUid) || { present: 0, halfDay: 0 };
+                if (att.status === 'Present') current.present++;
+                if (att.status === 'Half-day') current.halfDay++;
+                attendanceByStaff.set(att.staffUid, current);
+            }));
 
-        let totalSalary = 0;
-        staffList.forEach(staff => {
-            const details = staffDetailsMap.get(staff.uid);
-            if (details?.salary) {
-                const monthWorkingDays = calculateWorkingDays(startOfMonth(startDate), endOfMonth(startDate), holidays, staff);
-                if (monthWorkingDays > 0) {
-                    const perDaySalary = details.salary / monthWorkingDays;
-                    const attendance = attendanceByStaff.get(staff.uid) || { present: 0, halfDay: 0 };
-                    const earnedDays = attendance.present + (attendance.halfDay * 0.5);
-                    totalSalary += earnedDays * perDaySalary;
+            let totalSalary = 0;
+            staffList.forEach(staff => {
+                const details = staffDetailsMap.get(staff.uid);
+                if (details?.salary) {
+                    const monthWorkingDays = calculateWorkingDays(startOfMonth(startDate), endOfMonth(startDate), holidays, staff);
+                    if (monthWorkingDays > 0) {
+                        const perDaySalary = details.salary / monthWorkingDays;
+                        const attendance = attendanceByStaff.get(staff.uid) || { present: 0, halfDay: 0 };
+                        const earnedDays = attendance.present + (attendance.halfDay * 0.5);
+                        totalSalary += earnedDays * perDaySalary;
+                    }
                 }
-            }
-        });
-        setTotalSalaryExpense(totalSalary);
-      } else {
-        setTotalSalaryExpense(0);
-      }
+            });
+            setTotalSalaryExpense(totalSalary);
+        } else {
+            setTotalSalaryExpense(0);
+        }
     };
 
     fetchSalaryData().finally(() => setLoading(false));
@@ -256,7 +256,7 @@ export default function FoodStallDashboardPage() {
     return () => { unsubs.forEach(unsub => unsub()); };
   }, [activeSiteId, activeStallId, authLoading, user, dateFilter, staffList, staffDetailsMap, userManagementLoading, calculateWorkingDays]);
 
-  const netProfit = totalSales - commission - totalExpenses - totalSalaryExpense;
+  const netProfit = totalWithDeductions - totalExpenses - totalSalaryExpense;
 
   const dateFilterLabels: Record<DateFilterOption, string> = {
     today: 'Today', last_7_days: 'Last 7 Days', this_month: 'This Month', all_time: 'All Time'
@@ -375,20 +375,22 @@ export default function FoodStallDashboardPage() {
           <CardContent><div className="text-2xl font-bold">₹{totalSales.toFixed(2)}</div><p className="text-xs text-muted-foreground">Revenue from all sales channels.</p></CardContent>
         </Card>
         <Card className="shadow-md">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Aggregator Commission</CardTitle><Percent className="h-4 w-4 text-muted-foreground" /></CardHeader>
-          <CardContent><div className="text-2xl font-bold text-orange-600">- ₹{commission.toFixed(2)}</div><p className="text-xs text-muted-foreground">Est. 20% on ₹{hungerboxSales.toFixed(2)}</p></CardContent>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Sales (with Deductions)</CardTitle><Percent className="h-4 w-4 text-muted-foreground" /></CardHeader>
+          <CardContent><div className="text-2xl font-bold text-green-600">₹{totalWithDeductions.toFixed(2)}</div><p className="text-xs text-muted-foreground">After aggregator commission.</p></CardContent>
         </Card>
         <Card className="shadow-md">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Total Expenses</CardTitle><ShoppingBag className="h-4 w-4 text-muted-foreground" /></CardHeader>
           <CardContent><div className="text-2xl font-bold text-red-600">- ₹{totalExpenses.toFixed(2)}</div><p className="text-xs text-muted-foreground">Total cost of all purchases.</p></CardContent>
         </Card>
-        <Card className="shadow-md">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Staff Salary</CardTitle><UsersIcon className="h-4 w-4 text-muted-foreground" /></CardHeader>
-            <CardContent><div className="text-2xl font-bold text-red-600">- ₹{totalSalaryExpense.toFixed(2)}</div><p className="text-xs text-muted-foreground">{dateFilter === 'all_time' ? 'Total salary paid' : 'Earned salary for this period.'}</p></CardContent>
-        </Card>
+        {dateFilter !== 'all_time' && (
+            <Card className="shadow-md">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Staff Salary</CardTitle><UsersIcon className="h-4 w-4 text-muted-foreground" /></CardHeader>
+                <CardContent><div className="text-2xl font-bold text-red-600">- ₹{totalSalaryExpense.toFixed(2)}</div><p className="text-xs text-muted-foreground">Earned salary for this period.</p></CardContent>
+            </Card>
+        )}
         <Card className="shadow-md lg:col-span-1">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Net Profit</CardTitle><Utensils className="h-4 w-4 text-muted-foreground" /></CardHeader>
-          <CardContent><div className={`text-2xl font-bold ${netProfit >= 0 ? 'text-green-600' : 'text-destructive'}`}>₹{netProfit.toFixed(2)}</div><p className="text-xs text-muted-foreground">Sales - All Expenses.</p></CardContent>
+          <CardContent><div className={`text-2xl font-bold ${netProfit >= 0 ? 'text-green-600' : 'text-destructive'}`}>₹{netProfit.toFixed(2)}</div><p className="text-xs text-muted-foreground">Sales (w/ ded.) - All Expenses.</p></CardContent>
         </Card>
       </div>
       )}
@@ -436,5 +438,3 @@ export default function FoodStallDashboardPage() {
     </div>
   );
 }
-
-    
