@@ -86,7 +86,7 @@ export default function FoodSalesClientPage() {
   const [firstVisibleDoc, setFirstVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
   const [lastVisibleDoc, setLastVisibleDoc] = useState<DocumentSnapshot<DocumentData> | null>(null);
   const [isLastPage, setIsLastPage] = useState(false);
-  const [isFirstPageReached, setIsFirstPageReached] = useState(true);
+  
   const [currentPage, setCurrentPage] = useState(1);
   const [pageHistory, setPageHistory] = useState<(DocumentSnapshot<DocumentData> | null)[]>([null]);
   
@@ -136,8 +136,8 @@ export default function FoodSalesClientPage() {
 
     if (direction === 'next' && lastVisibleDoc) {
       finalConstraints.push(startAfter(lastVisibleDoc));
-    } else if (direction === 'prev' && pageHistory.length > 1) {
-      const prevPageStartAfterDoc = pageHistory[pageHistory.length - 2];
+    } else if (direction === 'prev' && currentPage > 1) {
+      const prevPageStartAfterDoc = pageHistory[currentPage - 2];
       finalConstraints = prevPageStartAfterDoc ? [...baseConstraints, startAfter(prevPageStartAfterDoc)] : [...baseConstraints];
     }
     finalConstraints.push(limit(SALES_PER_PAGE + 1));
@@ -161,26 +161,22 @@ export default function FoodSalesClientPage() {
         if (direction === 'initial') {
             setPageHistory([null]);
             setCurrentPage(1);
-            setIsFirstPageReached(true);
-            setIsLastPage(!hasMore);
         } else if (direction === 'next') {
             setPageHistory(prev => [...prev, snapshot.docs[0]]);
             setCurrentPage(prev => prev + 1);
-            setIsFirstPageReached(false);
-            setIsLastPage(!hasMore);
         } else if (direction === 'prev') {
             setPageHistory(prev => prev.slice(0, -1));
             setCurrentPage(prev => prev - 1);
-            setIsLastPage(false);
-            if (pageHistory.length <= 2) setIsFirstPageReached(true);
         }
+
+        setIsLastPage(!hasMore);
 
     } catch (error: any) {
         setErrorSales(error.message || "Failed to load sales.");
     } finally {
         setLoadingSales(false);
     }
-  }, [authLoading, db, buildTransactionQuery, lastVisibleDoc, pageHistory]);
+  }, [authLoading, db, buildTransactionQuery, lastVisibleDoc, currentPage, pageHistory]);
   
   useEffect(() => {
     fetchSalesPage('initial');
@@ -532,7 +528,7 @@ export default function FoodSalesClientPage() {
           onNextPage={() => fetchSalesPage('next')}
           onPrevPage={() => fetchSalesPage('prev')}
           isLastPage={isLastPage}
-          isFirstPage={isFirstPageReached}
+          isFirstPage={currentPage === 1}
           currentPage={currentPage}
           isLoading={loadingSales}
           onDelete={handleDelete}
@@ -548,5 +544,3 @@ export default function FoodSalesClientPage() {
     </div>
   );
 }
-
-    
