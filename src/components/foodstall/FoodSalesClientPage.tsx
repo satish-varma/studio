@@ -77,6 +77,7 @@ export default function FoodSalesClientPage() {
   const [isLastPage, setIsLastPage] = useState(false);
   const [isFirstPageReached, setIsFirstPageReached] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
+  const [pageHistory, setPageHistory] = useState<(DocumentSnapshot<DocumentData> | null)[]>([null]);
   
   const [isExporting, setIsExporting] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
@@ -109,75 +110,111 @@ export default function FoodSalesClientPage() {
     return constraints;
   }, [user, activeSiteId, activeStallId, dateFilter, effectiveSiteId]);
 
-  const fetchSalesAndContext = useCallback(() => {
+  const fetchSalesPage = useCallback(async (direction: 'initial' | 'next' | 'prev' = 'initial') => {
     if (authLoading || !db) return;
-
     const baseConstraints = buildTransactionQuery();
     if (!baseConstraints) {
-      setSales([]);
-      setTotalSalesAmount(0);
-      setLoadingSales(false);
-      return;
+      setSales([]); setLoadingSales(false); return;
     }
-
-    setLoadingSales(true);
-    const salesCollectionRef = collection(db, "foodSaleTransactions");
-    const q = query(salesCollectionRef, ...baseConstraints, limit(SALES_PER_PAGE));
     
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-        const fetchedSales = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data(),
-            saleDate: (doc.data().saleDate as Timestamp).toDate(),
-        } as FoodSaleTransaction));
+    setLoadingSales(true);
+    let finalConstraints = [...baseConstraints];
 
-        const total = fetchedSales.reduce((sum, sale) => sum + (sale.totalAmount || 0), 0);
-        
+    if (direction === 'next' && lastVisibleDoc) {
+      finalConstraints.push(startAfter(lastVisibleDoc));
+    } else if (direction === 'prev' && pageHistory.length > 1) {
+      const prevPageStartAfterDoc = pageHistory[pageHistory.length - 2];
+      finalConstraints = prevPageStartAfterDoc ? [...baseConstraints, startAfter(prevPageStartAfterDoc)] : [...baseConstraints];
+    }
+    finalConstraints.push(limit(SALES_PER_PAGE + 1));
+    
+    const salesCollectionRef = collection(db, "foodSaleTransactions");
+    const q = query(salesCollectionRef, ...finalConstraints);
+
+    try {
+        const snapshot = await getDocs(q);
+        const hasMore = snapshot.docs.length > SALES_PER_PAGE;
+        const fetchedSales: FoodSaleTransaction[] = snapshot.docs
+            .slice(0, SALES_PER_PAGE)
+            .map(doc => ({
+                id: doc.id, ...doc.data(), saleDate: (doc.data().saleDate as Timestamp).toDate(),
+            } as FoodSaleTransaction));
+
         setSales(fetchedSales);
-        setTotalSalesAmount(total);
         setFirstVisibleDoc(snapshot.docs[0] || null);
-        setLastVisibleDoc(snapshot.docs[snapshot.docs.length - 1] || null);
-        setIsLastPage(snapshot.docs.length < SALES_PER_PAGE);
-        setIsFirstPageReached(true);
-        setCurrentPage(1);
-        setLoadingSales(false);
-    }, (error) => {
-        console.error("Error fetching sales data:", error);
+        setLastVisibleDoc(snapshot.docs[fetchedSales.length - 1] || null);
+
+        if (direction === 'initial') {
+            setPageHistory([null]);
+            setCurrentPage(1);
+            setIsFirstPageReached(true);
+            setIsLastPage(!hasMore);
+        } else if (direction === 'next') {
+            setPageHistory(prev => [...prev, snapshot.docs[0]]);
+            setCurrentPage(prev => prev + 1);
+            setIsFirstPageReached(false);
+            setIsLastPage(!hasMore);
+        } else if (direction === 'prev') {
+            setPageHistory(prev => prev.slice(0, -1));
+            setCurrentPage(prev => prev - 1);
+            setIsLastPage(false);
+            if (pageHistory.length <= 2) setIsFirstPageReached(true);
+        }
+
+    } catch (error: any) {
         setErrorSales(error.message || "Failed to load sales.");
+    } finally {
         setLoadingSales(false);
-    });
+    }
+  }, [authLoading, db, buildTransactionQuery, lastVisibleDoc, pageHistory]);
+  
+  useEffect(() => {
+    fetchSalesPage('initial');
+  }, [dateFilter, siteFilter, activeStallId]);
 
-    const sitesQuery = query(collection(db, "sites"), orderBy("name"));
-    const unsubSites = onSnapshot(sitesQuery, (snapshot) => {
-        const fetchedSites = snapshot.docs.map(doc => ({id: doc.id, ...doc.data()} as Site));
-        const newSitesMap: Record<string, string> = {};
-        fetchedSites.forEach(site => newSitesMap[site.id] = site.name);
-        setAllSites(fetchedSites);
-        setSitesMap(newSitesMap);
-    });
-
-    const stallsQuery = query(collection(db, "stalls"));
-    const unsubStalls = onSnapshot(stallsQuery, (snapshot) => {
-      const newStallsMap: Record<string, string> = {};
-      snapshot.forEach(doc => { newStallsMap[doc.id] = (doc.data() as Stall).name; });
-      setStallsMap(newStallsMap);
-    });
-
-    return () => {
-      unsubscribe();
-      unsubSites();
-      unsubStalls();
-    };
-  }, [authLoading, db, buildTransactionQuery]);
 
   useEffect(() => {
-    const unsubscribe = fetchSalesAndContext();
-    return () => {
-      if (unsubscribe) {
-        unsubscribe();
-      }
-    };
-  }, [fetchSalesAndContext]);
+    if (authLoading || !db) return;
+    
+    // Total calculation
+    const totalConstraints = buildTransactionQuery();
+    if (totalConstraints) {
+      const totalQuery = query(collection(db, "foodSaleTransactions"), ...totalConstraints);
+      const unsubTotal = onSnapshot(totalQuery, (snapshot) => {
+        const total = snapshot.docs.reduce((sum, doc) => sum + (doc.data().totalAmount || 0), 0);
+        setTotalSalesAmount(total);
+      });
+       return () => unsubTotal();
+    }
+  }, [dateFilter, siteFilter, activeStallId, authLoading, db, buildTransactionQuery]);
+
+  useEffect(() => {
+     if (!db) return;
+     const sitesQuery = query(collection(db, "sites"), orderBy("name"));
+     const unsubSites = onSnapshot(sitesQuery, (snapshot) => {
+         const newSitesMap: Record<string, string> = {};
+         const fetchedSites = snapshot.docs.map(doc => {
+            const site = {id: doc.id, ...doc.data()} as Site;
+            newSitesMap[site.id] = site.name;
+            return site;
+         });
+         setAllSites(fetchedSites);
+         setSitesMap(newSitesMap);
+     });
+
+     const stallsQuery = query(collection(db, "stalls"));
+     const unsubStalls = onSnapshot(stallsQuery, (snapshot) => {
+       const newStallsMap: Record<string, string> = {};
+       snapshot.forEach(doc => { newStallsMap[doc.id] = (doc.data() as Stall).name; });
+       setStallsMap(newStallsMap);
+     });
+
+     return () => {
+       unsubSites();
+       unsubStalls();
+     };
+  }, [db]);
+  
   
   const handleGmailImport = async () => {
     if (!user || !activeSiteId || !activeStallId) {
@@ -185,7 +222,6 @@ export default function FoodSalesClientPage() {
         return;
     }
     
-    // Check for user tokens, if not present, initiate OAuth flow
     if (!db) {
         toast({ title: "Database Error", description: "Cannot verify Gmail connection.", variant: "destructive" });
         return;
@@ -419,8 +455,8 @@ export default function FoodSalesClientPage() {
           sales={sales} 
           sitesMap={sitesMap}
           stallsMap={stallsMap}
-          onNextPage={() => {}}
-          onPrevPage={() => {}}
+          onNextPage={() => fetchSalesPage('next')}
+          onPrevPage={() => fetchSalesPage('prev')}
           isLastPage={isLastPage}
           isFirstPage={isFirstPageReached}
           currentPage={currentPage}
