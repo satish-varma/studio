@@ -183,9 +183,8 @@ export default function FoodStallDashboardPage() {
         setExpensePaymentSummary(Object.entries(expensePaymentMethodTotals).map(([method, totalCost]) => ({ method, totalCost })));
     }));
     
-    // Fetch Attendance and Holidays for salary calculation
     const fetchSalaryData = async () => {
-        if (!startDate || !endDate || staffList.length === 0) {
+        if (dateFilter === 'all_time' || !startDate || !endDate || staffList.length === 0) {
             setTotalSalaryExpense(0);
             return;
         }
@@ -196,12 +195,10 @@ export default function FoodStallDashboardPage() {
             uidsBatches.push(staffUids.slice(i, i + 30));
         }
         
-        // Correctly fetch holidays for the entire month of the start date for accurate per-day calculation
         const monthForSalaryCalc = startOfMonth(startDate);
         const holidaysQuery = query(collection(db, "holidays"), where("date", ">=", monthForSalaryCalc.toISOString().split('T')[0]), where("date", "<=", endOfMonth(monthForSalaryCalc).toISOString().split('T')[0]));
         
         const attendancePromises = uidsBatches.map(batch => {
-            // Fetch attendance only for the selected date range (startDate to endDate)
             const attendanceQuery = query(collection(db, "staffAttendance"), 
                 where("staffUid", "in", batch), 
                 where("date", ">=", startDate.toISOString().split('T')[0]), 
@@ -231,12 +228,10 @@ export default function FoodStallDashboardPage() {
         staffList.forEach(staff => {
             const details = staffDetailsMap.get(staff.uid);
             if (details?.salary) {
-                // Calculate working days for the entire month to get an accurate per-day salary
                 const monthWorkingDays = calculateWorkingDays(startOfMonth(startDate), endOfMonth(startDate), holidays, staff);
 
                 if (monthWorkingDays > 0) {
                     const perDaySalary = details.salary / monthWorkingDays;
-                    // Use attendance for the selected period
                     const attendance = attendanceByStaff.get(staff.uid) || { present: 0, halfDay: 0 };
                     const earnedDays = attendance.present + (attendance.halfDay * 0.5);
                     totalSalary += earnedDays * perDaySalary;
@@ -332,6 +327,8 @@ export default function FoodStallDashboardPage() {
     }
   };
 
+  const showSalaryCard = dateFilter !== 'all_time';
+
   return (
     <div className="space-y-6">
       <PageHeader title="Food Stall Dashboard" description="Overview of your food stall's financial health and operations." />
@@ -377,10 +374,12 @@ export default function FoodStallDashboardPage() {
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Total Expenses</CardTitle><ShoppingBag className="h-4 w-4 text-muted-foreground" /></CardHeader>
           <CardContent><div className="text-2xl font-bold text-red-600">- ₹{totalExpenses.toFixed(2)}</div><p className="text-xs text-muted-foreground">Total cost of all purchases.</p></CardContent>
         </Card>
-         <Card className="shadow-md">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Staff Salary</CardTitle><UsersIcon className="h-4 w-4 text-muted-foreground" /></CardHeader>
-          <CardContent><div className="text-2xl font-bold text-red-600">- ₹{totalSalaryExpense.toFixed(2)}</div><p className="text-xs text-muted-foreground">Earned salary for this period.</p></CardContent>
-        </Card>
+         {showSalaryCard && (
+            <Card className="shadow-md">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Staff Salary</CardTitle><UsersIcon className="h-4 w-4 text-muted-foreground" /></CardHeader>
+                <CardContent><div className="text-2xl font-bold text-red-600">- ₹{totalSalaryExpense.toFixed(2)}</div><p className="text-xs text-muted-foreground">Earned salary for this period.</p></CardContent>
+            </Card>
+         )}
         <Card className="shadow-md lg:col-span-1">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Net Profit</CardTitle><Utensils className="h-4 w-4 text-muted-foreground" /></CardHeader>
           <CardContent><div className={`text-2xl font-bold ${netProfit >= 0 ? 'text-green-600' : 'text-destructive'}`}>₹{netProfit.toFixed(2)}</div><p className="text-xs text-muted-foreground">Sales - All Expenses.</p></CardContent>
@@ -431,5 +430,7 @@ export default function FoodStallDashboardPage() {
     </div>
   );
 }
+
+    
 
     
