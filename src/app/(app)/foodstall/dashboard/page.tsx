@@ -195,10 +195,13 @@ export default function FoodStallDashboardPage() {
         for (let i = 0; i < staffUids.length; i += 30) {
             uidsBatches.push(staffUids.slice(i, i + 30));
         }
-
-        const holidaysQuery = query(collection(db, "holidays"), where("date", ">=", startDate.toISOString().split('T')[0]), where("date", "<=", endDate.toISOString().split('T')[0]));
+        
+        // Correctly fetch holidays for the entire month of the start date for accurate per-day calculation
+        const monthForSalaryCalc = startOfMonth(startDate);
+        const holidaysQuery = query(collection(db, "holidays"), where("date", ">=", monthForSalaryCalc.toISOString().split('T')[0]), where("date", "<=", endOfMonth(monthForSalaryCalc).toISOString().split('T')[0]));
         
         const attendancePromises = uidsBatches.map(batch => {
+            // Fetch attendance only for the selected date range (startDate to endDate)
             const attendanceQuery = query(collection(db, "staffAttendance"), 
                 where("staffUid", "in", batch), 
                 where("date", ">=", startDate.toISOString().split('T')[0]), 
@@ -228,13 +231,15 @@ export default function FoodStallDashboardPage() {
         staffList.forEach(staff => {
             const details = staffDetailsMap.get(staff.uid);
             if (details?.salary) {
-                const monthWorkingDays = calculateWorkingDays(startOfMonth(startDate), endOfMonth(startDate), [], staff);
-                const periodWorkingDays = calculateWorkingDays(startDate, endDate, holidays, staff);
+                // Calculate working days for the entire month to get an accurate per-day salary
+                const monthWorkingDays = calculateWorkingDays(startOfMonth(startDate), endOfMonth(startDate), holidays, staff);
 
                 if (monthWorkingDays > 0) {
                     const perDaySalary = details.salary / monthWorkingDays;
+                    // Use attendance for the selected period
                     const attendance = attendanceByStaff.get(staff.uid) || { present: 0, halfDay: 0 };
-                    totalSalary += (attendance.present + attendance.halfDay * 0.5) * perDaySalary;
+                    const earnedDays = attendance.present + (attendance.halfDay * 0.5);
+                    totalSalary += earnedDays * perDaySalary;
                 }
             }
         });
@@ -426,3 +431,5 @@ export default function FoodStallDashboardPage() {
     </div>
   );
 }
+
+    
