@@ -29,7 +29,7 @@ interface FoodSalesTableProps {
   onDelete: (sale: FoodSaleTransaction) => void;
   selectedIds: string[];
   onSelectionChange: (ids: string[]) => void;
-  isLoading: boolean;
+  isLoading?: boolean; // Optional loading prop
 }
 
 const TableRowSkeleton = () => (
@@ -56,7 +56,7 @@ export function FoodSalesTable({
   onDelete,
   selectedIds,
   onSelectionChange,
-  isLoading,
+  isLoading = false,
 }: FoodSalesTableProps) {
   const router = useRouter();
 

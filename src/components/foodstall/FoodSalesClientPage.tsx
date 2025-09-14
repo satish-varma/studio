@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback } from "react";
-import type { FoodSaleTransaction, Site, Stall, AppUser } from "@/types";
+import type { FoodSaleTransaction, Site, Stall, AppUser, FoodSaleType } from "@/types";
 import { 
   getFirestore, 
   collection, 
@@ -22,7 +22,7 @@ import { firebaseConfig, auth } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Info, DollarSign, Upload, Download, Building, PlusCircle, Mail, Trash2 } from "lucide-react";
+import { Loader2, Info, DollarSign, Upload, Download, Building, PlusCircle, Mail, Trash2, ListFilter, Store, WalletCards } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -74,10 +74,16 @@ export default function FoodSalesClientPage() {
 
   const [dateFilter, setDateFilter] = useState<DateFilterOption>('this_month');
   const [siteFilter, setSiteFilter] = useState<string>('all');
+  const [saleTypeFilter, setSaleTypeFilter] = useState<FoodSaleType | 'all'>('all');
+  const [stallFilter, setStallFilter] = useState<string>('all');
+  
   const [allSites, setAllSites] = useState<Site[]>([]);
+  const [stallsForSite, setStallsForSite] = useState<Stall[]>([]);
+
   const [sitesMap, setSitesMap] = useState<Record<string, string>>({});
   const [stallsMap, setStallsMap] = useState<Record<string, string>>({});
   const [totalSalesAmount, setTotalSalesAmount] = useState(0);
+  const [totalWithDeductions, setTotalWithDeductions] = useState(0);
   
   const [isExporting, setIsExporting] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
@@ -87,6 +93,7 @@ export default function FoodSalesClientPage() {
   const [isDeleting, setIsDeleting] = useState(false);
   
   const effectiveSiteId = user?.role === 'admin' ? (siteFilter === 'all' ? null : siteFilter) : activeSiteId;
+  const effectiveStallId = user?.role === 'admin' ? (stallFilter === 'all' ? null : stallFilter) : activeStallId;
 
 
   const buildTransactionQuery = useCallback(() => {
@@ -95,7 +102,8 @@ export default function FoodSalesClientPage() {
 
     let constraints: QueryConstraint[] = [orderBy("saleDate", "desc"), limit(SALES_PER_PAGE)];
     if (effectiveSiteId) constraints.push(where("siteId", "==", effectiveSiteId));
-    if (activeStallId) constraints.push(where("stallId", "==", activeStallId));
+    if (effectiveStallId) constraints.push(where("stallId", "==", effectiveStallId));
+    if (saleTypeFilter !== 'all') constraints.push(where("saleType", "==", saleTypeFilter));
 
     const now = new Date();
     let startDate: Date | null = null;
@@ -111,7 +119,7 @@ export default function FoodSalesClientPage() {
     if (endDate) constraints.push(where("saleDate", "<=", Timestamp.fromDate(endDate)));
 
     return constraints;
-  }, [user, activeSiteId, activeStallId, dateFilter, effectiveSiteId]);
+  }, [user, activeSiteId, dateFilter, effectiveSiteId, effectiveStallId, saleTypeFilter]);
 
   useEffect(() => {
     if (authLoading || !db) return;
@@ -145,19 +153,30 @@ export default function FoodSalesClientPage() {
     const baseConstraints = buildTransactionQuery();
     if (!baseConstraints || !db) {
         setTotalSalesAmount(0);
+        setTotalWithDeductions(0);
         return;
     }
-    // Remove orderBy and limit for total calculation
     const totalQueryConstraints = baseConstraints.filter(c => c.type !== 'orderBy' && c.type !== 'limit');
     const totalQuery = query(collection(db, "foodSaleTransactions"), ...totalQueryConstraints);
     const unsubTotal = onSnapshot(totalQuery, (snapshot) => {
-      const total = snapshot.docs.reduce((sum, doc) => sum + (doc.data().totalAmount || 0), 0);
+      let total = 0;
+      let totalDeducted = 0;
+      snapshot.forEach(doc => {
+          const sale = doc.data() as FoodSaleTransaction;
+          const saleTotal = sale.totalAmount || 0;
+          total += saleTotal;
+
+          const commissionRate = sale.saleType === 'MRP' ? 0.08 : 0.18;
+          const deduction = (sale.hungerboxSales || 0) * commissionRate;
+          totalDeducted += (saleTotal - deduction);
+      });
       setTotalSalesAmount(total);
+      setTotalWithDeductions(totalDeducted);
     }, (error) => {
         console.error("Error fetching total sales: ", error);
     });
      return () => unsubTotal();
-  }, [dateFilter, siteFilter, activeStallId, db, buildTransactionQuery]);
+  }, [dateFilter, siteFilter, stallFilter, saleTypeFilter, db, buildTransactionQuery]);
 
 
   useEffect(() => {
@@ -174,18 +193,25 @@ export default function FoodSalesClientPage() {
          setSitesMap(newSitesMap);
      });
 
-     const stallsQuery = query(collection(db, "stalls"));
+     const stallsQuery = query(collection(db, "stalls"), orderBy("name"));
      const unsubStalls = onSnapshot(stallsQuery, (snapshot) => {
+       const allStalls = snapshot.docs.map(doc => ({id: doc.id, ...doc.data()} as Stall));
        const newStallsMap: Record<string, string> = {};
-       snapshot.forEach(doc => { newStallsMap[doc.id] = (doc.data() as Stall).name; });
+       allStalls.forEach(stall => { newStallsMap[stall.id] = stall.name; });
        setStallsMap(newStallsMap);
+
+       if (effectiveSiteId) {
+         setStallsForSite(allStalls.filter(s => s.siteId === effectiveSiteId));
+       } else {
+         setStallsForSite([]);
+       }
      });
 
      return () => {
        unsubSites();
        unsubStalls();
      };
-  }, [db]);
+  }, [db, effectiveSiteId]);
   
   
   const handleGmailImport = async () => {
@@ -419,33 +445,53 @@ export default function FoodSalesClientPage() {
               <CardTitle>Filter & Summary</CardTitle>
               <CardDescription className="mt-1">
                 Total sales for the selected period.
-                {!effectiveSiteId ? ' (Aggregated for all sites)' : !activeStallId ? ' (Aggregated for all stalls in site)' : ''}
+                {!effectiveSiteId ? ' (Aggregated for all sites)' : !effectiveStallId ? ' (Aggregated for all stalls in site)' : ''}
               </CardDescription>
             </div>
-            <div className="text-left sm:text-right">
-              <p className="text-sm text-muted-foreground">Total Sales</p>
-              <div className="text-2xl font-bold">
-                {loadingSales ? <Skeleton className="h-8 w-32 mt-1" /> : `₹${totalSalesAmount.toFixed(2)}`}
-              </div>
+            <div className="flex gap-4 text-left sm:text-right">
+                <div>
+                    <p className="text-sm text-muted-foreground">Total Sales</p>
+                    <div className="text-2xl font-bold">
+                        {loadingSales ? <Skeleton className="h-8 w-32 mt-1" /> : `₹${totalSalesAmount.toFixed(2)}`}
+                    </div>
+                </div>
+                 <div>
+                    <p className="text-sm text-muted-foreground">Total (with Deductions)</p>
+                    <div className="text-2xl font-bold text-primary">
+                        {loadingSales ? <Skeleton className="h-8 w-32 mt-1" /> : `₹${totalWithDeductions.toFixed(2)}`}
+                    </div>
+                </div>
             </div>
           </div>
         </CardHeader>
-        <CardContent className="flex flex-wrap gap-2 border-t pt-4">
-          <Button variant={dateFilter === 'today' ? 'default' : 'outline'} onClick={() => setDateFilter('today')}>Today</Button>
-          <Button variant={dateFilter === 'last_7_days' ? 'default' : 'outline'} onClick={() => setDateFilter('last_7_days')}>Last 7 Days</Button>
-          <Button variant={dateFilter === 'this_month' ? 'default' : 'outline'} onClick={() => setDateFilter('this_month')}>This Month</Button>
-          <Button variant={dateFilter === 'all_time' ? 'default' : 'outline'} onClick={() => setDateFilter('all_time')}>All Time</Button>
-          {user?.role === 'admin' && (
-            <Select value={siteFilter} onValueChange={setSiteFilter}>
-                <SelectTrigger className="w-full sm:w-[200px] bg-input"><Building className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by site"/></SelectTrigger>
-                <SelectContent><SelectItem value="all">All Sites</SelectItem>{allSites.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
-            </Select>
-          )}
-           <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => setShowImportDialog(true)}><Upload className="mr-2 h-4 w-4" />Import from CSV</Button>
-            <Button variant="outline" onClick={handleExport} disabled={isExporting}>{isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Download className="mr-2 h-4 w-4" />}Export to CSV</Button>
-            <Button variant="outline" onClick={handleGmailImport} disabled={isGmailImporting}>{isGmailImporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Mail className="mr-2 h-4 w-4" />}Import from Gmail</Button>
-          </div>
+        <CardContent className="flex flex-col gap-2 border-t pt-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant={dateFilter === 'today' ? 'default' : 'outline'} onClick={() => setDateFilter('today')}>Today</Button>
+              <Button variant={dateFilter === 'last_7_days' ? 'default' : 'outline'} onClick={() => setDateFilter('last_7_days')}>Last 7 Days</Button>
+              <Button variant={dateFilter === 'this_month' ? 'default' : 'outline'} onClick={() => setDateFilter('this_month')}>This Month</Button>
+              <Button variant={dateFilter === 'all_time' ? 'default' : 'outline'} onClick={() => setDateFilter('all_time')}>All Time</Button>
+              <Button variant="outline" onClick={() => setShowImportDialog(true)}><Upload className="mr-2 h-4 w-4" />Import</Button>
+              <Button variant="outline" onClick={handleExport} disabled={isExporting}>{isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Download className="mr-2 h-4 w-4" />}Export</Button>
+              <Button variant="outline" onClick={handleGmailImport} disabled={isGmailImporting}>{isGmailImporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Mail className="mr-2 h-4 w-4" />}Import from Gmail</Button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {user?.role === 'admin' && (
+                  <Select value={siteFilter} onValueChange={setSiteFilter}>
+                      <SelectTrigger className="w-full bg-input"><Building className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Filter by site"/></SelectTrigger>
+                      <SelectContent><SelectItem value="all">All Sites</SelectItem>{allSites.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                )}
+                 {user?.role === 'admin' && effectiveSiteId && (
+                    <Select value={stallFilter} onValueChange={setStallFilter}>
+                        <SelectTrigger className="w-full bg-input"><Store className="mr-2 h-4 w-4 text-muted-foreground"/><SelectValue placeholder="Filter by stall"/></SelectTrigger>
+                        <SelectContent><SelectItem value="all">All Stalls</SelectItem>{stallsForSite.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+                    </Select>
+                )}
+                 <Select value={saleTypeFilter} onValueChange={(v) => setSaleTypeFilter(v as any)}>
+                    <SelectTrigger className="w-full bg-input"><ListFilter className="mr-2 h-4 w-4 text-muted-foreground"/><SelectValue placeholder="Filter by type"/></SelectTrigger>
+                    <SelectContent><SelectItem value="all">All Sale Types</SelectItem><SelectItem value="Non-MRP">Non-MRP</SelectItem><SelectItem value="MRP">MRP</SelectItem></SelectContent>
+                </Select>
+            </div>
         </CardContent>
       </Card>
       
