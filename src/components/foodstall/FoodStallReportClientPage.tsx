@@ -136,7 +136,7 @@ export default function FoodStallReportClientPage() {
 
       salesTransactions.forEach(sale => {
         totalSalesAmount += sale.totalAmount;
-        const hungerboxAmount = sale.sales?.hungerbox || 0;
+        const hungerboxAmount = sale.hungerboxSales || 0;
         totalHungerboxSales += hungerboxAmount;
         const commissionRate = sale.saleType === 'MRP' ? 0.08 : 0.18;
         totalCommission += hungerboxAmount * commissionRate;
