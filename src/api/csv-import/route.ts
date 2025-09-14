@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { initializeApp, getApps, cert, App as AdminApp } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { getFirestore as getAdminFirestore, Timestamp, WriteBatch } from 'firebase-admin/firestore';
-import type { StockItem, FoodItemExpense, AppUser, FoodSaleTransaction, FoodSaleType } from '@/types';
+import type { StockItem, FoodItemExpense, AppUser, FoodSaleTransaction } from '@/types';
 import Papa from 'papaparse';
 import { logFoodStallActivity } from '@/lib/foodStallLogger';
 
@@ -225,7 +225,7 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
       console.warn(`${LOG_PREFIX} Skipping sales row due to missing site, stall, or date.`, row);
       continue;
     }
-    const saleType = (row['Sale Type'] === 'MRP' ? 'MRP' : 'Non-MRP') as FoodSaleType;
+    const saleType = (row['Sale Type'] === 'MRP' ? 'MRP' : 'Non-MRP');
     const docId = `${row['Sale Date']}_${stallId}_${saleType}`;
     
     const hungerboxSales = parseFloat(row['Hungerbox Sales']) || 0;

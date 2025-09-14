@@ -3,7 +3,8 @@ export type FoodStallActivityType =
   | 'EXPENSE_RECORDED'
   | 'EXPENSE_UPDATED'
   | 'EXPENSE_BULK_IMPORTED'
-  | 'SALE_RECORDED_OR_UPDATED';
+  | 'SALE_RECORDED_OR_UPDATED'
+  | 'SALE_BULK_IMPORTED';
 
 export interface FoodStallActivityLog {
   id?: string; // Firestore document ID

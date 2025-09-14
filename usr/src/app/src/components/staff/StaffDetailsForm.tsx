@@ -21,24 +21,12 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Loader2, Save } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
-import { getFirestore, doc, setDoc, updateDoc } from "firebase/firestore";
-import { firebaseConfig } from '@/lib/firebaseConfig';
-import { getApps, initializeApp } from 'firebase/app';
+import { doc, setDoc, updateDoc } from "firebase/firestore";
+import { db } from '@/lib/firebaseConfig';
 import { useState } from "react";
 import { DatePicker } from "@/components/ui/date-picker";
 import { logStaffActivity } from "@/lib/staffLogger";
 import { useAuth } from "@/contexts/AuthContext";
-
-const LOG_PREFIX = "[StaffDetailsForm]";
-
-if (!getApps().length) {
-  try {
-    initializeApp(firebaseConfig);
-  } catch (error) {
-    console.error(`${LOG_PREFIX} Firebase initialization error:`, error);
-  }
-}
-const db = getFirestore();
 
 interface StaffDetailsFormProps {
   staffUid: string;
@@ -66,6 +54,10 @@ export default function StaffDetailsForm({ staffUid, initialData, staffUser }: S
   async function onSubmit(values: StaffDetailsFormValues) {
     if (!currentUser) {
         toast({ title: "Authentication Error", description: "You are not logged in.", variant: "destructive" });
+        return;
+    }
+    if (!db) {
+        toast({ title: "Database Error", description: "Firestore is not initialized.", variant: "destructive" });
         return;
     }
     setIsSubmitting(true);

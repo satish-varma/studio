@@ -21,25 +21,13 @@ import { Card, CardContent, CardDescription as UiCardDescription, CardFooter, Ca
 import { Loader2, Save, History } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
-import { getFirestore, doc, setDoc, updateDoc, collection, query, where, getDocs, orderBy } from "firebase/firestore";
-import { firebaseConfig } from '@/lib/firebaseConfig';
-import { getApps, initializeApp } from 'firebase/app';
+import { doc, setDoc, updateDoc, collection, query, where, getDocs, orderBy } from "firebase/firestore";
+import { db } from '@/lib/firebaseConfig';
 import { useState, useEffect } from "react";
 import { DatePicker } from "../ui/date-picker";
 import { logStaffActivity } from "@/lib/staffLogger";
 import { useAuth } from "@/contexts/AuthContext";
 import StaffHistory from "./StaffHistory";
-
-const LOG_PREFIX = "[StaffDetailsForm]";
-
-if (!getApps().length) {
-  try {
-    initializeApp(firebaseConfig);
-  } catch (error) {
-    console.error(`${LOG_PREFIX} Firebase initialization error:`, error);
-  }
-}
-const db = getFirestore();
 
 interface StaffDetailsFormProps {
   staffUid: string;
@@ -72,7 +60,7 @@ export default function StaffDetailsForm({ staffUid, initialData, staffUser }: S
 
   useEffect(() => {
     const fetchHistoryData = async () => {
-        if (!staffUid) return;
+        if (!staffUid || !db) return;
         setLoadingHistory(true);
         try {
             const logQuery = query(collection(db, "staffActivityLogs"), where("relatedStaffUid", "==", staffUid), orderBy("timestamp", "desc"));
@@ -106,6 +94,10 @@ export default function StaffDetailsForm({ staffUid, initialData, staffUser }: S
   async function onSubmit(values: StaffDetailsFormValues) {
     if (!currentUser) {
         toast({ title: "Authentication Error", description: "You are not logged in.", variant: "destructive" });
+        return;
+    }
+    if (!db) {
+        toast({ title: "Database Error", description: "Firestore is not initialized.", variant: "destructive" });
         return;
     }
     setIsSubmitting(true);

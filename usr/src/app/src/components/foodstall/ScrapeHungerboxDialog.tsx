@@ -9,13 +9,11 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Bot, Eye, EyeOff, Building, Store } from "lucide-react";
 import { useAuth } from '@/contexts/AuthContext';
-import { auth } from '@/lib/firebaseConfig';
+import { auth, db } from '@/lib/firebaseConfig'; // Import db directly
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { getFirestore, collection, query, orderBy, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
 import type { Site, Stall } from '@/types';
-
-const db = getFirestore();
 
 interface ScrapeHungerboxDialogProps {
   isOpen: boolean;
@@ -28,7 +26,6 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
   const [isScraping, setIsScraping] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  // New state for site/stall selection within the dialog
   const [allSites, setAllSites] = useState<Site[]>([]);
   const [stallsForSite, setStallsForSite] = useState<Stall[]>([]);
   const [selectedSiteId, setSelectedSiteId] = useState<string>('');
@@ -37,8 +34,7 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
 
   const { toast } = useToast();
   const { user } = useAuth();
-  
-  // Fetch sites and stalls when the dialog is open
+
   useEffect(() => {
     if (!isOpen || !db) return;
 
@@ -47,46 +43,52 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
     const unsubSites = onSnapshot(sitesQuery, (snapshot) => {
         setAllSites(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()} as Site)));
         setLoadingContext(false);
+    }, (error) => {
+        console.error("Error fetching sites: ", error);
+        toast({ title: "Error", description: "Could not fetch sites.", variant: "destructive" });
+        setLoadingContext(false);
     });
 
+    // This part is simplified; a more robust solution would handle stalls better
     const stallsQuery = query(collection(db, "stalls"), orderBy("name"));
     const unsubStalls = onSnapshot(stallsQuery, (snapshot) => {
       const allStallsData = snapshot.docs.map(doc => ({id: doc.id, ...doc.data()} as Stall));
       if (selectedSiteId) {
         setStallsForSite(allStallsData.filter(s => s.siteId === selectedSiteId));
       }
+    }, (error) => {
+        console.error("Error fetching stalls: ", error);
     });
 
     return () => {
       unsubSites();
       unsubStalls();
     };
-  }, [isOpen, selectedSiteId]);
+  }, [isOpen, selectedSiteId, toast]);
 
-  // Update stalls dropdown when a site is selected
   useEffect(() => {
-    if (selectedSiteId && allSites.length > 0) { // Check allSites to ensure stalls can be filtered
+    if (selectedSiteId && db) {
         const stallsQuery = query(collection(db, "stalls"), where("siteId", "==", selectedSiteId), orderBy("name"));
         const unsub = onSnapshot(stallsQuery, (snapshot) => {
             setStallsForSite(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()} as Stall)));
         });
         return () => unsub();
+    } else {
+        setStallsForSite([]);
     }
-    setStallsForSite([]);
-    setSelectedStallId(''); // Reset stall when site changes
-  }, [selectedSiteId, allSites]);
-
+    setSelectedStallId('');
+  }, [selectedSiteId]);
 
   const handleImport = async () => {
     if (!username || !password) {
       toast({ title: "Missing Credentials", description: "Please enter your Hungerbox username and password.", variant: "destructive" });
       return;
     }
-     if (!selectedSiteId || !selectedStallId) {
-        toast({ title: "Context Required", description: "Please select a site and stall to associate this import with.", variant: "destructive" });
+    if (!selectedSiteId || !selectedStallId) {
+        toast({ title: "Context Required", description: "Please select a site and stall for this import.", variant: "destructive" });
         return;
     }
-    if (!user) {
+    if (!user || !auth || !auth.currentUser) { // Guard clause for auth and currentUser
       toast({ title: "Authentication Error", description: "You must be logged in to import data.", variant: "destructive" });
       return;
     }
@@ -95,7 +97,6 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
     toast({ title: "Importing...", description: "Connecting to Hungerbox. This may take a moment...", duration: 10000 });
 
     try {
-      if (!auth.currentUser) throw new Error("Firebase user not available.");
       const idToken = await auth.currentUser.getIdToken(true);
 
       const response = await fetch('/api/scrape-hungerbox', {
@@ -127,7 +128,7 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
         <DialogHeader>
           <DialogTitle>Import from Hungerbox</DialogTitle>
           <DialogDescription>
-            Enter your credentials and select the site/stall to associate the imported sales data with.
+            Enter credentials and select the site/stall to associate the imported sales data with.
           </DialogDescription>
         </DialogHeader>
         <div className="py-4 space-y-4">
@@ -135,8 +136,7 @@ export default function ScrapeHungerboxDialog({ isOpen, onClose }: ScrapeHungerb
             <Bot className="h-4 w-4" />
             <AlertTitle>Note on Web Scraping</AlertTitle>
             <AlertDescription className="text-xs">
-              This feature works by simulating a browser login. If Hungerbox changes their website layout, this import may fail.
-              The current implementation uses mock data for demonstration.
+              This feature simulates a browser login. If Hungerbox changes their website, this might fail. It currently uses mock data.
             </AlertDescription>
           </Alert>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
