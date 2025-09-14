@@ -1,0 +1,546 @@
+
+"use client";
+
+import PageHeader from "@/components/shared/PageHeader";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { DatePicker } from "@/components/ui/date-picker";
+import {
+  foodExpenseFormSchema,
+  type FoodItemExpenseFormValues,
+  foodExpenseCategories,
+  paymentMethods,
+  type FoodExpensePreset
+} from "@/types/food";
+import { ArrowLeft, Loader2, Info, Store } from "lucide-react";
+import Link from "next/link";
+import { useState, useEffect } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/hooks/use-toast";
+import {
+  getFirestore,
+  collection,
+  addDoc,
+  Timestamp,
+  query,
+  orderBy,
+  onSnapshot
+} from "firebase/firestore";
+import { firebaseConfig } from '@/lib/firebaseConfig';
+import { getApps, initializeApp, getApp } from 'firebase/app';
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Textarea } from "@/components/ui/textarea";
+import { logFoodStallActivity } from "@/lib/foodStallLogger";
+import { PlusCircle } from "lucide-react";
+
+
+let db: ReturnType<typeof getFirestore> | undefined;
+if (!getApps().length) {
+  try {
+    initializeApp(firebaseConfig);
+    db = getFirestore();
+  } catch (error) {
+    console.error("Firebase initialization error in RecordFoodExpensePage:", error);
+  }
+} else {
+  db = getFirestore(getApp());
+}
+
+export default function RecordFoodExpensePage() {
+  const { user, activeSiteId, activeStallId, activeSite, activeStall } = useAuth();
+  const { toast } = useToast();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [vendors, setVendors] = useState<string[]>([]);
+  const [loadingVendors, setLoadingVendors] = useState(true);
+  const [expensePresets, setExpensePresets] = useState<FoodExpensePreset[]>([]);
+
+  const form = useForm<FoodItemExpenseFormValues>({
+    resolver: zodResolver(foodExpenseFormSchema),
+    defaultValues: {
+      category: "",
+      otherCategoryDetails: "",
+      totalCost: undefined,
+      paymentMethod: "",
+      otherPaymentMethodDetails: "",
+      purchaseDate: new Date(),
+      vendor: "",
+      otherVendorDetails: "",
+      notes: "",
+      billImageUrl: "",
+    },
+  });
+
+  const paymentMethod = form.watch("paymentMethod");
+  const vendor = form.watch("vendor");
+  const category = form.watch("category");
+  
+  const [showOther, setShowOther] = useState({
+      category: false,
+      vendor: false,
+      paymentMethod: false,
+  });
+  
+  useEffect(() => {
+    setShowOther({
+        category: category === 'Other',
+        vendor: vendor === 'Other',
+        paymentMethod: paymentMethod === 'Other',
+    });
+  }, [category, vendor, paymentMethod]);
+
+  // Fetch supporting data (vendors, presets)
+  useEffect(() => {
+    if (!db) return;
+    setLoadingVendors(true);
+    const vendorsCollectionRef = collection(db, "foodVendors");
+    const qVendors = query(vendorsCollectionRef, orderBy("name", "asc"));
+    const unsubscribeVendors = onSnapshot(qVendors, (snapshot) => {
+      setVendors(snapshot.docs.map(doc => doc.data().name as string));
+      setLoadingVendors(false);
+    }, (error) => {
+      console.error("Error fetching vendors:", error);
+      toast({ title: "Error", description: "Could not fetch vendors list.", variant: "destructive" });
+      setLoadingVendors(false);
+    });
+
+    const presetsCollectionRef = collection(db, "foodExpensePresets");
+    const qPresets = query(presetsCollectionRef);
+    const unsubscribePresets = onSnapshot(qPresets, (snapshot) => {
+      setExpensePresets(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FoodExpensePreset)));
+    }, (error) => {
+      console.error("Error fetching expense presets:", error);
+    });
+
+    return () => {
+      unsubscribeVendors();
+      unsubscribePresets();
+    };
+  }, [toast]);
+
+  // Effect to apply presets when category changes
+  useEffect(() => {
+    const selectedPreset = expensePresets.find(p => p.category === category);
+    if (selectedPreset) {
+      if (selectedPreset.defaultVendor) {
+        form.setValue('vendor', vendors.includes(selectedPreset.defaultVendor) ? selectedPreset.defaultVendor : 'Other');
+        if (!vendors.includes(selectedPreset.defaultVendor)) {
+          form.setValue('otherVendorDetails', selectedPreset.defaultVendor);
+        }
+      }
+      if (selectedPreset.defaultPaymentMethod) {
+        form.setValue('paymentMethod', selectedPreset.defaultPaymentMethod);
+      }
+      if (selectedPreset.defaultNotes) {
+        form.setValue('notes', selectedPreset.defaultNotes);
+      }
+      if (selectedPreset.defaultTotalCost !== undefined) {
+        form.setValue('totalCost', selectedPreset.defaultTotalCost);
+      }
+    }
+  }, [category, expensePresets, form, vendors]);
+
+
+  async function onSubmit(values: FoodItemExpenseFormValues) {
+    if (!user || !activeSiteId || !activeStallId || !db) {
+      toast({
+        title: "Error",
+        description:
+          "Cannot record expense. User, site, or stall context is missing, or DB not initialized.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      const categoryToSave = values.category === 'Other' ? (values.otherCategoryDetails || "Other") : values.category;
+      const vendorToSave = values.vendor === 'Other' ? (values.otherVendorDetails || "Other") : values.vendor;
+
+      const expenseData = {
+        ...values,
+        category: categoryToSave,
+        vendor: vendorToSave,
+        siteId: activeSiteId,
+        stallId: activeStallId,
+        recordedByUid: user.uid,
+        recordedByName: user.displayName || user.email,
+        purchaseDate: Timestamp.fromDate(values.purchaseDate),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      delete (expenseData as any).otherCategoryDetails;
+      delete (expenseData as any).otherVendorDetails;
+
+
+      const docRef = await addDoc(collection(db, "foodItemExpenses"), expenseData);
+      
+      const vendorNameForLog = vendorToSave;
+
+      await logFoodStallActivity(user, {
+        siteId: activeSiteId,
+        stallId: activeStallId,
+        type: 'EXPENSE_RECORDED',
+        relatedDocumentId: docRef.id,
+        details: {
+            expenseCategory: categoryToSave,
+            totalCost: values.totalCost,
+            vendor: vendorNameForLog,
+            notes: values.notes,
+        }
+      });
+      
+      toast({
+        title: "Expense Recorded",
+        description: `An expense for ${categoryToSave} of ₹${values.totalCost.toFixed(2)} has been recorded.`,
+      });
+      
+      form.reset({
+        ...values,
+        totalCost: undefined,
+        notes: "",
+        billImageUrl: "",
+      });
+
+    } catch (error: any) {
+      console.error("Error recording food expense:", error);
+      toast({
+        title: "Recording Failed",
+        description:
+          error.message || "Could not record the expense. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  if (!user) {
+    return (
+      <div className="flex justify-center items-center py-10">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="ml-2">Authenticating...</p>
+      </div>
+    );
+  }
+
+  if (!activeSiteId || !activeStallId) {
+    return (
+      <div className="max-w-2xl mx-auto mt-10">
+        <Alert variant="default" className="border-primary/50">
+          <Info className="h-4 w-4" />
+          <AlertTitle>Site & Stall Context Required</AlertTitle>
+          <AlertDescription>
+            To record a food stall expense, please ensure you have an active
+            Site and a specific Stall selected in the header. This context is
+            necessary to correctly associate the expense.
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Record New Food Stall Expense"
+        description={<span className="flex items-center gap-2 text-sm text-muted-foreground">Recording expense for: <Store size={14} /> {activeStall?.name || '...'} at {activeSite?.name || '...'}</span>}
+        actions={
+          <Link href="/foodstall/expenses">
+            <Button variant="outline" disabled={isSubmitting}>
+              <ArrowLeft className="mr-2 h-4 w-4" /> Back to Expenses
+            </Button>
+          </Link>
+        }
+      />
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)}>
+          <Card className="max-w-2xl mx-auto shadow-lg">
+            <CardHeader>
+              <CardTitle>Expense Details</CardTitle>
+              <CardDescription>
+                All fields marked with * are required. Select a category to auto-fill defaults.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="category"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Category *</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        value={field.value || ""}
+                        disabled={isSubmitting}
+                      >
+                        <FormControl>
+                          <SelectTrigger id="category" className="bg-input">
+                            <SelectValue placeholder="Select expense category" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {foodExpenseCategories.map((cat) => (
+                            <SelectItem key={cat} value={cat}>
+                              {cat}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                 {showOther.category && (
+                    <FormField
+                      control={form.control}
+                      name="otherCategoryDetails"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Specify Other Category *</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="Enter category name"
+                              {...field}
+                              value={field.value ?? ""}
+                              disabled={isSubmitting}
+                              className="bg-input"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
+                <FormField
+                  control={form.control}
+                  name="totalCost"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Total Cost * (₹)</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          placeholder="0.00"
+                          {...field}
+                          value={field.value ?? ""}
+                          disabled={isSubmitting}
+                          className="bg-input"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+               <FormField
+                  control={form.control}
+                  name="vendor"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Vendor *</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        value={field.value || ""}
+                        disabled={isSubmitting || loadingVendors}
+                      >
+                        <FormControl>
+                          <SelectTrigger id="vendor" className="bg-input">
+                            <SelectValue placeholder={loadingVendors ? "Loading vendors..." : "Select a vendor"} />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                           {vendors.map((v) => (
+                            <SelectItem key={v} value={v}>
+                              {v}
+                            </SelectItem>
+                          ))}
+                          <SelectItem value="Other">Other</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                {showOther.vendor && (
+                <FormField
+                  control={form.control}
+                  name="otherVendorDetails"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Specify Other Vendor *</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="Enter vendor name"
+                          {...field}
+                          value={field.value ?? ""}
+                          disabled={isSubmitting}
+                          className="bg-input"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="paymentMethod"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Payment Method *</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        value={field.value || ""}
+                        disabled={isSubmitting}
+                      >
+                        <FormControl>
+                          <SelectTrigger
+                            id="paymentMethod"
+                            className="bg-input"
+                          >
+                            <SelectValue placeholder="Select payment method" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {paymentMethods.map((method) => (
+                            <SelectItem key={method} value={method}>
+                              {method}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="purchaseDate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Purchase Date *</FormLabel>
+                      <DatePicker
+                        date={field.value}
+                        onDateChange={field.onChange}
+                        id="expensePurchaseDate"
+                        disabled={isSubmitting}
+                        className="bg-input"
+                      />
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              
+              {showOther.paymentMethod && (
+                <FormField
+                  control={form.control}
+                  name="otherPaymentMethodDetails"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Specify Other Payment Method *</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="e.g., Sodexo, Meal Voucher"
+                          {...field}
+                          value={field.value ?? ""}
+                          disabled={isSubmitting}
+                          className="bg-input"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+              
+              <FormField
+                control={form.control}
+                name="billImageUrl"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Bill Image URL (Optional)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="url"
+                        placeholder="https://example.com/your-bill.jpg"
+                        {...field}
+                        value={field.value ?? ""}
+                        disabled={isSubmitting}
+                        className="bg-input"
+                      />
+                    </FormControl>
+                    <FormDescription className="text-xs flex items-center gap-1">
+                      <Info size={12} />
+                      Direct file upload is not supported yet. Please upload your bill somewhere public and paste the link here.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="notes"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Notes (Optional)</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder="e.g., Paid in cash, specific brand for an item"
+                        {...field}
+                        value={field.value ?? ""}
+                        disabled={isSubmitting}
+                        className="bg-input min-h-[70px]"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </CardContent>
+            <CardFooter>
+              <Button type="submit" className="w-full" disabled={isSubmitting}>
+                {isSubmitting && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                Save Expense
+              </Button>
+            </CardFooter>
+          </Card>
+        </form>
+      </Form>
+    </div>
+  );
+}

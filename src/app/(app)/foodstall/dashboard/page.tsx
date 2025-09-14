@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import PageHeader from "@/components/shared/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -229,6 +229,8 @@ export default function FoodStallDashboardPage() {
             const details = staffDetailsMap.get(staff.uid);
             if (details?.salary) {
                 const monthWorkingDays = calculateWorkingDays(startOfMonth(startDate), endOfMonth(startDate), [], staff);
+                const periodWorkingDays = calculateWorkingDays(startDate, endDate, holidays, staff);
+
                 if (monthWorkingDays > 0) {
                     const perDaySalary = details.salary / monthWorkingDays;
                     const attendance = attendanceByStaff.get(staff.uid) || { present: 0, halfDay: 0 };
