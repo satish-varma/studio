@@ -190,20 +190,38 @@ export default function FoodStallDashboardPage() {
         }
 
         const staffUids = staffList.map(s => s.uid);
-        const holidaysQuery = query(collection(db, "holidays"), where("date", ">=", startDate.toISOString().split('T')[0]), where("date", "<=", endDate.toISOString().split('T')[0]));
-        const attendanceQuery = query(collection(db, "staffAttendance"), where("staffUid", "in", staffUids), where("date", ">=", startDate.toISOString().split('T')[0]), where("date", "<=", endDate.toISOString().split('T')[0]));
+        const uidsBatches: string[][] = [];
+        for (let i = 0; i < staffUids.length; i += 30) {
+            uidsBatches.push(staffUids.slice(i, i + 30));
+        }
 
-        const [holidaysSnapshot, attendanceSnapshot] = await Promise.all([getDocs(holidaysQuery), getDocs(attendanceQuery)]);
+        const holidaysQuery = query(collection(db, "holidays"), where("date", ">=", startDate.toISOString().split('T')[0]), where("date", "<=", endDate.toISOString().split('T')[0]));
+        
+        const attendancePromises = uidsBatches.map(batch => {
+            const attendanceQuery = query(collection(db, "staffAttendance"), 
+                where("staffUid", "in", batch), 
+                where("date", ">=", startDate.toISOString().split('T')[0]), 
+                where("date", "<=", endDate.toISOString().split('T')[0])
+            );
+            return getDocs(attendanceQuery);
+        });
+
+        const [holidaysSnapshot, ...attendanceSnapshots] = await Promise.all([
+            getDocs(holidaysQuery),
+            ...attendancePromises
+        ]);
+
         const holidays = holidaysSnapshot.docs.map(d => d.data() as Holiday);
         
         const attendanceByStaff = new Map<string, { present: number, halfDay: number }>();
-        attendanceSnapshot.forEach(doc => {
+        
+        attendanceSnapshots.flat().forEach(snapshot => snapshot.docs.forEach(doc => {
             const att = doc.data() as StaffAttendance;
             const current = attendanceByStaff.get(att.staffUid) || { present: 0, halfDay: 0 };
             if (att.status === 'Present') current.present++;
             if (att.status === 'Half-day') current.halfDay++;
             attendanceByStaff.set(att.staffUid, current);
-        });
+        }));
 
         let totalSalary = 0;
         staffList.forEach(staff => {
@@ -396,3 +414,4 @@ export default function FoodStallDashboardPage() {
     </div>
   );
 }
+
