@@ -186,7 +186,10 @@ export default function FoodSalesClientPage() {
     }
     
     // Check for user tokens, if not present, initiate OAuth flow
-    const tokensRef = doc(db, 'user_tokens', user.uid);
+    if (!db) {
+        toast({ title: "Database Error", description: "Cannot verify Gmail connection.", variant: "destructive" });
+        return;
+    }
     const tokenSnap = await getDocs(query(collection(db, 'user_tokens'), where('uid', '==', user.uid)));
 
     if (tokenSnap.empty) {
@@ -401,6 +404,7 @@ export default function FoodSalesClientPage() {
            <div className="flex items-center gap-2">
             <Button variant="outline" onClick={() => setShowImportDialog(true)}><Upload className="mr-2 h-4 w-4" />Import from CSV</Button>
             <Button variant="outline" onClick={handleExport} disabled={isExporting}>{isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Download className="mr-2 h-4 w-4" />}Export to CSV</Button>
+            <Button variant="outline" onClick={handleGmailImport} disabled={isGmailImporting}>{isGmailImporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Mail className="mr-2 h-4 w-4" />}Import from Gmail</Button>
           </div>
         </CardContent>
       </Card>
