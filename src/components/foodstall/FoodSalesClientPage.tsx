@@ -22,7 +22,7 @@ import {
   deleteDoc,
   doc,
 } from "firebase/firestore";
-import { firebaseConfig } from '@/lib/firebaseConfig';
+import { firebaseConfig, auth } from '@/lib/firebaseConfig'; // Import auth
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -212,7 +212,8 @@ export default function FoodSalesClientPage() {
     toast({ title: "Importing from Gmail...", description: "Checking for new Hungerbox sales emails. This may take a moment." });
     
     try {
-        const idToken = await auth.currentUser?.getIdToken(true);
+        if (!auth || !auth.currentUser) throw new Error("Firebase user not available for token retrieval.");
+        const idToken = await auth.currentUser.getIdToken(true);
         const response = await fetch('/api/gmail-handler', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
