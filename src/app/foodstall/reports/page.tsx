@@ -131,13 +131,16 @@ export default function FoodStallReportClientPage() {
       const salesTransactions = salesSnapshot.docs.map(doc => doc.data() as FoodSaleTransaction);
       
       let totalSalesAmount = 0;
+      let totalCommission = 0;
       let totalHungerboxSales = 0;
 
       salesTransactions.forEach(sale => {
         totalSalesAmount += sale.totalAmount;
-        totalHungerboxSales += sale.sales?.hungerbox || 0;
+        const hungerboxAmount = sale.hungerboxSales || 0;
+        totalHungerboxSales += hungerboxAmount;
+        const commissionRate = sale.saleType === 'MRP' ? 0.08 : 0.18;
+        totalCommission += hungerboxAmount * commissionRate;
       });
-      const totalCommission = totalHungerboxSales * 0.20;
       console.log(`${LOG_PREFIX} Fetched ${salesTransactions.length} sales transactions, total amount: ${totalSalesAmount}, commission: ${totalCommission}`);
 
 
@@ -221,7 +224,7 @@ export default function FoodStallReportClientPage() {
   
   const summaryCards = summaryData ? [
     { title: "Gross Sales", value: `₹${summaryData.totalSalesAmount.toFixed(2)}`, icon: IndianRupee, color: "text-green-600", description: `Across ${summaryData.numberOfSales} sale days` },
-    { title: "Aggregator Commission", value: `- ₹${summaryData.totalCommission.toFixed(2)}`, icon: Percent, color: "text-orange-500", description: `20% on ₹${summaryData.totalHungerboxSales.toFixed(2)} (HungerBox)` },
+    { title: "Aggregator Commission", value: `- ₹${summaryData.totalCommission.toFixed(2)}`, icon: Percent, color: "text-orange-500", description: `On ₹${summaryData.totalHungerboxSales.toFixed(2)} (HungerBox)` },
     { title: "Total Expenses", value: `- ₹${summaryData.totalExpensesAmount.toFixed(2)}`, icon: ShoppingBag, color: "text-red-500", description: `From ${summaryData.numberOfExpenses} expense records` },
     { title: "Net Profit", value: `₹${summaryData.netProfit.toFixed(2)}`, icon: TrendingUp, color: summaryData.netProfit >= 0 ? "text-accent" : "text-destructive", description: "Gross Sales - Commission - Expenses" },
   ] : [];
