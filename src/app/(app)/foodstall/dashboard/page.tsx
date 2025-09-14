@@ -183,26 +183,24 @@ export default function FoodStallDashboardPage() {
         setExpensePaymentSummary(Object.entries(expensePaymentMethodTotals).map(([method, totalCost]) => ({ method, totalCost })));
     }));
     
+    // Encapsulate salary data fetching logic.
     const fetchSalaryData = async () => {
       if (staffList.length === 0) {
         setTotalSalaryExpense(0);
         return;
       }
       const staffUids = staffList.map(s => s.uid);
+      const uidsBatches: string[][] = [];
+      for (let i = 0; i < staffUids.length; i += 30) {
+        uidsBatches.push(staffUids.slice(i, i + 30));
+      }
 
       if (dateFilter === 'all_time') {
-        // For all time, sum up all payments from salaryPayments collection
         const paymentsQuery = query(collection(db, "salaryPayments"), where("staffUid", "in", staffUids));
         const paymentsSnapshot = await getDocs(paymentsQuery);
         const totalPaid = paymentsSnapshot.docs.reduce((sum, doc) => sum + (doc.data() as SalaryPayment).amountPaid, 0);
         setTotalSalaryExpense(totalPaid);
       } else if (startDate && endDate) {
-        // For specific date ranges, calculate earned salary based on attendance
-        const uidsBatches: string[][] = [];
-        for (let i = 0; i < staffUids.length; i += 30) {
-            uidsBatches.push(staffUids.slice(i, i + 30));
-        }
-        
         const monthForSalaryCalc = startOfMonth(startDate);
         const holidaysQuery = query(collection(db, "holidays"), where("date", ">=", monthForSalaryCalc.toISOString().split('T')[0]), where("date", "<=", endOfMonth(monthForSalaryCalc).toISOString().split('T')[0]));
         
@@ -236,7 +234,6 @@ export default function FoodStallDashboardPage() {
             const details = staffDetailsMap.get(staff.uid);
             if (details?.salary) {
                 const monthWorkingDays = calculateWorkingDays(startOfMonth(startDate), endOfMonth(startDate), holidays, staff);
-
                 if (monthWorkingDays > 0) {
                     const perDaySalary = details.salary / monthWorkingDays;
                     const attendance = attendanceByStaff.get(staff.uid) || { present: 0, halfDay: 0 };
@@ -250,7 +247,6 @@ export default function FoodStallDashboardPage() {
         setTotalSalaryExpense(0);
       }
     };
-
 
     fetchSalaryData().finally(() => setLoading(false));
 
@@ -437,9 +433,3 @@ export default function FoodStallDashboardPage() {
     </div>
   );
 }
-
-    
-
-    
-
-    
