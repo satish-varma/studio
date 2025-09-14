@@ -155,20 +155,25 @@ export default function FoodSalesClientPage() {
             } as FoodSaleTransaction));
 
         setSales(fetchedSales);
-        setFirstVisibleDoc(snapshot.docs[0] || null);
-        setLastVisibleDoc(snapshot.docs[fetchedSales.length - 1] || null);
+        
+        if (snapshot.docs.length > 0) {
+          const firstDoc = snapshot.docs[0];
+          const lastDoc = snapshot.docs[fetchedSales.length - 1];
+          setFirstVisibleDoc(firstDoc);
+          setLastVisibleDoc(lastDoc);
 
-        if (direction === 'initial') {
+          if (direction === 'initial') {
             setPageHistory([null]);
             setCurrentPage(1);
-        } else if (direction === 'next') {
-            setPageHistory(prev => [...prev, snapshot.docs[0]]);
+          } else if (direction === 'next') {
+            setPageHistory(prev => [...prev, firstDoc]);
             setCurrentPage(prev => prev + 1);
-        } else if (direction === 'prev') {
+          } else if (direction === 'prev') {
             setPageHistory(prev => prev.slice(0, -1));
             setCurrentPage(prev => prev - 1);
+          }
         }
-
+        
         setIsLastPage(!hasMore);
 
     } catch (error: any) {
