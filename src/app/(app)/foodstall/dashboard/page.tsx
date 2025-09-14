@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import PageHeader from "@/components/shared/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { DollarSign, ShoppingBag, Utensils, ArrowRight, LineChart, ClipboardList, Loader2, Info, Percent, BarChart, Soup, Truck, WalletCards, Users as UsersIcon } from "lucide-react";
+import { DollarSign, ShoppingBag, Utensils, ArrowRight, LineChart, ClipboardList, Loader2, Info, Percent, BarChart, Soup, Truck, WalletCards, Users as UsersIcon, IndianRupee } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { getFirestore, collection, query, where, onSnapshot, Timestamp, QueryConstraint, getDocs } from "firebase/firestore";
@@ -55,13 +55,19 @@ interface ExpensePaymentMethodSummary {
   totalCost: number;
 }
 
+interface SalesData {
+  grossMrp: number;
+  grossNonMrp: number;
+  netMrp: number;
+  netNonMrp: number;
+}
+
 
 export default function FoodStallDashboardPage() {
   const { user, activeSiteId, activeStallId, loading: authLoading } = useAuth();
   const { users: staffList, staffDetails: staffDetailsMap, loading: userManagementLoading } = useUserManagement();
   
-  const [totalSales, setTotalSales] = useState(0);
-  const [totalWithDeductions, setTotalWithDeductions] = useState(0);
+  const [salesData, setSalesData] = useState<SalesData>({ grossMrp: 0, grossNonMrp: 0, netMrp: 0, netNonMrp: 0 });
   const [totalExpenses, setTotalExpenses] = useState(0);
   const [totalSalaryExpense, setTotalSalaryExpense] = useState(0);
   
@@ -109,7 +115,9 @@ export default function FoodStallDashboardPage() {
     
     if (user.role !== 'admin' && !activeSiteId) {
         setLoading(false);
-        setTotalSales(0); setTotalExpenses(0); setTotalWithDeductions(0); setTotalSalaryExpense(0);
+        setSalesData({ grossMrp: 0, grossNonMrp: 0, netMrp: 0, netNonMrp: 0 }); 
+        setTotalExpenses(0); 
+        setTotalSalaryExpense(0);
         return;
     }
     
@@ -139,22 +147,25 @@ export default function FoodStallDashboardPage() {
     if (toTimestamp) salesQueryConstraints.push(where("saleDate", "<=", toTimestamp));
     const salesQuery = query(salesCollectionRef, ...salesQueryConstraints);
     unsubs.push(onSnapshot(salesQuery, (snapshot) => {
-        let salesTotal = 0;
-        let deductionsTotal = 0;
+        let newSalesData: SalesData = { grossMrp: 0, grossNonMrp: 0, netMrp: 0, netNonMrp: 0 };
         const paymentMethodTotals: Record<string, number> = { HungerBox: 0, UPI: 0 };
+        
         snapshot.forEach(doc => {
             const sale = doc.data() as FoodSaleTransaction;
-            salesTotal += sale.totalAmount;
             const saleHungerbox = sale.hungerboxSales || 0;
             const saleUpi = sale.upiSales || 0;
             paymentMethodTotals.HungerBox += saleHungerbox;
             paymentMethodTotals.UPI += saleUpi;
-            
-            const commissionRate = sale.saleType === 'MRP' ? 0.08 : 0.18;
-            deductionsTotal += saleHungerbox * commissionRate;
+
+            if (sale.saleType === 'MRP') {
+              newSalesData.grossMrp += sale.totalAmount;
+              newSalesData.netMrp += (sale.totalAmount - (saleHungerbox * 0.08));
+            } else {
+              newSalesData.grossNonMrp += sale.totalAmount;
+              newSalesData.netNonMrp += (sale.totalAmount - (saleHungerbox * 0.18));
+            }
         });
-        setTotalSales(salesTotal);
-        setTotalWithDeductions(salesTotal - deductionsTotal);
+        setSalesData(newSalesData);
         setPaymentSummary(Object.entries(paymentMethodTotals).map(([method, totalAmount]) => ({ method, totalAmount })));
     }));
 
@@ -189,6 +200,7 @@ export default function FoodStallDashboardPage() {
             setTotalSalaryExpense(0);
             return;
         }
+
         const staffUids = staffList.map(s => s.uid);
         const uidsBatches: string[][] = [];
         for (let i = 0; i < staffUids.length; i += 30) {
@@ -200,7 +212,8 @@ export default function FoodStallDashboardPage() {
                 getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", batch)))
             );
             const paymentsSnapshots = await Promise.all(paymentPromises);
-            const totalPaid = paymentsSnapshots.flat().reduce((sum, snapshot) => 
+            const allPayments = paymentsSnapshots.flat();
+            const totalPaid = allPayments.reduce((sum, snapshot) => 
                 sum + snapshot.docs.reduce((docSum, doc) => docSum + (doc.data() as SalaryPayment).amountPaid, 0), 0);
             setTotalSalaryExpense(totalPaid);
         } else if (startDate && endDate) {
@@ -224,7 +237,8 @@ export default function FoodStallDashboardPage() {
             const holidays = holidaysSnapshot.docs.map(d => d.data() as Holiday);
             const attendanceByStaff = new Map<string, { present: number, halfDay: number }>();
             
-            attendanceSnapshots.flat().forEach(snapshot => snapshot.docs.forEach(doc => {
+            const allAttendanceDocs = attendanceSnapshots.flat();
+            allAttendanceDocs.forEach(snapshot => snapshot.docs.forEach(doc => {
                 const att = doc.data() as StaffAttendance;
                 const current = attendanceByStaff.get(att.staffUid) || { present: 0, halfDay: 0 };
                 if (att.status === 'Present') current.present++;
@@ -247,7 +261,7 @@ export default function FoodStallDashboardPage() {
             });
             setTotalSalaryExpense(totalSalary);
         } else {
-            setTotalSalaryExpense(0);
+             setTotalSalaryExpense(0);
         }
     };
 
@@ -256,7 +270,8 @@ export default function FoodStallDashboardPage() {
     return () => { unsubs.forEach(unsub => unsub()); };
   }, [activeSiteId, activeStallId, authLoading, user, dateFilter, staffList, staffDetailsMap, userManagementLoading, calculateWorkingDays]);
 
-  const netProfit = totalWithDeductions - totalExpenses - totalSalaryExpense;
+  const totalSalesWithDeductions = salesData.netMrp + salesData.netNonMrp;
+  const netProfit = totalSalesWithDeductions - totalExpenses - totalSalaryExpense;
 
   const dateFilterLabels: Record<DateFilterOption, string> = {
     today: 'Today', last_7_days: 'Last 7 Days', this_month: 'This Month', all_time: 'All Time'
@@ -369,27 +384,44 @@ export default function FoodStallDashboardPage() {
             ))}
         </div>
       ) : (
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
-        <Card className="shadow-md">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Gross Sales ({dateFilterLabels[dateFilter]})</CardTitle><DollarSign className="h-4 w-4 text-muted-foreground" /></CardHeader>
-          <CardContent><div className="text-2xl font-bold">₹{totalSales.toFixed(2)}</div><p className="text-xs text-muted-foreground">Revenue from all sales channels.</p></CardContent>
-        </Card>
-        <Card className="shadow-md">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Sales (with Deductions)</CardTitle><Percent className="h-4 w-4 text-muted-foreground" /></CardHeader>
-          <CardContent><div className="text-2xl font-bold text-green-600">₹{totalWithDeductions.toFixed(2)}</div><p className="text-xs text-muted-foreground">After aggregator commission.</p></CardContent>
-        </Card>
-        <Card className="shadow-md">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Total Expenses</CardTitle><ShoppingBag className="h-4 w-4 text-muted-foreground" /></CardHeader>
-          <CardContent><div className="text-2xl font-bold text-red-600">- ₹{totalExpenses.toFixed(2)}</div><p className="text-xs text-muted-foreground">Total cost of all purchases.</p></CardContent>
-        </Card>
-        <Card className="shadow-md">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Staff Salary</CardTitle><UsersIcon className="h-4 w-4 text-muted-foreground" /></CardHeader>
-            <CardContent><div className="text-2xl font-bold text-red-600">- ₹{totalSalaryExpense.toFixed(2)}</div><p className="text-xs text-muted-foreground">{dateFilter === 'all_time' ? 'Total salary paid' : 'Earned salary for period'}</p></CardContent>
-        </Card>
-        <Card className="shadow-md lg:col-span-1">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Net Profit</CardTitle><Utensils className="h-4 w-4 text-muted-foreground" /></CardHeader>
-          <CardContent><div className={`text-2xl font-bold ${netProfit >= 0 ? 'text-green-600' : 'text-destructive'}`}>₹{netProfit.toFixed(2)}</div><p className="text-xs text-muted-foreground">Sales (w/ ded.) - All Expenses.</p></CardContent>
-        </Card>
+      <div className="space-y-4">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <Card className="shadow-md col-span-1 md:col-span-2">
+              <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Non-MRP Sales</CardTitle></CardHeader>
+              <CardContent className="flex justify-between items-baseline">
+                <div><p className="text-xs text-muted-foreground">Gross Sales</p><div className="text-2xl font-bold">₹{salesData.grossNonMrp.toFixed(2)}</div></div>
+                <div><p className="text-xs text-muted-foreground">Net (after 18%)</p><div className="text-2xl font-bold text-green-600">₹{salesData.netNonMrp.toFixed(2)}</div></div>
+              </CardContent>
+            </Card>
+            <Card className="shadow-md col-span-1 md:col-span-2">
+              <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">MRP Sales</CardTitle></CardHeader>
+              <CardContent className="flex justify-between items-baseline">
+                <div><p className="text-xs text-muted-foreground">Gross Sales</p><div className="text-2xl font-bold">₹{salesData.grossMrp.toFixed(2)}</div></div>
+                <div><p className="text-xs text-muted-foreground">Net (after 8%)</p><div className="text-2xl font-bold text-green-600">₹{salesData.netMrp.toFixed(2)}</div></div>
+              </CardContent>
+            </Card>
+        </div>
+        <div className="grid gap-4 md:grid-cols-3">
+          <Card className="shadow-md">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Total Expenses</CardTitle><ShoppingBag className="h-4 w-4 text-muted-foreground" /></CardHeader>
+            <CardContent><div className="text-2xl font-bold text-red-600">- ₹{totalExpenses.toFixed(2)}</div><p className="text-xs text-muted-foreground">Total cost of all purchases.</p></CardContent>
+          </Card>
+          {dateFilter !== 'all_time' ? (
+            <Card className="shadow-md">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Staff Salary</CardTitle><UsersIcon className="h-4 w-4 text-muted-foreground" /></CardHeader>
+                <CardContent><div className="text-2xl font-bold text-red-600">- ₹{totalSalaryExpense.toFixed(2)}</div><p className="text-xs text-muted-foreground">Earned salary for period</p></CardContent>
+            </Card>
+          ) : (
+             <Card className="shadow-md">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Staff Salary</CardTitle><UsersIcon className="h-4 w-4 text-muted-foreground" /></CardHeader>
+                <CardContent><div className="text-2xl font-bold text-red-600">- ₹{totalSalaryExpense.toFixed(2)}</div><p className="text-xs text-muted-foreground">Total salary paid all time</p></CardContent>
+            </Card>
+          )}
+          <Card className="shadow-md">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Net Profit</CardTitle><Utensils className="h-4 w-4 text-muted-foreground" /></CardHeader>
+            <CardContent><div className={`text-2xl font-bold ${netProfit >= 0 ? 'text-green-600' : 'text-destructive'}`}>₹{netProfit.toFixed(2)}</div><p className="text-xs text-muted-foreground">Net Sales - Expenses - Salary</p></CardContent>
+          </Card>
+        </div>
       </div>
       )}
 
@@ -436,3 +468,5 @@ export default function FoodStallDashboardPage() {
     </div>
   );
 }
+
+    
