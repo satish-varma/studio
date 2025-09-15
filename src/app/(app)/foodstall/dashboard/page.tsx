@@ -5,20 +5,26 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import PageHeader from "@/components/shared/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { DollarSign, ShoppingBag, Utensils, ArrowRight, LineChart, ClipboardList, Loader2, Info, Percent, BarChart, Soup, Truck, WalletCards, Users as UsersIcon, IndianRupee } from "lucide-react";
+import { DollarSign, ShoppingBag, Utensils, ArrowRight, LineChart, ClipboardList, Loader2, Info, Percent, BarChart, Soup, Truck, WalletCards, Users as UsersIcon, IndianRupee, Building, Calendar as CalendarIcon } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { getFirestore, collection, query, where, onSnapshot, Timestamp, QueryConstraint, getDocs } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
-import { startOfDay, endOfDay, subDays, startOfMonth, getDaysInMonth, endOfMonth } from "date-fns";
-import type { FoodItemExpense, FoodSaleTransaction, StaffAttendance, Holiday, StaffDetails, AppUser, SalaryPayment } from "@/types";
+import { startOfDay, endOfDay, subDays, startOfMonth, getDaysInMonth, endOfMonth, startOfWeek, endOfWeek, isValid } from "date-fns";
+import type { FoodItemExpense, FoodSaleTransaction, StaffAttendance, Holiday, StaffDetails, AppUser, SalaryPayment, Site } from "@/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useUserManagement } from "@/hooks/use-user-management";
+import type { DateRange } from "react-day-picker";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { cn } from "@/lib/utils";
+import { format } from 'date-fns';
+
 
 let db: ReturnType<typeof getFirestore> | undefined;
 if (!getApps().length) {
@@ -32,7 +38,6 @@ if (!getApps().length) {
   db = getFirestore(getApp());
 }
 
-type DateFilterOption = 'today' | 'last_7_days' | 'this_month' | 'all_time';
 type SummaryViewOption = 'by_expense_category' | 'by_payment_method' | 'by_vendor' | 'by_expense_payment_method';
 
 interface ExpenseCategorySummary {
@@ -64,8 +69,8 @@ interface SalesData {
 
 
 export default function FoodStallDashboardPage() {
-  const { user, activeSiteId, activeStallId, loading: authLoading } = useAuth();
-  const { users: staffList, staffDetails: staffDetailsMap, loading: userManagementLoading } = useUserManagement();
+  const { user, activeSiteId, loading: authLoading } = useAuth();
+  const { users: staffList, sites: allSites, staffDetails: staffDetailsMap, loading: userManagementLoading } = useUserManagement();
   
   const [salesData, setSalesData] = useState<SalesData>({ grossMrp: 0, grossNonMrp: 0, netMrp: 0, netNonMrp: 0 });
   const [totalExpenses, setTotalExpenses] = useState(0);
@@ -78,8 +83,18 @@ export default function FoodStallDashboardPage() {
 
 
   const [loading, setLoading] = useState(true);
-  const [dateFilter, setDateFilter] = useState<DateFilterOption>('today');
   const [summaryView, setSummaryView] = useState<SummaryViewOption>('by_expense_category');
+
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(() => ({
+    from: startOfMonth(new Date()),
+    to: endOfDay(new Date())
+  }));
+  const [tempDateRange, setTempDateRange] = useState<DateRange | undefined>(dateRange);
+  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+  
+  const [siteFilter, setSiteFilter] = useState<string>('all');
+  
+  const effectiveSiteId = user?.role === 'admin' ? (siteFilter === 'all' ? null : siteFilter) : activeSiteId;
 
   const isHoliday = useCallback((date: Date, holidays: Holiday[], staffSiteId?: string | null) => {
     const dayOfWeek = date.getDay();
@@ -105,6 +120,34 @@ export default function FoodStallDashboardPage() {
       }
       return workingDays;
   }, [isHoliday]);
+  
+  const datePresets = [
+    { label: "Today", value: 'today' },
+    { label: "This Week", value: 'this_week' },
+    { label: "This Month", value: 'this_month' },
+    { label: "Last Month", value: 'last_month' },
+    { label: "All Time", value: 'all_time' },
+  ];
+  
+  const handleSetDatePreset = (preset: string) => {
+    const now = new Date();
+    let from: Date | undefined, to: Date | undefined = endOfDay(now);
+
+    switch (preset) {
+        case 'today': from = startOfDay(now); break;
+        case 'this_week': from = startOfWeek(now); break;
+        case 'this_month': from = startOfMonth(now); break;
+        case 'last_month': from = startOfMonth(subDays(startOfMonth(now), 1)); to = endOfMonth(subDays(startOfMonth(now), 1)); break;
+        case 'all_time': from = undefined; to = undefined; break;
+        default: from = undefined; to = undefined;
+    }
+    setTempDateRange({ from, to });
+  };
+  
+  const applyDateFilter = () => {
+    setDateRange(tempDateRange);
+    setIsDatePickerOpen(false);
+  };
 
 
   useEffect(() => {
@@ -113,7 +156,7 @@ export default function FoodStallDashboardPage() {
         return;
     }
     
-    if (user.role !== 'admin' && !activeSiteId) {
+    if (user.role === 'manager' && !activeSiteId) {
         setLoading(false);
         setSalesData({ grossMrp: 0, grossNonMrp: 0, netMrp: 0, netNonMrp: 0 }); 
         setTotalExpenses(0); 
@@ -123,26 +166,14 @@ export default function FoodStallDashboardPage() {
     
     setLoading(true);
 
-    const now = new Date();
-    let startDate: Date | null = null;
-    let endDate: Date | null = endOfDay(now);
-
-    switch (dateFilter) {
-        case 'today': startDate = startOfDay(now); break;
-        case 'last_7_days': startDate = startOfDay(subDays(now, 6)); break;
-        case 'this_month': startDate = startOfMonth(now); break;
-        case 'all_time': startDate = null; endDate = null; break;
-    }
-
-    const fromTimestamp = startDate ? Timestamp.fromDate(startDate) : null;
-    const toTimestamp = endDate ? Timestamp.fromDate(endDate) : null;
+    const fromTimestamp = dateRange?.from ? Timestamp.fromDate(startOfDay(dateRange.from)) : null;
+    const toTimestamp = dateRange?.to ? Timestamp.fromDate(endOfDay(dateRange.to)) : null;
     
     const unsubs: (()=>void)[] = [];
 
     const salesCollectionRef = collection(db, "foodSaleTransactions");
     let salesQueryConstraints: QueryConstraint[] = [];
-    if (activeSiteId) salesQueryConstraints.push(where("siteId", "==", activeSiteId));
-    if (activeStallId) salesQueryConstraints.push(where("stallId", "==", activeStallId));
+    if (effectiveSiteId) salesQueryConstraints.push(where("siteId", "==", effectiveSiteId));
     if (fromTimestamp) salesQueryConstraints.push(where("saleDate", ">=", fromTimestamp));
     if (toTimestamp) salesQueryConstraints.push(where("saleDate", "<=", toTimestamp));
     const salesQuery = query(salesCollectionRef, ...salesQueryConstraints);
@@ -171,8 +202,7 @@ export default function FoodStallDashboardPage() {
 
     const expensesCollectionRef = collection(db, "foodItemExpenses");
     let expensesQueryConstraints: QueryConstraint[] = [];
-    if (activeSiteId) expensesQueryConstraints.push(where("siteId", "==", activeSiteId));
-    if (activeStallId) expensesQueryConstraints.push(where("stallId", "==", activeStallId));
+    if (effectiveSiteId) expensesQueryConstraints.push(where("siteId", "==", effectiveSiteId));
     if (fromTimestamp) expensesQueryConstraints.push(where("purchaseDate", ">=", fromTimestamp));
     if (toTimestamp) expensesQueryConstraints.push(where("purchaseDate", "<=", toTimestamp));
     const expensesQuery = query(expensesCollectionRef, ...expensesQueryConstraints);
@@ -207,7 +237,7 @@ export default function FoodStallDashboardPage() {
             uidsBatches.push(staffUids.slice(i, i + 30));
         }
 
-        if (dateFilter === 'all_time') {
+        if (!dateRange?.from || !dateRange?.to) { // "All Time" selected
             const paymentPromises = uidsBatches.map(batch => 
                 getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", batch)))
             );
@@ -216,7 +246,10 @@ export default function FoodStallDashboardPage() {
             const totalPaid = allPayments.reduce((sum, snapshot) => 
                 sum + snapshot.docs.reduce((docSum, doc) => docSum + (doc.data() as SalaryPayment).amountPaid, 0), 0);
             setTotalSalaryExpense(totalPaid);
-        } else if (startDate && endDate) {
+        } else {
+            const startDate = dateRange.from;
+            const endDate = dateRange.to;
+            
             const monthForSalaryCalc = startOfMonth(startDate);
             const holidaysQuery = query(collection(db, "holidays"), where("date", ">=", monthForSalaryCalc.toISOString().split('T')[0]), where("date", "<=", endOfMonth(monthForSalaryCalc).toISOString().split('T')[0]));
             
@@ -260,22 +293,16 @@ export default function FoodStallDashboardPage() {
                 }
             });
             setTotalSalaryExpense(totalSalary);
-        } else {
-             setTotalSalaryExpense(0);
         }
     };
 
     fetchSalaryData().finally(() => setLoading(false));
 
     return () => { unsubs.forEach(unsub => unsub()); };
-  }, [activeSiteId, activeStallId, authLoading, user, dateFilter, staffList, staffDetailsMap, userManagementLoading, calculateWorkingDays]);
+  }, [effectiveSiteId, authLoading, user, dateRange, staffList, staffDetailsMap, userManagementLoading, calculateWorkingDays]);
 
   const totalSalesWithDeductions = salesData.netMrp + salesData.netNonMrp;
   const netProfit = totalSalesWithDeductions - totalExpenses - totalSalaryExpense;
-
-  const dateFilterLabels: Record<DateFilterOption, string> = {
-    today: 'Today', last_7_days: 'Last 7 Days', this_month: 'This Month', all_time: 'All Time'
-  };
 
   const quickNavItems = [
     { title: "Manage Expenses", description: "Track all your purchases and operational costs.", href: "/foodstall/expenses", icon: ShoppingBag, cta: "View Expenses", disabled: false },
@@ -291,7 +318,7 @@ export default function FoodStallDashboardPage() {
     );
   }
 
-  if (user?.role !== 'admin' && !activeSiteId) {
+  if (user?.role === 'manager' && !activeSiteId) {
     return (
         <div className="space-y-6">
             <PageHeader title="Food Stall Dashboard" description="Overview of your food stall's financial health and operations." />
@@ -355,27 +382,66 @@ export default function FoodStallDashboardPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Food Stall Dashboard" description="Overview of your food stall's financial health and operations." />
-      <div className="flex flex-wrap gap-2">
-        {(['today', 'last_7_days', 'this_month', 'all_time'] as DateFilterOption[]).map((filter) => (
-          <Button key={filter} variant={dateFilter === filter ? 'default' : 'outline'} onClick={() => setDateFilter(filter)}>
-            {dateFilterLabels[filter]}
-          </Button>
-        ))}
-      </div>
-
-      {!activeSiteId && user?.role === 'admin' && (
-        <Alert variant="default" className="border-primary/50">
-            <Info className="h-4 w-4" /><AlertTitle>Viewing All Sites</AlertTitle>
-            <AlertDescription>You are currently viewing aggregated sales and expense data for all stalls across all sites.</AlertDescription>
-        </Alert>
-      )}
       
-      {activeSiteId && !activeStallId && user?.role !== 'admin' && (
-        <Alert variant="default" className="border-primary/50">
-            <Info className="h-4 w-4" /><AlertTitle>Select a Stall</AlertTitle>
-            <AlertDescription>Please select a specific stall from the header to see its live data.</AlertDescription>
-        </Alert>
-      )}
+       <Card>
+        <CardHeader>
+          <CardTitle>Filters</CardTitle>
+          <CardDescription>Select a site and date range to analyze profits.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+             <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
+                <PopoverTrigger asChild>
+                <Button
+                    id="dateRangePicker" variant={'outline'}
+                    className={cn("w-full lg:w-[300px] justify-start text-left font-normal bg-input", !dateRange && "text-muted-foreground")}
+                >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {dateRange?.from ? ( dateRange.to ? (
+                        <> {format(dateRange.from, "LLL dd, y")} - {format(dateRange.to, "LLL dd, y")} </>
+                    ) : ( format(dateRange.from, "LLL dd, y") )
+                    ) : ( <span>Pick a date range</span> )}
+                </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0 flex" align="start">
+                    <div className="p-2 border-r">
+                        <div className="flex flex-col items-stretch gap-1">
+                            {datePresets.map(({label, value}) => (
+                                <Button key={value} variant="ghost" className="justify-start" onClick={() => handleSetDatePreset(value)}>{label}</Button>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="p-2">
+                         <Calendar
+                            initialFocus mode="range" defaultMonth={tempDateRange?.from}
+                            selected={tempDateRange} onSelect={setTempDateRange} numberOfMonths={2}
+                            disabled={(date) => date > new Date() || date < new Date("2000-01-01")}
+                        />
+                        <div className="flex justify-end gap-2 pt-2 border-t mt-2">
+                             <Button variant="ghost" onClick={() => setIsDatePickerOpen(false)}>Close</Button>
+                             <Button onClick={applyDateFilter}>Apply</Button>
+                        </div>
+                    </div>
+                </PopoverContent>
+            </Popover>
+
+            {user?.role === 'admin' && (
+                <div className="max-w-xs">
+                    <Label htmlFor="site-filter">Site</Label>
+                    <Select value={siteFilter} onValueChange={setSiteFilter}>
+                        <SelectTrigger id="site-filter" className="w-full bg-input">
+                            <Building className="mr-2 h-4 w-4 text-muted-foreground"/>
+                            <SelectValue placeholder="Filter by site" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">All Sites</SelectItem>
+                            {allSites.map(site => <SelectItem key={site.id} value={site.id}>{site.name}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                </div>
+            )}
+        </CardContent>
+      </Card>
+
 
       {loading ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
@@ -385,15 +451,15 @@ export default function FoodStallDashboardPage() {
         </div>
       ) : (
       <div className="space-y-4">
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <Card className="shadow-md col-span-1 md:col-span-2">
+        <div className="grid gap-4 md:grid-cols-2">
+            <Card className="shadow-md col-span-1">
               <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Non-MRP Sales</CardTitle></CardHeader>
               <CardContent className="flex justify-between items-baseline">
                 <div><p className="text-xs text-muted-foreground">Gross Sales</p><div className="text-2xl font-bold">₹{salesData.grossNonMrp.toFixed(2)}</div></div>
                 <div><p className="text-xs text-muted-foreground">Net (after 18%)</p><div className="text-2xl font-bold text-green-600">₹{salesData.netNonMrp.toFixed(2)}</div></div>
               </CardContent>
             </Card>
-            <Card className="shadow-md col-span-1 md:col-span-2">
+            <Card className="shadow-md col-span-1">
               <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">MRP Sales</CardTitle></CardHeader>
               <CardContent className="flex justify-between items-baseline">
                 <div><p className="text-xs text-muted-foreground">Gross Sales</p><div className="text-2xl font-bold">₹{salesData.grossMrp.toFixed(2)}</div></div>
@@ -406,17 +472,12 @@ export default function FoodStallDashboardPage() {
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Total Expenses</CardTitle><ShoppingBag className="h-4 w-4 text-muted-foreground" /></CardHeader>
             <CardContent><div className="text-2xl font-bold text-red-600">- ₹{totalExpenses.toFixed(2)}</div><p className="text-xs text-muted-foreground">Total cost of all purchases.</p></CardContent>
           </Card>
-          {dateFilter !== 'all_time' ? (
-            <Card className="shadow-md">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Staff Salary</CardTitle><UsersIcon className="h-4 w-4 text-muted-foreground" /></CardHeader>
-                <CardContent><div className="text-2xl font-bold text-red-600">- ₹{totalSalaryExpense.toFixed(2)}</div><p className="text-xs text-muted-foreground">Earned salary for period</p></CardContent>
-            </Card>
-          ) : (
-             <Card className="shadow-md">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Staff Salary</CardTitle><UsersIcon className="h-4 w-4 text-muted-foreground" /></CardHeader>
-                <CardContent><div className="text-2xl font-bold text-red-600">- ₹{totalSalaryExpense.toFixed(2)}</div><p className="text-xs text-muted-foreground">Total salary paid all time</p></CardContent>
-            </Card>
-          )}
+          
+          <Card className="shadow-md">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Staff Salary</CardTitle><UsersIcon className="h-4 w-4 text-muted-foreground" /></CardHeader>
+              <CardContent><div className="text-2xl font-bold text-red-600">- ₹{totalSalaryExpense.toFixed(2)}</div><p className="text-xs text-muted-foreground">{dateRange?.from && dateRange.to ? 'Earned salary for period' : 'Total salary paid all time'}</p></CardContent>
+          </Card>
+          
           <Card className="shadow-md">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Net Profit</CardTitle><Utensils className="h-4 w-4 text-muted-foreground" /></CardHeader>
             <CardContent><div className={`text-2xl font-bold ${netProfit >= 0 ? 'text-green-600' : 'text-destructive'}`}>₹{netProfit.toFixed(2)}</div><p className="text-xs text-muted-foreground">Net Sales - Expenses - Salary</p></CardContent>
@@ -459,7 +520,7 @@ export default function FoodStallDashboardPage() {
                     <Card key={item.title} className="flex flex-col hover:shadow-md transition-shadow">
                         <CardHeader className="pb-3"><CardTitle className="text-lg flex items-center"><item.icon className="h-5 w-5 mr-2 text-primary/80" />{item.title}</CardTitle></CardHeader>
                         <CardContent className="flex-grow"><p className="text-sm text-muted-foreground">{item.description}</p></CardContent>
-                        <CardFooter><Button asChild className="w-full" disabled={item.disabled || (!activeStallId && user?.role !== 'admin')}><Link href={item.href}>{item.cta} <ArrowRight className="ml-2 h-4 w-4" /></Link></Button></CardFooter>
+                        <CardFooter><Button asChild className="w-full" disabled={item.disabled || (!effectiveSiteId && user?.role !== 'admin')}><Link href={item.href}>{item.cta} <ArrowRight className="ml-2 h-4 w-4" /></Link></Button></CardFooter>
                     </Card>
                     ))}
                 </CardContent>
