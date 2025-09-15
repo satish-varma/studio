@@ -150,7 +150,7 @@ export default function FoodStallDashboardPage() {
   };
 
 
-  useEffect(() => {
+ useEffect(() => {
     if (authLoading || userManagementLoading || !db || !user) {
         if (!authLoading && !userManagementLoading) setLoading(false);
         return;
@@ -171,6 +171,7 @@ export default function FoodStallDashboardPage() {
     
     const unsubs: (()=>void)[] = [];
 
+    // --- Sales Fetching (unchanged) ---
     const salesCollectionRef = collection(db, "foodSaleTransactions");
     let salesQueryConstraints: QueryConstraint[] = [];
     if (effectiveSiteId) salesQueryConstraints.push(where("siteId", "==", effectiveSiteId));
@@ -180,14 +181,12 @@ export default function FoodStallDashboardPage() {
     unsubs.push(onSnapshot(salesQuery, (snapshot) => {
         let newSalesData: SalesData = { grossMrp: 0, grossNonMrp: 0, netMrp: 0, netNonMrp: 0 };
         const paymentMethodTotals: Record<string, number> = { HungerBox: 0, UPI: 0 };
-        
         snapshot.forEach(doc => {
             const sale = doc.data() as FoodSaleTransaction;
             const saleHungerbox = sale.hungerboxSales || 0;
             const saleUpi = sale.upiSales || 0;
             paymentMethodTotals.HungerBox += saleHungerbox;
             paymentMethodTotals.UPI += saleUpi;
-
             if (sale.saleType === 'MRP') {
               newSalesData.grossMrp += sale.totalAmount;
               newSalesData.netMrp += (sale.totalAmount - (saleHungerbox * 0.08));
@@ -200,11 +199,12 @@ export default function FoodStallDashboardPage() {
         setPaymentSummary(Object.entries(paymentMethodTotals).map(([method, totalAmount]) => ({ method, totalAmount })));
     }));
 
+    // --- Expenses Fetching (Corrected with Timestamps) ---
     const expensesCollectionRef = collection(db, "foodItemExpenses");
     let expensesQueryConstraints: QueryConstraint[] = [];
     if (effectiveSiteId) expensesQueryConstraints.push(where("siteId", "==", effectiveSiteId));
-    if (fromTimestamp) expensesQueryConstraints.push(where("purchaseDate", ">=", fromTimestamp));
-    if (toTimestamp) expensesQueryConstraints.push(where("purchaseDate", "<=", toTimestamp));
+    if (fromTimestamp) expensesQueryConstraints.push(where("purchaseDate", ">=", fromTimestamp)); // FIX: Use timestamp here
+    if (toTimestamp) expensesQueryConstraints.push(where("purchaseDate", "<=", toTimestamp));     // FIX: Use timestamp here
     const expensesQuery = query(expensesCollectionRef, ...expensesQueryConstraints);
     unsubs.push(onSnapshot(expensesQuery, (snapshot) => {
         let total = 0;
@@ -223,8 +223,8 @@ export default function FoodStallDashboardPage() {
         setVendorSummary(Object.entries(vendorTotals).map(([vendor, totalCost]) => ({ vendor, totalCost })));
         setExpensePaymentSummary(Object.entries(expensePaymentMethodTotals).map(([method, totalCost]) => ({ method, totalCost })));
     }));
-    
-    // Encapsulate salary data fetching logic.
+
+    // --- Salary Fetching (Refactored for correctness) ---
     const fetchSalaryData = async () => {
         if (staffList.length === 0) {
             setTotalSalaryExpense(0);
@@ -237,27 +237,26 @@ export default function FoodStallDashboardPage() {
             uidsBatches.push(staffUids.slice(i, i + 30));
         }
 
-        if (!dateRange?.from || !dateRange?.to) { // "All Time" selected
+        if (!dateRange?.from || !dateRange.to) { // All Time
             const paymentPromises = uidsBatches.map(batch => 
                 getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", batch)))
             );
             const paymentsSnapshots = await Promise.all(paymentPromises);
-            const allPayments = paymentsSnapshots.flat();
-            const totalPaid = allPayments.reduce((sum, snapshot) => 
-                sum + snapshot.docs.reduce((docSum, doc) => docSum + (doc.data() as SalaryPayment).amountPaid, 0), 0);
+            const allPayments = paymentsSnapshots.flatMap(s => s.docs);
+            const totalPaid = allPayments.reduce((sum, doc) => sum + (doc.data() as SalaryPayment).amountPaid, 0);
             setTotalSalaryExpense(totalPaid);
-        } else {
+        } else { // Specific Date Range
             const startDate = dateRange.from;
             const endDate = dateRange.to;
-            
-            const monthForSalaryCalc = startOfMonth(startDate);
-            const holidaysQuery = query(collection(db, "holidays"), where("date", ">=", monthForSalaryCalc.toISOString().split('T')[0]), where("date", "<=", endOfMonth(monthForSalaryCalc).toISOString().split('T')[0]));
+            const monthOfStartDate = startOfMonth(startDate);
+
+            const holidaysQuery = query(collection(db, "holidays"), where("date", ">=", format(monthOfStartDate, 'yyyy-MM-dd')), where("date", "<=", format(endOfMonth(monthOfStartDate), 'yyyy-MM-dd')));
             
             const attendancePromises = uidsBatches.map(batch => {
                 const attendanceQuery = query(collection(db, "staffAttendance"), 
                     where("staffUid", "in", batch), 
-                    where("date", ">=", startDate.toISOString().split('T')[0]), 
-                    where("date", "<=", endDate.toISOString().split('T')[0])
+                    where("date", ">=", format(startDate, 'yyyy-MM-dd')), 
+                    where("date", "<=", format(endDate, 'yyyy-MM-dd'))
                 );
                 return getDocs(attendanceQuery);
             });
@@ -270,8 +269,7 @@ export default function FoodStallDashboardPage() {
             const holidays = holidaysSnapshot.docs.map(d => d.data() as Holiday);
             const attendanceByStaff = new Map<string, { present: number, halfDay: number }>();
             
-            const allAttendanceDocs = attendanceSnapshots.flat();
-            allAttendanceDocs.forEach(snapshot => snapshot.docs.forEach(doc => {
+            attendanceSnapshots.flat().forEach(snapshot => snapshot.forEach(doc => {
                 const att = doc.data() as StaffAttendance;
                 const current = attendanceByStaff.get(att.staffUid) || { present: 0, halfDay: 0 };
                 if (att.status === 'Present') current.present++;
@@ -283,7 +281,7 @@ export default function FoodStallDashboardPage() {
             staffList.forEach(staff => {
                 const details = staffDetailsMap.get(staff.uid);
                 if (details?.salary) {
-                    const monthWorkingDays = calculateWorkingDays(startOfMonth(startDate), endOfMonth(startDate), holidays, staff);
+                    const monthWorkingDays = calculateWorkingDays(monthOfStartDate, endOfMonth(monthOfStartDate), holidays, staff);
                     if (monthWorkingDays > 0) {
                         const perDaySalary = details.salary / monthWorkingDays;
                         const attendance = attendanceByStaff.get(staff.uid) || { present: 0, halfDay: 0 };
