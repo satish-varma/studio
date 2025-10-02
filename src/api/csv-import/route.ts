@@ -221,13 +221,13 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
     // Aggregate data first
     const salesAggregation = new Map<string, {
         hungerboxSales: number;
-        upiSales: number;
+        upiSales: number; // Will be 0 based on new mapping
         siteId: string;
         stallId: string;
     }>();
 
     for (const row of parsedData) {
-        const vendorId = row['vendor_id']?.trim(); // Corrected column name
+        const vendorId = row['vendor_id']?.trim();
         const mapping = hungerboxVendorMapping[vendorId];
         
         if (!mapping) {
@@ -246,27 +246,25 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
             continue;
         }
 
-        const orderDate = row['order date']?.trim();
-        const isMrp = row['is mrp']?.toLowerCase() === 'true';
-        const saleType = isMrp ? 'MRP' : 'Non-MRP';
-        const paymentMode = row['payment mode']?.toLowerCase();
-        const price = parseFloat(row['price']) || 0;
+        const orderDate = row['order_date']?.trim();
+        const isMrp = row['is_mrp']?.trim(); // Value is '0' or '1'
+        const saleType = isMrp === '1' ? 'MRP' : 'Non-MRP';
+        const actualValue = parseFloat(row['actual_value']) || 0;
 
-        if (!orderDate) continue;
+        if (!orderDate) {
+            console.warn(`${LOG_PREFIX} Skipping row due to missing order_date.`, row);
+            continue;
+        }
 
         const aggKey = `${orderDate}_${stallId}_${saleType}`;
         const currentAgg = salesAggregation.get(aggKey) || {
             hungerboxSales: 0,
-            upiSales: 0,
+            upiSales: 0, // Always 0 based on new mapping
             siteId: siteId,
             stallId: stallId,
         };
 
-        if (paymentMode === 'paid by user') {
-            currentAgg.upiSales += price;
-        } else if (paymentMode === 'paid by company') {
-            currentAgg.hungerboxSales += price;
-        }
+        currentAgg.hungerboxSales += actualValue;
 
         salesAggregation.set(aggKey, currentAgg);
     }
@@ -277,7 +275,6 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
 
     // Now write to Firestore
     const batch = adminDb.batch();
-    const callingUser = await getAdminAuth().getUser(uid);
     let operationCount = 0;
 
     for (const [key, data] of salesAggregation.entries()) {
@@ -291,11 +288,11 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
             stallId: data.stallId,
             saleType: saleType,
             hungerboxSales: data.hungerboxSales,
-            upiSales: data.upiSales,
-            totalAmount: data.hungerboxSales + data.upiSales,
+            upiSales: 0, // UPI is 0 as per new mapping
+            totalAmount: data.hungerboxSales, // Total amount is just hungerbox sales
             notes: `Imported via Hungerbox CSV on ${new Date().toLocaleDateString()}.`,
-            recordedByUid: callingUser.uid,
-            recordedByName: callingUser.displayName || callingUser.email,
+            recordedByUid: 'Q7ZecmlipJcb1bqrzRkFOGVcNyL2', // Hardcoded UID
+            recordedByName: 'thegutguru.in', // Hardcoded name
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
         };
@@ -368,3 +365,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `An unexpected error occurred: ${error.message}` }, { status: 500 });
   }
 }
+
+    
