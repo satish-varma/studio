@@ -195,13 +195,13 @@ export default function FoodSalesClientPage() {
 
      const stallsQuery = query(collection(db, "stalls"), orderBy("name"));
      const unsubStalls = onSnapshot(stallsQuery, (snapshot) => {
-       const allStalls = snapshot.docs.map(doc => ({id: doc.id, ...doc.data()} as Stall));
+       const allStallsData = snapshot.docs.map(doc => ({id: doc.id, ...doc.data()} as Stall));
        const newStallsMap: Record<string, string> = {};
-       allStalls.forEach(stall => { newStallsMap[stall.id] = stall.name; });
+       allStallsData.forEach(stall => { newStallsMap[stall.id] = stall.name; });
        setStallsMap(newStallsMap);
 
        if (effectiveSiteId) {
-         setStallsForSite(allStalls.filter(s => s.siteId === effectiveSiteId));
+         setStallsForSite(allStallsData.filter(s => s.siteId === effectiveSiteId));
        } else {
          setStallsForSite([]);
        }
@@ -470,7 +470,7 @@ export default function FoodSalesClientPage() {
               <Button variant={dateFilter === 'last_7_days' ? 'default' : 'outline'} onClick={() => setDateFilter('last_7_days')}>Last 7 Days</Button>
               <Button variant={dateFilter === 'this_month' ? 'default' : 'outline'} onClick={() => setDateFilter('this_month')}>This Month</Button>
               <Button variant={dateFilter === 'all_time' ? 'default' : 'outline'} onClick={() => setDateFilter('all_time')}>All Time</Button>
-              <Button variant="outline" onClick={() => setShowImportDialog(true)}><Upload className="mr-2 h-4 w-4" />Import</Button>
+              <Button variant="outline" onClick={() => setShowImportDialog(true)}><Upload className="mr-2 h-4 w-4" />Import Food Sales</Button>
               <Button variant="outline" onClick={handleExport} disabled={isExporting}>{isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Download className="mr-2 h-4 w-4" />}Export</Button>
               <Button variant="outline" onClick={handleGmailImport} disabled={isGmailImporting}>{isGmailImporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Mail className="mr-2 h-4 w-4" />}Import from Gmail</Button>
             </div>

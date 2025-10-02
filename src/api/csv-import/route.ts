@@ -217,22 +217,34 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
   let batch = adminDb.batch();
   let operationCount = 0;
   let totalProcessed = 0;
+  const logAggregation = new Map<string, { siteId: string; stallId: string; count: number }>();
 
   for (const row of parsedData) {
-    const siteId = sitesMap.get(row['Site Name']?.trim().toLowerCase() || '');
-    const stallId = stallsMap.get(row['Stall Name']?.trim().toLowerCase() || '');
-    if (!siteId || !stallId || !row['Sale Date']) {
-      console.warn(`${LOG_PREFIX} Skipping sales row due to missing site, stall, or date.`, row);
-      continue;
+    const siteName = row['Site Name']?.trim().toLowerCase();
+    const stallName = row['Stall Name']?.trim().toLowerCase();
+    const saleDateStr = row['Sale Date']?.trim();
+    
+    if (!siteName || !stallName || !saleDateStr) {
+        console.warn(`${LOG_PREFIX} Skipping sales record due to missing Site, Stall, or Date. Row:`, row);
+        continue;
     }
+
+    const siteId = sitesMap.get(siteName);
+    const stallId = stallsMap.get(stallName);
+
+    if (!siteId || !stallId) {
+        console.warn(`${LOG_PREFIX} Skipping sales record due to unknown site/stall. Site: "${row['Site Name']}", Stall: "${row['Stall Name']}"`);
+        continue;
+    }
+
     const saleType = (row['Sale Type'] === 'MRP' ? 'MRP' : 'Non-MRP');
-    const docId = `${row['Sale Date']}_${stallId}_${saleType}`;
+    const docId = `${saleDateStr}_${stallId}_${saleType}`;
     
     const hungerboxSales = parseFloat(row['Hungerbox Sales']) || 0;
     const upiSales = parseFloat(row['UPI Sales']) || 0;
 
     const saleData: Omit<FoodSaleTransaction, 'id' | 'saleDate'> & { saleDate: Timestamp } = {
-      saleDate: Timestamp.fromDate(new Date(row['Sale Date'])),
+      saleDate: Timestamp.fromDate(new Date(saleDateStr)),
       siteId,
       stallId,
       saleType,
@@ -250,6 +262,11 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
     batch.set(saleRef, saleData, { merge: true });
     operationCount++;
 
+    const aggKey = `${siteId}_${stallId}`;
+    const currentAgg = logAggregation.get(aggKey) || { siteId, stallId, count: 0 };
+    currentAgg.count++;
+    logAggregation.set(aggKey, currentAgg);
+
     if (operationCount >= BATCH_SIZE) {
       await batch.commit();
       totalProcessed += operationCount;
@@ -261,6 +278,19 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
   if (operationCount > 0) {
     await batch.commit();
     totalProcessed += operationCount;
+  }
+  
+  for (const [, agg] of logAggregation) {
+    await logFoodStallActivity({
+        uid: callingUser.uid, displayName: callingUser.displayName, email: callingUser.email, role: 'admin'
+    } as AppUser, {
+        siteId: agg.siteId, stallId: agg.stallId, type: 'SALE_BULK_IMPORTED',
+        relatedDocumentId: `csv-import-${Date.now()}`,
+        details: {
+            processedCount: agg.count,
+            notes: `Processed a bulk import of ${agg.count} sales records from a CSV file.`
+        }
+    });
   }
   
   return { message: `Successfully processed ${totalProcessed} food sales records.` };
