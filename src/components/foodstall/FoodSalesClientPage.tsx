@@ -86,7 +86,7 @@ export default function FoodSalesClientPage() {
   const [totalWithDeductions, setTotalWithDeductions] = useState(0);
   
   const [isExporting, setIsExporting] = useState(false);
-  const [showImportDialog, setShowImportDialog] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState<null | 'foodSales'>(null);
   const [isGmailImporting, setIsGmailImporting] = useState(false);
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -545,3 +545,5 @@ export default function FoodSalesClientPage() {
     </div>
   );
 }
+
+    
