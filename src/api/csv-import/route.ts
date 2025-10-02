@@ -207,21 +207,18 @@ async function handleFoodExpenseImport(adminDb: ReturnType<typeof getAdminFirest
 async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestore>, csvData: string, uid: string) {
     const parsedData = await parseCsv<any>(csvData);
     
-    // Create maps for efficient lookups of your internal site/stall names to their Firestore IDs
     const sitesSnapshot = await adminDb.collection('sites').get();
     const sitesMap = new Map(sitesSnapshot.docs.map(doc => [doc.data().name.toLowerCase(), doc.id]));
     
     const stallsSnapshot = await adminDb.collection('stalls').get();
     const stallsMap = new Map(stallsSnapshot.docs.map(doc => {
-      // Create a key that combines site name and stall name for uniqueness
       const siteName = sitesSnapshot.docs.find(s => s.id === doc.data().siteId)?.data().name.toLowerCase() || '';
       return [`${siteName}::${doc.data().name.toLowerCase()}`, doc.id];
     }));
 
-    // Aggregate data first
     const salesAggregation = new Map<string, {
         hungerboxSales: number;
-        upiSales: number; // Will be 0 based on new mapping
+        upiSales: number;
         siteId: string;
         stallId: string;
     }>();
@@ -247,7 +244,7 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
         }
 
         const orderDate = row['order_date']?.trim();
-        const isMrp = row['is_mrp']?.trim(); // Value is '0' or '1'
+        const isMrp = row['is_mrp']?.trim();
         const saleType = isMrp === '1' ? 'MRP' : 'Non-MRP';
         const actualValue = parseFloat(row['actual_value']) || 0;
 
@@ -256,10 +253,19 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
             continue;
         }
 
-        const aggKey = `${orderDate}_${stallId}_${saleType}`;
+        // Correctly parse MM/DD/YYYY format
+        const dateParts = orderDate.split('/');
+        if (dateParts.length !== 3) {
+            console.warn(`${LOG_PREFIX} Skipping row due to invalid date format: "${orderDate}"`);
+            continue;
+        }
+        const formattedDate = `${dateParts[2]}-${dateParts[0].padStart(2, '0')}-${dateParts[1].padStart(2, '0')}`;
+
+
+        const aggKey = `${formattedDate}_${stallId}_${saleType}`;
         const currentAgg = salesAggregation.get(aggKey) || {
             hungerboxSales: 0,
-            upiSales: 0, // Always 0 based on new mapping
+            upiSales: 0, // UPI is always 0 based on the provided mapping logic
             siteId: siteId,
             stallId: stallId,
         };
@@ -270,16 +276,15 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
     }
     
     if (salesAggregation.size === 0) {
-        return { message: "No valid sales data found to import." };
+        return { message: "No valid sales data found to import after aggregation." };
     }
 
-    // Now write to Firestore
     const batch = adminDb.batch();
     let operationCount = 0;
 
     for (const [key, data] of salesAggregation.entries()) {
         const [dateStr, stallId, saleType] = key.split('_');
-        const docId = `${dateStr}_${stallId}_${saleType}`;
+        const docId = key;
         const saleRef = adminDb.collection('foodSaleTransactions').doc(docId);
 
         const saleData = {
@@ -288,11 +293,11 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
             stallId: data.stallId,
             saleType: saleType,
             hungerboxSales: data.hungerboxSales,
-            upiSales: 0, // UPI is 0 as per new mapping
-            totalAmount: data.hungerboxSales, // Total amount is just hungerbox sales
+            upiSales: 0,
+            totalAmount: data.hungerboxSales,
             notes: `Imported via Hungerbox CSV on ${new Date().toLocaleDateString()}.`,
-            recordedByUid: 'Q7ZecmlipJcb1bqrzRkFOGVcNyL2', // Hardcoded UID
-            recordedByName: 'thegutguru.in', // Hardcoded name
+            recordedByUid: 'Q7ZecmlipJcb1bqrzRkFOGVcNyL2',
+            recordedByName: 'thegutguru.in',
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
         };
@@ -303,7 +308,7 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
 
     await batch.commit();
 
-    return { message: `Successfully processed and aggregated ${parsedData.length} rows into ${operationCount} daily sales records.` };
+    return { message: `Successfully processed and aggregated ${parsedData.length} CSV rows into ${operationCount} daily sales records.` };
 }
 
 export async function POST(request: NextRequest) {
@@ -365,5 +370,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `An unexpected error occurred: ${error.message}` }, { status: 500 });
   }
 }
-
-    
