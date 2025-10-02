@@ -227,7 +227,7 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
     }>();
 
     for (const row of parsedData) {
-        const vendorId = row['consumption vendor id']?.trim();
+        const vendorId = row['vendor_id']?.trim(); // Corrected column name
         const mapping = hungerboxVendorMapping[vendorId];
         
         if (!mapping) {
@@ -368,5 +368,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `An unexpected error occurred: ${error.message}` }, { status: 500 });
   }
 }
-
-    
