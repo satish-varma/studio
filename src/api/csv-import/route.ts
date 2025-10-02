@@ -6,6 +6,7 @@ import { getFirestore as getAdminFirestore, Timestamp, WriteBatch } from 'fireba
 import type { StockItem, FoodItemExpense, AppUser, FoodSaleTransaction } from '@/types';
 import Papa from 'papaparse';
 import { logFoodStallActivity } from '@/lib/foodStallLogger';
+import { hungerboxVendorMapping } from '@/lib/hungerbox-mapping';
 
 const LOG_PREFIX = "[API:CsvImport]";
 
@@ -206,48 +207,57 @@ async function handleFoodExpenseImport(adminDb: ReturnType<typeof getAdminFirest
 async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestore>, csvData: string, uid: string) {
     const parsedData = await parseCsv<any>(csvData);
     
+    // Create maps for efficient lookups of your internal site/stall names to their Firestore IDs
     const sitesSnapshot = await adminDb.collection('sites').get();
     const sitesMap = new Map(sitesSnapshot.docs.map(doc => [doc.data().name.toLowerCase(), doc.id]));
+    
     const stallsSnapshot = await adminDb.collection('stalls').get();
-    const stallsMap = new Map(stallsSnapshot.docs.map(doc => [doc.data().name.toLowerCase(), doc.id]));
+    const stallsMap = new Map(stallsSnapshot.docs.map(doc => {
+      // Create a key that combines site name and stall name for uniqueness
+      const siteName = sitesSnapshot.docs.find(s => s.id === doc.data().siteId)?.data().name.toLowerCase() || '';
+      return [`${siteName}::${doc.data().name.toLowerCase()}`, doc.id];
+    }));
 
     // Aggregate data first
     const salesAggregation = new Map<string, {
         hungerboxSales: number;
         upiSales: number;
-        notes: string[];
         siteId: string;
         stallId: string;
     }>();
 
     for (const row of parsedData) {
+        const vendorId = row['consumption vendor id']?.trim();
+        const mapping = hungerboxVendorMapping[vendorId];
+        
+        if (!mapping) {
+            console.warn(`${LOG_PREFIX} Skipping row. No mapping found for Hungerbox vendor ID: "${vendorId}"`);
+            continue;
+        }
+        
+        const siteName = mapping.site.toLowerCase();
+        const stallName = mapping.stall.toLowerCase();
+
+        const siteId = sitesMap.get(siteName);
+        const stallId = stallsMap.get(`${siteName}::${stallName}`);
+
+        if (!siteId || !stallId) {
+            console.warn(`${LOG_PREFIX} Skipping row. Could not find internal Site/Stall ID for mapped names. Site: "${siteName}", Stall: "${stallName}"`);
+            continue;
+        }
+
         const orderDate = row['order date']?.trim();
-        const stallName = row['consumption vendor name']?.trim().toLowerCase();
         const isMrp = row['is mrp']?.toLowerCase() === 'true';
         const saleType = isMrp ? 'MRP' : 'Non-MRP';
         const paymentMode = row['payment mode']?.toLowerCase();
         const price = parseFloat(row['price']) || 0;
 
-        if (!orderDate || !stallName) {
-            continue;
-        }
-
-        const stallId = stallsMap.get(stallName);
-        if (!stallId) {
-            console.warn(`${LOG_PREFIX} Skipping row. Could not find stall ID for stall name: "${stallName}"`);
-            continue;
-        }
-        const siteId = stallsSnapshot.docs.find(doc => doc.id === stallId)?.data().siteId;
-        if (!siteId) {
-            console.warn(`${LOG_PREFIX} Skipping row. Could not find site ID for stall: "${stallName}"`);
-            continue;
-        }
+        if (!orderDate) continue;
 
         const aggKey = `${orderDate}_${stallId}_${saleType}`;
         const currentAgg = salesAggregation.get(aggKey) || {
             hungerboxSales: 0,
             upiSales: 0,
-            notes: [],
             siteId: siteId,
             stallId: stallId,
         };
@@ -358,3 +368,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `An unexpected error occurred: ${error.message}` }, { status: 500 });
   }
 }
+
+    
