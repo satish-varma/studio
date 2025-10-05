@@ -219,8 +219,8 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
     
     const stallsSnapshot = await adminDb.collection('stalls').get();
     const allStalls = stallsSnapshot.docs.map(doc => {
-        const { id, ...rest } = doc.data() as Stall;
-        return { id: doc.id, ...rest };
+        const data = doc.data() as Omit<Stall, 'id'>;
+        return { id: doc.id, ...data };
     });
 
     const salesAggregation = new Map<string, FoodSaleTransaction>();
@@ -290,7 +290,7 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
         } else {
             salesAggregation.set(aggKey, {
                 id: aggKey, // This ID is for the map, not Firestore doc
-                saleDate: Timestamp.fromDate(saleDate),
+                saleDate: saleDate, // Use the Date object here
                 siteId: siteId,
                 stallId: stallId,
                 saleType: saleType,
@@ -314,6 +314,7 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
     const batch = adminDb.batch();
     for (const [docId, data] of salesAggregation.entries()) {
         const saleRef = adminDb.collection('foodSaleTransactions').doc(docId);
+        // The Admin SDK's set method will correctly convert the Date object to a Firestore Timestamp.
         batch.set(saleRef, data, { merge: true });
     }
 
@@ -381,5 +382,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `An unexpected error occurred: ${error.message}` }, { status: 500 });
   }
 }
-
-    
