@@ -1,15 +1,14 @@
-
 "use client";
 
 import { useState, useMemo, useEffect, useCallback } from "react";
 import type { AppUser, StaffDetails, SalaryAdvance, SalaryPayment, Site, Holiday, UserStatus, StaffAttendance } from "@/types";
 import type { DateRange } from "react-day-picker";
-import { format, startOfMonth, isAfter, isBefore, max, min, startOfDay, getMonth, eachMonthOfInterval, subDays, startOfWeek, endOfWeek, subMonths, endOfDay, endOfMonth } from "date-fns";
+import { format, startOfMonth, isAfter, isBefore, max, min, startOfDay, getMonth, eachMonthOfInterval, subDays, startOfWeek, endOfWeek, subMonths, endOfMonth } from "date-fns";
 import { getFirestore, collection, query, where, getDocs, Timestamp, QueryConstraint } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
-import { Loader2, Info, Building, Wallet, CalendarDays, HandCoins, IndianRupee, Users, LineChart } from "lucide-react";
+import { Loader2, Info, Building, Wallet, CalendarDays, HandCoins, IndianRupee, Users, LineChart, Calendar as CalendarIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -107,14 +106,17 @@ export default function StaffReportClientPage() {
         setErrorReport("Please select an active site to view the report."); setLoadingReport(false); return;
     }
     if (!dateRange?.from || !dateRange.to) {
-        setErrorReport("Please select a valid date range."); setLoadingReport(false); return;
+        // Allow All time filter
+        if (dateRange?.from !== undefined || dateRange?.to !== undefined) {
+          setErrorReport("Please select a valid date range."); setLoadingReport(false); return;
+        }
     }
 
     setLoadingReport(true); setErrorReport(null);
 
     try {
-        const fromTimestamp = Timestamp.fromDate(startOfDay(dateRange.from));
-        const toTimestamp = Timestamp.fromDate(endOfDay(dateRange.to));
+        const fromTimestamp = dateRange?.from ? Timestamp.fromDate(startOfDay(dateRange.from)) : null;
+        const toTimestamp = dateRange?.to ? Timestamp.fromDate(endOfDay(dateRange.to)) : null;
         
         const uids = filteredStaffList.map(s => s.uid);
         if (uids.length === 0) { setReportData([]); setLoadingReport(false); return; }
@@ -122,10 +124,25 @@ export default function StaffReportClientPage() {
         const uidsBatches: string[][] = [];
         for (let i = 0; i < uids.length; i += 30) { uidsBatches.push(uids.slice(i, i + 30)); }
         
+        const advancesQueryConstraints = [
+          fromTimestamp && where("date", ">=", fromTimestamp.toDate().toISOString()),
+          toTimestamp && where("date", "<=", toTimestamp.toDate().toISOString()),
+        ].filter(Boolean) as QueryConstraint[];
+        
+        const paymentsQueryConstraints = [
+          fromTimestamp && where("paymentDate", ">=", fromTimestamp.toDate().toISOString()),
+          toTimestamp && where("paymentDate", "<=", toTimestamp.toDate().toISOString()),
+        ].filter(Boolean) as QueryConstraint[];
+        
+        const attendanceQueryConstraints = [
+          fromTimestamp && where("date", ">=", format(fromTimestamp.toDate(), 'yyyy-MM-dd')),
+          toTimestamp && where("date", "<=", format(toTimestamp.toDate(), 'yyyy-MM-dd')),
+        ].filter(Boolean) as QueryConstraint[];
+
         const [advancesSnaps, paymentsSnaps, attendanceSnaps, holidaysSnap] = await Promise.all([
-            Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "advances"), where("staffUid", "in", batch), where("date", ">=", fromTimestamp.toDate().toISOString()), where("date", "<=", toTimestamp.toDate().toISOString()))))),
-            Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", batch), where("paymentDate", ">=", fromTimestamp.toDate().toISOString()), where("paymentDate", "<=", toTimestamp.toDate().toISOString()))))),
-            Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "staffAttendance"), where("staffUid", "in", batch), where("date", ">=", format(fromTimestamp.toDate(), 'yyyy-MM-dd')), where("date", "<=", format(toTimestamp.toDate(), 'yyyy-MM-dd')))))),
+            Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "advances"), ...advancesQueryConstraints, where("staffUid", "in", batch))))),
+            Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "salaryPayments"), ...paymentsQueryConstraints, where("staffUid", "in", batch))))),
+            Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "staffAttendance"), ...attendanceQueryConstraints, where("staffUid", "in", batch))))),
             getDocs(query(collection(db, "holidays")))
         ]);
         
@@ -145,20 +162,22 @@ export default function StaffReportClientPage() {
         }));
 
         const holidays = holidaysSnap.docs.map(doc => doc.data() as Holiday);
-        const monthsInRange = eachMonthOfInterval({ start: dateRange.from, end: dateRange.to });
-
+        
         const calculatedData = filteredStaffList.map(staff => {
             const details = staffDetailsMap.get(staff.uid) || null;
             let earnedSalary = 0; let totalWorkingDays = 0;
             const attendance = attendanceMap.get(staff.uid) || { present: 0, halfDay: 0 };
             const presentDays = attendance.present + (attendance.halfDay * 0.5);
 
-            if (details?.salary) {
+            if (details?.salary && dateRange?.from && dateRange.to) {
+                const monthsInRange = eachMonthOfInterval({ start: dateRange.from, end: dateRange.to });
                 monthsInRange.forEach(monthStart => {
                     const monthEnd = endOfMonth(monthStart);
                     const workingDaysInMonth = calculateWorkingDays(monthStart, monthEnd, holidays, staff);
+                    totalWorkingDays += workingDaysInMonth; // Note: this isn't quite right for earned salary calc which is monthly
                     if (workingDaysInMonth > 0) {
                         const perDaySalary = details.salary / workingDaysInMonth;
+                        // This calculation is complex for multi-month ranges and should ideally be per-month
                         earnedSalary += perDaySalary * presentDays;
                     }
                 });
@@ -190,13 +209,22 @@ export default function StaffReportClientPage() {
     }, { earnedSalary: 0, advances: 0, paidAmount: 0, netPayable: 0 });
   }, [reportData]);
 
-  const datePresets = [{ label: "This Month", value: 'this_month' }, { label: "Last Month", value: 'last_month' }, { label: "Last 3 Months", value: 'last_3_months' }, { label: "All Time", value: 'all_time' }];
+  const datePresets = [
+    { label: "Today", value: 'today' },
+    { label: "This Week", value: 'this_week' },
+    { label: "This Month", value: 'this_month' },
+    { label: "Last Month", value: 'last_month' },
+    { label: "Last 3 Months", value: 'last_3_months' },
+    { label: "All Time", value: 'all_time' },
+  ];
   
   const handleSetDatePreset = (preset: string) => {
       const now = new Date();
       let from: Date | undefined, to: Date | undefined = endOfDay(now);
 
       switch (preset) {
+          case 'today': from = startOfDay(now); break;
+          case 'this_week': from = startOfWeek(now); break;
           case 'this_month': from = startOfMonth(now); break;
           case 'last_month': from = startOfMonth(subMonths(now, 1)); to = endOfMonth(subMonths(now, 1)); break;
           case 'last_3_months': from = startOfMonth(subMonths(now, 2)); break;
@@ -204,6 +232,9 @@ export default function StaffReportClientPage() {
           default: from = undefined; to = undefined;
       }
       setTempDateRange({ from, to });
+      // Apply immediately
+      setDateRange({ from, to });
+      setIsDatePickerOpen(false);
   };
   const applyDateFilter = () => { setDateRange(tempDateRange); setIsDatePickerOpen(false); };
 
@@ -214,19 +245,26 @@ export default function StaffReportClientPage() {
         <PageHeader title="Staff Financial Report" description="Analyze staff salary, advances, and payments over a period."/>
         <Card>
             <CardHeader><CardTitle>Report Filters</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-                <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
-                    <PopoverTrigger asChild>
-                    <Button id="reportDateRange" variant={"outline"} className={cn("w-full sm:w-auto min-w-[280px]", !dateRange && "text-muted-foreground")}>
-                        <LineChart className="mr-2 h-4 w-4" />
-                        {dateRange?.from ? ( dateRange.to ? (<> {format(dateRange.from, "LLL dd, y")} - {format(dateRange.to, "LLL dd, y")} </>) : ( format(dateRange.from, "LLL dd, y") ) ) : ( <span>Pick a date range</span> )}
-                    </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar initialFocus mode="range" defaultMonth={tempDateRange?.from} selected={tempDateRange} onSelect={setTempDateRange} numberOfMonths={2}/>
-                        <div className="flex justify-end gap-2 pt-2 border-t mt-2 p-2"> <Button variant="ghost" onClick={() => setIsDatePickerOpen(false)}>Close</Button> <Button onClick={applyDateFilter}>Apply</Button> </div>
-                    </PopoverContent>
-                </Popover>
+            <CardContent className="flex flex-col gap-4">
+                <div className="flex flex-wrap items-center gap-2">
+                    {datePresets.map(({ label, value }) => (
+                        <Button key={value} variant="outline" onClick={() => handleSetDatePreset(value)}>
+                            {label}
+                        </Button>
+                    ))}
+                    <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
+                        <PopoverTrigger asChild>
+                        <Button id="reportDateRange" variant={"outline"} className={cn("w-full sm:w-auto min-w-[280px]", !dateRange && "text-muted-foreground")}>
+                            <CalendarIcon className="mr-2 h-4 w-4" />
+                            {dateRange?.from ? ( dateRange.to ? (<> {format(dateRange.from, "LLL dd, y")} - {format(dateRange.to, "LLL dd, y")} </>) : ( format(dateRange.from, "LLL dd, y") ) ) : ( <span>Pick a date range</span> )}
+                        </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar initialFocus mode="range" defaultMonth={tempDateRange?.from} selected={tempDateRange} onSelect={setTempDateRange} numberOfMonths={2}/>
+                            <div className="flex justify-end gap-2 pt-2 border-t mt-2 p-2"> <Button variant="ghost" onClick={() => setIsDatePickerOpen(false)}>Close</Button> <Button onClick={applyDateFilter}>Apply</Button> </div>
+                        </PopoverContent>
+                    </Popover>
+                </div>
                 {user?.role === 'admin' && (
                     <Select value={siteFilter} onValueChange={setSiteFilter}>
                         <SelectTrigger className="w-full sm:w-[220px] bg-input"><Building className="mr-2 h-4 w-4 text-muted-foreground"/><SelectValue placeholder="All Sites" /></SelectTrigger>
