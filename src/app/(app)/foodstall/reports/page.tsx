@@ -149,9 +149,11 @@ export default function FoodStallReportClientPage() {
       }
 
       // --- Fetch Sales ---
-      let salesQueryConstraints = [...baseSiteQuery];
-      if(fromDate) salesQueryConstraints.push(where("saleDate", ">=", fromDate));
-      if(toDate) salesQueryConstraints.push(where("saleDate", "<=", toDate));
+      let salesQueryConstraints: QueryConstraint[] = [...baseSiteQuery];
+      // THE FIX: Only add date constraints if fromDate and toDate are not null.
+      if (fromDate) salesQueryConstraints.push(where("saleDate", ">=", fromDate));
+      if (toDate) salesQueryConstraints.push(where("saleDate", "<=", toDate));
+      
       const salesQuery = query(collection(db, "foodSaleTransactions"), ...salesQueryConstraints);
       const salesSnapshot = await getDocs(salesQuery);
       const salesTransactions = salesSnapshot.docs.map(doc => doc.data() as FoodSaleTransaction);
@@ -166,9 +168,9 @@ export default function FoodStallReportClientPage() {
       });
 
       // --- Fetch Expenses ---
-      let expensesQueryConstraints = [...baseSiteQuery];
-      if(fromDate) expensesQueryConstraints.push(where("purchaseDate", ">=", fromDate));
-      if(toDate) expensesQueryConstraints.push(where("purchaseDate", "<=", toDate));
+      let expensesQueryConstraints: QueryConstraint[] = [...baseSiteQuery];
+      if (fromDate) expensesQueryConstraints.push(where("purchaseDate", ">=", fromDate));
+      if (toDate) expensesQueryConstraints.push(where("purchaseDate", "<=", toDate));
       const expensesQuery = query(collection(db, "foodItemExpenses"), ...expensesQueryConstraints);
       const expensesSnapshot = await getDocs(expensesQuery);
       const expenseTransactions = expensesSnapshot.docs.map(doc => doc.data() as FoodItemExpense);
