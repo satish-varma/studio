@@ -393,17 +393,17 @@ export default function StaffDashboardPage() {
                 <CardContent className="flex flex-col gap-4">
                      <div className="flex flex-wrap items-center gap-2">
                         {datePresets.map(({ label, value }) => (
-                            <Button key={value} variant="outline" onClick={() => handleSetDatePreset(value)}>
+                            <Button key={value} variant={dateRange?.from?.getTime() === (value === 'all_time' ? undefined : (value === 'today' ? startOfDay(new Date()) : value === 'this_week' ? startOfWeek(new Date()) : value === 'this_month' ? startOfMonth(new Date()) : value === 'last_month' ? startOfMonth(subMonths(new Date(), 1)) : startOfMonth(subMonths(new Date(), 2)))?.getTime()) ? 'default' : 'outline'} onClick={() => handleSetDatePreset(value)}>
                                 {label}
                             </Button>
                         ))}
                     </div>
-                    <div className="flex flex-col sm:flex-row items-center gap-2">
-                        <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+                         <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
                             <PopoverTrigger asChild>
                             <Button
                                 id="dateRangePicker" variant={'outline'}
-                                className={cn("w-full sm:w-[300px] justify-start text-left font-normal bg-input", !dateRange && "text-muted-foreground")}
+                                className={cn("w-full sm:w-auto min-w-[280px] justify-start text-left font-normal bg-input", !dateRange && "text-muted-foreground")}
                             >
                                 <CalendarIcon className="mr-2 h-4 w-4" />
                                 {dateRange?.from ? ( dateRange.to ? (
@@ -495,6 +495,8 @@ export default function StaffDashboardPage() {
         </div>
     );
 }
+
+    
 
     
 
