@@ -4,7 +4,7 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import type { AppUser, StaffDetails, SalaryAdvance, SalaryPayment, Site, Holiday, UserStatus, StaffAttendance } from "@/types";
 import type { DateRange } from "react-day-picker";
-import { format, startOfMonth, isAfter, isBefore, max, min, startOfDay, getMonth, eachMonthOfInterval, subDays, startOfWeek, endOfWeek, subMonths, endOfDay } from "date-fns";
+import { format, startOfMonth, isAfter, isBefore, max, min, startOfDay, getMonth, eachMonthOfInterval, subDays, startOfWeek, endOfWeek, subMonths, endOfDay, endOfMonth } from "date-fns";
 import { getFirestore, collection, query, where, getDocs, Timestamp, QueryConstraint } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
