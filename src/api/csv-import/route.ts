@@ -206,82 +206,64 @@ async function handleFoodExpenseImport(adminDb: ReturnType<typeof getAdminFirest
 
 async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestore>, csvData: string, uid: string) {
     const parsedData = await parseCsv<any>(csvData);
-    
-    // Step 1: Pre-fetch all sites and stalls for efficient lookup
+
     const sitesSnapshot = await adminDb.collection('sites').get();
     const sitesMap = new Map(sitesSnapshot.docs.map(doc => [doc.data().name.toLowerCase(), doc.id]));
 
     const stallsSnapshot = await adminDb.collection('stalls').get();
-    const allStalls = stallsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as Stall }));
+    const allStalls = stallsSnapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as Stall) }));
 
-    // Step 2: Aggregate data from CSV
-    const salesAggregation = new Map<string, FoodSaleTransaction>();
+    const salesAggregation = new Map<string, Partial<FoodSaleTransaction> & { hungerboxSales: number, totalAmount: number }>();
     const callingUser = await getAdminAuth().getUser(uid);
-
-    let processedRowCount = 0;
 
     for (const row of parsedData) {
         const vendorId = row['vendor_id']?.trim();
         const mapping = hungerboxVendorMapping[vendorId];
-        
         if (!mapping) {
-            console.warn(`${LOG_PREFIX} Skipping row. No mapping found for Hungerbox vendor ID: "${vendorId}"`);
+            console.warn(`${LOG_PREFIX} Skipping row due to no mapping for vendor ID: "${vendorId}"`);
             continue;
         }
-        
+
         const siteName = mapping.site.toLowerCase();
         const stallName = mapping.stall.toLowerCase();
-
         const siteId = sitesMap.get(siteName);
         if (!siteId) {
-            console.warn(`${LOG_PREFIX} Skipping row. Could not find internal Site ID for mapped name: "${siteName}"`);
+            console.warn(`${LOG_PREFIX} Skipping row due to unknown mapped site name: "${siteName}"`);
             continue;
         }
-
+        
         const stall = allStalls.find(s => s.siteId === siteId && s.name.toLowerCase() === stallName);
         if (!stall) {
-            console.warn(`${LOG_PREFIX} Skipping row. Could not find internal Stall ID for name "${stallName}" within site "${siteName}"`);
+            console.warn(`${LOG_PREFIX} Skipping row due to unknown mapped stall name: "${stallName}" for site "${siteName}"`);
             continue;
         }
         const stallId = stall.id;
 
-        const orderDate = row['order_date']?.trim();
-        if (!orderDate) {
-            console.warn(`${LOG_PREFIX} Skipping row due to missing order_date.`, row);
+        const orderDateStr = row['order_date']?.trim();
+        const dateParts = orderDateStr?.split('/');
+        if (!dateParts || dateParts.length !== 3) {
+            console.warn(`${LOG_PREFIX} Skipping row due to invalid date format: "${orderDateStr}"`);
             continue;
         }
 
-        // Correct, robust date parsing
-        const dateParts = orderDate.split('/'); // MM/DD/YYYY
-        if (dateParts.length !== 3) {
-            console.warn(`${LOG_PREFIX} Skipping row due to invalid date format: "${orderDate}"`);
-            continue;
-        }
-        const year = parseInt(dateParts[2], 10);
-        const month = parseInt(dateParts[0], 10) - 1; // Month is 0-indexed
-        const day = parseInt(dateParts[1], 10);
-        const saleDate = new Date(Date.UTC(year, month, day, 0, 0, 0));
-        
-        if (isNaN(saleDate.getTime())) {
-             console.warn(`${LOG_PREFIX} Skipping row due to parsed invalid date: "${orderDate}"`);
-             continue;
-        }
+        // Robust, timezone-safe date handling
+        const year = dateParts[2];
+        const month = dateParts[0].padStart(2, '0');
+        const day = dateParts[1].padStart(2, '0');
+        const formattedDate = `${year}-${month}-${day}`;
+        const saleDate = new Date(`${formattedDate}T00:00:00.000Z`); // Create UTC date
 
-        const formattedDate = saleDate.toISOString().split('T')[0]; // YYYY-MM-DD
-
-        const isMrp = row['is_mrp']?.trim();
-        const saleType = isMrp === '1' ? 'MRP' : 'Non-MRP';
+        const saleType = row['is_mrp']?.trim() === '1' ? 'MRP' : 'Non-MRP';
         const actualValue = parseFloat(row['actual_value']) || 0;
-
         const aggKey = `${formattedDate}_${stallId}_${saleType}`;
         
-        if (salesAggregation.has(aggKey)) {
-            const existingRecord = salesAggregation.get(aggKey)!;
-            existingRecord.hungerboxSales += actualValue;
-            existingRecord.totalAmount += actualValue;
-            existingRecord.updatedAt = new Date().toISOString();
+        const currentAgg = salesAggregation.get(aggKey);
+
+        if (currentAgg) {
+            currentAgg.hungerboxSales += actualValue;
+            currentAgg.totalAmount += actualValue;
         } else {
-            const newRecord: FoodSaleTransaction = {
+            salesAggregation.set(aggKey, {
                 id: aggKey,
                 saleDate: Timestamp.fromDate(saleDate),
                 siteId: siteId,
@@ -295,28 +277,21 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
                 recordedByName: callingUser.displayName || callingUser.email!,
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
-            };
-            salesAggregation.set(aggKey, newRecord);
+            });
         }
-        processedRowCount++;
     }
-    
+
     if (salesAggregation.size === 0) {
-        return { message: "No valid sales data found to import after aggregation." };
+        return { message: "No valid sales data found to import after processing." };
     }
 
-    console.log(`${LOG_PREFIX} Aggregated ${processedRowCount} rows into ${salesAggregation.size} unique database records.`);
-
-    // Step 3: Write aggregated data to Firestore using setDoc with merge
     const batch = adminDb.batch();
-
     for (const [docId, data] of salesAggregation.entries()) {
         const saleRef = adminDb.collection('foodSaleTransactions').doc(docId);
         batch.set(saleRef, data, { merge: true });
     }
 
     await batch.commit();
-    console.log(`${LOG_PREFIX} Firestore batch commit successful.`);
 
     return { message: `Successfully processed and aggregated ${parsedData.length} CSV rows into ${salesAggregation.size} daily sales records.` };
 }
