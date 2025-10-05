@@ -27,19 +27,6 @@ const nextConfig: NextConfig = {
       }
     ],
   },
-  experimental: {
-    serverActions: true,
-    serverComponentsExternalPackages: ['@react-email/components'],
-    // server.fs.allow has been removed to fix 403 Forbidden errors on static assets.
-    turbo: {
-        rules: {
-            '*.svg': {
-                loaders: ['@svgr/webpack'],
-                as: '*.js',
-            },
-        },
-    },
-  },
 };
 
 export default nextConfig;
