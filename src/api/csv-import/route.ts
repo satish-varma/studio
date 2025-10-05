@@ -217,6 +217,7 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
     const callingUser = await getAdminAuth().getUser(uid);
 
     for (const row of parsedData) {
+        // CORRECTED: Use 'vendor_id' as provided in the image data.
         const vendorId = row['vendor_id']?.trim();
         if (!vendorId) {
             console.warn(`${LOG_PREFIX} Skipping row due to missing 'vendor_id'. Row:`, row);
@@ -251,15 +252,16 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
             continue;
         }
 
-        // Robust, timezone-safe date handling
+        // ROBUST, TIMEZONE-SAFE DATE HANDLING
         const year = dateParts[2];
         const month = dateParts[0].padStart(2, '0'); // MM
         const day = dateParts[1].padStart(2, '0');   // DD
         const formattedDate = `${year}-${month}-${day}`; // "2025-09-15"
         const saleDate = new Date(`${formattedDate}T00:00:00.000Z`); // Create as UTC date
 
+        // CORRECTED: Use 'actual_val' as shown in the image data.
         const saleType = row['is_mrp']?.trim() === '1' ? 'MRP' : 'Non-MRP';
-        const actualValue = parseFloat(row['actual_value']) || 0;
+        const actualValue = parseFloat(row['actual_val']) || 0;
         const aggKey = `${formattedDate}_${stallId}_${saleType}`;
         
         const currentAgg = salesAggregation.get(aggKey);
@@ -269,13 +271,13 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
             currentAgg.totalAmount += actualValue;
         } else {
             salesAggregation.set(aggKey, {
-                id: aggKey,
-                saleDate: Timestamp.fromDate(saleDate),
+                id: aggKey, // This ID is for the map, not Firestore doc
+                saleDate: Timestamp.fromDate(saleDate), // CORRECT: Use Firestore Timestamp
                 siteId: siteId,
                 stallId: stallId,
                 saleType: saleType,
                 hungerboxSales: actualValue,
-                upiSales: 0, // Assuming UPI sales are not in this CSV
+                upiSales: 0, 
                 totalAmount: actualValue,
                 notes: `Imported via Hungerbox CSV on ${new Date().toLocaleDateString()}.`,
                 recordedByUid: callingUser.uid,
