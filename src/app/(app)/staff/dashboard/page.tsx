@@ -4,18 +4,23 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import PageHeader from "@/components/shared/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, UserX, UserRoundCheck, HandCoins, CalendarDays, Wallet, BarChart, IndianRupee, UserCheck } from "lucide-react";
+import { Users, UserX, UserRoundCheck, HandCoins, CalendarDays, Wallet, Building, Calendar as CalendarIcon } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { getFirestore, collection, query, where, onSnapshot, getDocs } from "firebase/firestore";
-import type { AppUser, StaffAttendance, SalaryAdvance, Holiday, StaffDetails } from "@/types";
-import { format, startOfMonth, endOfMonth, getDaysInMonth } from "date-fns";
-import { Loader2, Info } from "lucide-react";
+import type { AppUser, StaffAttendance, SalaryAdvance, Holiday, StaffDetails, Site } from "@/types";
+import { format, startOfMonth, endOfMonth, getDaysInMonth, startOfDay, endOfDay, subDays } from "date-fns";
+import { Loader2, Info, IndianRupee } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { useUserManagement } from "@/hooks/use-user-management";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import type { DateRange } from "react-day-picker";
 
 
 const db = getFirestore();
@@ -38,19 +43,36 @@ export default function StaffDashboardPage() {
     const { user, activeSiteId, loading: authLoading } = useAuth();
     
     const {
-        users: staffList,
+        users: allStaff,
+        sites: allSites,
         staffDetails: staffDetailsMap,
         loading: userManagementLoading,
         error: userManagementError,
     } = useUserManagement();
+
+    const [dateRange, setDateRange] = useState<DateRange | undefined>(() => ({
+      from: startOfMonth(new Date()),
+      to: endOfDay(new Date()),
+    }));
+    const [tempDateRange, setTempDateRange] = useState<DateRange | undefined>(dateRange);
+    const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
     
+    const [siteFilter, setSiteFilter] = useState<string>('all');
+
+    const effectiveSiteId = user?.role === 'admin' ? (siteFilter === 'all' ? null : siteFilter) : activeSiteId;
+    
+    const filteredStaffList = useMemo(() => {
+        if (!effectiveSiteId) return allStaff;
+        return allStaff.filter(s => s.defaultSiteId === effectiveSiteId || (s.role === 'manager' && s.managedSiteIds?.includes(effectiveSiteId)));
+    }, [allStaff, effectiveSiteId]);
+
+
     const [stats, setStats] = useState({ 
         totalStaff: 0, 
         presentToday: 0, 
-        advancesThisMonth: 0, 
+        advancesForPeriod: 0, 
         notPresentToday: 0,
-        salaryToday: 0,
-        salaryThisMonth: 0,
+        salaryForPeriod: 0,
         projectedSalary: 0,
     });
     const [recentAdvances, setRecentAdvances] = useState<SalaryAdvance[]>([]);
@@ -62,8 +84,8 @@ export default function StaffDashboardPage() {
     const [summaryView, setSummaryView] = useState<SummaryViewOption>('by_projected_salary');
 
     const getStaffName = useCallback((uid: string) => {
-        return staffList.find(s => s.uid === uid)?.displayName || uid.substring(0, 8);
-    }, [staffList]);
+        return allStaff.find(s => s.uid === uid)?.displayName || uid.substring(0, 8);
+    }, [allStaff]);
 
     const isHoliday = useCallback((date: Date, holidays: Holiday[], staffSiteId?: string | null) => {
         const dayOfWeek = date.getDay();
@@ -93,26 +115,22 @@ export default function StaffDashboardPage() {
         return workingDays;
     }, [isHoliday]);
 
-
     useEffect(() => {
-        if (userManagementLoading) {
-            setLoadingCalculations(true);
-            return;
-        }
-        
-        if (staffList.length === 0) {
-            setLoadingCalculations(false);
-            setStats({ totalStaff: 0, presentToday: 0, advancesThisMonth: 0, notPresentToday: 0, salaryToday: 0, salaryThisMonth: 0, projectedSalary: 0 });
-            setRecentAdvances([]);
-            setAdvancesSummary([]);
-            setAttendanceSummary([]);
-            setEarnedSalarySummary([]);
-            setStaffOnLeaveOrAbsent([]);
+        if (userManagementLoading || filteredStaffList.length === 0) {
+            if (!userManagementLoading) {
+                setLoadingCalculations(false);
+                setStats({ totalStaff: 0, presentToday: 0, advancesForPeriod: 0, notPresentToday: 0, salaryForPeriod: 0, projectedSalary: 0 });
+                setRecentAdvances([]);
+                setAdvancesSummary([]);
+                setAttendanceSummary([]);
+                setEarnedSalarySummary([]);
+                setStaffOnLeaveOrAbsent([]);
+            }
             return;
         }
 
         setLoadingCalculations(true);
-        const staffUids = staffList.map(s => s.uid);
+        const staffUids = filteredStaffList.map(s => s.uid);
         
         const uidsBatches: string[][] = [];
         for (let i = 0; i < staffUids.length; i += 30) {
@@ -120,97 +138,66 @@ export default function StaffDashboardPage() {
         }
         
         const todayStr = format(new Date(), 'yyyy-MM-dd');
-        const monthStart = startOfMonth(new Date());
-        const monthEnd = endOfMonth(new Date());
+        const fromDate = dateRange?.from ? startOfDay(dateRange.from) : startOfMonth(new Date());
+        const toDate = dateRange?.to ? endOfDay(dateRange.to) : endOfMonth(new Date());
 
         const fetchDependencies = async () => {
             const [
                 advancesSnapshots, 
                 attendanceTodaySnapshots,
-                attendanceMonthSnapshots,
+                attendancePeriodSnapshots,
                 holidaysSnapshot
             ] = await Promise.all([
-                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "advances"), where("date", ">=", monthStart.toISOString()), where("date", "<=", monthEnd.toISOString()), where("staffUid", "in", batch))))),
+                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "advances"), where("date", ">=", fromDate.toISOString()), where("date", "<=", toDate.toISOString()), where("staffUid", "in", batch))))),
                 Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "staffAttendance"), where("date", "==", todayStr), where("staffUid", "in", batch))))),
-                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "staffAttendance"), where("date", ">=", format(monthStart, 'yyyy-MM-dd')), where("date", "<=", format(monthEnd, 'yyyy-MM-dd')), where("staffUid", "in", batch))))),
+                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "staffAttendance"), where("date", ">=", format(fromDate, 'yyyy-MM-dd')), where("date", "<=", format(toDate, 'yyyy-MM-dd')), where("staffUid", "in", batch))))),
                 getDocs(query(collection(db, "holidays")))
             ]);
             
-            // --- Advances ---
             const allAdvances = advancesSnapshots.flat().flatMap(s => s.docs.map(doc => ({id: doc.id, ...doc.data()} as SalaryAdvance)));
             const totalAdvance = allAdvances.reduce((sum, adv) => sum + adv.amount, 0);
             
             const advancesByStaff: Record<string, number> = {};
-            allAdvances.forEach(adv => {
-                advancesByStaff[adv.staffUid] = (advancesByStaff[adv.staffUid] || 0) + adv.amount;
-            });
-            const advancesSummaryData = Object.entries(advancesByStaff).map(([uid, totalAmount]) => ({
-                uid, name: getStaffName(uid), totalAmount
-            })).sort((a,b) => b.totalAmount - a.totalAmount);
-            setAdvancesSummary(advancesSummaryData);
-            
+            allAdvances.forEach(adv => { advancesByStaff[adv.staffUid] = (advancesByStaff[adv.staffUid] || 0) + adv.amount; });
+            setAdvancesSummary(Object.entries(advancesByStaff).map(([uid, totalAmount]) => ({ uid, name: getStaffName(uid), totalAmount })).sort((a,b) => b.totalAmount - a.totalAmount));
             setRecentAdvances(allAdvances.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 5));
 
-            // --- Today's Attendance & Salary ---
             const attendanceTodayDocs = attendanceTodaySnapshots.flat().flatMap(s => s.docs);
-            
-            const activeStaffList = staffList.filter(s => (s.role === 'staff' || s.role === 'manager') && (s.status === 'active' || !s.status));
+            const activeStaffList = filteredStaffList.filter(s => (s.role === 'staff' || s.role === 'manager') && (s.status === 'active' || !s.status));
             const activeStaffCount = activeStaffList.length;
 
-            const notPresentRecords = attendanceTodayDocs
-                .filter(doc => ['Leave', 'Absent', 'Half-day'].includes((doc.data() as StaffAttendance).status))
-                .map(doc => ({ id: doc.id, ...doc.data() } as StaffAttendance));
-            
+            const notPresentRecords = attendanceTodayDocs.filter(doc => ['Leave', 'Absent', 'Half-day'].includes((doc.data() as StaffAttendance).status)).map(doc => ({ id: doc.id, ...doc.data() } as StaffAttendance));
             const presentCount = activeStaffCount - notPresentRecords.length;
-
             setStaffOnLeaveOrAbsent(notPresentRecords);
             
             const holidays = holidaysSnapshot.docs.map(d => d.data() as Holiday);
-            const workingDaysInMonth = calculateWorkingDays(new Date(), holidays);
-            let salaryToday = 0;
-            attendanceTodayDocs.forEach(doc => {
+            
+            const periodAttendanceMap = new Map<string, {present: number, halfDay: number}>();
+            attendancePeriodSnapshots.flat().forEach(snapshot => snapshot.forEach(doc => {
                 const att = doc.data() as StaffAttendance;
-                const details = staffDetailsMap.get(att.staffUid);
-                if (details?.salary && workingDaysInMonth > 0) {
-                    const perDaySalary = details.salary / workingDaysInMonth;
-                    if (att.status === 'Present') salaryToday += perDaySalary;
-                    if (att.status === 'Half-day') salaryToday += perDaySalary / 2;
-                }
-            });
-
-            // --- Monthly Salary Bill & Attendance Summary ---
-            const monthlyAttendanceMap = new Map<string, {present: number, halfDay: number}>();
-            attendanceMonthSnapshots.flat().forEach(snapshot => snapshot.forEach(doc => {
-                const att = doc.data() as StaffAttendance;
-                const current = monthlyAttendanceMap.get(att.staffUid) || { present: 0, halfDay: 0 };
+                const current = periodAttendanceMap.get(att.staffUid) || { present: 0, halfDay: 0 };
                 if (att.status === 'Present') current.present++;
                 if (att.status === 'Half-day') current.halfDay++;
-                monthlyAttendanceMap.set(att.staffUid, current);
+                periodAttendanceMap.set(att.staffUid, current);
             }));
 
-            const attendanceSummaryData = Array.from(monthlyAttendanceMap.entries()).map(([uid, data]) => ({
-                uid,
-                name: getStaffName(uid),
-                present: data.present,
-                halfDay: data.halfDay
-            })).sort((a,b) => b.present - a.present || b.halfDay - a.halfDay);
-            setAttendanceSummary(attendanceSummaryData);
+            setAttendanceSummary(Array.from(periodAttendanceMap.entries()).map(([uid, data]) => ({ uid, name: getStaffName(uid), present: data.present, halfDay: data.halfDay })).sort((a,b) => b.present - a.present || b.halfDay - a.halfDay));
 
-
-            let salaryThisMonth = 0;
+            let salaryForPeriod = 0;
             let projectedSalary = 0;
             const earnedSalarySummaryData: EarnedSalarySummary[] = [];
             
             activeStaffList.forEach(staff => {
                 const details = staffDetailsMap.get(staff.uid);
                 projectedSalary += details?.salary || 0;
-
-                const attendance = monthlyAttendanceMap.get(staff.uid);
+                const workingDaysInMonth = calculateWorkingDays(startOfMonth(fromDate), holidays);
+                
+                const attendance = periodAttendanceMap.get(staff.uid);
                 if (details?.salary && attendance && workingDaysInMonth > 0) {
                     const perDaySalary = details.salary / workingDaysInMonth;
                     const presentDays = attendance.present + (attendance.halfDay * 0.5);
                     const earned = perDaySalary * presentDays;
-                    salaryThisMonth += earned;
+                    salaryForPeriod += earned;
                     earnedSalarySummaryData.push({ uid: staff.uid, name: getStaffName(staff.uid), earnedSalary: earned });
                 }
             });
@@ -220,11 +207,10 @@ export default function StaffDashboardPage() {
             setStats({ 
                 totalStaff: activeStaffCount, 
                 presentToday: presentCount, 
-                advancesThisMonth: totalAdvance, 
+                advancesForPeriod: totalAdvance, 
                 notPresentToday: notPresentRecords.length,
-                salaryToday: salaryToday,
-                salaryThisMonth: salaryThisMonth,
-                projectedSalary: projectedSalary,
+                salaryForPeriod,
+                projectedSalary,
             });
             setLoadingCalculations(false);
         };
@@ -233,7 +219,33 @@ export default function StaffDashboardPage() {
             setLoadingCalculations(false);
         });
         
-    }, [userManagementLoading, staffList, staffDetailsMap, calculateWorkingDays, getStaffName]);
+    }, [userManagementLoading, filteredStaffList, staffDetailsMap, calculateWorkingDays, getStaffName, dateRange]);
+    
+    const applyDateFilter = () => {
+        setDateRange(tempDateRange);
+        setIsDatePickerOpen(false);
+    };
+
+    const datePresets = [
+        { label: "Today", value: 'today' },
+        { label: "This Week", value: 'this_week' },
+        { label: "This Month", value: 'this_month' },
+        { label: "All Time", value: 'all_time' },
+    ];
+    
+    const handleSetDatePreset = (preset: string) => {
+        const now = new Date();
+        let from: Date | undefined, to: Date | undefined = endOfDay(now);
+
+        switch (preset) {
+            case 'today': from = startOfDay(now); break;
+            case 'this_week': from = startOfDay(subDays(now, now.getDay() - 1)); break;
+            case 'this_month': from = startOfMonth(now); break;
+            case 'all_time': from = undefined; to = undefined; break;
+            default: from = undefined; to = undefined;
+        }
+        setTempDateRange({ from, to });
+    };
 
     const loading = authLoading || userManagementLoading || loadingCalculations;
 
@@ -260,114 +272,115 @@ export default function StaffDashboardPage() {
     const statCards = [
         { title: "Active Staff", value: stats.totalStaff, icon: Users, description: "Total active staff members." },
         { title: "Projected Salary", value: `₹${stats.projectedSalary.toFixed(2)}`, icon: Wallet, description: "Total base salary of active staff." },
-        { title: "Salary Bill (This Month)", value: `₹${stats.salaryThisMonth.toFixed(2)}`, icon: CalendarDays, description: "Earned salary based on attendance." },
+        { title: "Salary Bill (Period)", value: `₹${stats.salaryForPeriod.toFixed(2)}`, icon: CalendarDays, description: "Earned salary based on attendance." },
         { title: "Present Today", value: stats.presentToday, icon: UserRoundCheck, description: `${stats.presentToday} of ${stats.totalStaff} staff present.` },
-        { title: "Advances (This Month)", value: `₹${stats.advancesThisMonth.toFixed(2)}`, icon: HandCoins, description: "Total salary advance this month." },
+        { title: "Advances (Period)", value: `₹${stats.advancesForPeriod.toFixed(2)}`, icon: HandCoins, description: "Total salary advance in period." },
         { title: "Leave/Absent Today", value: stats.notPresentToday, icon: UserX, description: "Staff not marked as 'Present'." },
     ];
 
     const getStatusBadge = (status: 'Leave' | 'Absent' | 'Half-day') => {
         switch (status) {
-            case 'Absent':
-                return <Badge variant="destructive">Absent</Badge>;
-            case 'Leave':
-                return <Badge variant="outline" className="text-amber-600 border-amber-500">Leave</Badge>;
-            case 'Half-day':
-                return <Badge variant="secondary">Half-day</Badge>;
-            default:
-                return <Badge variant="outline">{status}</Badge>;
+            case 'Absent': return <Badge variant="destructive">Absent</Badge>;
+            case 'Leave': return <Badge variant="outline" className="text-amber-600 border-amber-500">Leave</Badge>;
+            case 'Half-day': return <Badge variant="secondary">Half-day</Badge>;
+            default: return <Badge variant="outline">{status}</Badge>;
         }
     };
     
-    const projectedSalaryList = staffList
+    const projectedSalaryList = filteredStaffList
         .filter(s => (s.role === 'staff' || s.role === 'manager') && (s.status === 'active' || !s.status))
-        .map(s => ({
-            ...s,
-            salary: staffDetailsMap.get(s.uid)?.salary || 0
-        }))
+        .map(s => ({ ...s, salary: staffDetailsMap.get(s.uid)?.salary || 0 }))
         .sort((a,b) => b.salary - a.salary);
         
     const renderPivotTable = () => {
         switch(summaryView) {
             case 'by_projected_salary':
                 return (
-                    <Table>
-                        <TableHeader><TableRow><TableHead>Staff Member</TableHead><TableHead className="text-right">Projected Monthly Salary</TableHead></TableRow></TableHeader>
-                        <TableBody>
-                            {projectedSalaryList.length > 0 ? projectedSalaryList.map(item => (
-                                <TableRow key={item.uid}>
-                                    <TableCell>{item.displayName}</TableCell>
-                                    <TableCell className="text-right font-medium">₹{item.salary.toFixed(2)}</TableCell>
-                                </TableRow>
-                            )) : <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground">No active staff with salary data.</TableCell></TableRow>}
-                        </TableBody>
+                    <Table><TableHeader><TableRow><TableHead>Staff Member</TableHead><TableHead className="text-right">Projected Monthly Salary</TableHead></TableRow></TableHeader>
+                        <TableBody>{projectedSalaryList.length > 0 ? projectedSalaryList.map(item => ( <TableRow key={item.uid}><TableCell>{item.displayName}</TableCell><TableCell className="text-right font-medium">₹{item.salary.toFixed(2)}</TableCell></TableRow>)) : <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground">No active staff with salary data.</TableCell></TableRow>}</TableBody>
                     </Table>
                 );
             case 'by_earned_salary':
                 return (
-                    <Table>
-                        <TableHeader><TableRow><TableHead>Staff Member</TableHead><TableHead className="text-right">Earned Salary (This Month)</TableHead></TableRow></TableHeader>
-                        <TableBody>
-                            {earnedSalarySummary.length > 0 ? earnedSalarySummary.map(item => (
-                                <TableRow key={item.uid}>
-                                    <TableCell>{item.name}</TableCell>
-                                    <TableCell className="text-right font-medium">₹{item.earnedSalary.toFixed(2)}</TableCell>
-                                </TableRow>
-                            )) : <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground">No salary data for this month.</TableCell></TableRow>}
-                        </TableBody>
+                    <Table><TableHeader><TableRow><TableHead>Staff Member</TableHead><TableHead className="text-right">Earned Salary (Period)</TableHead></TableRow></TableHeader>
+                        <TableBody>{earnedSalarySummary.length > 0 ? earnedSalarySummary.map(item => ( <TableRow key={item.uid}><TableCell>{item.name}</TableCell><TableCell className="text-right font-medium">₹{item.earnedSalary.toFixed(2)}</TableCell></TableRow>)) : <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground">No salary data for this period.</TableCell></TableRow>}</TableBody>
                     </Table>
                 );
-            case 'by_advances':
-                 return (
-                    <Table>
-                        <TableHeader><TableRow><TableHead>Staff Member</TableHead><TableHead className="text-right">Total Advances (This Month)</TableHead></TableRow></TableHeader>
-                        <TableBody>
-                           {advancesSummary.length > 0 ? advancesSummary.map(item => (
-                                <TableRow key={item.uid}>
-                                    <TableCell>{item.name}</TableCell>
-                                    <TableCell className="text-right font-medium">₹{item.totalAmount.toFixed(2)}</TableCell>
-                                </TableRow>
-                            )) : <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground">No advances recorded this month.</TableCell></TableRow>}
-                        </TableBody>
-                    </Table>
-                );
+            case 'by_advances': return ( <Table><TableHeader><TableRow><TableHead>Staff Member</TableHead><TableHead className="text-right">Total Advances (Period)</TableHead></TableRow></TableHeader><TableBody>{advancesSummary.length > 0 ? advancesSummary.map(item => ( <TableRow key={item.uid}><TableCell>{item.name}</TableCell><TableCell className="text-right font-medium">₹{item.totalAmount.toFixed(2)}</TableCell></TableRow>)) : <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground">No advances recorded for this period.</TableCell></TableRow>}</TableBody></Table>);
             case 'by_attendance':
                 return (
-                    <Table>
-                        <TableHeader><TableRow><TableHead>Staff Member</TableHead><TableHead className="text-center">Present Days</TableHead><TableHead className="text-center">Half Days</TableHead></TableRow></TableHeader>
-                        <TableBody>
-                            {attendanceSummary.length > 0 ? attendanceSummary.map(item => (
-                                <TableRow key={item.uid}>
-                                    <TableCell>{item.name}</TableCell>
-                                    <TableCell className="text-center font-medium text-green-600">{item.present}</TableCell>
-                                    <TableCell className="text-center font-medium text-blue-600">{item.halfDay}</TableCell>
-                                </TableRow>
-                            )) : <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground">No attendance data for this month.</TableCell></TableRow>}
-                        </TableBody>
+                    <Table><TableHeader><TableRow><TableHead>Staff Member</TableHead><TableHead className="text-center">Present Days</TableHead><TableHead className="text-center">Half Days</TableHead></TableRow></TableHeader>
+                        <TableBody>{attendanceSummary.length > 0 ? attendanceSummary.map(item => ( <TableRow key={item.uid}><TableCell>{item.name}</TableCell><TableCell className="text-center font-medium text-green-600">{item.present}</TableCell><TableCell className="text-center font-medium text-blue-600">{item.halfDay}</TableCell></TableRow>)) : <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground">No attendance data for this period.</TableCell></TableRow>}</TableBody>
                     </Table>
                 );
-            case 'by_today_status':
-                 return (
-                    <Table>
-                        <TableHeader><TableRow><TableHead>Staff Member</TableHead><TableHead className="text-center">Status Today</TableHead></TableRow></TableHeader>
-                        <TableBody>
-                            {staffOnLeaveOrAbsent.length > 0 ? staffOnLeaveOrAbsent.map(item => (
-                                <TableRow key={item.id}>
-                                    <TableCell>{getStaffName(item.staffUid)}</TableCell>
-                                    <TableCell className="text-center">{getStatusBadge(item.status as any)}</TableCell>
-                                </TableRow>
-                            )) : <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground">All active staff are present today.</TableCell></TableRow>}
-                        </TableBody>
-                    </Table>
-                );
-            default:
-                return null;
+            case 'by_today_status': return ( <Table><TableHeader><TableRow><TableHead>Staff Member</TableHead><TableHead className="text-center">Status Today</TableHead></TableRow></TableHeader><TableBody>{staffOnLeaveOrAbsent.length > 0 ? staffOnLeaveOrAbsent.map(item => ( <TableRow key={item.id}><TableCell>{getStaffName(item.staffUid)}</TableCell><TableCell className="text-center">{getStatusBadge(item.status as any)}</TableCell></TableRow>)) : <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground">All active staff are present today.</TableCell></TableRow>}</TableBody></Table>);
+            default: return null;
         }
     };
 
     return (
         <div className="space-y-6">
             <PageHeader title="Staff Dashboard" description="Overview of staff attendance, advances, and key metrics for the active site." />
+
+             <Card>
+                <CardHeader>
+                  <CardTitle>Filters</CardTitle>
+                  <CardDescription>Select a site and date range to analyze staff metrics.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                     <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
+                        <PopoverTrigger asChild>
+                        <Button
+                            id="dateRangePicker" variant={'outline'}
+                            className={cn("w-full lg:w-[300px] justify-start text-left font-normal bg-input", !dateRange && "text-muted-foreground")}
+                        >
+                            <CalendarIcon className="mr-2 h-4 w-4" />
+                            {dateRange?.from ? ( dateRange.to ? (
+                                <> {format(dateRange.from, "LLL dd, y")} - {format(dateRange.to, "LLL dd, y")} </>
+                            ) : ( format(dateRange.from, "LLL dd, y") )
+                            ) : ( <span>Pick a date range</span> )}
+                        </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0 flex" align="start">
+                            <div className="p-2 border-r">
+                                <div className="flex flex-col items-stretch gap-1">
+                                    {datePresets.map(({label, value}) => (
+                                        <Button key={value} variant="ghost" className="justify-start" onClick={() => handleSetDatePreset(value)}>{label}</Button>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="p-2">
+                                 <Calendar
+                                    initialFocus mode="range" defaultMonth={tempDateRange?.from}
+                                    selected={tempDateRange} onSelect={setTempDateRange} numberOfMonths={2}
+                                    disabled={(date) => date > new Date() || date < new Date("2000-01-01")}
+                                />
+                                <div className="flex justify-end gap-2 pt-2 border-t mt-2">
+                                     <Button variant="ghost" onClick={() => setIsDatePickerOpen(false)}>Close</Button>
+                                     <Button onClick={applyDateFilter}>Apply</Button>
+                                </div>
+                            </div>
+                        </PopoverContent>
+                    </Popover>
+
+                    {user?.role === 'admin' && (
+                        <div className="max-w-xs">
+                            <Label htmlFor="site-filter">Site</Label>
+                            <Select value={siteFilter} onValueChange={setSiteFilter}>
+                                <SelectTrigger id="site-filter" className="w-full bg-input">
+                                    <Building className="mr-2 h-4 w-4 text-muted-foreground"/>
+                                    <SelectValue placeholder="Filter by site" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">All Sites</SelectItem>
+                                    {allSites.map(site => <SelectItem key={site.id} value={site.id}>{site.name}</SelectItem>)}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    )}
+                </CardContent>
+              </Card>
+
 
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {statCards.map(card => (
@@ -388,87 +401,31 @@ export default function StaffDashboardPage() {
                  <Card className="lg:col-span-3">
                     <CardHeader>
                          <div className="flex items-center justify-between">
-                            <CardTitle className="flex items-center"><BarChart className="mr-2 h-5 w-5 text-primary"/>Dynamic Summary</CardTitle>
+                            <CardTitle>Dynamic Summary</CardTitle>
                              <Select value={summaryView} onValueChange={(v) => setSummaryView(v as SummaryViewOption)}>
                                 <SelectTrigger className="w-[240px] bg-input"><SelectValue /></SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="by_projected_salary"><Wallet className="mr-2 h-4 w-4" />Projected Salary</SelectItem>
-                                    <SelectItem value="by_earned_salary"><IndianRupee className="mr-2 h-4 w-4" />Earned Salary Bill</SelectItem>
-                                    <SelectItem value="by_advances"><HandCoins className="mr-2 h-4 w-4" />Advances by Staff</SelectItem>
-                                    <SelectItem value="by_attendance"><UserCheck className="mr-2 h-4 w-4" />Attendance Summary</SelectItem>
-                                    <SelectItem value="by_today_status"><UserX className="mr-2 h-4 w-4" />Today's Absences/Leaves</SelectItem>
+                                    <SelectItem value="by_projected_salary">Projected Salary</SelectItem>
+                                    <SelectItem value="by_earned_salary">Earned Salary (Period)</SelectItem>
+                                    <SelectItem value="by_advances">Advances by Staff</SelectItem>
+                                    <SelectItem value="by_attendance">Attendance Summary</SelectItem>
+                                    <SelectItem value="by_today_status">Today's Absences/Leaves</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
-                         <CardDescription>
-                            A dynamic breakdown of staff data.
-                        </CardDescription>
+                         <CardDescription>A dynamic breakdown of staff data.</CardDescription>
                     </CardHeader>
-                    <CardContent>
-                        <ScrollArea className="h-72">
-                             {renderPivotTable()}
-                        </ScrollArea>
-                    </CardContent>
+                    <CardContent><ScrollArea className="h-72">{renderPivotTable()}</ScrollArea></CardContent>
                 </Card>
 
                 <div className="lg:col-span-2 space-y-6">
                     <Card>
-                        <CardHeader>
-                            <CardTitle>Recent Salary Advances</CardTitle>
-                            <CardDescription>Last 5 salary advances recorded this month.</CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            {recentAdvances.length === 0 ? (
-                            <p className="text-sm text-muted-foreground text-center py-4">No advances recorded this month.</p>
-                            ) : (
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow>
-                                            <TableHead>Date</TableHead>
-                                            <TableHead>Staff</TableHead>
-                                            <TableHead className="text-right">Amount</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {recentAdvances.map(adv => (
-                                            <TableRow key={adv.id}>
-                                                <TableCell>{format(new Date(adv.date), 'MMM dd, yyyy')}</TableCell>
-                                                <TableCell>{getStaffName(adv.staffUid)}</TableCell>
-                                                <TableCell className="text-right font-medium">₹{adv.amount.toFixed(2)}</TableCell>
-                                            </TableRow>
-                                        ))}
-                                    </TableBody>
-                                </Table>
-                            )}
-                        </CardContent>
+                        <CardHeader><CardTitle>Recent Salary Advances</CardTitle><CardDescription>Last 5 salary advances recorded in period.</CardDescription></CardHeader>
+                        <CardContent>{recentAdvances.length === 0 ? ( <p className="text-sm text-muted-foreground text-center py-4">No advances recorded for this period.</p>) : ( <Table><TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Staff</TableHead><TableHead className="text-right">Amount</TableHead></TableRow></TableHeader><TableBody>{recentAdvances.map(adv => ( <TableRow key={adv.id}><TableCell>{format(new Date(adv.date), 'MMM dd, yyyy')}</TableCell><TableCell>{getStaffName(adv.staffUid)}</TableCell><TableCell className="text-right font-medium">₹{adv.amount.toFixed(2)}</TableCell></TableRow>))}</TableBody></Table>)}</CardContent>
                     </Card>
                     <Card>
-                        <CardHeader>
-                            <CardTitle>Staff on Leave/Absent Today</CardTitle>
-                            <CardDescription>Attendance status for staff not marked as "Present".</CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                        {staffOnLeaveOrAbsent.length === 0 ? (
-                            <p className="text-sm text-muted-foreground text-center py-4">All staff are marked present.</p>
-                            ) : (
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow>
-                                            <TableHead>Staff</TableHead>
-                                            <TableHead>Status</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {staffOnLeaveOrAbsent.map(att => (
-                                            <TableRow key={att.id}>
-                                                <TableCell>{getStaffName(att.staffUid)}</TableCell>
-                                                <TableCell>{getStatusBadge(att.status as any)}</TableCell>
-                                            </TableRow>
-                                        ))}
-                                    </TableBody>
-                                </Table>
-                            )}
-                        </CardContent>
+                        <CardHeader><CardTitle>Staff on Leave/Absent Today</CardTitle><CardDescription>Attendance status for staff not marked as "Present".</CardDescription></CardHeader>
+                        <CardContent>{staffOnLeaveOrAbsent.length === 0 ? ( <p className="text-sm text-muted-foreground text-center py-4">All active staff are present today.</p>) : ( <Table><TableHeader><TableRow><TableHead>Staff</TableHead><TableHead>Status</TableHead></TableRow></TableHeader><TableBody>{staffOnLeaveOrAbsent.map(att => ( <TableRow key={att.id}><TableCell>{getStaffName(att.staffUid)}</TableCell><TableCell>{getStatusBadge(att.status as any)}</TableCell></TableRow>))}</TableBody></Table>)}</CardContent>
                     </Card>
                 </div>
             </div>
@@ -476,4 +433,4 @@ export default function StaffDashboardPage() {
     );
 }
 
-  
+
