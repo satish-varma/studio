@@ -127,13 +127,19 @@ export default function StaffAttendanceClientPage() {
                     batchAttendance[data.staffUid][data.date] = data;
                 });
                 setAttendance(prev => ({...prev, ...batchAttendance}));
+            }, (err) => {
+              console.error("Error in attendance onSnapshot:", err);
+              toast({ title: "Real-time Error", description: "Could not sync attendance updates. Please refresh.", variant: "destructive" });
             });
             unsubscribers.push(unsubscribe);
         });
 
-        return () => unsubscribers.forEach(unsub => unsub());
+        return () => {
+          console.log("Cleaning up attendance listeners.");
+          unsubscribers.forEach(unsub => unsub());
+        };
     }
-  }, [currentMonth, allStaffForContext]);
+  }, [currentMonth, allStaffForContext, toast]);
 
   useEffect(() => {
     const firstDay = startOfMonth(currentMonth);
@@ -146,9 +152,15 @@ export default function StaffAttendanceClientPage() {
      const unsubscribeHolidays = onSnapshot(holidaysQuery, (snapshot) => {
       const fetchedHolidays = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Holiday));
       setHolidays(fetchedHolidays);
+    }, (err) => {
+       console.error("Error in holidays onSnapshot:", err);
+       toast({ title: "Real-time Error", description: "Could not sync holiday updates.", variant: "destructive" });
     });
-    return () => unsubscribeHolidays();
-  }, [currentMonth]);
+    return () => {
+      console.log("Cleaning up holiday listeners.");
+      unsubscribeHolidays();
+    };
+  }, [currentMonth, toast]);
   
   const isHoliday = useCallback((date: Date, staffSiteId?: string | null) => {
     const dayOfWeek = date.getDay();
@@ -171,12 +183,10 @@ export default function StaffAttendanceClientPage() {
     
     let siteIdForAttendance: string | null = staff.defaultSiteId;
     
-    // For managers without a default site, use the admin's active site context IF AVAILABLE.
-    // If admin is in "All Sites", use the manager's FIRST assigned site.
     if (staff.role === 'manager' && !siteIdForAttendance) {
-        if (activeSiteId) { // Admin/viewer has a specific site selected
+        if (activeSiteId) {
             siteIdForAttendance = activeSiteId;
-        } else if (staff.managedSiteIds && staff.managedSiteIds.length > 0) { // Admin is in "All Sites" view
+        } else if (staff.managedSiteIds && staff.managedSiteIds.length > 0) {
             siteIdForAttendance = staff.managedSiteIds[0];
         }
     }
@@ -218,22 +228,7 @@ export default function StaffAttendanceClientPage() {
     const newStatus = statusCycle[nextIndex];
     
     const docRef = doc(db, "staffAttendance", docId);
-    const prevAttendance = JSON.parse(JSON.stringify(attendance || {}));
-
-    setAttendance(prev => {
-        const newAttendance = JSON.parse(JSON.stringify(prev || {}));
-        if (!newAttendance[staff.uid]) newAttendance[staff.uid] = {};
-        if (newStatus === null) {
-            delete newAttendance[staff.uid][dateStr];
-        } else {
-            newAttendance[staff.uid][dateStr] = {
-                id: docId, staffUid: staff.uid, date: dateStr, status: newStatus,
-                siteId: siteIdForAttendance, recordedByUid: user.uid, recordedByName: user.displayName || user.email!
-            };
-        }
-        return newAttendance;
-    });
-
+    
     try {
       if (newStatus === null) {
         await deleteDoc(docRef);
@@ -262,8 +257,7 @@ export default function StaffAttendanceClientPage() {
 
     } catch(error: any) {
       console.error("Error saving attendance:", error);
-      toast({ title: "Save Failed", description: `Failed to save status for ${staff.displayName}. Reverting change.`, variant: "destructive"});
-      setAttendance(prevAttendance);
+      toast({ title: "Save Failed", description: `Failed to save status for ${staff.displayName}.`, variant: "destructive"});
     }
   }, [user, attendance, isHoliday, toast, staffDetailsMap, activeSiteId]);
 
@@ -326,22 +320,6 @@ export default function StaffAttendanceClientPage() {
       });
       toast({ title: "Bulk Action Successful", description: `${validOperations} attendance records updated.` });
       setSelectedStaffUids([]);
-      // Optimistically update local state to reflect change without a full refetch
-      setAttendance(prev => {
-        const newAttendance = JSON.parse(JSON.stringify(prev || {}));
-        for (const uid of selectedStaffUids) {
-            if (!newAttendance[uid]) newAttendance[uid] = {};
-            for (const date of dateRange) {
-                const dateStr = format(date, 'yyyy-MM-dd');
-                if (finalStatus === 'Cleared') {
-                    delete newAttendance[uid][dateStr];
-                } else if (finalStatus) {
-                    newAttendance[uid][dateStr] = { status: finalStatus };
-                }
-            }
-        }
-        return newAttendance;
-      });
     } catch (error: any) {
       console.error("Bulk action failed:", error);
       toast({ title: "Bulk Action Failed", description: error.message, variant: "destructive" });

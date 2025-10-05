@@ -30,13 +30,7 @@ const nextConfig: NextConfig = {
   experimental: {
     serverActions: true,
     serverComponentsExternalPackages: ['@react-email/components'],
-    // Adding server.fs.allow to prevent 403 Forbidden errors on static assets like fonts
-    // during development with Turbopack.
-    server: {
-      fs: {
-        allow: ["./"],
-      },
-    },
+    // server.fs.allow has been removed to fix 403 Forbidden errors on static assets.
     turbo: {
         rules: {
             '*.svg': {
