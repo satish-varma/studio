@@ -61,10 +61,10 @@ export async function POST(request: NextRequest) {
     const sitesMap = new Map(sitesSnapshot.docs.map(doc => [doc.data().name.toLowerCase(), doc.id]));
 
     const stallsSnapshot = await adminDb.collection('stalls').get();
-    const allStalls: Stall[] = stallsSnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...(doc.data() as Omit<Stall, 'id'>)
-    }));
+    const allStalls = stallsSnapshot.docs.map(doc => {
+        const { id, ...stallData } = doc.data();
+        return { id: doc.id, ...stallData } as Stall;
+    });
 
     const batch = adminDb.batch();
     let validRecordsCount = 0;
@@ -86,26 +86,26 @@ export async function POST(request: NextRequest) {
 
         const siteId = sitesMap.get(siteName);
         if (!siteId) {
-            errors.push(`Row ${index + 2}: Site "${row['Site Name']}" not found.`);
+            errors.push(`Row ${index + 2}: Site "'${row['Site Name']}'" not found.`);
             continue;
         }
 
         const stall = allStalls.find(s => s.siteId === siteId && s.name.toLowerCase() === stallName);
         if (!stall) {
-            errors.push(`Row ${index + 2}: Stall "${row['Stall Name']}" not found in site "${row['Site Name']}".`);
+            errors.push(`Row ${index + 2}: Stall "'${row['Stall Name']}'" not found in site "'${row['Site Name']}'".`);
             continue;
         }
 
         const saleDate = new Date(saleDateStr);
         if (isNaN(saleDate.getTime())) {
-            errors.push(`Row ${index + 2}: Invalid Sale Date format "${saleDateStr}". Use YYYY-MM-DD.`);
+            errors.push(`Row ${index + 2}: Invalid Sale Date format "'${saleDateStr}'". Use YYYY-MM-DD.`);
             continue;
         }
 
         const docId = row.ID || `${format(saleDate, 'yyyy-MM-dd')}_${stall.id}_${saleType}`;
         const saleDocRef = adminDb.collection('foodSaleTransactions').doc(docId);
 
-        const saleData: Omit<FoodSaleTransaction, 'id' | 'saleDate'> & { saleDate: Date } = {
+        const saleData: Omit<FoodSaleTransaction, 'id'> = {
             saleDate: saleDate,
             siteId: siteId,
             stallId: stall.id,
