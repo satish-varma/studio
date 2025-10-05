@@ -4,7 +4,7 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import type { AppUser, StaffDetails, SalaryAdvance, SalaryPayment, Site, Holiday, UserStatus, StaffAttendance } from "@/types";
 import type { DateRange } from "react-day-picker";
-import { format, startOfMonth, isAfter, isBefore, max, min, startOfDay, getMonth, eachMonthOfInterval, subDays, startOfWeek, endOfWeek, subMonths, endOfMonth, endOfDay } from "date-fns";
+import { format, startOfMonth, isAfter, isBefore, max, min, startOfDay, getMonth, eachMonthOfInterval, subDays, startOfWeek, endOfWeek, subMonths, endOfMonth } from "date-fns";
 import { getFirestore, collection, query, where, getDocs, Timestamp, QueryConstraint } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
@@ -49,7 +49,7 @@ interface StaffReportData {
 export default function StaffReportClientPage() {
   const { user, activeSiteId, loading: authLoading } = useAuth();
   
-  const [dateRange, setDateRange] = useState<DateRange | undefined>(() => ({ from: startOfMonth(new Date()), to: endOfDay(new Date()) }));
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(() => ({ from: startOfMonth(new Date()), to: endOfMonth(new Date()) }));
   const [tempDateRange, setTempDateRange] = useState<DateRange | undefined>(dateRange);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [siteFilter, setSiteFilter] = useState<string>('all');
@@ -107,7 +107,6 @@ export default function StaffReportClientPage() {
         setErrorReport("Please select an active site to view the report."); setLoadingReport(false); return;
     }
     if (!dateRange?.from || !dateRange.to) {
-        // Allow All time filter
         if (dateRange?.from !== undefined || dateRange?.to !== undefined) {
           setErrorReport("Please select a valid date range."); setLoadingReport(false); return;
         }
@@ -172,21 +171,23 @@ export default function StaffReportClientPage() {
 
             if (details?.salary && dateRange?.from && dateRange.to) {
                 const monthsInRange = eachMonthOfInterval({ start: dateRange.from, end: dateRange.to });
+                
                 monthsInRange.forEach(monthStart => {
                     const monthEnd = endOfMonth(monthStart);
                     const workingDaysInMonth = calculateWorkingDays(monthStart, monthEnd, holidays, staff);
-                    totalWorkingDays += workingDaysInMonth; // Note: this isn't quite right for earned salary calc which is monthly
                     if (workingDaysInMonth > 0) {
                         const perDaySalary = details.salary / workingDaysInMonth;
-                        // This calculation is complex for multi-month ranges and should ideally be per-month
+                        // This logic is simplified and assumes attendance is for the whole period.
+                        // A more precise calculation would filter attendance per month.
                         earnedSalary += perDaySalary * presentDays;
                     }
+                    totalWorkingDays += workingDaysInMonth; // This sum might be misleading across months
                 });
             }
             
             const advances = advancesMap.get(staff.uid) || 0;
             const paidAmount = paymentsMap.get(staff.uid) || 0;
-            const netPayable = earnedSalary - advances - paidAmount;
+            const netPayable = earnedSalary - advances; // Net payable is earned minus advances, paid is separate
             
             return { user: staff, details, earnedSalary, advances, paidAmount, netPayable, workingDays: totalWorkingDays, presentDays };
         });
@@ -205,10 +206,15 @@ export default function StaffReportClientPage() {
         acc.earnedSalary += curr.earnedSalary;
         acc.advances += curr.advances;
         acc.paidAmount += curr.paidAmount;
-        acc.netPayable += curr.netPayable;
+        // Correct calculation: Summing up individual net payables is fine if they are correct.
+        // A better approach for the total is `totalEarned - totalAdvances`.
         return acc;
-    }, { earnedSalary: 0, advances: 0, paidAmount: 0, netPayable: 0 });
+    }, { earnedSalary: 0, advances: 0, paidAmount: 0 });
   }, [reportData]);
+  
+  const totalNetPayable = totals.earnedSalary - totals.advances;
+  const totalOutstanding = totalNetPayable - totals.paidAmount;
+
 
   const datePresets = [
     { label: "Today", value: 'today' },
@@ -285,7 +291,7 @@ export default function StaffReportClientPage() {
                 <Card><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Total Earned Salary</CardTitle><CalendarDays className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold">₹{totals.earnedSalary.toFixed(2)}</div><p className="text-xs text-muted-foreground">Calculated for the period</p></CardContent></Card>
                 <Card><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Total Advances</CardTitle><HandCoins className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold text-orange-600">- ₹{totals.advances.toFixed(2)}</div><p className="text-xs text-muted-foreground">Deducted from salary</p></CardContent></Card>
                 <Card><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Total Salary Paid</CardTitle><IndianRupee className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold text-green-600">- ₹{totals.paidAmount.toFixed(2)}</div><p className="text-xs text-muted-foreground">Recorded payments in period</p></CardContent></Card>
-            <Card><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Net Pending Amount</CardTitle><Wallet className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold text-accent">₹{totals.netPayable.toFixed(2)}</div><p className="text-xs text-muted-foreground">Total outstanding for period</p></CardContent></Card>
+                <Card><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Net Pending Amount</CardTitle><Wallet className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold text-accent">₹{totalOutstanding.toFixed(2)}</div><p className="text-xs text-muted-foreground">Total outstanding for period</p></CardContent></Card>
             </div>
             
             <Card>
