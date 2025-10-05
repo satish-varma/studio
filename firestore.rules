@@ -44,7 +44,7 @@ service cloud.firestore {
       return isManagerRole() &&
              userData != null &&
              userData.managedSiteIds != null &&
-             userData.managedSiteIds.hasAny([siteId]); 
+             userData.managedSiteIds.hasAny([siteId]); // Use hasAny for list check
     }
 
     function isStaffAssignedTo(siteId, stallId) {
@@ -61,18 +61,29 @@ service cloud.firestore {
              userData != null &&
              userData.defaultSiteId == siteId;
     }
+    
+    function getStaffMemberData(staffUid) {
+      return getUserData(staffUid);
+    }
+    
+    function isStaffInSite(staffUid, siteId) {
+        let staffData = getStaffMemberData(staffUid);
+        return staffData != null && staffData.defaultSiteId == siteId;
+    }
 
     // --- Collections Rules ---
 
     match /users/{userId} {
       allow read: if isUser(userId) || isAdmin() || isManagerRole();
       allow create: if isAdmin();
+      // Admins can update any user.
+      // Other users can only update their own document, and cannot change protected fields.
       allow update: if isAdmin() ||
                       (isUser(userId) &&
                        !request.resource.data.keys().hasAny(['role', 'uid', 'email', 'createdAt', 'status', 'managedSiteIds', 'defaultSiteId', 'defaultStallId']));
       allow delete: if isAdmin() && request.auth.uid != userId;
     }
-    match /users/{document=**} {
+    match /users {
       allow list: if isAdmin() || isManagerRole();
     }
 
@@ -80,7 +91,7 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow create, update, delete: if isAdmin();
     }
-    match /sites/{document=**} {
+    match /sites {
       allow list: if isSignedIn();
     }
 
@@ -88,7 +99,7 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow create, update, delete: if isAdmin();
     }
-     match /stalls/{document=**} {
+    match /stalls {
       allow list: if isSignedIn();
     }
 
@@ -111,7 +122,7 @@ service cloud.firestore {
 
       allow update: if resource.data.siteId != null &&
                        (isAdmin() ||
-                        (isManagerRole() && isManagerOfSite(resource.data.siteId)) || 
+                        (isManagerRole() && isManagerOfSite(resource.data.siteId)) || // Managers can update items in their sites (all fields if needed, client controls specifics)
                         (isStaffRole() && isStaffAssignedToSiteOnly(resource.data.siteId) &&
                          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['quantity', 'lastUpdated'])
                         )
@@ -126,16 +137,17 @@ service cloud.firestore {
                         (isManagerRole() && isManagerOfSite(resource.data.siteId)) ||
                         (isStaffRole() && 
                           ( (resource.data.stallId != null && isStaffAssignedTo(request.resource.data.siteId, resource.data.stallId)) ||
-                            (resource.data.stallId == null && isStaffAssignedToSiteOnly(request.resource.data.siteId))
+                            (resource.data.stallId == null && isStaffAssignedToSiteOnly(resource.data.siteId))
                           )
                         )
                        );
     }
-     match /stockItems/{document=**} {
+    match /stockItems {
         allow list: if isSignedIn();
     }
 
     match /salesTransactions/{transactionId} {
+      // Full secure rule for salesTransactions create
       allow create: if isSignedIn() && 
                        request.resource.data.staffId == request.auth.uid && 
                        request.resource.data.siteId != null &&
@@ -162,7 +174,7 @@ service cloud.firestore {
 
       allow delete: if false;
     }
-     match /salesTransactions/{document=**} {
+    match /salesTransactions {
         allow list: if isSignedIn();
     }
 
@@ -179,15 +191,19 @@ service cloud.firestore {
 
       allow read: if isAdmin() || 
                      (isManagerRole() && isManagerOfSite(resource.data.siteId));
-      
-       allow list: if isAdmin() || isManagerRole();
 
       allow update, delete: if false;
+    }
+    match /stockMovementLogs {
+        allow list: if isAdmin() || isManagerRole();
     }
     
     // --- Food Stall Specific Rules ---
     
     match /foodItemExpenses/{expenseId} {
+      // Staff can create an expense for their assigned site/stall
+      // Managers can create for any stall in their managed sites
+      // Admins can create for any site/stall
       allow create: if isSignedIn() &&
                        request.resource.data.recordedByUid == request.auth.uid &&
                        request.resource.data.siteId != null &&
@@ -197,12 +213,16 @@ service cloud.firestore {
                         (isStaffRole() && isStaffAssignedTo(request.resource.data.siteId, request.resource.data.stallId))
                        );
                        
+      // Staff can read expenses they created or that are for their stall
+      // Managers can read expenses for any stall in their managed sites
+      // Admins can read any expense
       allow read: if isSignedIn() &&
                      (isAdmin() ||
                       (isManagerRole() && isManagerOfSite(resource.data.siteId)) ||
                       (isStaffRole() && isStaffAssignedTo(resource.data.siteId, resource.data.stallId))
                      );
                      
+      // Managers and Admins can update expenses in the sites they manage.
       allow update: if isSignedIn() &&
                        (isAdmin() ||
                         (isManagerRole() && isManagerOfSite(request.resource.data.siteId))
@@ -210,11 +230,9 @@ service cloud.firestore {
 
       allow delete: if isAdmin();
     }
-    match /foodItemExpenses/{document=**} {
-        allow list: if isSignedIn();
-    }
     
     match /foodSaleTransactions/{saleId} {
+      // Similar logic to expense creation
       allow create, update: if isSignedIn() &&
                          request.resource.data.recordedByUid == request.auth.uid &&
                          request.resource.data.siteId != null &&
@@ -232,11 +250,9 @@ service cloud.firestore {
                      
       allow delete: if isAdmin();
     }
-    match /foodSaleTransactions/{document=**} {
-        allow list: if isSignedIn();
-    }
 
     match /foodStallActivityLogs/{logId} {
+      // Any authenticated user can create a log entry for an action they perform.
       allow create: if isSignedIn() &&
                        request.resource.data.userId == request.auth.uid &&
                        request.resource.data.siteId is string &&
@@ -245,48 +261,64 @@ service cloud.firestore {
                        request.resource.data.relatedDocumentId is string &&
                        request.resource.data.timestamp is string;
 
+      // Only admins or managers of the corresponding site can read/list logs.
       allow read: if isAdmin() || (isManagerRole() && isManagerOfSite(resource.data.siteId));
       
-      allow list: if isAdmin() || isManagerRole();
-      
+      // No one can update or delete logs to maintain audit trail integrity.
       allow update, delete: if false;
+    }
+     match /foodStallActivityLogs {
+        allow list: if isAdmin() || isManagerRole();
     }
     
     match /foodVendors/{vendorId} {
+      // Any signed-in user can read the list for dropdowns.
       allow read: if isSignedIn();
+      // Only managers and admins can create, update, or delete vendors.
       allow write: if isAdmin() || isManagerRole();
     }
     
     match /foodExpensePresets/{presetId} {
+      // Any signed-in user can read the presets to use them in forms.
       allow read: if isSignedIn();
+      // Only managers and admins can create, update, or delete presets.
       allow write: if isAdmin() || isManagerRole();
     }
     
     // --- Staff Management Specific Rules ---
     
     match /staffDetails/{userId} {
+      // Helper function to get the site ID of the staff member being managed
       function getStaffSiteId() {
         return getUserData(userId).defaultSiteId;
       }
       
+      // Staff can read their own details.
+      // Admins can read any staff details.
+      // Managers can read details of staff assigned to a site they manage.
       allow read: if isUser(userId) || isAdmin() || (isManagerRole() && isManagerOfSite(getStaffSiteId()));
 
+      // Only Admins or Managers of the staff's assigned site can create/update details.
       allow create, update: if isAdmin() || (isManagerRole() && isManagerOfSite(getStaffSiteId()));
 
+      // Only Admins can delete staff details records.
       allow delete: if isAdmin();
     }
     
     match /staffAttendance/{attendanceId} {
+      // Managers can create/update attendance for staff in their managed sites. Admins can do so for any site.
       allow create, update: if isSignedIn() &&
                                request.resource.data.siteId != null &&
                                (isAdmin() || (isManagerRole() && isManagerOfSite(request.resource.data.siteId)));
       
+      // Read access mirrors create/update access.
       allow read: if isSignedIn() &&
                      (isAdmin() || (isManagerRole() && isManagerOfSite(resource.data.siteId)));
       
+      // Only admins should be able to delete attendance records to maintain historical integrity.
       allow delete: if isAdmin();
     }
-     match /staffAttendance/{document=**} {
+    match /staffAttendance {
         allow list: if isSignedIn() && (isAdmin() || isManagerRole());
     }
 
@@ -294,21 +326,28 @@ service cloud.firestore {
       allow create: if isSignedIn() &&
                       request.resource.data.recordedByUid == request.auth.uid &&
                       request.resource.data.siteId != null &&
-                      (isAdmin() || (isManagerRole() && isManagerOfSite(request.resource.data.siteId))) &&
-                      // Ensure the staff member belongs to the site being recorded against
-                      getUserData(request.resource.data.staffUid).defaultSiteId == request.resource.data.staffSiteId;
+                      request.resource.data.staffSiteId != null &&
+                      (
+                        isAdmin() ||
+                        (isManagerRole() && 
+                         isManagerOfSite(request.resource.data.siteId) &&
+                         isManagerOfSite(request.resource.data.staffSiteId)
+                        )
+                      );
 
       allow read: if isSignedIn() &&
                      (isAdmin() || (isManagerRole() && isManagerOfSite(resource.data.siteId)));
       
       allow delete: if isAdmin();
     }
-     match /advances/{document=**} {
+    match /advances {
       allow list: if isSignedIn() && (isAdmin() || isManagerRole());
     }
     
     match /holidays/{holidayId} {
+      // Any authenticated user can see the list of holidays for the attendance register
       allow read, list: if isSignedIn();
+      // Only admins can add, change, or remove company holidays
       allow create, update, delete: if isAdmin();
     }
 
@@ -334,20 +373,28 @@ service cloud.firestore {
     }
     
     match /salaryHistory/{historyId} {
-        allow create: if isSignedIn() && 
-                        request.resource.data.recordedByUid == request.auth.uid &&
-                        // Ensure the creator is an admin or a manager of the staff member's site
-                        (isAdmin() || (isManagerRole() && isManagerOfSite(getUserData(request.resource.data.staffUid).defaultSiteId)));
-        
-        allow read: if isSignedIn() &&
-                     (isAdmin() || 
-                      isUser(resource.data.staffUid) || // User can read their own salary history
-                      (isManagerRole() && isManagerOfSite(getUserData(resource.data.staffUid).defaultSiteId)));
+        // Staff can read their own salary history. Managers and Admins can read history for staff in their managed sites.
+        allow read: if isUser(request.resource.data.staffUid) ||
+                     isAdmin() ||
+                     (isManagerRole() && isManagerOfSite(getUserData(request.resource.data.staffUid).defaultSiteId));
 
-        allow delete, update: if isAdmin(); // Only admins can alter history
+        // Managers can create salary history for staff in their managed sites. Admins can create for anyone.
+        allow create: if isSignedIn() &&
+                       request.resource.data.recordedByUid == request.auth.uid &&
+                       (
+                         isAdmin() ||
+                         (isManagerRole() && isManagerOfSite(getUserData(request.resource.data.staffUid).defaultSiteId))
+                       ) &&
+                       request.resource.data.newSalary is number &&
+                       request.resource.data.effectiveDate is string &&
+                       request.resource.data.staffUid is string;
+        
+        // History should be immutable to maintain a clear record.
+        allow update, delete: if false;
     }
-    match /salaryHistory/{document=**} {
-      allow list: if isSignedIn();
+    match /salaryHistory {
+      // Listing all salary history should be restricted.
+      allow list: if isAdmin() || isManagerRole();
     }
 
     // --- Gmail Integration Rules ---
