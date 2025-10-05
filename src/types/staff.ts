@@ -19,6 +19,9 @@ export const staffDetailsFormSchema = z.object({
     joiningDate: z.date().optional().nullable(),
     salary: z.coerce.number().min(0).optional(),
     exitDate: z.date().optional().nullable(),
+    // Added site and stall for assignment updates on the same form
+    defaultSiteId: z.string().optional().nullable(),
+    defaultStallId: z.string().optional().nullable(),
 });
 
 export type StaffDetailsFormValues = z.infer<typeof staffDetailsFormSchema>;
