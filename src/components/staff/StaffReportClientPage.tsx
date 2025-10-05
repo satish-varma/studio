@@ -4,7 +4,7 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import type { AppUser, StaffDetails, SalaryAdvance, SalaryPayment, Site, Holiday, UserStatus, StaffAttendance } from "@/types";
 import type { DateRange } from "react-day-picker";
-import { format, startOfMonth, isAfter, isBefore, max, min, startOfDay, getMonth, eachMonthOfInterval, subDays, startOfWeek, endOfWeek, subMonths, endOfMonth } from "date-fns";
+import { format, startOfMonth, isAfter, isBefore, max, min, startOfDay, getMonth, eachMonthOfInterval, subDays, startOfWeek, endOfWeek, subMonths, endOfMonth, endOfDay } from "date-fns";
 import { getFirestore, collection, query, where, getDocs, Timestamp, QueryConstraint } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
@@ -206,8 +206,6 @@ export default function StaffReportClientPage() {
         acc.earnedSalary += curr.earnedSalary;
         acc.advances += curr.advances;
         acc.paidAmount += curr.paidAmount;
-        // Correct calculation: Summing up individual net payables is fine if they are correct.
-        // A better approach for the total is `totalEarned - totalAdvances`.
         return acc;
     }, { earnedSalary: 0, advances: 0, paidAmount: 0 });
   }, [reportData]);
@@ -217,8 +215,6 @@ export default function StaffReportClientPage() {
 
 
   const datePresets = [
-    { label: "Today", value: 'today' },
-    { label: "This Week", value: 'this_week' },
     { label: "This Month", value: 'this_month' },
     { label: "Last Month", value: 'last_month' },
     { label: "Last 3 Months", value: 'last_3_months' },
@@ -230,11 +226,9 @@ export default function StaffReportClientPage() {
       let from: Date | undefined, to: Date | undefined = endOfDay(now);
 
       switch (preset) {
-          case 'today': from = startOfDay(now); break;
-          case 'this_week': from = startOfWeek(now); break;
-          case 'this_month': from = startOfMonth(now); break;
+          case 'this_month': from = startOfMonth(now); to = endOfMonth(now); break;
           case 'last_month': from = startOfMonth(subMonths(now, 1)); to = endOfMonth(subMonths(now, 1)); break;
-          case 'last_3_months': from = startOfMonth(subMonths(now, 2)); break;
+          case 'last_3_months': from = startOfMonth(subMonths(now, 2)); to = endOfMonth(now); break;
           case 'all_time': from = undefined; to = undefined; break;
           default: from = undefined; to = undefined;
       }
