@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import type { FoodSaleTransaction, FoodItemExpense, AppUser, StaffDetails, Holiday, StaffAttendance, SalaryPayment, Site, Stall } from "@/types";
 import type { DateRange } from "react-day-picker";
-import { subDays, startOfDay, endOfDay, isValid, format, startOfMonth, getDaysInMonth, endOfMonth, subMonths } from "date-fns";
+import { subDays, startOfDay, endOfDay, isValid, format, startOfMonth, getDaysInMonth, endOfMonth, subMonths, startOfWeek, endOfWeek } from "date-fns";
 import {
     getFirestore,
     collection,
@@ -91,7 +91,7 @@ export default function FoodStallReportClientPage() {
   const [errorReport, setErrorReport] = useState<string | null>(null);
   
   const {
-    users: staffList,
+    users: allStaff,
     sites: allSites,
     staffDetails: staffDetailsMap,
     loading: userManagementLoading,
@@ -149,8 +149,8 @@ export default function FoodStallReportClientPage() {
     setErrorReport(null);
 
     try {
-      const fromDate = dateRange?.from ? Timestamp.fromDate(startOfDay(dateRange.from)) : null;
-      const toDate = dateRange?.to ? Timestamp.fromDate(endOfDay(dateRange.to)) : null;
+      const fromTimestamp = dateRange?.from ? Timestamp.fromDate(startOfDay(dateRange.from)) : null;
+      const toTimestamp = dateRange?.to ? Timestamp.fromDate(endOfDay(dateRange.to)) : null;
 
       let baseQuery: QueryConstraint[] = [];
       if (effectiveSiteId) baseQuery.push(where("siteId", "==", effectiveSiteId));
@@ -159,8 +159,8 @@ export default function FoodStallReportClientPage() {
       // --- Fetch Sales ---
       let salesQueryConstraints: QueryConstraint[] = [...baseQuery];
       if (saleTypeFilter !== 'all') salesQueryConstraints.push(where("saleType", "==", saleTypeFilter));
-      if (fromDate) salesQueryConstraints.push(where("saleDate", ">=", fromDate));
-      if (toDate) salesQueryConstraints.push(where("saleDate", "<=", toDate));
+      if (fromTimestamp) salesQueryConstraints.push(where("saleDate", ">=", fromTimestamp));
+      if (toTimestamp) salesQueryConstraints.push(where("saleDate", "<=", toTimestamp));
       
       const salesQuery = query(collection(db, "foodSaleTransactions"), ...salesQueryConstraints);
       const salesSnapshot = await getDocs(salesQuery);
@@ -177,8 +177,8 @@ export default function FoodStallReportClientPage() {
 
       // --- Fetch Expenses ---
       let expensesQueryConstraints: QueryConstraint[] = [...baseQuery];
-      if (fromDate) expensesQueryConstraints.push(where("purchaseDate", ">=", fromDate));
-      if (toDate) expensesQueryConstraints.push(where("purchaseDate", "<=", toDate));
+      if (fromTimestamp) expensesQueryConstraints.push(where("purchaseDate", ">=", fromTimestamp));
+      if (toTimestamp) expensesQueryConstraints.push(where("purchaseDate", "<=", toTimestamp));
       const expensesQuery = query(collection(db, "foodItemExpenses"), ...expensesQueryConstraints);
       const expensesSnapshot = await getDocs(expensesQuery);
       const expenseTransactions = expensesSnapshot.docs.map(doc => doc.data() as FoodItemExpense);
@@ -203,8 +203,8 @@ export default function FoodStallReportClientPage() {
       
       // --- Fetch and Calculate Salary Expense ---
       let totalSalaryExpense = 0;
-      const relevantStaff = effectiveSiteId ? staffList.filter(s => s.defaultSiteId === effectiveSiteId) : staffList;
-      
+      const relevantStaff = effectiveSiteId ? allStaff.filter(s => s.defaultSiteId === effectiveSiteId) : allStaff;
+
       if (relevantStaff.length > 0) {
         if (dateRange?.from && dateRange.to) { // Only calculate salary for specific date ranges
           const uidsBatches: string[][] = [];
@@ -244,9 +244,14 @@ export default function FoodStallReportClientPage() {
                   }
               }
           });
-        } else { // All Time
-          const allPayments = await getDocs(query(collection(db, "salaryPayments")));
-          totalSalaryExpense = allPayments.docs.reduce((sum, doc) => sum + (doc.data() as SalaryPayment).amountPaid, 0);
+        } else { // All Time: sum up all salary payments for the relevant staff
+          const uidsBatches: string[][] = [];
+          for (let i = 0; i < relevantStaff.length; i += 30) {
+              uidsBatches.push(relevantStaff.map(s => s.uid).slice(i, i + 30));
+          }
+          const paymentPromises = uidsBatches.map(batch => getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", batch))));
+          const paymentsSnapshots = await Promise.all(paymentPromises);
+          totalSalaryExpense = paymentsSnapshots.flat().reduce((sum, s) => sum + s.docs.reduce((docSum, doc) => docSum + (doc.data() as SalaryPayment).amountPaid, 0), 0);
         }
       }
       
@@ -264,7 +269,7 @@ export default function FoodStallReportClientPage() {
     } finally {
       setLoadingReport(false);
     }
-  }, [user, dateRange, authLoading, userManagementLoading, db, staffList, staffDetailsMap, calculateWorkingDays, effectiveSiteId, stallFilter, saleTypeFilter]);
+  }, [user, dateRange, authLoading, userManagementLoading, db, allStaff, staffDetailsMap, calculateWorkingDays, effectiveSiteId, stallFilter, saleTypeFilter]);
 
   useEffect(() => {
     fetchReportData();
@@ -280,6 +285,7 @@ export default function FoodStallReportClientPage() {
     { label: "This Month", value: 'this_month' },
     { label: "Last 7 Days", value: 'last_7_days' },
     { label: "Last Month", value: 'last_month' },
+    { label: "Last 3 Months", value: 'last_3_months' },
     { label: "All Time", value: 'all_time' },
   ];
   
@@ -291,10 +297,11 @@ export default function FoodStallReportClientPage() {
         case 'this_month': from = startOfMonth(now); break;
         case 'last_7_days': from = startOfDay(subDays(now, 6)); break;
         case 'last_month': from = startOfMonth(subMonths(now, 1)); to = endOfMonth(subMonths(now, 1)); break;
+        case 'last_3_months': from = startOfMonth(subMonths(now, 2)); break;
         case 'all_time': from = undefined; to = undefined; break;
         default: from = undefined; to = undefined;
     }
-    setDateRange({ from, to });
+    setTempDateRange({ from, to });
   };
   
   const applyDateFilter = () => {
@@ -332,7 +339,13 @@ export default function FoodStallReportClientPage() {
           <CardContent className="space-y-4">
               <div className="flex flex-wrap items-center gap-2">
                 {datePresets.map(({label, value}) => (
-                    <Button key={value} variant={dateRange?.from?.getTime() === (presetMapping[value]?.from?.getTime() || -1) ? 'default' : 'outline'} onClick={() => handleSetDatePreset(value)}>{label}</Button>
+                    <Button key={value} variant={
+                        value === 'all_time' ? (!dateRange ? 'default' : 'outline') :
+                        (dateRange && dateRange.from?.getTime() === (presetMapping[value]?.from?.getTime() || -1) && dateRange.to?.getTime() === (presetMapping[value]?.to?.getTime() || -2) ? 'default' : 'outline')}
+                        onClick={() => handleSetDatePreset(value)}
+                    >
+                        {label}
+                    </Button>
                 ))}
                 <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
                     <PopoverTrigger asChild>
@@ -348,6 +361,13 @@ export default function FoodStallReportClientPage() {
                     </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0 flex" align="start">
+                        <div className="p-2 border-r">
+                            <div className="flex flex-col items-stretch gap-1">
+                                {datePresets.map(({label, value}) => (
+                                    <Button key={value} variant="ghost" className="justify-start" onClick={() => handleSetDatePreset(value)}>{label}</Button>
+                                ))}
+                            </div>
+                        </div>
                         <div className="p-2">
                             <div className="flex justify-between items-center mb-2 px-2">
                                 <p className="text-sm font-medium">Start: <span className="font-normal text-muted-foreground">{tempDateRange?.from ? format(tempDateRange.from, 'PPP') : '...'}</span></p>
@@ -444,9 +464,10 @@ export default function FoodStallReportClientPage() {
 }
 
 const now = new Date();
-const presetMapping: { [key: string]: { from: Date | undefined, to: Date | undefined } } = {
+const presetMapping: { [key: string]: { from?: Date, to?: Date } } = {
   'this_month': { from: startOfMonth(now), to: endOfDay(now) },
   'last_7_days': { from: startOfDay(subDays(now, 6)), to: endOfDay(now) },
   'last_month': { from: startOfMonth(subMonths(now, 1)), to: endOfMonth(subMonths(now, 1)) },
+  'last_3_months': { from: startOfMonth(subMonths(now, 2)), to: endOfDay(now) },
   'all_time': { from: undefined, to: undefined }
 };
