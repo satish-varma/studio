@@ -231,6 +231,7 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
         const siteName = mapping.site.toLowerCase();
         const stallName = mapping.stall.toLowerCase();
         const siteId = sitesMap.get(siteName);
+        
         if (!siteId) {
             console.warn(`${LOG_PREFIX} Skipping row due to unknown mapped site name: "${siteName}"`);
             continue;
