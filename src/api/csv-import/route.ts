@@ -215,11 +215,8 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
     const allStalls = stallsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as Stall }));
 
     // Step 2: Aggregate data from CSV
-    const salesAggregation = new Map<string, {
-        hungerboxSales: number;
-        siteId: string;
-        stallId: string;
-    }>();
+    const salesAggregation = new Map<string, FoodSaleTransaction>();
+    const callingUser = await getAdminAuth().getUser(uid);
 
     let processedRowCount = 0;
 
@@ -241,7 +238,6 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
             continue;
         }
 
-        // Find the correct stall by matching both siteId and name
         const stall = allStalls.find(s => s.siteId === siteId && s.name.toLowerCase() === stallName);
         if (!stall) {
             console.warn(`${LOG_PREFIX} Skipping row. Could not find internal Stall ID for name "${stallName}" within site "${siteName}"`);
@@ -255,28 +251,53 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
             continue;
         }
 
-        // Robust Date Parsing
-        const dateParts = orderDate.split('/');
+        // Correct, robust date parsing
+        const dateParts = orderDate.split('/'); // MM/DD/YYYY
         if (dateParts.length !== 3) {
             console.warn(`${LOG_PREFIX} Skipping row due to invalid date format: "${orderDate}"`);
             continue;
         }
-        // Creates YYYY-MM-DD string to avoid timezone issues.
-        const formattedDate = `${dateParts[2]}-${dateParts[0].padStart(2, '0')}-${dateParts[1].padStart(2, '0')}`;
+        const year = parseInt(dateParts[2], 10);
+        const month = parseInt(dateParts[0], 10) - 1; // Month is 0-indexed
+        const day = parseInt(dateParts[1], 10);
+        const saleDate = new Date(Date.UTC(year, month, day, 0, 0, 0));
+        
+        if (isNaN(saleDate.getTime())) {
+             console.warn(`${LOG_PREFIX} Skipping row due to parsed invalid date: "${orderDate}"`);
+             continue;
+        }
+
+        const formattedDate = saleDate.toISOString().split('T')[0]; // YYYY-MM-DD
 
         const isMrp = row['is_mrp']?.trim();
         const saleType = isMrp === '1' ? 'MRP' : 'Non-MRP';
         const actualValue = parseFloat(row['actual_value']) || 0;
 
         const aggKey = `${formattedDate}_${stallId}_${saleType}`;
-        const currentAgg = salesAggregation.get(aggKey) || {
-            hungerboxSales: 0,
-            siteId: siteId,
-            stallId: stallId,
-        };
-
-        currentAgg.hungerboxSales += actualValue;
-        salesAggregation.set(aggKey, currentAgg);
+        
+        if (salesAggregation.has(aggKey)) {
+            const existingRecord = salesAggregation.get(aggKey)!;
+            existingRecord.hungerboxSales += actualValue;
+            existingRecord.totalAmount += actualValue;
+            existingRecord.updatedAt = new Date().toISOString();
+        } else {
+            const newRecord: FoodSaleTransaction = {
+                id: aggKey,
+                saleDate: Timestamp.fromDate(saleDate),
+                siteId: siteId,
+                stallId: stallId,
+                saleType: saleType,
+                hungerboxSales: actualValue,
+                upiSales: 0,
+                totalAmount: actualValue,
+                notes: `Imported via Hungerbox CSV on ${new Date().toLocaleDateString()}.`,
+                recordedByUid: callingUser.uid,
+                recordedByName: callingUser.displayName || callingUser.email!,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+            };
+            salesAggregation.set(aggKey, newRecord);
+        }
         processedRowCount++;
     }
     
@@ -288,30 +309,10 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
 
     // Step 3: Write aggregated data to Firestore using setDoc with merge
     const batch = adminDb.batch();
-    const callingUser = await getAdminAuth().getUser(uid);
 
-    for (const [key, data] of salesAggregation.entries()) {
-        const docId = key;
+    for (const [docId, data] of salesAggregation.entries()) {
         const saleRef = adminDb.collection('foodSaleTransactions').doc(docId);
-        const saleDate = new Date(`${key.split('_')[0]}T00:00:00Z`); // Create a UTC-based date
-
-        const saleData: FoodSaleTransaction = {
-            id: docId,
-            saleDate: Timestamp.fromDate(saleDate),
-            siteId: data.siteId,
-            stallId: data.stallId,
-            saleType: key.split('_')[2] as 'MRP' | 'Non-MRP',
-            hungerboxSales: data.hungerboxSales,
-            upiSales: 0, // Defaulting UPI to 0 for Hungerbox imports
-            totalAmount: data.hungerboxSales,
-            notes: `Imported via Hungerbox CSV on ${new Date().toLocaleDateString()}.`,
-            recordedByUid: callingUser.uid,
-            recordedByName: callingUser.displayName || callingUser.email!,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-        };
-
-        batch.set(saleRef, saleData, { merge: true });
+        batch.set(saleRef, data, { merge: true });
     }
 
     await batch.commit();
