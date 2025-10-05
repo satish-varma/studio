@@ -206,86 +206,105 @@ async function handleFoodExpenseImport(adminDb: ReturnType<typeof getAdminFirest
 
 async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestore>, csvData: string, uid: string) {
     const parsedData = await parseCsv<any>(csvData);
+    if (parsedData.length === 0) {
+        return { message: "CSV file is empty or contains no data." };
+    }
+
+    const headers = Object.keys(parsedData[0]).map(h => h.trim());
+    const isHungerboxFormat = headers.includes('vendor_id');
+    const isGenericFormat = headers.includes('Site Name') && headers.includes('Stall Name');
 
     const sitesSnapshot = await adminDb.collection('sites').get();
     const sitesMap = new Map(sitesSnapshot.docs.map(doc => [doc.data().name.toLowerCase(), doc.id]));
-
+    
     const stallsSnapshot = await adminDb.collection('stalls').get();
-    const allStalls = stallsSnapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as Stall) }));
+    const allStalls = stallsSnapshot.docs.map(doc => {
+        const { id, ...rest } = doc.data() as Stall;
+        return { id: doc.id, ...rest };
+    });
 
     const salesAggregation = new Map<string, FoodSaleTransaction>();
     const callingUser = await getAdminAuth().getUser(uid);
+    let processedRows = 0;
 
     for (const row of parsedData) {
-        // CORRECTED: Use 'vendor_id' as provided in the image data.
-        const vendorId = row['vendor_id']?.trim();
-        if (!vendorId) {
-            console.warn(`${LOG_PREFIX} Skipping row due to missing 'vendor_id'. Row:`, row);
-            continue;
+        let siteId: string | undefined;
+        let stallId: string | undefined;
+        let saleDate: Date | undefined;
+        let saleType: 'MRP' | 'Non-MRP' | undefined;
+        let hungerboxSales = 0;
+        let upiSales = 0;
+
+        if (isHungerboxFormat) {
+            const vendorId = row['vendor_id']?.trim();
+            if (!vendorId) {
+                console.warn(`${LOG_PREFIX} Skipping Hungerbox row due to missing 'vendor_id'. Row:`, row);
+                continue;
+            }
+            const mapping = hungerboxVendorMapping[vendorId];
+            if (!mapping) {
+                console.warn(`${LOG_PREFIX} Skipping Hungerbox row due to no mapping for vendor ID: "${vendorId}"`);
+                continue;
+            }
+            siteId = sitesMap.get(mapping.site.toLowerCase());
+            const stall = allStalls.find(s => s.siteId === siteId && s.name.toLowerCase() === mapping.stall.toLowerCase());
+            stallId = stall?.id;
+            const orderDateStr = row['order_date']?.trim();
+            const dateParts = orderDateStr?.split('/');
+            if (dateParts?.length === 3) {
+                saleDate = new Date(`${dateParts[2]}-${dateParts[0].padStart(2, '0')}-${dateParts[1].padStart(2, '0')}T00:00:00.000Z`);
+            }
+            saleType = row['is_mrp']?.trim() === '1' ? 'MRP' : 'Non-MRP';
+            hungerboxSales = parseFloat(row['actual_value']) || 0;
+            upiSales = 0;
+
+        } else if (isGenericFormat) {
+            const siteName = row['Site Name']?.trim().toLowerCase();
+            const stallName = row['Stall Name']?.trim().toLowerCase();
+            siteId = sitesMap.get(siteName);
+            const stall = allStalls.find(s => s.siteId === siteId && s.name.toLowerCase() === stallName);
+            stallId = stall?.id;
+            const saleDateStr = row['Sale Date']?.trim();
+            if (saleDateStr) {
+                 saleDate = new Date(`${saleDateStr}T00:00:00.000Z`);
+            }
+            saleType = row['Sale Type']?.trim() as 'MRP' | 'Non-MRP';
+            hungerboxSales = parseFloat(row['Hungerbox Sales']) || 0;
+            upiSales = parseFloat(row['UPI Sales']) || 0;
         }
-        const mapping = hungerboxVendorMapping[vendorId];
-        if (!mapping) {
-            console.warn(`${LOG_PREFIX} Skipping row due to no mapping for vendor ID: "${vendorId}"`);
+
+        if (!siteId || !stallId || !saleDate || isNaN(saleDate.getTime()) || !saleType) {
+            console.warn(`${LOG_PREFIX} Skipping row due to missing/invalid derived data. Site: ${siteId}, Stall: ${stallId}, Date: ${saleDate}, Type: ${saleType}. Original Row:`, row);
             continue;
         }
 
-        const siteName = mapping.site.toLowerCase();
-        const stallName = mapping.stall.toLowerCase();
-        const siteId = sitesMap.get(siteName);
-        
-        if (!siteId) {
-            console.warn(`${LOG_PREFIX} Skipping row due to unknown mapped site name: "${siteName}"`);
-            continue;
-        }
-        
-        const stall = allStalls.find(s => s.siteId === siteId && s.name.toLowerCase() === stallName);
-        if (!stall) {
-            console.warn(`${LOG_PREFIX} Skipping row due to unknown mapped stall name: "${stallName}" for site "${siteName}"`);
-            continue;
-        }
-        const stallId = stall.id;
-
-        const orderDateStr = row['order_date']?.trim(); // Format: "9/15/2025"
-        const dateParts = orderDateStr?.split('/'); // ["9", "15", "2025"]
-        if (!dateParts || dateParts.length !== 3) {
-            console.warn(`${LOG_PREFIX} Skipping row due to invalid date format: "${orderDateStr}"`);
-            continue;
-        }
-
-        // ROBUST, TIMEZONE-SAFE DATE HANDLING
-        const year = dateParts[2];
-        const month = dateParts[0].padStart(2, '0'); // MM
-        const day = dateParts[1].padStart(2, '0');   // DD
-        const formattedDate = `${year}-${month}-${day}`; // "2025-09-15"
-        const saleDate = new Date(`${formattedDate}T00:00:00.000Z`); // Create as UTC date
-
-        // CORRECTED: Use 'actual_value' as shown in the image data.
-        const saleType = row['is_mrp']?.trim() === '1' ? 'MRP' : 'Non-MRP';
-        const actualValue = parseFloat(row['actual_value']) || 0;
+        const formattedDate = saleDate.toISOString().split('T')[0];
+        const totalAmount = hungerboxSales + upiSales;
         const aggKey = `${formattedDate}_${stallId}_${saleType}`;
-        
         const currentAgg = salesAggregation.get(aggKey);
 
         if (currentAgg) {
-            currentAgg.hungerboxSales += actualValue;
-            currentAgg.totalAmount += actualValue;
+            currentAgg.hungerboxSales += hungerboxSales;
+            currentAgg.upiSales += upiSales;
+            currentAgg.totalAmount += totalAmount;
         } else {
             salesAggregation.set(aggKey, {
                 id: aggKey, // This ID is for the map, not Firestore doc
-                saleDate: Timestamp.fromDate(saleDate), // CORRECT: Use Firestore Timestamp
+                saleDate: Timestamp.fromDate(saleDate),
                 siteId: siteId,
                 stallId: stallId,
                 saleType: saleType,
-                hungerboxSales: actualValue,
-                upiSales: 0, 
-                totalAmount: actualValue,
-                notes: `Imported via Hungerbox CSV on ${new Date().toLocaleDateString()}.`,
+                hungerboxSales: hungerboxSales,
+                upiSales: upiSales,
+                totalAmount: totalAmount,
+                notes: `Imported via CSV on ${new Date().toLocaleDateString()}.`,
                 recordedByUid: callingUser.uid,
                 recordedByName: callingUser.displayName || callingUser.email!,
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
             });
         }
+        processedRows++;
     }
 
     if (salesAggregation.size === 0) {
@@ -300,7 +319,7 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
 
     await batch.commit();
 
-    return { message: `Successfully processed and aggregated ${parsedData.length} CSV rows into ${salesAggregation.size} daily sales records.` };
+    return { message: `Successfully processed and aggregated ${processedRows} CSV rows into ${salesAggregation.size} daily sales records.` };
 }
 
 export async function POST(request: NextRequest) {
