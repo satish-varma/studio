@@ -13,7 +13,7 @@ interface HungerboxMapping {
 }
 
 export const hungerboxVendorMapping: HungerboxMapping = {
-  "22910": { site: "ORION IBM", stall: "14th Floor Tuck Shop" },
+  "22911": { site: "ORION IBM", stall: "14th Floor Tuck Shop" },
   "22861": { site: "ORION IBM", stall: "B5 Tuck Shop" },
   "22912": { site: "UPPAL IBM", stall: "TuckShop" },
   "22909": { site: "ORION IBM", stall: "B6 Live Counter" },
@@ -22,5 +22,3 @@ export const hungerboxVendorMapping: HungerboxMapping = {
   "22908": { site: "ORION IBM", stall: "11th Floor Tuck Shop" },
   "22915": { site: "MindSpace IBM", stall: "Live Counter" },
 };
-
-    
