@@ -213,11 +213,15 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
     const stallsSnapshot = await adminDb.collection('stalls').get();
     const allStalls = stallsSnapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as Stall) }));
 
-    const salesAggregation = new Map<string, Partial<FoodSaleTransaction> & { hungerboxSales: number, totalAmount: number }>();
+    const salesAggregation = new Map<string, FoodSaleTransaction>();
     const callingUser = await getAdminAuth().getUser(uid);
 
     for (const row of parsedData) {
-        const vendorId = row['vendor_id']?.trim();
+        const vendorId = row['consumption_vendor_id']?.trim(); // *** THE FIX ***
+        if (!vendorId) {
+            console.warn(`${LOG_PREFIX} Skipping row due to missing 'consumption_vendor_id'. Row:`, row);
+            continue;
+        }
         const mapping = hungerboxVendorMapping[vendorId];
         if (!mapping) {
             console.warn(`${LOG_PREFIX} Skipping row due to no mapping for vendor ID: "${vendorId}"`);
@@ -239,8 +243,8 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
         }
         const stallId = stall.id;
 
-        const orderDateStr = row['order_date']?.trim();
-        const dateParts = orderDateStr?.split('/');
+        const orderDateStr = row['order_date']?.trim(); // Format: "9/15/2025"
+        const dateParts = orderDateStr?.split('/'); // ["9", "15", "2025"]
         if (!dateParts || dateParts.length !== 3) {
             console.warn(`${LOG_PREFIX} Skipping row due to invalid date format: "${orderDateStr}"`);
             continue;
@@ -248,10 +252,10 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
 
         // Robust, timezone-safe date handling
         const year = dateParts[2];
-        const month = dateParts[0].padStart(2, '0');
-        const day = dateParts[1].padStart(2, '0');
-        const formattedDate = `${year}-${month}-${day}`;
-        const saleDate = new Date(`${formattedDate}T00:00:00.000Z`); // Create UTC date
+        const month = dateParts[0].padStart(2, '0'); // MM
+        const day = dateParts[1].padStart(2, '0');   // DD
+        const formattedDate = `${year}-${month}-${day}`; // "2025-09-15"
+        const saleDate = new Date(`${formattedDate}T00:00:00.000Z`); // Create as UTC date
 
         const saleType = row['is_mrp']?.trim() === '1' ? 'MRP' : 'Non-MRP';
         const actualValue = parseFloat(row['actual_value']) || 0;
@@ -355,5 +359,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `An unexpected error occurred: ${error.message}` }, { status: 500 });
   }
 }
-
-    
