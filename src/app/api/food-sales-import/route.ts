@@ -105,8 +105,8 @@ export async function POST(request: NextRequest) {
         const docId = row.ID || `${format(saleDate, 'yyyy-MM-dd')}_${stall.id}_${saleType}`;
         const saleDocRef = adminDb.collection('foodSaleTransactions').doc(docId);
 
-        const saleData: Omit<FoodSaleTransaction, 'id'> = {
-            saleDate: Timestamp.fromDate(saleDate),
+        const saleData: Omit<FoodSaleTransaction, 'id' | 'saleDate'> & { saleDate: Date } = {
+            saleDate: saleDate,
             siteId: siteId,
             stallId: stall.id,
             saleType: saleType,
