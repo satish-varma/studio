@@ -269,6 +269,7 @@ export default function StaffDashboardPage() {
             default: from = undefined; to = undefined;
         }
         setDateRange({ from, to });
+        setTempDateRange({ from, to });
     };
 
     const loading = authLoading || userManagementLoading || loadingCalculations;
@@ -351,13 +352,15 @@ export default function StaffDashboardPage() {
                   <CardTitle>Filters</CardTitle>
                   <CardDescription>Select a site and date range to analyze staff metrics.</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent className="flex flex-col gap-4">
                      <div className="flex flex-wrap items-center gap-2">
                         {datePresets.map(({ label, value }) => (
                             <Button key={value} variant="outline" onClick={() => handleSetDatePreset(value)}>
                                 {label}
                             </Button>
                         ))}
+                    </div>
+                    <div className="flex flex-col sm:flex-row items-center gap-2">
                         <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
                             <PopoverTrigger asChild>
                             <Button
@@ -368,20 +371,10 @@ export default function StaffDashboardPage() {
                                 {dateRange?.from ? ( dateRange.to ? (
                                     <> {format(dateRange.from, "LLL dd, y")} - {format(dateRange.to, "LLL dd, y")} </>
                                 ) : ( format(dateRange.from, "LLL dd, y") )
-                                ) : ( <span>Pick a date range</span> )}
+                                ) : ( <span>Pick a custom date range</span> )}
                             </Button>
                             </PopoverTrigger>
                             <PopoverContent className="w-auto p-0 flex" align="start">
-                                <div className="p-2 border-r">
-                                    <div className="flex flex-col items-stretch gap-1">
-                                        {datePresets.map(({label, value}) => (
-                                            <Button key={value} variant="ghost" className="justify-start" onClick={() => {
-                                                handleSetDatePreset(value);
-                                                setIsDatePickerOpen(false);
-                                            }}>{label}</Button>
-                                        ))}
-                                    </div>
-                                </div>
                                 <div className="p-2">
                                      <Calendar
                                         initialFocus mode="range" defaultMonth={tempDateRange?.from}
@@ -395,23 +388,21 @@ export default function StaffDashboardPage() {
                                 </div>
                             </PopoverContent>
                         </Popover>
+                        {user?.role === 'admin' && (
+                            <div className="w-full sm:max-w-xs">
+                                <Select value={siteFilter} onValueChange={setSiteFilter}>
+                                    <SelectTrigger id="site-filter" className="w-full bg-input">
+                                        <Building className="mr-2 h-4 w-4 text-muted-foreground"/>
+                                        <SelectValue placeholder="Filter by site" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="all">All Sites</SelectItem>
+                                        {allSites.map(site => <SelectItem key={site.id} value={site.id}>{site.name}</SelectItem>)}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        )}
                     </div>
-
-                    {user?.role === 'admin' && (
-                        <div className="max-w-xs">
-                            <Label htmlFor="site-filter">Site</Label>
-                            <Select value={siteFilter} onValueChange={setSiteFilter}>
-                                <SelectTrigger id="site-filter" className="w-full bg-input">
-                                    <Building className="mr-2 h-4 w-4 text-muted-foreground"/>
-                                    <SelectValue placeholder="Filter by site" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="all">All Sites</SelectItem>
-                                    {allSites.map(site => <SelectItem key={site.id} value={site.id}>{site.name}</SelectItem>)}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    )}
                 </CardContent>
               </Card>
 
