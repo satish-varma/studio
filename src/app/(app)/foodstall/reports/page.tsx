@@ -203,52 +203,51 @@ export default function FoodStallReportClientPage() {
       
       // --- Fetch and Calculate Salary Expense ---
       let totalSalaryExpense = 0;
-      const relevantStaff = effectiveSiteId ? allStaff.filter(s => s.defaultSiteId === effectiveSiteId) : allStaff;
+      const relevantStaff = effectiveSiteId ? allStaff.filter(s => {
+          if (s.role === 'manager') return s.managedSiteIds?.includes(effectiveSiteId);
+          return s.defaultSiteId === effectiveSiteId;
+      }) : allStaff;
 
       if (relevantStaff.length > 0) {
-        if (dateRange?.from && dateRange.to) { // Only calculate salary for specific date ranges
           const uidsBatches: string[][] = [];
           for (let i = 0; i < relevantStaff.length; i += 30) {
               uidsBatches.push(relevantStaff.map(s => s.uid).slice(i, i + 30));
           }
 
-          const monthOfStartDate = startOfMonth(dateRange.from);
-          const holidaysQuery = query(collection(db, "holidays"), where("date", ">=", format(monthOfStartDate, 'yyyy-MM-dd')), where("date", "<=", format(endOfMonth(dateRange.to), 'yyyy-MM-dd')));
-          
-          const attendancePromises = uidsBatches.map(batch => getDocs(query(collection(db, "staffAttendance"), 
-              where("staffUid", "in", batch), 
-              where("date", ">=", format(dateRange.from!, 'yyyy-MM-dd')), 
-              where("date", "<=", format(dateRange.to!, 'yyyy-MM-dd'))
-          )));
+          if (dateRange?.from && dateRange.to) { // Only calculate salary for specific date ranges
+            const monthOfStartDate = startOfMonth(dateRange.from);
+            const holidaysQuery = query(collection(db, "holidays"), where("date", ">=", format(monthOfStartDate, 'yyyy-MM-dd')), where("date", "<=", format(endOfMonth(dateRange.to), 'yyyy-MM-dd')));
+            
+            const attendancePromises = uidsBatches.map(batch => getDocs(query(collection(db, "staffAttendance"), 
+                where("staffUid", "in", batch), 
+                where("date", ">=", format(dateRange.from!, 'yyyy-MM-dd')), 
+                where("date", "<=", format(dateRange.to!, 'yyyy-MM-dd'))
+            )));
 
-          const [holidaysSnapshot, ...attendanceSnapshots] = await Promise.all([getDocs(holidaysQuery), ...attendancePromises]);
-          const holidays = holidaysSnapshot.docs.map(d => d.data() as Holiday);
-          const attendanceByStaff = new Map<string, { present: number, halfDay: number }>();
-          attendanceSnapshots.flat().forEach(snapshot => snapshot.forEach(doc => {
-              const att = doc.data() as StaffAttendance;
-              const current = attendanceByStaff.get(att.staffUid) || { present: 0, halfDay: 0 };
-              if (att.status === 'Present') current.present++;
-              if (att.status === 'Half-day') current.halfDay++;
-              attendanceByStaff.set(att.staffUid, current);
-          }));
+            const [holidaysSnapshot, ...attendanceSnapshots] = await Promise.all([getDocs(holidaysQuery), ...attendancePromises]);
+            const holidays = holidaysSnapshot.docs.map(d => d.data() as Holiday);
+            const attendanceByStaff = new Map<string, { present: number, halfDay: number }>();
+            attendanceSnapshots.flat().forEach(snapshot => snapshot.forEach(doc => {
+                const att = doc.data() as StaffAttendance;
+                const current = attendanceByStaff.get(att.staffUid) || { present: 0, halfDay: 0 };
+                if (att.status === 'Present') current.present++;
+                if (att.status === 'Half-day') current.halfDay++;
+                attendanceByStaff.set(att.staffUid, current);
+            }));
 
-          relevantStaff.forEach(staff => {
-              const details = staffDetailsMap.get(staff.uid);
-              if (details?.salary) {
-                  const monthWorkingDays = calculateWorkingDays(startOfMonth(dateRange.from!), endOfMonth(dateRange.from!), holidays, staff);
-                  if (monthWorkingDays > 0) {
-                      const perDaySalary = details.salary / monthWorkingDays;
-                      const attendance = attendanceByStaff.get(staff.uid) || { present: 0, halfDay: 0 };
-                      const earnedDays = attendance.present + (attendance.halfDay * 0.5);
-                      totalSalaryExpense += earnedDays * perDaySalary;
-                  }
-              }
-          });
+            relevantStaff.forEach(staff => {
+                const details = staffDetailsMap.get(staff.uid);
+                if (details?.salary) {
+                    const monthWorkingDays = calculateWorkingDays(startOfMonth(dateRange.from!), endOfMonth(dateRange.from!), holidays, staff);
+                    if (monthWorkingDays > 0) {
+                        const perDaySalary = details.salary / monthWorkingDays;
+                        const attendance = attendanceByStaff.get(staff.uid) || { present: 0, halfDay: 0 };
+                        const earnedDays = attendance.present + (attendance.halfDay * 0.5);
+                        totalSalaryExpense += earnedDays * perDaySalary;
+                    }
+                }
+            });
         } else { // All Time: sum up all salary payments for the relevant staff
-          const uidsBatches: string[][] = [];
-          for (let i = 0; i < relevantStaff.length; i += 30) {
-              uidsBatches.push(relevantStaff.map(s => s.uid).slice(i, i + 30));
-          }
           const paymentPromises = uidsBatches.map(batch => getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", batch))));
           const paymentsSnapshots = await Promise.all(paymentPromises);
           totalSalaryExpense = paymentsSnapshots.flat().reduce((sum, s) => sum + s.docs.reduce((docSum, doc) => docSum + (doc.data() as SalaryPayment).amountPaid, 0), 0);
@@ -301,7 +300,8 @@ export default function FoodStallReportClientPage() {
         case 'all_time': from = undefined; to = undefined; break;
         default: from = undefined; to = undefined;
     }
-    setTempDateRange({ from, to });
+    setDateRange({ from, to });
+    setIsDatePickerOpen(false);
   };
   
   const applyDateFilter = () => {
@@ -340,8 +340,8 @@ export default function FoodStallReportClientPage() {
               <div className="flex flex-wrap items-center gap-2">
                 {datePresets.map(({label, value}) => (
                     <Button key={value} variant={
-                        value === 'all_time' ? (!dateRange ? 'default' : 'outline') :
-                        (dateRange && dateRange.from?.getTime() === (presetMapping[value]?.from?.getTime() || -1) && dateRange.to?.getTime() === (presetMapping[value]?.to?.getTime() || -2) ? 'default' : 'outline')}
+                        value === 'all_time' ? (!dateRange?.from && !dateRange?.to ? 'default' : 'outline') :
+                        (dateRange?.from?.getTime() === (presetMapping[value]?.from?.getTime() || -1) && dateRange?.to?.getTime() === (presetMapping[value]?.to?.getTime() || -2) ? 'default' : 'outline')}
                         onClick={() => handleSetDatePreset(value)}
                     >
                         {label}
