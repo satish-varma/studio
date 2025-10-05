@@ -207,21 +207,21 @@ async function handleFoodExpenseImport(adminDb: ReturnType<typeof getAdminFirest
 async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestore>, csvData: string, uid: string) {
     const parsedData = await parseCsv<any>(csvData);
     
+    // Step 1: Pre-fetch all sites and stalls for efficient lookup
     const sitesSnapshot = await adminDb.collection('sites').get();
     const sitesMap = new Map(sitesSnapshot.docs.map(doc => [doc.data().name.toLowerCase(), doc.id]));
-    
-    const stallsSnapshot = await adminDb.collection('stalls').get();
-    const stallsMap = new Map(stallsSnapshot.docs.map(doc => {
-      const siteName = sitesSnapshot.docs.find(s => s.id === doc.data().siteId)?.data().name.toLowerCase() || '';
-      return [`${siteName}::${doc.data().name.toLowerCase()}`, doc.id];
-    }));
 
+    const stallsSnapshot = await adminDb.collection('stalls').get();
+    const allStalls = stallsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+    // Step 2: Aggregate data from CSV
     const salesAggregation = new Map<string, {
         hungerboxSales: number;
-        upiSales: number;
         siteId: string;
         stallId: string;
     }>();
+
+    let processedRowCount = 0;
 
     for (const row of parsedData) {
         const vendorId = row['vendor_id']?.trim();
@@ -236,79 +236,88 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
         const stallName = mapping.stall.toLowerCase();
 
         const siteId = sitesMap.get(siteName);
-        const stallId = stallsMap.get(`${siteName}::${stallName}`);
-
-        if (!siteId || !stallId) {
-            console.warn(`${LOG_PREFIX} Skipping row. Could not find internal Site/Stall ID for mapped names. Site: "${siteName}", Stall: "${stallName}"`);
+        if (!siteId) {
+            console.warn(`${LOG_PREFIX} Skipping row. Could not find internal Site ID for mapped name: "${siteName}"`);
             continue;
         }
 
-        const orderDate = row['order_date']?.trim();
-        const isMrp = row['is_mrp']?.trim();
-        const saleType = isMrp === '1' ? 'MRP' : 'Non-MRP';
-        const actualValue = parseFloat(row['actual_value']) || 0;
+        // Find the correct stall by matching both siteId and name
+        const stall = allStalls.find(s => s.siteId === siteId && s.name.toLowerCase() === stallName);
+        if (!stall) {
+            console.warn(`${LOG_PREFIX} Skipping row. Could not find internal Stall ID for name "${stallName}" within site "${siteName}"`);
+            continue;
+        }
+        const stallId = stall.id;
 
+        const orderDate = row['order_date']?.trim();
         if (!orderDate) {
             console.warn(`${LOG_PREFIX} Skipping row due to missing order_date.`, row);
             continue;
         }
 
-        // Correctly parse MM/DD/YYYY format
+        // Robust Date Parsing
         const dateParts = orderDate.split('/');
         if (dateParts.length !== 3) {
             console.warn(`${LOG_PREFIX} Skipping row due to invalid date format: "${orderDate}"`);
             continue;
         }
+        // Creates YYYY-MM-DD string to avoid timezone issues.
         const formattedDate = `${dateParts[2]}-${dateParts[0].padStart(2, '0')}-${dateParts[1].padStart(2, '0')}`;
 
+        const isMrp = row['is_mrp']?.trim();
+        const saleType = isMrp === '1' ? 'MRP' : 'Non-MRP';
+        const actualValue = parseFloat(row['actual_value']) || 0;
 
         const aggKey = `${formattedDate}_${stallId}_${saleType}`;
         const currentAgg = salesAggregation.get(aggKey) || {
             hungerboxSales: 0,
-            upiSales: 0, // UPI is always 0 based on the provided mapping logic
             siteId: siteId,
             stallId: stallId,
         };
 
         currentAgg.hungerboxSales += actualValue;
-
         salesAggregation.set(aggKey, currentAgg);
+        processedRowCount++;
     }
     
     if (salesAggregation.size === 0) {
         return { message: "No valid sales data found to import after aggregation." };
     }
 
+    console.log(`${LOG_PREFIX} Aggregated ${processedRowCount} rows into ${salesAggregation.size} unique database records.`);
+
+    // Step 3: Write aggregated data to Firestore using setDoc with merge
     const batch = adminDb.batch();
-    let operationCount = 0;
+    const callingUser = await getAdminAuth().getUser(uid);
 
     for (const [key, data] of salesAggregation.entries()) {
-        const [dateStr, stallId, saleType] = key.split('_');
         const docId = key;
         const saleRef = adminDb.collection('foodSaleTransactions').doc(docId);
+        const saleDate = new Date(`${key.split('_')[0]}T00:00:00Z`); // Create a UTC-based date
 
-        const saleData = {
-            saleDate: Timestamp.fromDate(new Date(dateStr)),
+        const saleData: FoodSaleTransaction = {
+            id: docId,
+            saleDate: Timestamp.fromDate(saleDate),
             siteId: data.siteId,
             stallId: data.stallId,
-            saleType: saleType,
+            saleType: key.split('_')[2] as 'MRP' | 'Non-MRP',
             hungerboxSales: data.hungerboxSales,
-            upiSales: 0,
+            upiSales: 0, // Defaulting UPI to 0 for Hungerbox imports
             totalAmount: data.hungerboxSales,
             notes: `Imported via Hungerbox CSV on ${new Date().toLocaleDateString()}.`,
-            recordedByUid: 'Q7ZecmlipJcb1bqrzRkFOGVcNyL2',
-            recordedByName: 'thegutguru.in',
+            recordedByUid: callingUser.uid,
+            recordedByName: callingUser.displayName || callingUser.email!,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
         };
 
         batch.set(saleRef, saleData, { merge: true });
-        operationCount++;
     }
 
     await batch.commit();
+    console.log(`${LOG_PREFIX} Firestore batch commit successful.`);
 
-    return { message: `Successfully processed and aggregated ${parsedData.length} CSV rows into ${operationCount} daily sales records.` };
+    return { message: `Successfully processed and aggregated ${parsedData.length} CSV rows into ${salesAggregation.size} daily sales records.` };
 }
 
 export async function POST(request: NextRequest) {
