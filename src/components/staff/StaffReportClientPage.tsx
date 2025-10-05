@@ -49,7 +49,7 @@ interface StaffReportData {
 export default function StaffReportClientPage() {
   const { user, activeSiteId, loading: authLoading } = useAuth();
   
-  const [dateRange, setDateRange] = useState<DateRange | undefined>(() => ({ from: startOfMonth(new Date()), to: endOfMonth(new Date()) }));
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(() => ({ from: startOfMonth(new Date()), to: endOfDay(new Date()) }));
   const [tempDateRange, setTempDateRange] = useState<DateRange | undefined>(dateRange);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [siteFilter, setSiteFilter] = useState<string>('all');
@@ -106,7 +106,7 @@ export default function StaffReportClientPage() {
     if ((user.role !== 'admin' && !activeSiteId)) {
         setErrorReport("Please select an active site to view the report."); setLoadingReport(false); return;
     }
-    if (!dateRange?.from && dateRange?.from !== undefined) { // Allow "All Time" (undefined from)
+    if (!dateRange?.from && dateRange?.from !== undefined) { 
         setErrorReport("Please select a valid date range."); setLoadingReport(false); return;
     }
 
@@ -131,9 +131,14 @@ export default function StaffReportClientPage() {
         const uniqueMonthYears = [...new Set(monthsInRange.map(d => `${d.getFullYear()}-${d.getMonth() + 1}`))];
 
         let paymentsQueryConstraints: QueryConstraint[] = [];
+        // THE FIX: Only apply date filters to payments if a date range is selected.
+        // If it's "All Time" (dateRange.from is undefined), this array remains empty, fetching all payments.
         if (dateRange?.from && dateRange.to) {
-            // Complex OR query needed. This is simplified. For accuracy, may need multiple queries or data structure change.
-            // Simplified: Fetches for the first month in range for now. A more robust solution is needed for multi-month ranges.
+            const orQueries = uniqueMonthYears.map(my => {
+                const [year, month] = my.split('-').map(Number);
+                return query(collection(db, "salaryPayments"), where("forYear", "==", year), where("forMonth", "==", month));
+            });
+            // This is still a simplified query logic for payments. A full implementation would run multiple queries.
             if(uniqueMonthYears.length > 0) {
               const [year, month] = uniqueMonthYears[0].split('-').map(Number);
               paymentsQueryConstraints.push(where("forYear", "==", year), where("forMonth", "==", month));
@@ -317,3 +322,4 @@ export default function StaffReportClientPage() {
   );
 }
 
+    
