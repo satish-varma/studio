@@ -7,8 +7,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Users, UserX, UserRoundCheck, HandCoins, CalendarDays, Wallet, Building, Calendar as CalendarIcon } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { getFirestore, collection, query, where, onSnapshot, getDocs } from "firebase/firestore";
-import type { AppUser, StaffAttendance, SalaryAdvance, Holiday, StaffDetails, Site } from "@/types";
-import { format, startOfMonth, endOfMonth, getDaysInMonth, startOfDay, endOfDay, subDays, startOfWeek, subMonths } from "date-fns";
+import type { AppUser, StaffAttendance, SalaryAdvance, Holiday, StaffDetails, Site, SalaryPayment } from "@/types";
+import { format, startOfMonth, endOfMonth, getDaysInMonth, startOfDay, endOfDay, subDays, startOfWeek, subMonths, isBefore, isAfter, max, min } from "date-fns";
 import { Loader2, Info, IndianRupee } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -63,8 +63,12 @@ export default function StaffDashboardPage() {
     const effectiveSiteId = user?.role === 'admin' ? (siteFilter === 'all' ? null : siteFilter) : activeSiteId;
     
     const filteredStaffList = useMemo(() => {
-        if (!effectiveSiteId) return allStaff;
-        return allStaff.filter(s => s.defaultSiteId === effectiveSiteId || (s.role === 'manager' && s.managedSiteIds?.includes(effectiveSiteId)));
+        if (!effectiveSiteId) return allStaff.filter(s => s.role === 'staff' || s.role === 'manager');
+        return allStaff.filter(s => {
+          if (s.role === 'staff') return s.defaultSiteId === effectiveSiteId;
+          if (s.role === 'manager') return s.managedSiteIds?.includes(effectiveSiteId);
+          return false;
+        });
     }, [allStaff, effectiveSiteId]);
 
 
@@ -90,7 +94,7 @@ export default function StaffDashboardPage() {
 
     const isHoliday = useCallback((date: Date, holidays: Holiday[], staffSiteId?: string | null) => {
         const dayOfWeek = date.getDay();
-        if (dayOfWeek === 0 || dayOfWeek === 6) { // Assuming Saturday (6) and Sunday (0) are weekends
+        if (dayOfWeek === 0 || dayOfWeek === 6) { 
             return true;
         }
         const dateStr = format(date, 'yyyy-MM-dd');
@@ -104,14 +108,14 @@ export default function StaffDashboardPage() {
         return false;
     }, []);
 
-    const calculateWorkingDays = useCallback((month: Date, holidays: Holiday[], staff?: AppUser) => {
-        const totalDays = getDaysInMonth(month);
+    const calculateWorkingDays = useCallback((start: Date, end: Date, holidays: Holiday[], staff?: AppUser) => {
         let workingDays = 0;
-        for (let i = 1; i <= totalDays; i++) {
-            const currentDate = new Date(month.getFullYear(), month.getMonth(), i);
+        let currentDate = new Date(start);
+        while(currentDate <= end) {
             if (!isHoliday(currentDate, holidays, staff?.defaultSiteId)) { 
                 workingDays++;
             }
+            currentDate.setDate(currentDate.getDate() + 1);
         }
         return workingDays;
     }, [isHoliday]);
@@ -121,11 +125,8 @@ export default function StaffDashboardPage() {
             if (!userManagementLoading) {
                 setLoadingCalculations(false);
                 setStats({ totalStaff: 0, presentToday: 0, advancesForPeriod: 0, notPresentToday: 0, salaryForPeriod: 0, projectedSalary: 0 });
-                setRecentAdvances([]);
-                setAdvancesSummary([]);
-                setAttendanceSummary([]);
-                setEarnedSalarySummary([]);
-                setStaffOnLeaveOrAbsent([]);
+                setRecentAdvances([]); setAdvancesSummary([]); setAttendanceSummary([]);
+                setEarnedSalarySummary([]); setStaffOnLeaveOrAbsent([]);
             }
             return;
         }
@@ -206,9 +207,10 @@ export default function StaffDashboardPage() {
                 const details = staffDetailsMap.get(staff.uid);
                 projectedSalary += details?.salary || 0;
                 
-                if (!fromDate) return; // Cannot calculate earned salary for "All Time"
+                if (!fromDate || !toDate) return;
 
-                const workingDaysInMonth = calculateWorkingDays(startOfMonth(fromDate), holidays, staff);
+                const monthForSalaryCalc = startOfMonth(fromDate);
+                const workingDaysInMonth = calculateWorkingDays(monthForSalaryCalc, endOfMonth(monthForSalaryCalc), holidays, staff);
                 
                 const attendance = periodAttendanceMap.get(staff.uid);
                 if (details?.salary && attendance && workingDaysInMonth > 0) {
@@ -461,5 +463,3 @@ export default function StaffDashboardPage() {
         </div>
     );
 }
-
-    
