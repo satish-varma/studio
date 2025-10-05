@@ -19,13 +19,24 @@ const nextConfig: NextConfig = {
         port: '',
         pathname: '/**',
       },
+      {
+        protocol: 'https',
+        hostname: 'picsum.photos',
+        port: '',
+        pathname: '/**',
+      }
     ],
   },
-  // Adding server.fs.allow to prevent 403 Forbidden errors on static assets like fonts
-  // during development with Vite/Turbopack.
   experimental: {
     serverActions: true,
     serverComponentsExternalPackages: ['@react-email/components'],
+    // Adding server.fs.allow to prevent 403 Forbidden errors on static assets like fonts
+    // during development with Turbopack.
+    server: {
+      fs: {
+        allow: ["./"],
+      },
+    },
     turbo: {
         rules: {
             '*.svg': {
