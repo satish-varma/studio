@@ -69,11 +69,12 @@ export default function StaffReportClientPage() {
   const effectiveSiteId = user?.role === 'admin' ? (siteFilter === 'all' ? null : siteFilter) : activeSiteId;
   
   const filteredStaffList = useMemo(() => {
+    if (!user) return [];
     const baseList = allStaff.filter(u => u.role === 'staff' || u.role === 'manager');
-    if (!effectiveSiteId && user?.role !== 'admin') {
-      return user?.role === 'manager' ? baseList.filter(s => s.managedSiteIds?.some(msid => currentUser.managedSiteIds?.includes(msid))) : [];
+    if (!effectiveSiteId && user.role !== 'admin') {
+      return user.role === 'manager' && user.managedSiteIds ? baseList.filter(s => s.managedSiteIds?.some(msid => user.managedSiteIds?.includes(msid))) : [];
     }
-    if (!effectiveSiteId && user?.role === 'admin') return baseList;
+    if (!effectiveSiteId && user.role === 'admin') return baseList;
     return baseList.filter(s => {
       if (s.role === 'staff') return s.defaultSiteId === effectiveSiteId;
       if (s.role === 'manager') return s.managedSiteIds?.includes(effectiveSiteId!);
@@ -102,7 +103,7 @@ export default function StaffReportClientPage() {
   
   const fetchReportData = useCallback(async () => {
     if (authLoading || userManagementLoading || !db || !user) return;
-    if ((user.role !== 'admin' && !activeSiteId) && user.role !== 'manager') {
+    if ((user.role !== 'admin' && !activeSiteId)) {
         setErrorReport("Please select an active site to view the report."); setLoadingReport(false); return;
     }
     if (!dateRange?.from || !dateRange.to) {
@@ -158,6 +159,8 @@ export default function StaffReportClientPage() {
                     const workingDaysInMonth = calculateWorkingDays(monthStart, monthEnd, holidays, staff);
                     if (workingDaysInMonth > 0) {
                         const perDaySalary = details.salary / workingDaysInMonth;
+                        // This part needs to be more accurate based on attendance within the actual range
+                        // For simplicity in this report, we'll pro-rate. A full payroll calculation is more complex.
                         earnedSalary += perDaySalary * presentDays;
                     }
                 });
@@ -175,7 +178,7 @@ export default function StaffReportClientPage() {
     } finally {
         setLoadingReport(false);
     }
-  }, [user, dateRange, authLoading, userManagementLoading, staffDetailsMap, filteredStaffList, calculateWorkingDays]);
+  }, [user, dateRange, authLoading, userManagementLoading, staffDetailsMap, filteredStaffList, calculateWorkingDays, activeSiteId]);
 
   useEffect(() => { fetchReportData(); }, [fetchReportData]);
 
@@ -261,3 +264,5 @@ export default function StaffReportClientPage() {
     </div>
   );
 }
+
+    
