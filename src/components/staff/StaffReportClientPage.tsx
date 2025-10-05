@@ -4,7 +4,7 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import type { AppUser, StaffDetails, SalaryAdvance, SalaryPayment, Site, Holiday, UserStatus, StaffAttendance } from "@/types";
 import type { DateRange } from "react-day-picker";
-import { format, startOfMonth, endOfMonth, isAfter, isBefore, max, min, startOfDay, getMonth, eachMonthOfInterval, subDays, startOfWeek, endOfWeek, subMonths } from "date-fns";
+import { format, startOfMonth, isAfter, isBefore, max, min, startOfDay, getMonth, eachMonthOfInterval, subDays, startOfWeek, endOfWeek, subMonths, endOfDay } from "date-fns";
 import { getFirestore, collection, query, where, getDocs, Timestamp, QueryConstraint } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
@@ -159,8 +159,6 @@ export default function StaffReportClientPage() {
                     const workingDaysInMonth = calculateWorkingDays(monthStart, monthEnd, holidays, staff);
                     if (workingDaysInMonth > 0) {
                         const perDaySalary = details.salary / workingDaysInMonth;
-                        // This part needs to be more accurate based on attendance within the actual range
-                        // For simplicity in this report, we'll pro-rate. A full payroll calculation is more complex.
                         earnedSalary += perDaySalary * presentDays;
                     }
                 });
@@ -193,7 +191,20 @@ export default function StaffReportClientPage() {
   }, [reportData]);
 
   const datePresets = [{ label: "This Month", value: 'this_month' }, { label: "Last Month", value: 'last_month' }, { label: "Last 3 Months", value: 'last_3_months' }, { label: "All Time", value: 'all_time' }];
-  const handleSetDatePreset = (preset: string) => { /*...same as dashboard...*/ };
+  
+  const handleSetDatePreset = (preset: string) => {
+      const now = new Date();
+      let from: Date | undefined, to: Date | undefined = endOfDay(now);
+
+      switch (preset) {
+          case 'this_month': from = startOfMonth(now); break;
+          case 'last_month': from = startOfMonth(subMonths(now, 1)); to = endOfMonth(subMonths(now, 1)); break;
+          case 'last_3_months': from = startOfMonth(subMonths(now, 2)); break;
+          case 'all_time': from = undefined; to = undefined; break;
+          default: from = undefined; to = undefined;
+      }
+      setTempDateRange({ from, to });
+  };
   const applyDateFilter = () => { setDateRange(tempDateRange); setIsDatePickerOpen(false); };
 
   if (authLoading || userManagementLoading) { return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin" /></div>; }
@@ -264,5 +275,3 @@ export default function StaffReportClientPage() {
     </div>
   );
 }
-
-    
