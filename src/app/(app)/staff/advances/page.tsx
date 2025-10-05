@@ -252,7 +252,7 @@ export default function SalaryAdvanceClientPage() {
                     {advances.map(adv => (
                         <TableRow key={adv.id}>
                             <TableCell>{format(new Date(adv.date), 'PPP')}</TableCell>
-                            <TableCell>{format(new Date(adv.forYear, adv.forMonth - 1), 'MMM yyyy')}</TableCell>
+                            <TableCell>{(adv.forYear && adv.forMonth) ? format(new Date(adv.forYear, adv.forMonth - 1), 'MMM yyyy') : "N/A"}</TableCell>
                             <TableCell>{staffList.find(s => s.uid === adv.staffUid)?.displayName || adv.staffUid.substring(0,8)}</TableCell>
                             <TableCell>{adv.recordedByName || adv.recordedByUid.substring(0,8)}</TableCell>
                             <TableCell className="text-right font-medium">₹{adv.amount.toFixed(2)}</TableCell>
@@ -261,7 +261,7 @@ export default function SalaryAdvanceClientPage() {
                     ))}
                 </TableBody>
             </Table>
-            </div>
+        </div>
         )}
       </CardContent>
     </Card>
