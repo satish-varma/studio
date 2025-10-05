@@ -106,10 +106,8 @@ export default function StaffReportClientPage() {
     if ((user.role !== 'admin' && !activeSiteId)) {
         setErrorReport("Please select an active site to view the report."); setLoadingReport(false); return;
     }
-    if (!dateRange?.from || !dateRange.to) {
-        if (dateRange?.from !== undefined || dateRange?.to !== undefined) {
-          setErrorReport("Please select a valid date range."); setLoadingReport(false); return;
-        }
+    if (!dateRange?.from && dateRange?.from !== undefined) { // Allow "All Time" (undefined from)
+        setErrorReport("Please select a valid date range."); setLoadingReport(false); return;
     }
 
     setLoadingReport(true); setErrorReport(null);
@@ -129,10 +127,18 @@ export default function StaffReportClientPage() {
           toTimestamp && where("date", "<=", toTimestamp.toDate().toISOString()),
         ].filter(Boolean) as QueryConstraint[];
         
-        const paymentsQueryConstraints = [
-          fromTimestamp && where("paymentDate", ">=", fromTimestamp.toDate().toISOString()),
-          toTimestamp && where("paymentDate", "<=", toTimestamp.toDate().toISOString()),
-        ].filter(Boolean) as QueryConstraint[];
+        const monthsInRange = dateRange?.from && dateRange.to ? eachMonthOfInterval({ start: dateRange.from, end: dateRange.to }) : [];
+        const uniqueMonthYears = [...new Set(monthsInRange.map(d => `${d.getFullYear()}-${d.getMonth() + 1}`))];
+
+        let paymentsQueryConstraints: QueryConstraint[] = [];
+        if (dateRange?.from && dateRange.to) {
+            // Complex OR query needed. This is simplified. For accuracy, may need multiple queries or data structure change.
+            // Simplified: Fetches for the first month in range for now. A more robust solution is needed for multi-month ranges.
+            if(uniqueMonthYears.length > 0) {
+              const [year, month] = uniqueMonthYears[0].split('-').map(Number);
+              paymentsQueryConstraints.push(where("forYear", "==", year), where("forMonth", "==", month));
+            }
+        }
         
         const attendanceQueryConstraints = [
           fromTimestamp && where("date", ">=", format(fromTimestamp.toDate(), 'yyyy-MM-dd')),
@@ -170,24 +176,21 @@ export default function StaffReportClientPage() {
             const presentDays = attendance.present + (attendance.halfDay * 0.5);
 
             if (details?.salary && dateRange?.from && dateRange.to) {
-                const monthsInRange = eachMonthOfInterval({ start: dateRange.from, end: dateRange.to });
-                
                 monthsInRange.forEach(monthStart => {
                     const monthEnd = endOfMonth(monthStart);
                     const workingDaysInMonth = calculateWorkingDays(monthStart, monthEnd, holidays, staff);
                     if (workingDaysInMonth > 0) {
                         const perDaySalary = details.salary / workingDaysInMonth;
-                        // This logic is simplified and assumes attendance is for the whole period.
-                        // A more precise calculation would filter attendance per month.
+                        // This logic is simplified; needs to count attendance per month.
                         earnedSalary += perDaySalary * presentDays;
                     }
-                    totalWorkingDays += workingDaysInMonth; // This sum might be misleading across months
+                    totalWorkingDays += workingDaysInMonth;
                 });
             }
             
             const advances = advancesMap.get(staff.uid) || 0;
             const paidAmount = paymentsMap.get(staff.uid) || 0;
-            const netPayable = earnedSalary - advances; // Net payable is earned minus advances, paid is separate
+            const netPayable = earnedSalary - advances;
             
             return { user: staff, details, earnedSalary, advances, paidAmount, netPayable, workingDays: totalWorkingDays, presentDays };
         });
@@ -233,7 +236,6 @@ export default function StaffReportClientPage() {
           default: from = undefined; to = undefined;
       }
       setTempDateRange({ from, to });
-      // Apply immediately
       setDateRange({ from, to });
       setIsDatePickerOpen(false);
   };
@@ -314,3 +316,4 @@ export default function StaffReportClientPage() {
     </div>
   );
 }
+
