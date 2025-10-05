@@ -217,9 +217,9 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
     const callingUser = await getAdminAuth().getUser(uid);
 
     for (const row of parsedData) {
-        const vendorId = row['consumption_vendor_id']?.trim(); // *** THE FIX ***
+        const vendorId = row['vendor_id']?.trim(); // *** THE FIX ***
         if (!vendorId) {
-            console.warn(`${LOG_PREFIX} Skipping row due to missing 'consumption_vendor_id'. Row:`, row);
+            console.warn(`${LOG_PREFIX} Skipping row due to missing 'vendor_id'. Row:`, row);
             continue;
         }
         const mapping = hungerboxVendorMapping[vendorId];
@@ -359,3 +359,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `An unexpected error occurred: ${error.message}` }, { status: 500 });
   }
 }
+
+    
