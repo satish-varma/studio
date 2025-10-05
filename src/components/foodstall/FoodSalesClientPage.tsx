@@ -470,7 +470,7 @@ export default function FoodSalesClientPage() {
               <Button variant={dateFilter === 'last_7_days' ? 'default' : 'outline'} onClick={() => setDateFilter('last_7_days')}>Last 7 Days</Button>
               <Button variant={dateFilter === 'this_month' ? 'default' : 'outline'} onClick={() => setDateFilter('this_month')}>This Month</Button>
               <Button variant={dateFilter === 'all_time' ? 'default' : 'outline'} onClick={() => setDateFilter('all_time')}>All Time</Button>
-              <Button variant="outline" onClick={() => setShowImportDialog('foodSales')}><Upload className="mr-2 h-4 w-4" />Import Food Sales</Button>
+              <Button variant="outline" onClick={() => setShowImportDialog('foodSales')}><Upload className="mr-2 h-4 w-4" />Import Hungerbox Sales</Button>
               <Button variant="outline" onClick={handleExport} disabled={isExporting}>{isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Download className="mr-2 h-4 w-4" />}Export</Button>
               <Button variant="outline" onClick={handleGmailImport} disabled={isGmailImporting}>{isGmailImporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Mail className="mr-2 h-4 w-4" />}Import from Gmail</Button>
             </div>
@@ -545,3 +545,5 @@ export default function FoodSalesClientPage() {
     </div>
   );
 }
+
+    

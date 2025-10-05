@@ -68,7 +68,6 @@ export default function CsvImportDialog({ dataType, isOpen, onClose }: CsvImport
         });
 
         const result = await response.json().catch(() => {
-          // Handle cases where the server returns a non-JSON response (like a 405 error page)
           throw new Error(`Server responded with status ${response.status} and non-JSON content.`);
         });
 
@@ -155,3 +154,5 @@ export default function CsvImportDialog({ dataType, isOpen, onClose }: CsvImport
     </Dialog>
   );
 }
+
+    

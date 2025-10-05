@@ -3,9 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { initializeApp, getApps, cert, App as AdminApp } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { getFirestore as getAdminFirestore, Timestamp, WriteBatch } from 'firebase-admin/firestore';
-import type { StockItem, FoodItemExpense, AppUser, FoodSaleTransaction } from '@/types';
+import type { StockItem, FoodItemExpense, AppUser, FoodSaleTransaction, Site, Stall } from '@/types';
 import Papa from 'papaparse';
 import { logFoodStallActivity } from '@/lib/foodStallLogger';
+import { hungerboxVendorMapping } from '@/lib/hungerbox-mapping';
 
 const LOG_PREFIX = "[API:CsvImport]";
 
@@ -205,108 +206,98 @@ async function handleFoodExpenseImport(adminDb: ReturnType<typeof getAdminFirest
 
 async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestore>, csvData: string, uid: string) {
     const parsedData = await parseCsv<any>(csvData);
-    const sitesMap = new Map<string, string>();
-    const stallsMap = new Map<string, string>();
-    const usersMap = new Map<string, {displayName: string, email: string}>();
 
-    // Pre-fetch context data
     const sitesSnapshot = await adminDb.collection('sites').get();
-    sitesSnapshot.forEach(doc => sitesMap.set(doc.data().name.toLowerCase(), doc.id));
+    const sitesMap = new Map(sitesSnapshot.docs.map(doc => [doc.data().name.toLowerCase(), doc.id]));
+
     const stallsSnapshot = await adminDb.collection('stalls').get();
-    stallsSnapshot.forEach(doc => stallsMap.set(doc.data().name.toLowerCase(), doc.id));
-    const usersSnapshot = await adminDb.collection('users').get();
-    usersSnapshot.forEach(doc => usersMap.set(doc.id, {displayName: doc.data().displayName, email: doc.data().email}));
-    
-    let batch = adminDb.batch();
-    let operationCount = 0;
-    let totalProcessed = 0;
-    const logAggregation = new Map<string, { siteId: string; stallId: string; count: number }>();
+    const allStalls = stallsSnapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as Stall) }));
+
+    const salesAggregation = new Map<string, FoodSaleTransaction>();
+    const callingUser = await getAdminAuth().getUser(uid);
 
     for (const row of parsedData) {
-        const siteName = row['Site Name']?.trim().toLowerCase();
-        const stallName = row['Stall Name']?.trim().toLowerCase();
-        const saleDateStr = row['Sale Date']?.trim();
-
-        if (!siteName || !stallName || !saleDateStr) {
-            console.warn(`${LOG_PREFIX} Skipping sales record due to missing Site, Stall, or Date. Row:`, row);
+        const vendorId = row['vendor_id']?.trim();
+        if (!vendorId) {
+            console.warn(`${LOG_PREFIX} Skipping row due to missing 'vendor_id'. Row:`, row);
+            continue;
+        }
+        const mapping = hungerboxVendorMapping[vendorId];
+        if (!mapping) {
+            console.warn(`${LOG_PREFIX} Skipping row due to no mapping for vendor ID: "${vendorId}"`);
             continue;
         }
 
+        const siteName = mapping.site.toLowerCase();
+        const stallName = mapping.stall.toLowerCase();
         const siteId = sitesMap.get(siteName);
-        const stallId = stallsMap.get(stallName);
+        
+        if (!siteId) {
+            console.warn(`${LOG_PREFIX} Skipping row due to unknown mapped site name: "${siteName}"`);
+            continue;
+        }
+        
+        const stall = allStalls.find(s => s.siteId === siteId && s.name.toLowerCase() === stallName);
+        if (!stall) {
+            console.warn(`${LOG_PREFIX} Skipping row due to unknown mapped stall name: "${stallName}" for site "${siteName}"`);
+            continue;
+        }
+        const stallId = stall.id;
 
-        if (!siteId || !stallId) {
-            console.warn(`${LOG_PREFIX} Skipping sales record due to unknown site/stall. Site: "${row['Site Name']}", Stall: "${row['Stall Name']}"`);
+        const orderDateStr = row['order_date']?.trim(); // Format: "9/15/2025"
+        const dateParts = orderDateStr?.split('/'); // ["9", "15", "2025"]
+        if (!dateParts || dateParts.length !== 3) {
+            console.warn(`${LOG_PREFIX} Skipping row due to invalid date format: "${orderDateStr}"`);
             continue;
         }
 
-        const saleDate = new Date(saleDateStr);
-        saleDate.setHours(0, 0, 0, 0); // Normalize to start of day
+        const year = dateParts[2];
+        const month = dateParts[0].padStart(2, '0'); // MM
+        const day = dateParts[1].padStart(2, '0');   // DD
+        const formattedDate = `${year}-${month}-${day}`; // "2025-09-15"
+        const saleDate = new Date(`${formattedDate}T00:00:00.000Z`); // Create as UTC date
 
-        const hungerboxSales = parseFloat(row['Hungerbox Sales']) || 0;
-        const upiSales = parseFloat(row['UPI Sales']) || 0;
-        const totalAmount = hungerboxSales + upiSales;
+        const saleType = row['is_mrp']?.trim() === '1' ? 'MRP' : 'Non-MRP';
+        const actualValue = parseFloat(row['actual_value']) || 0;
+        const aggKey = `${formattedDate}_${stallId}_${saleType}`;
+        
+        const currentAgg = salesAggregation.get(aggKey);
 
-        const recordedByUser = usersMap.get(row['Recorded By (UID)']);
-
-        const saleData: Omit<FoodSaleTransaction, 'id' | 'saleDate'> & { saleDate: Timestamp } = {
-            saleDate: Timestamp.fromDate(saleDate),
-            siteId,
-            stallId,
-            saleType: row['Sale Type'] || 'daily-summary',
-            hungerboxSales,
-            upiSales,
-            totalAmount,
-            notes: row.Notes || '',
-            recordedByUid: row['Recorded By (UID)'] || uid,
-            recordedByName: recordedByUser?.displayName || recordedByUser?.email || row['Recorded By (Name)'] || "",
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-        };
-
-        // Use the provided ID for updates, otherwise create a new doc.
-        const saleRef = row.ID ? adminDb.collection('foodSaleTransactions').doc(row.ID) : adminDb.collection('foodSaleTransactions').doc();
-        batch.set(saleRef, saleData, { merge: true });
-        operationCount++;
-
-        const aggKey = `${siteId}_${stallId}`;
-        const currentAgg = logAggregation.get(aggKey) || { siteId, stallId, count: 0 };
-        currentAgg.count++;
-        logAggregation.set(aggKey, currentAgg);
-
-        if (operationCount >= BATCH_SIZE) {
-            await batch.commit();
-            totalProcessed += operationCount;
-            batch = adminDb.batch();
-            operationCount = 0;
+        if (currentAgg) {
+            currentAgg.hungerboxSales += actualValue;
+            currentAgg.totalAmount += actualValue;
+        } else {
+            salesAggregation.set(aggKey, {
+                id: aggKey, // This ID is for the map, not Firestore doc
+                saleDate: Timestamp.fromDate(saleDate),
+                siteId: siteId,
+                stallId: stallId,
+                saleType: saleType,
+                hungerboxSales: actualValue,
+                upiSales: 0, 
+                totalAmount: actualValue,
+                notes: `Imported via Hungerbox CSV on ${new Date().toLocaleDateString()}.`,
+                recordedByUid: callingUser.uid,
+                recordedByName: callingUser.displayName || callingUser.email!,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+            });
         }
     }
 
-    if (operationCount > 0) {
-        await batch.commit();
-        totalProcessed += operationCount;
-    }
-    
-    const callingUser = await getAdminAuth().getUser(uid);
-    for (const [, agg] of logAggregation) {
-        await logFoodStallActivity({ 
-            uid: callingUser.uid, 
-            displayName: callingUser.displayName ?? null, 
-            email: callingUser.email ?? null, 
-            role: 'admin'
-        } as AppUser, {
-            siteId: agg.siteId,
-            stallId: agg.stallId,
-            type: 'SALE_BULK_IMPORTED',
-            relatedDocumentId: `csv-import-${Date.now()}`,
-            details: {
-                processedCount: agg.count,
-                notes: `Processed a bulk import of ${agg.count} sales records from a CSV file.`
-            }
-        });
+    if (salesAggregation.size === 0) {
+        return { message: "No valid sales data found to import after processing." };
     }
 
-    return { message: `Successfully processed ${totalProcessed} food sales records.` };
+    const batch = adminDb.batch();
+    for (const [docId, data] of salesAggregation.entries()) {
+        const saleRef = adminDb.collection('foodSaleTransactions').doc(docId);
+        batch.set(saleRef, data, { merge: true });
+    }
+
+    await batch.commit();
+
+    return { message: `Successfully processed and aggregated ${parsedData.length} CSV rows into ${salesAggregation.size} daily sales records.` };
 }
 
 export async function POST(request: NextRequest) {
@@ -333,8 +324,8 @@ export async function POST(request: NextRequest) {
     const decodedToken = await adminAuth.verifyIdToken(idToken);
     callingUserUid = decodedToken.uid;
     const adminUserDoc = await adminDb.collection('users').doc(callingUserUid).get();
-    if (!adminUserDoc.exists || adminUserDoc.data()?.role !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden: Caller is not an admin.' }, { status: 403 });
+    if (!adminUserDoc.exists || (adminUserDoc.data()?.role !== 'admin' && adminUserDoc.data()?.role !== 'manager')) {
+      return NextResponse.json({ error: 'Forbidden: Caller is not an admin or manager.' }, { status: 403 });
     }
     
     const { dataType, csvData } = await request.json();
@@ -368,3 +359,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `An unexpected error occurred: ${error.message}` }, { status: 500 });
   }
 }
+
+    
