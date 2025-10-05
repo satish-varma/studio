@@ -107,8 +107,6 @@ export default function PayrollClientPage() {
       const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
       const isGlobalHoliday = holidays.some(h => h.date === dateStr && h.siteId === null);
       
-      // A manager's working days should be calculated against global holidays, as their work spans multiple sites.
-      // A staff member's working days are affected by their specific site's holidays.
       const siteIdForHolidayCheck = staff.role === 'manager' ? null : staff.defaultSiteId;
       const isSiteHoliday = siteIdForHolidayCheck ? holidays.some(h => h.date === dateStr && h.siteId === siteIdForHolidayCheck) : false;
 
@@ -140,7 +138,6 @@ export default function PayrollClientPage() {
     const payrollMonthEnd = endOfMonth(currentMonth);
     const nextMonth = addMonths(currentMonth, 1);
     
-    // Corrected advance date range
     const advancesStartDate = payrollMonthStart;
     const advancesEndDate = new Date(nextMonth.getFullYear(), nextMonth.getMonth(), 15, 23, 59, 59);
 
@@ -407,3 +404,5 @@ export default function PayrollClientPage() {
     </div>
   );
 }
+
+    
