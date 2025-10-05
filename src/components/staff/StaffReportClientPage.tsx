@@ -131,14 +131,11 @@ export default function StaffReportClientPage() {
         const uniqueMonthYears = [...new Set(monthsInRange.map(d => `${d.getFullYear()}-${d.getMonth() + 1}`))];
 
         let paymentsQueryConstraints: QueryConstraint[] = [];
-        // THE FIX: Only apply date filters to payments if a date range is selected.
-        // If it's "All Time" (dateRange.from is undefined), this array remains empty, fetching all payments.
         if (dateRange?.from && dateRange.to) {
             const orQueries = uniqueMonthYears.map(my => {
                 const [year, month] = my.split('-').map(Number);
                 return query(collection(db, "salaryPayments"), where("forYear", "==", year), where("forMonth", "==", month));
             });
-            // This is still a simplified query logic for payments. A full implementation would run multiple queries.
             if(uniqueMonthYears.length > 0) {
               const [year, month] = uniqueMonthYears[0].split('-').map(Number);
               paymentsQueryConstraints.push(where("forYear", "==", year), where("forMonth", "==", month));
@@ -184,9 +181,8 @@ export default function StaffReportClientPage() {
                 monthsInRange.forEach(monthStart => {
                     const monthEnd = endOfMonth(monthStart);
                     const workingDaysInMonth = calculateWorkingDays(monthStart, monthEnd, holidays, staff);
-                    if (workingDaysInMonth > 0) {
+                    if (workingDaysInMonth > 0 && details.salary) {
                         const perDaySalary = details.salary / workingDaysInMonth;
-                        // This logic is simplified; needs to count attendance per month.
                         earnedSalary += perDaySalary * presentDays;
                     }
                     totalWorkingDays += workingDaysInMonth;
@@ -321,5 +317,3 @@ export default function StaffReportClientPage() {
     </div>
   );
 }
-
-    
