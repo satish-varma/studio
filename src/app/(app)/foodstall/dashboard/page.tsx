@@ -70,7 +70,7 @@ interface SalesData {
 
 export default function FoodStallDashboardPage() {
   const { user, activeSiteId, loading: authLoading } = useAuth();
-  const { users: staffList, sites: allSites, staffDetails: staffDetailsMap, loading: userManagementLoading } = useUserManagement();
+  const { users: allStaff, sites: allSites, staffDetails: staffDetailsMap, loading: userManagementLoading } = useUserManagement();
   
   const [salesData, setSalesData] = useState<SalesData>({ grossMrp: 0, grossNonMrp: 0, netMrp: 0, netNonMrp: 0 });
   const [totalExpenses, setTotalExpenses] = useState(0);
@@ -171,7 +171,7 @@ export default function FoodStallDashboardPage() {
     
     const unsubs: (()=>void)[] = [];
 
-    // --- Sales Fetching (unchanged) ---
+    // --- Sales Fetching ---
     const salesCollectionRef = collection(db, "foodSaleTransactions");
     let salesQueryConstraints: QueryConstraint[] = [];
     if (effectiveSiteId) salesQueryConstraints.push(where("siteId", "==", effectiveSiteId));
@@ -199,12 +199,12 @@ export default function FoodStallDashboardPage() {
         setPaymentSummary(Object.entries(paymentMethodTotals).map(([method, totalAmount]) => ({ method, totalAmount })));
     }));
 
-    // --- Expenses Fetching (Corrected with Timestamps) ---
+    // --- Expenses Fetching ---
     const expensesCollectionRef = collection(db, "foodItemExpenses");
     let expensesQueryConstraints: QueryConstraint[] = [];
     if (effectiveSiteId) expensesQueryConstraints.push(where("siteId", "==", effectiveSiteId));
-    if (fromTimestamp) expensesQueryConstraints.push(where("purchaseDate", ">=", fromTimestamp)); // FIX: Use timestamp here
-    if (toTimestamp) expensesQueryConstraints.push(where("purchaseDate", "<=", toTimestamp));     // FIX: Use timestamp here
+    if (fromTimestamp) expensesQueryConstraints.push(where("purchaseDate", ">=", fromTimestamp)); 
+    if (toTimestamp) expensesQueryConstraints.push(where("purchaseDate", "<=", toTimestamp));     
     const expensesQuery = query(expensesCollectionRef, ...expensesQueryConstraints);
     unsubs.push(onSnapshot(expensesQuery, (snapshot) => {
         let total = 0;
@@ -226,12 +226,17 @@ export default function FoodStallDashboardPage() {
 
     // --- Salary Fetching (Refactored for correctness) ---
     const fetchSalaryData = async () => {
-        if (staffList.length === 0) {
+        // Filter staff based on the effectiveSiteId for accurate cost attribution
+        const relevantStaff = effectiveSiteId 
+            ? allStaff.filter(s => s.defaultSiteId === effectiveSiteId || (s.role === 'manager' && s.managedSiteIds?.includes(effectiveSiteId)))
+            : allStaff;
+
+        if (relevantStaff.length === 0) {
             setTotalSalaryExpense(0);
             return;
         }
 
-        const staffUids = staffList.map(s => s.uid);
+        const staffUids = relevantStaff.map(s => s.uid);
         const uidsBatches: string[][] = [];
         for (let i = 0; i < staffUids.length; i += 30) {
             uidsBatches.push(staffUids.slice(i, i + 30));
@@ -278,7 +283,7 @@ export default function FoodStallDashboardPage() {
             }));
 
             let totalSalary = 0;
-            staffList.forEach(staff => {
+            relevantStaff.forEach(staff => {
                 const details = staffDetailsMap.get(staff.uid);
                 if (details?.salary) {
                     const monthWorkingDays = calculateWorkingDays(monthOfStartDate, endOfMonth(monthOfStartDate), holidays, staff);
@@ -297,7 +302,7 @@ export default function FoodStallDashboardPage() {
     fetchSalaryData().finally(() => setLoading(false));
 
     return () => { unsubs.forEach(unsub => unsub()); };
-  }, [effectiveSiteId, authLoading, user, dateRange, staffList, staffDetailsMap, userManagementLoading, calculateWorkingDays]);
+  }, [effectiveSiteId, authLoading, user, dateRange, allStaff, staffDetailsMap, userManagementLoading, calculateWorkingDays]);
 
   const totalSalesWithDeductions = salesData.netMrp + salesData.netNonMrp;
   const netProfit = totalSalesWithDeductions - totalExpenses - totalSalaryExpense;
@@ -527,3 +532,4 @@ export default function FoodStallDashboardPage() {
     </div>
   );
 }
+

@@ -203,10 +203,7 @@ export default function FoodStallReportClientPage() {
       
       // --- Fetch and Calculate Salary Expense ---
       let totalSalaryExpense = 0;
-      const relevantStaff = effectiveSiteId ? allStaff.filter(s => {
-          if (s.role === 'manager') return s.managedSiteIds?.includes(effectiveSiteId);
-          return s.defaultSiteId === effectiveSiteId;
-      }) : allStaff;
+      const relevantStaff = (effectiveSiteId ? allStaff.filter(s => s.defaultSiteId === effectiveSiteId || (s.role === 'manager' && s.managedSiteIds?.includes(effectiveSiteId))) : allStaff);
 
       if (relevantStaff.length > 0) {
           const uidsBatches: string[][] = [];
@@ -339,11 +336,7 @@ export default function FoodStallReportClientPage() {
           <CardContent className="space-y-4">
               <div className="flex flex-wrap items-center gap-2">
                 {datePresets.map(({label, value}) => (
-                    <Button key={value} variant={
-                        value === 'all_time' ? (!dateRange?.from && !dateRange?.to ? 'default' : 'outline') :
-                        (dateRange?.from?.getTime() === (presetMapping[value]?.from?.getTime() || -1) && dateRange?.to?.getTime() === (presetMapping[value]?.to?.getTime() || -2) ? 'default' : 'outline')}
-                        onClick={() => handleSetDatePreset(value)}
-                    >
+                    <Button key={value} variant="outline" onClick={() => handleSetDatePreset(value)}>
                         {label}
                     </Button>
                 ))}
@@ -462,12 +455,3 @@ export default function FoodStallReportClientPage() {
     </div>
   );
 }
-
-const now = new Date();
-const presetMapping: { [key: string]: { from?: Date, to?: Date } } = {
-  'this_month': { from: startOfMonth(now), to: endOfDay(now) },
-  'last_7_days': { from: startOfDay(subDays(now, 6)), to: endOfDay(now) },
-  'last_month': { from: startOfMonth(subMonths(now, 1)), to: endOfMonth(subMonths(now, 1)) },
-  'last_3_months': { from: startOfMonth(subMonths(now, 2)), to: endOfDay(now) },
-  'all_time': { from: undefined, to: undefined }
-};
