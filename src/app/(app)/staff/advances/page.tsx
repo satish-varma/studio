@@ -39,7 +39,6 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
-  FormDescription,
 } from "@/components/ui/form";
 import {
   Select,
@@ -59,6 +58,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { format, addMonths, subMonths } from "date-fns";
 import { logStaffActivity } from "@/lib/staffLogger";
 import { useUserManagement } from "@/hooks/use-user-management";
+import PageHeader from "@/components/shared/PageHeader";
+
 
 const LOG_PREFIX = "[SalaryAdvanceClientPage]";
 
@@ -105,6 +106,12 @@ export default function SalaryAdvanceClientPage() {
       setLoading(true);
       return;
     }
+    
+    if (!activeSiteId && user?.role !== 'admin') {
+      setAdvances([]);
+      setLoading(false);
+      return;
+    }
   
     // Determine the UIDs to query for based on the view (all sites or single site)
     const staffToQuery = staffList;
@@ -140,7 +147,7 @@ export default function SalaryAdvanceClientPage() {
     });
   
     return () => unsubscribers.forEach(unsub => unsub());
-  }, [staffList, userManagementLoading, authLoading, toast]);
+  }, [staffList, userManagementLoading, authLoading, toast, activeSiteId, user?.role]);
 
 
   const handleAddAdvance = async (values: SalaryAdvanceFormValues) => {
@@ -193,6 +200,18 @@ export default function SalaryAdvanceClientPage() {
 
   if (authLoading || userManagementLoading) return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin" /></div>;
   
+  if (!activeSiteId && user?.role !== 'admin') {
+    return (
+      <div className="space-y-6">
+          <PageHeader title="Salary Advances" description="Record and view salary advances for staff members."/>
+          <Alert variant="default" className="border-primary/50">
+              <Info className="h-4 w-4" /><AlertTitle>Site Selection Required</AlertTitle>
+              <AlertDescription>Please select a site from the header to manage salary advances.</AlertDescription>
+          </Alert>
+      </div>
+    );
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -253,7 +272,6 @@ export default function SalaryAdvanceClientPage() {
                                         ))}
                                         </SelectContent>
                                     </Select>
-                                    <FormDescription>Select the month this advance applies to.</FormDescription>
                                     <FormMessage />
                                     </FormItem>
                                 )}
@@ -291,8 +309,8 @@ export default function SalaryAdvanceClientPage() {
                         <TableRow key={adv.id}>
                             <TableCell>{format(new Date(adv.date), 'PPP')}</TableCell>
                             <TableCell>{(adv.forYear && adv.forMonth) ? format(new Date(adv.forYear, adv.forMonth - 1), 'MMM yyyy') : "N/A"}</TableCell>
-                            <TableCell>{staffList.find(s => s.uid === adv.staffUid)?.displayName || adv.staffUid.substring(0,8)}</TableCell>
-                            <TableCell>{adv.recordedByName || adv.recordedByUid.substring(0,8)}</TableCell>
+                            <TableCell>{staffList.find(s => s.uid === adv.staffUid)?.displayName || (adv.staffUid ? adv.staffUid.substring(0,8) : 'N/A')}</TableCell>
+                            <TableCell>{adv.recordedByName || (adv.recordedByUid ? adv.recordedByUid.substring(0,8) : 'N/A')}</TableCell>
                             <TableCell className="text-right font-medium">₹{adv.amount.toFixed(2)}</TableCell>
                             <TableCell>{adv.notes || 'N/A'}</TableCell>
                         </TableRow>
