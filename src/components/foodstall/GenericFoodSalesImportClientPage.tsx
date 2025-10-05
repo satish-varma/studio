@@ -9,7 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Loader2, Upload, FileText, ArrowLeft } from "lucide-react";
 import { useAuth } from '@/contexts/AuthContext';
 import { Label } from "@/components/ui/label";
-import { auth } from '@/lib/firebaseConfig';
+import { getAuth } from 'firebase/auth'; // Import getAuth
 import Link from 'next/link';
 
 const LOG_PREFIX = "[GenericFoodSalesImport]";
@@ -36,6 +36,8 @@ export default function GenericFoodSalesImportClientPage() {
       toast({ title: "No File Selected", description: "Please select a CSV file to import.", variant: "destructive" });
       return;
     }
+
+    const auth = getAuth(); // Get the auth instance
     if (!user || !auth.currentUser) {
       toast({ title: "Authentication Error", description: "You must be logged in to import data.", variant: "destructive" });
       return;
@@ -65,12 +67,23 @@ export default function GenericFoodSalesImportClientPage() {
         if (!response.ok) {
           throw new Error(result.error || `Server responded with status ${response.status}`);
         }
-
-        toast({
-          title: "Import Successful",
-          description: result.message || "Data imported successfully.",
-          duration: 7000,
-        });
+        
+        if (result.errors && result.errors.length > 0) {
+            toast({
+              title: "Import Partially Completed",
+              description: `${result.message}. Please check the following errors: ${result.errors.join(' ')}`,
+              variant: "destructive",
+              duration: 15000,
+            });
+        } else {
+            toast({
+              title: "Import Successful",
+              description: result.message || "Data imported successfully.",
+              duration: 7000,
+            });
+        }
+        
+        onClose(); // Assuming onClose is a prop that should be called. If not, this might need adjustment.
 
       } catch (error: any) {
         console.error(`${LOG_PREFIX} Error during import API call:`, error);
@@ -86,6 +99,12 @@ export default function GenericFoodSalesImportClientPage() {
       }
     };
     reader.readAsText(selectedFile);
+  };
+  
+  // A simple function to close, assuming it redirects. If it's a dialog, it would be passed as a prop.
+  const onClose = () => {
+    // This component is a page, so 'onClose' likely means navigating away.
+    // This is handled by the Link component below, so this can be a no-op or handled differently if it was a dialog.
   };
 
   return (
