@@ -1,12 +1,13 @@
+
 "use client";
 
 import { useMemo } from 'react';
-import type { StaffActivityLog, SalaryAdvance, SalaryPayment, StaffAttendance, StaffDetails } from '@/types';
+import type { StaffActivityLog, SalaryAdvance, SalaryPayment, StaffAttendance, StaffDetails, SalaryHistory } from '@/types';
 import { format, parseISO } from 'date-fns';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { ScrollArea } from '../ui/scroll-area';
 import { Badge } from '../ui/badge';
-import { HandCoins, IndianRupee, CalendarOff, LogIn, LogOut } from 'lucide-react';
+import { HandCoins, IndianRupee, CalendarOff, LogIn, LogOut, TrendingUp } from 'lucide-react';
 
 interface StaffHistoryProps {
   initialDetails: StaffDetails | null;
@@ -14,16 +15,17 @@ interface StaffHistoryProps {
   advances: SalaryAdvance[];
   payments: SalaryPayment[];
   attendance: StaffAttendance[];
+  salaryHistory: SalaryHistory[];
 }
 
 type HistoryEvent = {
   date: Date;
-  type: 'Join' | 'Exit' | 'Advance' | 'Salary' | 'Leave';
+  type: 'Join' | 'Exit' | 'Advance' | 'Salary' | 'Leave' | 'Appraisal';
   description: string;
   amount?: number;
 };
 
-export default function StaffHistory({ initialDetails, logs, advances, payments, attendance }: StaffHistoryProps) {
+export default function StaffHistory({ initialDetails, logs, advances, payments, attendance, salaryHistory }: StaffHistoryProps) {
   
   const combinedHistory = useMemo(() => {
     let events: HistoryEvent[] = [];
@@ -91,8 +93,17 @@ export default function StaffHistory({ initialDetails, logs, advances, payments,
         });
     });
 
+    salaryHistory.forEach(hist => {
+        events.push({
+            date: new Date(hist.effectiveDate),
+            type: 'Appraisal',
+            description: hist.notes || `Salary updated to new amount.`,
+            amount: hist.newSalary,
+        });
+    });
+
     return events.sort((a, b) => b.date.getTime() - a.date.getTime());
-  }, [logs, advances, payments, attendance, initialDetails]);
+  }, [logs, advances, payments, attendance, initialDetails, salaryHistory]);
 
   const getIcon = (type: HistoryEvent['type']) => {
     switch (type) {
@@ -101,6 +112,7 @@ export default function StaffHistory({ initialDetails, logs, advances, payments,
       case 'Advance': return <HandCoins className="h-4 w-4 text-orange-500" />;
       case 'Salary': return <IndianRupee className="h-4 w-4 text-blue-500" />;
       case 'Leave': return <CalendarOff className="h-4 w-4 text-yellow-500" />;
+      case 'Appraisal': return <TrendingUp className="h-4 w-4 text-indigo-500" />;
       default: return null;
     }
   };
@@ -130,13 +142,18 @@ export default function StaffHistory({ initialDetails, logs, advances, payments,
                     </p>
                      <Badge variant={
                         event.type === 'Join' ? 'default' : 
-                        event.type === 'Exit' ? 'destructive' : 
+                        event.type === 'Exit' ? 'destructive' :
+                        event.type === 'Appraisal' ? 'outline' :
                         'secondary'
-                    }>{event.type}</Badge>
+                    } className={event.type === 'Appraisal' ? 'border-indigo-500 text-indigo-600' : ''}>
+                        {event.type}
+                    </Badge>
                 </div>
                 <p className="text-sm text-muted-foreground mt-1">{event.description}</p>
                  {event.amount !== undefined && (
-                    <p className="text-sm font-medium text-accent mt-1">Amount: ₹{event.amount.toFixed(2)}</p>
+                    <p className="text-sm font-medium text-accent mt-1">
+                        {event.type === 'Appraisal' ? 'New Salary' : 'Amount'}: ₹{event.amount.toFixed(2)}
+                    </p>
                  )}
             </div>
           </div>

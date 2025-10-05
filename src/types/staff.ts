@@ -94,4 +94,23 @@ export const salaryPaymentFormSchema = z.object({
 
 export type SalaryPaymentFormValues = z.infer<typeof salaryPaymentFormSchema>;
 
-    
+
+// --------------- Salary History (Appraisal) ---------------
+export interface SalaryHistory {
+    id: string; // Firestore document ID
+    staffUid: string;
+    newSalary: number;
+    effectiveDate: string; // YYYY-MM-DD format
+    notes?: string;
+    recordedByUid: string;
+    recordedByName: string;
+    recordedAt: string; // ISO timestamp
+}
+
+export const salaryHistoryFormSchema = z.object({
+    newSalary: z.coerce.number().min(0, "Salary must be a non-negative number."),
+    effectiveDate: z.date({ required_error: "Effective date is required." }),
+    notes: z.string().optional(),
+});
+
+export type SalaryHistoryFormValues = z.infer<typeof salaryHistoryFormSchema>;

@@ -3,7 +3,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
-import type { StaffDetailsFormValues, AppUser, StaffDetails, StaffActivityLog, SalaryAdvance, SalaryPayment, StaffAttendance, Site, Stall } from "@/types";
+import type { StaffDetailsFormValues, AppUser, StaffDetails, StaffActivityLog, SalaryAdvance, SalaryPayment, StaffAttendance, Site, Stall, SalaryHistory } from "@/types";
 import { staffDetailsFormSchema } from "@/types/staff";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,7 +18,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription as UiCardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, Save, History, Building, Store } from "lucide-react";
+import { Loader2, Save, History, Building, Store, TrendingUp } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
 import { doc, setDoc, updateDoc, collection, query, where, getDocs, orderBy, onSnapshot } from "firebase/firestore";
@@ -29,6 +29,7 @@ import { logStaffActivity } from "@/lib/staffLogger";
 import { useAuth } from "@/contexts/AuthContext";
 import StaffHistory from "./StaffHistory";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import SalaryHistoryDialog from "./SalaryHistoryDialog";
 
 
 interface StaffDetailsFormProps {
@@ -52,6 +53,9 @@ export default function StaffDetailsForm({ staffUid, initialData, staffUser }: S
   const [sites, setSites] = useState<Site[]>([]);
   const [stalls, setStalls] = useState<Stall[]>([]);
   const [stallsForSelectedSite, setStallsForSelectedSite] = useState<Stall[]>([]);
+
+  const [isSalaryHistoryDialogOpen, setIsSalaryHistoryDialogOpen] = useState(false);
+  const [salaryHistory, setSalaryHistory] = useState<SalaryHistory[]>([]);
 
   const form = useForm<StaffDetailsFormValues>({
     resolver: zodResolver(staffDetailsFormSchema),
@@ -79,11 +83,17 @@ export default function StaffDetailsForm({ staffUid, initialData, staffUser }: S
         setStalls(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Stall)));
     });
 
+    const unsubSalaryHistory = onSnapshot(query(collection(db, "salaryHistory"), where("staffUid", "==", staffUid), orderBy("effectiveDate", "desc")), (snapshot) => {
+      setSalaryHistory(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SalaryHistory)));
+    });
+
+
     return () => {
         unsubSites();
         unsubStalls();
+        unsubSalaryHistory();
     };
-  }, []);
+  }, [staffUid]);
 
   useEffect(() => {
     if (selectedSiteId) {
@@ -91,7 +101,6 @@ export default function StaffDetailsForm({ staffUid, initialData, staffUser }: S
     } else {
         setStallsForSelectedSite([]);
     }
-    // Don't reset stall if site changes, it will be handled by the form logic or can be done manually if desired
   }, [selectedSiteId, stalls]);
 
 
@@ -187,6 +196,7 @@ export default function StaffDetailsForm({ staffUid, initialData, staffUser }: S
   }
 
   return (
+    <>
     <div className="space-y-6">
       <Card className="max-w-2xl mx-auto shadow-lg">
         <CardHeader>
@@ -198,7 +208,7 @@ export default function StaffDetailsForm({ staffUid, initialData, staffUser }: S
             <CardContent className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <FormField name="phoneNumber" control={form.control} render={({ field }) => ( <FormItem><FormLabel>Phone Number</FormLabel><FormControl><Input placeholder="e.g., +91..." {...field} value={field.value ?? ""} /></FormControl><FormMessage /></FormItem> )} />
-                <FormField name="salary" control={form.control} render={({ field }) => ( <FormItem><FormLabel>Salary (Monthly, ₹)</FormLabel><FormControl><Input type="number" placeholder="e.g., 25000" {...field} value={field.value ?? 0} onChange={e => field.onChange(parseInt(e.target.value, 10) || 0)}/></FormControl><FormMessage /></FormItem> )} />
+                <FormField name="salary" control={form.control} render={({ field }) => ( <FormItem><FormLabel>Current Salary (Monthly, ₹)</FormLabel><FormControl><Input type="number" placeholder="e.g., 25000" {...field} value={field.value ?? 0} onChange={e => field.onChange(parseInt(e.target.value, 10) || 0)}/></FormControl><FormMessage /></FormItem> )} />
               </div>
               <FormField name="address" control={form.control} render={({ field }) => ( <FormItem><FormLabel>Address</FormLabel><FormControl><Textarea placeholder="Full address" {...field} value={field.value ?? ""} /></FormControl><FormMessage /></FormItem> )} />
               
@@ -244,12 +254,17 @@ export default function StaffDetailsForm({ staffUid, initialData, staffUser }: S
                 <FormField name="exitDate" control={form.control} render={({ field }) => ( <FormItem><FormLabel>Exit Date (Optional)</FormLabel><DatePicker date={field.value ?? undefined} onDateChange={field.onChange} /><FormDescription className="text-xs">Setting this will make the user inactive.</FormDescription></FormItem> )} />
               </div>
             </CardContent>
-            <CardFooter className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => router.back()} disabled={isSubmitting}>Cancel</Button>
-              <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                Save Details
-              </Button>
+            <CardFooter className="flex justify-between items-center">
+               <Button type="button" variant="secondary" onClick={() => setIsSalaryHistoryDialogOpen(true)}>
+                    <TrendingUp className="mr-2 h-4 w-4" /> Record Appraisal
+                </Button>
+              <div className="flex gap-2">
+                <Button type="button" variant="outline" onClick={() => router.back()} disabled={isSubmitting}>Cancel</Button>
+                <Button type="submit" disabled={isSubmitting}>
+                    {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                    Save Details
+                </Button>
+              </div>
             </CardFooter>
           </form>
         </Form>
@@ -270,10 +285,19 @@ export default function StaffDetailsForm({ staffUid, initialData, staffUser }: S
                     advances={advances}
                     payments={payments}
                     attendance={attendance}
+                    salaryHistory={salaryHistory}
                 />
             )}
         </CardContent>
       </Card>
     </div>
+    <SalaryHistoryDialog
+        isOpen={isSalaryHistoryDialogOpen}
+        onClose={() => setIsSalaryHistoryDialogOpen(false)}
+        staffUser={staffUser}
+        currentSalary={initialData?.salary || 0}
+        salaryHistory={salaryHistory}
+    />
+    </>
   );
 }
