@@ -5,6 +5,7 @@ import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { getFirestore as getAdminFirestore, Timestamp, WriteBatch } from 'firebase-admin/firestore';
 import type { AppUser, FoodSaleTransaction, Site, Stall } from '@/types';
 import Papa from 'papaparse';
+import { format } from 'date-fns';
 
 const LOG_PREFIX = "[API:FoodSalesImport]";
 
