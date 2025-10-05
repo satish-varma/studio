@@ -8,7 +8,7 @@ import { Users, UserX, UserRoundCheck, HandCoins, CalendarDays, Wallet, Building
 import { useAuth } from "@/contexts/AuthContext";
 import { getFirestore, collection, query, where, onSnapshot, getDocs } from "firebase/firestore";
 import type { AppUser, StaffAttendance, SalaryAdvance, Holiday, StaffDetails, Site, SalaryPayment } from "@/types";
-import { format, startOfMonth, endOfMonth, getDaysInMonth, startOfDay, endOfDay, subDays, startOfWeek, subMonths, isBefore, isAfter, max, min, endOfWeek } from "date-fns";
+import { format, startOfMonth, endOfMonth, getDaysInMonth, startOfDay, endOfDay, subDays, startOfWeek, subMonths, isBefore, isAfter, max, min, endOfWeek, eachMonthOfInterval, getMonth } from "date-fns";
 import { Loader2, Info, IndianRupee } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -63,13 +63,28 @@ export default function StaffDashboardPage() {
     const effectiveSiteId = user?.role === 'admin' ? (siteFilter === 'all' ? null : siteFilter) : activeSiteId;
     
     const filteredStaffList = useMemo(() => {
-        if (!effectiveSiteId) return allStaff.filter(s => s.role === 'staff' || s.role === 'manager');
+        if (!effectiveSiteId && user?.role !== 'admin') {
+            // For managers, if no site is selected, show staff from all their managed sites.
+            if(user?.role === 'manager') {
+                const managedSiteIds = user.managedSiteIds || [];
+                return allStaff.filter(s => {
+                    if (s.role === 'staff') return s.defaultSiteId && managedSiteIds.includes(s.defaultSiteId);
+                    if (s.role === 'manager') return s.managedSiteIds?.some(msid => managedSiteIds.includes(msid));
+                    return false;
+                });
+            }
+            return [];
+        }
+        if (!effectiveSiteId && user?.role === 'admin') { // Admin with "All Sites"
+            return allStaff.filter(s => s.role === 'staff' || s.role === 'manager');
+        }
+        // Admin or Manager with a specific site selected
         return allStaff.filter(s => {
           if (s.role === 'staff') return s.defaultSiteId === effectiveSiteId;
-          if (s.role === 'manager') return s.managedSiteIds?.includes(effectiveSiteId);
+          if (s.role === 'manager') return s.managedSiteIds?.includes(effectiveSiteId!);
           return false;
         });
-    }, [allStaff, effectiveSiteId]);
+    }, [allStaff, effectiveSiteId, user]);
 
 
     const [stats, setStats] = useState({ 
@@ -156,12 +171,15 @@ export default function StaffDashboardPage() {
                 advancesSnapshots, 
                 attendanceTodaySnapshots,
                 attendancePeriodSnapshots,
-                holidaysSnapshot
+                holidaysSnapshot,
+                allPaymentsSnapshots,
             ] = await Promise.all([
                 Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "advances"), ...advancesQueryConstraints, where("staffUid", "in", batch))))),
                 Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "staffAttendance"), where("date", "==", todayStr), where("staffUid", "in", batch))))),
                 Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "staffAttendance"), ...attendanceQueryConstraints, where("staffUid", "in", batch))))),
-                getDocs(query(collection(db, "holidays")))
+                getDocs(query(collection(db, "holidays"))),
+                // Fetch all payments only if "All Time" is selected for salary calculation accuracy
+                !fromDate && !toDate ? Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", batch))))) : Promise.resolve([]),
             ]);
             
             const allAdvances = advancesSnapshots.flat().flatMap(s => s.docs.map(doc => ({id: doc.id, ...doc.data()} as SalaryAdvance)));
@@ -206,21 +224,42 @@ export default function StaffDashboardPage() {
             activeStaffList.forEach(staff => {
                 const details = staffDetailsMap.get(staff.uid);
                 projectedSalary += details?.salary || 0;
-                
-                if (!fromDate || !toDate) return;
-
-                const monthForSalaryCalc = startOfMonth(fromDate);
-                const workingDaysInMonth = calculateWorkingDays(monthForSalaryCalc, endOfMonth(monthForSalaryCalc), holidays, staff);
-                
-                const attendance = periodAttendanceMap.get(staff.uid);
-                if (details?.salary && attendance && workingDaysInMonth > 0) {
-                    const perDaySalary = details.salary / workingDaysInMonth;
-                    const presentDays = attendance.present + (attendance.halfDay * 0.5);
-                    const earned = perDaySalary * presentDays;
-                    salaryForPeriod += earned;
-                    earnedSalarySummaryData.push({ uid: staff.uid, name: getStaffName(staff.uid), earnedSalary: earned });
-                }
             });
+            
+            if (fromDate && toDate) {
+                const monthsInRange = eachMonthOfInterval({ start: fromDate, end: toDate });
+                const holidaysByMonth: Record<number, Holiday[]> = {};
+
+                monthsInRange.forEach(monthStart => {
+                    const monthKey = getMonth(monthStart);
+                    holidaysByMonth[monthKey] = holidays.filter(h => {
+                        const hDate = new Date(h.date);
+                        return hDate >= startOfMonth(monthStart) && hDate <= endOfMonth(monthStart);
+                    });
+                });
+
+                activeStaffList.forEach(staff => {
+                    const details = staffDetailsMap.get(staff.uid);
+                    if (details?.salary) {
+                        const attendance = periodAttendanceMap.get(staff.uid);
+                        if(attendance) {
+                            const monthKey = getMonth(fromDate);
+                            const workingDaysInMonth = calculateWorkingDays(startOfMonth(fromDate), endOfMonth(fromDate), holidaysByMonth[monthKey] || [], staff);
+                            if (workingDaysInMonth > 0) {
+                                const perDaySalary = details.salary / workingDaysInMonth;
+                                const presentDays = attendance.present + (attendance.halfDay * 0.5);
+                                const earned = perDaySalary * presentDays;
+                                salaryForPeriod += earned;
+                                earnedSalarySummaryData.push({ uid: staff.uid, name: getStaffName(staff.uid), earnedSalary: earned });
+                            }
+                        }
+                    }
+                });
+            } else { // "All Time" calculation
+                 salaryForPeriod = allPaymentsSnapshots.flat().reduce((sum, snapshot) => {
+                    return sum + snapshot.docs.reduce((docSum, doc) => docSum + (doc.data() as SalaryPayment).amountPaid, 0);
+                }, 0);
+            }
 
             setEarnedSalarySummary(earnedSalarySummaryData.sort((a, b) => b.earnedSalary - a.earnedSalary));
             
@@ -269,7 +308,6 @@ export default function StaffDashboardPage() {
             default: from = undefined; to = undefined;
         }
         setDateRange({ from, to });
-        setTempDateRange({ from, to });
     };
 
     const loading = authLoading || userManagementLoading || loadingCalculations;
@@ -297,7 +335,7 @@ export default function StaffDashboardPage() {
     const statCards = [
         { title: "Active Staff", value: stats.totalStaff, icon: Users, description: "Total active staff in this context." },
         { title: "Projected Salary", value: `₹${stats.projectedSalary.toFixed(2)}`, icon: Wallet, description: "Total base salary of active staff." },
-        { title: "Salary Bill (Period)", value: `₹${stats.salaryForPeriod.toFixed(2)}`, icon: CalendarDays, description: "Earned salary based on attendance." },
+        { title: "Salary Bill (Period)", value: `₹${stats.salaryForPeriod.toFixed(2)}`, icon: CalendarDays, description: dateRange?.from ? "Earned salary based on attendance." : "Total salary paid all time." },
         { title: "Present Today", value: stats.presentToday, icon: UserRoundCheck, description: `${stats.presentToday} of ${stats.totalStaff} staff present.` },
         { title: "Advances (Period)", value: `₹${stats.advancesForPeriod.toFixed(2)}`, icon: HandCoins, description: "Total salary advance in period." },
         { title: "Leave/Absent Today", value: stats.notPresentToday, icon: UserX, description: "Staff not marked as 'Present'." },
@@ -457,5 +495,7 @@ export default function StaffDashboardPage() {
         </div>
     );
 }
+
+    
 
     
