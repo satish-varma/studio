@@ -8,7 +8,7 @@ import { Users, UserX, UserRoundCheck, HandCoins, CalendarDays, Wallet, Building
 import { useAuth } from "@/contexts/AuthContext";
 import { getFirestore, collection, query, where, onSnapshot, getDocs } from "firebase/firestore";
 import type { AppUser, StaffAttendance, SalaryAdvance, Holiday, StaffDetails, Site } from "@/types";
-import { format, startOfMonth, endOfMonth, getDaysInMonth, startOfDay, endOfDay, subDays } from "date-fns";
+import { format, startOfMonth, endOfMonth, getDaysInMonth, startOfDay, endOfDay, subDays, startOfWeek, subMonths } from "date-fns";
 import { Loader2, Info, IndianRupee } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -168,7 +168,13 @@ export default function StaffDashboardPage() {
             const activeStaffCount = activeStaffList.length;
 
             const notPresentRecords = attendanceTodayDocs.filter(doc => ['Leave', 'Absent', 'Half-day'].includes((doc.data() as StaffAttendance).status)).map(doc => ({ id: doc.id, ...doc.data() } as StaffAttendance));
-            const presentCount = activeStaffCount - notPresentRecords.length;
+            
+            const presentTodayUids = new Set(attendanceTodayDocs
+                .filter(doc => (doc.data() as StaffAttendance).status === 'Present' || (doc.data() as StaffAttendance).status === 'Half-day')
+                .map(doc => (doc.data() as StaffAttendance).staffUid)
+            );
+            const presentCount = activeStaffList.filter(s => presentTodayUids.has(s.uid)).length;
+
             setStaffOnLeaveOrAbsent(notPresentRecords);
             
             const holidays = holidaysSnapshot.docs.map(d => d.data() as Holiday);
@@ -231,6 +237,8 @@ export default function StaffDashboardPage() {
         { label: "Today", value: 'today' },
         { label: "This Week", value: 'this_week' },
         { label: "This Month", value: 'this_month' },
+        { label: "Last Month", value: 'last_month' },
+        { label: "Last 3 Months", value: 'last_3_months' },
         { label: "All Time", value: 'all_time' },
     ];
     
@@ -240,8 +248,10 @@ export default function StaffDashboardPage() {
 
         switch (preset) {
             case 'today': from = startOfDay(now); break;
-            case 'this_week': from = startOfDay(subDays(now, now.getDay() - 1)); break;
+            case 'this_week': from = startOfWeek(now); break;
             case 'this_month': from = startOfMonth(now); break;
+            case 'last_month': from = startOfMonth(subMonths(now, 1)); to = endOfMonth(subMonths(now, 1)); break;
+            case 'last_3_months': from = startOfMonth(subMonths(now, 2)); break;
             case 'all_time': from = undefined; to = undefined; break;
             default: from = undefined; to = undefined;
         }
@@ -271,7 +281,7 @@ export default function StaffDashboardPage() {
     }
 
     const statCards = [
-        { title: "Active Staff", value: stats.totalStaff, icon: Users, description: "Total active staff members." },
+        { title: "Active Staff", value: stats.totalStaff, icon: Users, description: "Total active staff in this context." },
         { title: "Projected Salary", value: `₹${stats.projectedSalary.toFixed(2)}`, icon: Wallet, description: "Total base salary of active staff." },
         { title: "Salary Bill (Period)", value: `₹${stats.salaryForPeriod.toFixed(2)}`, icon: CalendarDays, description: "Earned salary based on attendance." },
         { title: "Present Today", value: stats.presentToday, icon: UserRoundCheck, description: `${stats.presentToday} of ${stats.totalStaff} staff present.` },
@@ -433,3 +443,4 @@ export default function StaffDashboardPage() {
         </div>
     );
 }
+
