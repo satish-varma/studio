@@ -61,7 +61,10 @@ export async function POST(request: NextRequest) {
     const sitesMap = new Map(sitesSnapshot.docs.map(doc => [doc.data().name.toLowerCase(), doc.id]));
 
     const stallsSnapshot = await adminDb.collection('stalls').get();
-    const allStalls = stallsSnapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as Stall) }));
+    const allStalls: Stall[] = stallsSnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...(doc.data() as Omit<Stall, 'id'>)
+    }));
 
     const batch = adminDb.batch();
     let validRecordsCount = 0;
