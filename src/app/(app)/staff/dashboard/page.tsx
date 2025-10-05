@@ -8,7 +8,7 @@ import { Users, UserX, UserRoundCheck, HandCoins, CalendarDays, Wallet, Building
 import { useAuth } from "@/contexts/AuthContext";
 import { getFirestore, collection, query, where, onSnapshot, getDocs } from "firebase/firestore";
 import type { AppUser, StaffAttendance, SalaryAdvance, Holiday, StaffDetails, Site, SalaryPayment } from "@/types";
-import { format, startOfMonth, endOfMonth, getDaysInMonth, startOfDay, endOfDay, subDays, startOfWeek, subMonths, isBefore, isAfter, max, min } from "date-fns";
+import { format, startOfMonth, endOfMonth, getDaysInMonth, startOfDay, endOfDay, subDays, startOfWeek, subMonths, isBefore, isAfter, max, min, endOfWeek } from "date-fns";
 import { Loader2, Info, IndianRupee } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -268,7 +268,7 @@ export default function StaffDashboardPage() {
             case 'all_time': from = undefined; to = undefined; break;
             default: from = undefined; to = undefined;
         }
-        setTempDateRange({ from, to });
+        setDateRange({ from, to });
     };
 
     const loading = authLoading || userManagementLoading || loadingCalculations;
@@ -354,7 +354,7 @@ export default function StaffDashboardPage() {
                 <CardContent className="space-y-4">
                      <div className="flex flex-wrap items-center gap-2">
                         {datePresets.map(({ label, value }) => (
-                            <Button key={value} variant={dateRange?.from?.getTime() === tempDateRange?.from?.getTime() && dateRange?.to?.getTime() === tempDateRange?.to?.getTime() ? 'default' : 'outline'} onClick={() => handleSetDatePreset(value)}>
+                            <Button key={value} variant="outline" onClick={() => handleSetDatePreset(value)}>
                                 {label}
                             </Button>
                         ))}
@@ -375,7 +375,10 @@ export default function StaffDashboardPage() {
                                 <div className="p-2 border-r">
                                     <div className="flex flex-col items-stretch gap-1">
                                         {datePresets.map(({label, value}) => (
-                                            <Button key={value} variant="ghost" className="justify-start" onClick={() => handleSetDatePreset(value)}>{label}</Button>
+                                            <Button key={value} variant="ghost" className="justify-start" onClick={() => {
+                                                handleSetDatePreset(value);
+                                                setIsDatePickerOpen(false);
+                                            }}>{label}</Button>
                                         ))}
                                     </div>
                                 </div>
@@ -463,3 +466,5 @@ export default function StaffDashboardPage() {
         </div>
     );
 }
+
+    
