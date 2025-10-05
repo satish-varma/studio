@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
@@ -126,6 +127,7 @@ export default function FoodStallDashboardPage() {
     { label: "This Week", value: 'this_week' },
     { label: "This Month", value: 'this_month' },
     { label: "Last Month", value: 'last_month' },
+    { label: "Last 3 Months", value: 'last_3_months' },
     { label: "All Time", value: 'all_time' },
   ];
   
@@ -138,10 +140,13 @@ export default function FoodStallDashboardPage() {
         case 'this_week': from = startOfWeek(now); break;
         case 'this_month': from = startOfMonth(now); break;
         case 'last_month': from = startOfMonth(subMonths(now, 1)); to = endOfMonth(subMonths(now, 1)); break;
+        case 'last_3_months': from = startOfMonth(subMonths(now, 2)); to = endOfMonth(now); break;
         case 'all_time': from = undefined; to = undefined; break;
         default: from = undefined; to = undefined;
     }
+    setDateRange({ from, to });
     setTempDateRange({ from, to });
+    setIsDatePickerOpen(false); // Close popover when preset is clicked
   };
   
   const applyDateFilter = () => {
@@ -392,40 +397,40 @@ export default function FoodStallDashboardPage() {
           <CardDescription>Select a site and date range to analyze profits.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-             <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
-                <PopoverTrigger asChild>
-                <Button
-                    id="dateRangePicker" variant={'outline'}
-                    className={cn("w-full lg:w-[300px] justify-start text-left font-normal bg-input", !dateRange && "text-muted-foreground")}
-                >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {dateRange?.from ? ( dateRange.to ? (
-                        <> {format(dateRange.from, "LLL dd, y")} - {format(dateRange.to, "LLL dd, y")} </>
-                    ) : ( format(dateRange.from, "LLL dd, y") )
-                    ) : ( <span>Pick a date range</span> )}
-                </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0 flex" align="start">
-                    <div className="p-2 border-r">
-                        <div className="flex flex-col items-stretch gap-1">
-                            {datePresets.map(({label, value}) => (
-                                <Button key={value} variant="ghost" className="justify-start" onClick={() => handleSetDatePreset(value)}>{label}</Button>
-                            ))}
+            <div className="flex flex-wrap items-center gap-2">
+                {datePresets.map(({ label, value }) => (
+                    <Button key={value} variant="outline" onClick={() => handleSetDatePreset(value)}>
+                        {label}
+                    </Button>
+                ))}
+                <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
+                    <PopoverTrigger asChild>
+                    <Button
+                        id="dateRangePicker" variant={'outline'}
+                        className={cn("w-full sm:w-auto min-w-[280px] justify-start text-left font-normal bg-input", !dateRange && "text-muted-foreground")}
+                    >
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {dateRange?.from ? ( dateRange.to ? (
+                            <> {format(dateRange.from, "LLL dd, y")} - {format(dateRange.to, "LLL dd, y")} </>
+                        ) : ( format(dateRange.from, "LLL dd, y") )
+                        ) : ( <span>Pick a custom date range</span> )}
+                    </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0 flex" align="start">
+                        <div className="p-2">
+                             <Calendar
+                                initialFocus mode="range" defaultMonth={tempDateRange?.from}
+                                selected={tempDateRange} onSelect={setTempDateRange} numberOfMonths={2}
+                                disabled={(date) => date > new Date() || date < new Date("2000-01-01")}
+                            />
+                            <div className="flex justify-end gap-2 pt-2 border-t mt-2">
+                                 <Button variant="ghost" onClick={() => setIsDatePickerOpen(false)}>Close</Button>
+                                 <Button onClick={applyDateFilter}>Apply</Button>
+                            </div>
                         </div>
-                    </div>
-                    <div className="p-2">
-                         <Calendar
-                            initialFocus mode="range" defaultMonth={tempDateRange?.from}
-                            selected={tempDateRange} onSelect={setTempDateRange} numberOfMonths={2}
-                            disabled={(date) => date > new Date() || date < new Date("2000-01-01")}
-                        />
-                        <div className="flex justify-end gap-2 pt-2 border-t mt-2">
-                             <Button variant="ghost" onClick={() => setIsDatePickerOpen(false)}>Close</Button>
-                             <Button onClick={applyDateFilter}>Apply</Button>
-                        </div>
-                    </div>
-                </PopoverContent>
-            </Popover>
+                    </PopoverContent>
+                </Popover>
+            </div>
 
             {user?.role === 'admin' && (
                 <div className="max-w-xs">
@@ -532,4 +537,3 @@ export default function FoodStallDashboardPage() {
     </div>
   );
 }
-
