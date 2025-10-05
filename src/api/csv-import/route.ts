@@ -219,15 +219,15 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
     
     const stallsSnapshot = await adminDb.collection('stalls').get();
     const allStalls: Stall[] = stallsSnapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-            id: doc.id,
-            name: data.name,
-            siteId: data.siteId,
-            stallType: data.stallType,
-            createdAt: data.createdAt,
-            updatedAt: data.updatedAt,
-        };
+      const data = doc.data();
+      return {
+          id: doc.id,
+          name: data.name,
+          siteId: data.siteId,
+          stallType: data.stallType,
+          createdAt: data.createdAt,
+          updatedAt: data.updatedAt,
+      };
     });
 
     const salesAggregation = new Map<string, FoodSaleTransaction>();
