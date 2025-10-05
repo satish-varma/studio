@@ -339,40 +339,47 @@ export default function StaffDashboardPage() {
                   <CardDescription>Select a site and date range to analyze staff metrics.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                     <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
-                        <PopoverTrigger asChild>
-                        <Button
-                            id="dateRangePicker" variant={'outline'}
-                            className={cn("w-full lg:w-[300px] justify-start text-left font-normal bg-input", !dateRange && "text-muted-foreground")}
-                        >
-                            <CalendarIcon className="mr-2 h-4 w-4" />
-                            {dateRange?.from ? ( dateRange.to ? (
-                                <> {format(dateRange.from, "LLL dd, y")} - {format(dateRange.to, "LLL dd, y")} </>
-                            ) : ( format(dateRange.from, "LLL dd, y") )
-                            ) : ( <span>Pick a date range</span> )}
-                        </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0 flex" align="start">
-                            <div className="p-2 border-r">
-                                <div className="flex flex-col items-stretch gap-1">
-                                    {datePresets.map(({label, value}) => (
-                                        <Button key={value} variant="ghost" className="justify-start" onClick={() => handleSetDatePreset(value)}>{label}</Button>
-                                    ))}
+                     <div className="flex flex-wrap items-center gap-2">
+                        {datePresets.map(({ label, value }) => (
+                            <Button key={value} variant={dateRange?.from?.getTime() === tempDateRange?.from?.getTime() && dateRange?.to?.getTime() === tempDateRange?.to?.getTime() ? 'default' : 'outline'} onClick={() => handleSetDatePreset(value)}>
+                                {label}
+                            </Button>
+                        ))}
+                        <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
+                            <PopoverTrigger asChild>
+                            <Button
+                                id="dateRangePicker" variant={'outline'}
+                                className={cn("w-full sm:w-[300px] justify-start text-left font-normal bg-input", !dateRange && "text-muted-foreground")}
+                            >
+                                <CalendarIcon className="mr-2 h-4 w-4" />
+                                {dateRange?.from ? ( dateRange.to ? (
+                                    <> {format(dateRange.from, "LLL dd, y")} - {format(dateRange.to, "LLL dd, y")} </>
+                                ) : ( format(dateRange.from, "LLL dd, y") )
+                                ) : ( <span>Pick a date range</span> )}
+                            </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0 flex" align="start">
+                                <div className="p-2 border-r">
+                                    <div className="flex flex-col items-stretch gap-1">
+                                        {datePresets.map(({label, value}) => (
+                                            <Button key={value} variant="ghost" className="justify-start" onClick={() => handleSetDatePreset(value)}>{label}</Button>
+                                        ))}
+                                    </div>
                                 </div>
-                            </div>
-                            <div className="p-2">
-                                 <Calendar
-                                    initialFocus mode="range" defaultMonth={tempDateRange?.from}
-                                    selected={tempDateRange} onSelect={setTempDateRange} numberOfMonths={2}
-                                    disabled={(date) => date > new Date() || date < new Date("2000-01-01")}
-                                />
-                                <div className="flex justify-end gap-2 pt-2 border-t mt-2">
-                                     <Button variant="ghost" onClick={() => setIsDatePickerOpen(false)}>Close</Button>
-                                     <Button onClick={applyDateFilter}>Apply</Button>
+                                <div className="p-2">
+                                     <Calendar
+                                        initialFocus mode="range" defaultMonth={tempDateRange?.from}
+                                        selected={tempDateRange} onSelect={setTempDateRange} numberOfMonths={2}
+                                        disabled={(date) => date > new Date() || date < new Date("2000-01-01")}
+                                    />
+                                    <div className="flex justify-end gap-2 pt-2 border-t mt-2">
+                                         <Button variant="ghost" onClick={() => setIsDatePickerOpen(false)}>Close</Button>
+                                         <Button onClick={applyDateFilter}>Apply</Button>
+                                    </div>
                                 </div>
-                            </div>
-                        </PopoverContent>
-                    </Popover>
+                            </PopoverContent>
+                        </Popover>
+                    </div>
 
                     {user?.role === 'admin' && (
                         <div className="max-w-xs">
@@ -443,4 +450,3 @@ export default function StaffDashboardPage() {
         </div>
     );
 }
-
