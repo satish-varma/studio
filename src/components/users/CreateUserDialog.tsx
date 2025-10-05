@@ -280,7 +280,7 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
         <DialogHeader>
           <DialogTitle>Create New User</DialogTitle>
           <DialogDescription>
-            Creates a Firebase Authentication user and their Firestore document with specified role and assignments.
+            This creates a new user in the authentication system and sets up their profile in the database.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
