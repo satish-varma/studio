@@ -21,6 +21,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { DateRange } from "react-day-picker";
+import { Label } from "@/components/ui/label";
 
 
 const db = getFirestore();
@@ -432,5 +433,3 @@ export default function StaffDashboardPage() {
         </div>
     );
 }
-
-
