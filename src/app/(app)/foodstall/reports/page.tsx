@@ -2,10 +2,9 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback } from "react";
-import { ReportControls } from "@/components/reports/ReportControls";
 import type { FoodSaleTransaction, FoodItemExpense, AppUser, StaffDetails, Holiday, StaffAttendance, SalaryPayment } from "@/types";
 import type { DateRange } from "react-day-picker";
-import { subDays, startOfDay, endOfDay, isValid, format, startOfMonth, getDaysInMonth, endOfMonth } from "date-fns";
+import { subDays, startOfDay, endOfDay, isValid, format, startOfMonth, getDaysInMonth, endOfMonth, subMonths } from "date-fns";
 import {
     getFirestore,
     collection,
@@ -18,7 +17,7 @@ import {
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
-import { Loader2, Info, IndianRupee, ShoppingBag, TrendingUp, AlertTriangle, ListOrdered, Percent, Users } from "lucide-react";
+import { Loader2, Info, IndianRupee, ShoppingBag, TrendingUp, AlertTriangle, ListOrdered, Percent, Users, Calendar as CalendarIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -31,6 +30,10 @@ import {
 } from "@/components/ui/table";
 import PageHeader from "@/components/shared/PageHeader";
 import { useUserManagement } from "@/hooks/use-user-management";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { cn } from "@/lib/utils";
 
 
 const LOG_PREFIX = "[FoodStallReportClientPage]";
@@ -69,10 +72,13 @@ const MAX_TOP_CATEGORIES = 10;
 
 export default function FoodStallReportClientPage() {
   const { user, activeSiteId, activeStallId, loading: authLoading, activeSite, activeStall } = useAuth();
+  
   const [dateRange, setDateRange] = useState<DateRange | undefined>(() => {
     const today = new Date();
-    return { from: subDays(startOfDay(today), 29), to: endOfDay(today) };
+    return { from: startOfDay(subDays(today, 6)), to: endOfDay(today) };
   });
+  const [tempDateRange, setTempDateRange] = useState<DateRange | undefined>(dateRange);
+  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
 
   const [summaryData, setSummaryData] = useState<ReportSummaryData | null>(null);
   const [topExpenseCategories, setTopExpenseCategories] = useState<TopExpenseCategory[]>([]);
@@ -126,20 +132,14 @@ export default function FoodStallReportClientPage() {
       setLoadingReport(false);
       return;
     }
-    if (!dateRange?.from || !dateRange?.to || !isValid(dateRange.from) || !isValid(dateRange.to)) {
-      setErrorReport("Please select a valid date range.");
-      setLoadingReport(false);
-      return;
-    }
     
     setLoadingReport(true);
     setErrorReport(null);
 
     try {
-      const fromDate = Timestamp.fromDate(startOfDay(dateRange.from));
-      const toDate = Timestamp.fromDate(endOfDay(dateRange.to));
+      const fromDate = dateRange?.from ? Timestamp.fromDate(startOfDay(dateRange.from)) : null;
+      const toDate = dateRange?.to ? Timestamp.fromDate(endOfDay(dateRange.to)) : null;
 
-      // --- Build base query constraints for site/stall ---
       const baseSiteQuery: QueryConstraint[] = [];
       if (activeSiteId) {
         baseSiteQuery.push(where("siteId", "==", activeSiteId));
@@ -149,7 +149,10 @@ export default function FoodStallReportClientPage() {
       }
 
       // --- Fetch Sales ---
-      const salesQuery = query(collection(db, "foodSaleTransactions"), ...baseSiteQuery, where("saleDate", ">=", fromDate), where("saleDate", "<=", toDate));
+      let salesQueryConstraints = [...baseSiteQuery];
+      if(fromDate) salesQueryConstraints.push(where("saleDate", ">=", fromDate));
+      if(toDate) salesQueryConstraints.push(where("saleDate", "<=", toDate));
+      const salesQuery = query(collection(db, "foodSaleTransactions"), ...salesQueryConstraints);
       const salesSnapshot = await getDocs(salesQuery);
       const salesTransactions = salesSnapshot.docs.map(doc => doc.data() as FoodSaleTransaction);
       
@@ -163,7 +166,10 @@ export default function FoodStallReportClientPage() {
       });
 
       // --- Fetch Expenses ---
-      const expensesQuery = query(collection(db, "foodItemExpenses"), ...baseSiteQuery, where("purchaseDate", ">=", fromDate), where("purchaseDate", "<=", toDate));
+      let expensesQueryConstraints = [...baseSiteQuery];
+      if(fromDate) expensesQueryConstraints.push(where("purchaseDate", ">=", fromDate));
+      if(toDate) expensesQueryConstraints.push(where("purchaseDate", "<=", toDate));
+      const expensesQuery = query(collection(db, "foodItemExpenses"), ...expensesQueryConstraints);
       const expensesSnapshot = await getDocs(expensesQuery);
       const expenseTransactions = expensesSnapshot.docs.map(doc => doc.data() as FoodItemExpense);
       
@@ -187,45 +193,50 @@ export default function FoodStallReportClientPage() {
       
       // --- Fetch and Calculate Salary Expense ---
       let totalSalaryExpense = 0;
-      const relevantStaff = activeSiteId ? staffList.filter(s => s.defaultSiteId === activeSiteId) : staffList;
-      if (relevantStaff.length > 0) {
-        const uidsBatches: string[][] = [];
-        for (let i = 0; i < relevantStaff.length; i += 30) {
-            uidsBatches.push(relevantStaff.map(s => s.uid).slice(i, i + 30));
+      if (dateRange?.from && dateRange.to) { // Only calculate salary for specific date ranges
+        const relevantStaff = activeSiteId ? staffList.filter(s => s.defaultSiteId === activeSiteId) : staffList;
+        if (relevantStaff.length > 0) {
+          const uidsBatches: string[][] = [];
+          for (let i = 0; i < relevantStaff.length; i += 30) {
+              uidsBatches.push(relevantStaff.map(s => s.uid).slice(i, i + 30));
+          }
+
+          const monthOfStartDate = startOfMonth(dateRange.from);
+          const holidaysQuery = query(collection(db, "holidays"), where("date", ">=", format(monthOfStartDate, 'yyyy-MM-dd')), where("date", "<=", format(endOfMonth(dateRange.to), 'yyyy-MM-dd')));
+          
+          const attendancePromises = uidsBatches.map(batch => getDocs(query(collection(db, "staffAttendance"), 
+              where("staffUid", "in", batch), 
+              where("date", ">=", format(dateRange.from!, 'yyyy-MM-dd')), 
+              where("date", "<=", format(dateRange.to!, 'yyyy-MM-dd'))
+          )));
+
+          const [holidaysSnapshot, ...attendanceSnapshots] = await Promise.all([getDocs(holidaysQuery), ...attendancePromises]);
+          const holidays = holidaysSnapshot.docs.map(d => d.data() as Holiday);
+          const attendanceByStaff = new Map<string, { present: number, halfDay: number }>();
+          attendanceSnapshots.flat().forEach(snapshot => snapshot.forEach(doc => {
+              const att = doc.data() as StaffAttendance;
+              const current = attendanceByStaff.get(att.staffUid) || { present: 0, halfDay: 0 };
+              if (att.status === 'Present') current.present++;
+              if (att.status === 'Half-day') current.halfDay++;
+              attendanceByStaff.set(att.staffUid, current);
+          }));
+
+          relevantStaff.forEach(staff => {
+              const details = staffDetailsMap.get(staff.uid);
+              if (details?.salary) {
+                  const monthWorkingDays = calculateWorkingDays(startOfMonth(dateRange.from!), endOfMonth(dateRange.from!), holidays, staff);
+                  if (monthWorkingDays > 0) {
+                      const perDaySalary = details.salary / monthWorkingDays;
+                      const attendance = attendanceByStaff.get(staff.uid) || { present: 0, halfDay: 0 };
+                      const earnedDays = attendance.present + (attendance.halfDay * 0.5);
+                      totalSalaryExpense += earnedDays * perDaySalary;
+                  }
+              }
+          });
         }
-
-        const monthOfStartDate = startOfMonth(dateRange.from);
-        const holidaysQuery = query(collection(db, "holidays"), where("date", ">=", format(monthOfStartDate, 'yyyy-MM-dd')), where("date", "<=", format(endOfMonth(dateRange.to), 'yyyy-MM-dd')));
-        
-        const attendancePromises = uidsBatches.map(batch => getDocs(query(collection(db, "staffAttendance"), 
-            where("staffUid", "in", batch), 
-            where("date", ">=", format(dateRange.from, 'yyyy-MM-dd')), 
-            where("date", "<=", format(dateRange.to, 'yyyy-MM-dd'))
-        )));
-
-        const [holidaysSnapshot, ...attendanceSnapshots] = await Promise.all([getDocs(holidaysQuery), ...attendancePromises]);
-        const holidays = holidaysSnapshot.docs.map(d => d.data() as Holiday);
-        const attendanceByStaff = new Map<string, { present: number, halfDay: number }>();
-        attendanceSnapshots.flat().forEach(snapshot => snapshot.forEach(doc => {
-            const att = doc.data() as StaffAttendance;
-            const current = attendanceByStaff.get(att.staffUid) || { present: 0, halfDay: 0 };
-            if (att.status === 'Present') current.present++;
-            if (att.status === 'Half-day') current.halfDay++;
-            attendanceByStaff.set(att.staffUid, current);
-        }));
-
-        relevantStaff.forEach(staff => {
-            const details = staffDetailsMap.get(staff.uid);
-            if (details?.salary) {
-                const monthWorkingDays = calculateWorkingDays(startOfMonth(dateRange.from), endOfMonth(dateRange.from), holidays, staff);
-                if (monthWorkingDays > 0) {
-                    const perDaySalary = details.salary / monthWorkingDays;
-                    const attendance = attendanceByStaff.get(staff.uid) || { present: 0, halfDay: 0 };
-                    const earnedDays = attendance.present + (attendance.halfDay * 0.5);
-                    totalSalaryExpense += earnedDays * perDaySalary;
-                }
-            }
-        });
+      } else { // All Time
+          const allPayments = await getDocs(query(collection(db, "salaryPayments")));
+          totalSalaryExpense = allPayments.docs.reduce((sum, doc) => sum + (doc.data() as SalaryPayment).amountPaid, 0);
       }
       
       // --- Final Calculation ---
@@ -261,6 +272,36 @@ export default function FoodStallReportClientPage() {
     }
     return desc + ".";
   }, [user, activeSite, activeStall]);
+
+  const datePresets = [
+    { label: "Last 7 Days", value: 'last_7_days' },
+    { label: "This Month", value: 'this_month' },
+    { label: "Last Month", value: 'last_month' },
+    { label: "Last 2 Months", value: 'last_2_months' },
+    { label: "Last 3 Months", value: 'last_3_months' },
+    { label: "All Time", value: 'all_time' },
+  ];
+  
+  const handleSetDatePreset = (preset: string) => {
+    const now = new Date();
+    let from: Date | undefined, to: Date | undefined = endOfDay(now);
+
+    switch (preset) {
+        case 'last_7_days': from = startOfDay(subDays(now, 6)); break;
+        case 'this_month': from = startOfMonth(now); break;
+        case 'last_month': from = startOfMonth(subMonths(now, 1)); to = endOfMonth(subMonths(now, 1)); break;
+        case 'last_2_months': from = startOfMonth(subMonths(now, 1)); break;
+        case 'last_3_months': from = startOfMonth(subMonths(now, 2)); break;
+        case 'all_time': from = undefined; to = undefined; break;
+        default: from = undefined; to = undefined;
+    }
+    setDateRange({ from, to });
+  };
+  
+  const applyDateFilter = () => {
+    setDateRange(tempDateRange);
+    setIsDatePickerOpen(false);
+  };
   
   const summaryCards = summaryData ? [
     { title: "Gross Sales", value: `₹${summaryData.totalSalesAmount.toFixed(2)}`, icon: IndianRupee, color: "text-green-600", description: `Across ${summaryData.numberOfSales} sale days` },
@@ -287,7 +328,44 @@ export default function FoodStallReportClientPage() {
   return (
     <div className="space-y-6">
        <PageHeader title="Food Stall Financial Report" description="Analyze your food stall's performance with detailed sales, expense, and profit reports." />
-      <ReportControls dateRange={dateRange} onDateRangeChange={setDateRange} />
+      <div className="mb-6 flex flex-col sm:flex-row items-stretch sm:items-center justify-start gap-4 p-4 border rounded-lg bg-card shadow">
+        <div className="flex flex-wrap items-center gap-2">
+            {datePresets.map(({label, value}) => (
+                <Button key={value} variant="outline" onClick={() => handleSetDatePreset(value)}>{label}</Button>
+            ))}
+             <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
+                <PopoverTrigger asChild>
+                <Button
+                    id="reportDateRange" variant={"outline"}
+                    className={cn("w-full sm:w-[280px] justify-start text-left font-normal bg-input", !dateRange && "text-muted-foreground")}
+                >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {dateRange?.from ? ( dateRange.to ? (
+                        <> {format(dateRange.from, "LLL dd, y")} - {format(dateRange.to, "LLL dd, y")} </>
+                    ) : ( format(dateRange.from, "LLL dd, y") )
+                    ) : ( <span>Pick a date range</span> )}
+                </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0 flex" align="start">
+                    <div className="p-2">
+                        <div className="flex justify-between items-center mb-2 px-2">
+                            <p className="text-sm font-medium">Start: <span className="font-normal text-muted-foreground">{tempDateRange?.from ? format(tempDateRange.from, 'PPP') : '...'}</span></p>
+                            <p className="text-sm font-medium">End: <span className="font-normal text-muted-foreground">{tempDateRange?.to ? format(tempDateRange.to, 'PPP') : '...'}</span></p>
+                        </div>
+                        <Calendar
+                            initialFocus mode="range" defaultMonth={tempDateRange?.from}
+                            selected={tempDateRange} onSelect={setTempDateRange} numberOfMonths={2}
+                            disabled={(date) => date > new Date() || date < new Date("2000-01-01")}
+                        />
+                        <div className="flex justify-end gap-2 pt-2 border-t mt-2">
+                             <Button variant="ghost" onClick={() => setIsDatePickerOpen(false)}>Close</Button>
+                             <Button onClick={applyDateFilter}>Apply</Button>
+                        </div>
+                    </div>
+                </PopoverContent>
+            </Popover>
+        </div>
+      </div>
 
       {loadingReport ? (
         <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading report data...</p></div>
