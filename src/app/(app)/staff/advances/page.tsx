@@ -56,7 +56,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 import { Loader2, Info, PlusCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { format } from "date-fns";
+import { format, addMonths, subMonths } from "date-fns";
 import { logStaffActivity } from "@/lib/staffLogger";
 import { useUserManagement } from "@/hooks/use-user-management";
 
@@ -90,6 +90,15 @@ export default function SalaryAdvanceClientPage() {
       notes: "",
     },
   });
+  
+  const monthOptions = Array.from({ length: 5 }, (_, i) => {
+    const date = addMonths(subMonths(new Date(), 2), i);
+    return {
+      value: date.toISOString(),
+      label: format(date, 'MMMM yyyy'),
+    };
+  });
+
 
   useEffect(() => {
     if (userManagementLoading || authLoading) {
@@ -147,13 +156,14 @@ export default function SalaryAdvanceClientPage() {
     }
 
     try {
+        const forDateObj = new Date(values.forDate);
         const advanceData = {
             ...values,
             staffUid: staffMember.uid,
             siteId: staffMember.defaultSiteId, // Use staff's assigned site
             date: values.date.toISOString(),
-            forMonth: values.forDate.getMonth() + 1, // Store as 1-12
-            forYear: values.forDate.getFullYear(),
+            forMonth: forDateObj.getMonth() + 1, // Store as 1-12
+            forYear: forDateObj.getFullYear(),
         };
         // We don't want to save forDate to the database, so remove it
         delete (advanceData as any).forDate;
@@ -166,7 +176,7 @@ export default function SalaryAdvanceClientPage() {
             siteId: staffMember.defaultSiteId,
             details: {
                 amount: values.amount,
-                notes: `Advance for ${format(values.forDate, 'MMM yyyy')} given to ${staffMember.displayName || staffMember.email} on ${format(values.date, 'PPP')}.`,
+                notes: `Advance for ${format(forDateObj, 'MMM yyyy')} given to ${staffMember.displayName || staffMember.email} on ${format(values.date, 'PPP')}.`,
                 relatedDocumentId: docRef.id,
             }
         });
@@ -220,7 +230,34 @@ export default function SalaryAdvanceClientPage() {
                              </FormItem>
                             <FormField name="amount" control={form.control} render={({ field }) => ( <FormItem><FormLabel>Amount (₹) *</FormLabel><FormControl><Input type="number" {...field} value={field.value || ''} onChange={e => field.onChange(parseFloat(e.target.value) || 0)}/></FormControl><FormMessage /></FormItem> )}/>
                             <FormField name="date" control={form.control} render={({ field }) => ( <FormItem><FormLabel>Date Given *</FormLabel><DatePicker date={field.value} onDateChange={field.onChange} /></FormItem> )}/>
-                            <FormField name="forDate" control={form.control} render={({ field }) => ( <FormItem><FormLabel>For Month *</FormLabel><DatePicker date={field.value} onDateChange={field.onChange} /><FormDescription>Select any day in the month this advance applies to.</FormDescription></FormItem> )}/>
+                            <FormField
+                                name="forDate"
+                                control={form.control}
+                                render={({ field }) => (
+                                    <FormItem>
+                                    <FormLabel>For Month *</FormLabel>
+                                    <Select
+                                        onValueChange={(value) => field.onChange(new Date(value))}
+                                        value={field.value ? field.value.toISOString() : ''}
+                                    >
+                                        <FormControl>
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select the month..." />
+                                        </SelectTrigger>
+                                        </FormControl>
+                                        <SelectContent>
+                                        {monthOptions.map(option => (
+                                            <SelectItem key={option.value} value={option.value}>
+                                            {option.label}
+                                            </SelectItem>
+                                        ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <FormDescription>Select the month this advance applies to.</FormDescription>
+                                    <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
                             <FormField name="notes" control={form.control} render={({ field }) => ( <FormItem><FormLabel>Notes</FormLabel><FormControl><Textarea {...field} /></FormControl></FormItem> )}/>
                              <DialogFooter>
                                 <Button type="submit" disabled={!selectedStaff}>Save Advance</Button>
