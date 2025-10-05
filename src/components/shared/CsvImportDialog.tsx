@@ -67,7 +67,10 @@ export default function CsvImportDialog({ dataType, isOpen, onClose }: CsvImport
           body: JSON.stringify({ dataType, csvData }),
         });
 
-        const result = await response.json();
+        const result = await response.json().catch(() => {
+          // Handle cases where the server returns a non-JSON response (like a 405 error page)
+          throw new Error(`Server responded with status ${response.status} and non-JSON content.`);
+        });
 
         if (!response.ok) {
           throw new Error(result.error || `Server responded with status ${response.status}`);
@@ -79,7 +82,7 @@ export default function CsvImportDialog({ dataType, isOpen, onClose }: CsvImport
           variant: "default",
           duration: 7000,
         });
-        onClose(); // Close dialog on success
+        onClose();
 
       } catch (error: any) {
         console.error(`${LOG_PREFIX} Error during import API call:`, error);
@@ -109,7 +112,7 @@ export default function CsvImportDialog({ dataType, isOpen, onClose }: CsvImport
       switch (dataType) {
           case 'stock': return 'Upload a CSV file to add or update stock items. The format must match the exported CSV file, including the "ID" column for updates.';
           case 'foodExpenses': return 'Upload a CSV of food expenses. Rows with an "Expense ID" will be updated; rows without one will be created as new expenses.';
-          case 'foodSales': return 'Upload a CSV of daily sales summaries. An existing entry for a given Date, Stall Name, and Sale Type will be updated; otherwise, a new one is created. Required columns: Sale Date, Site Name, Stall Name, Sale Type, Hungerbox Sales, UPI Sales.';
+          case 'foodSales': return 'Import Hungerbox sales data. Required columns: vendor_id, order_date, is_mrp, actual_value.';
           default: return 'Upload a CSV file.';
       }
   }
