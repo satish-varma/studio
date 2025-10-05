@@ -88,7 +88,7 @@ export function PayrollTable({ data, month, year, onPaymentSuccess }: PayrollTab
         });
 
         toast({ title: "Success", description: "Salary payment recorded." });
-        onPaymentSuccess(); // This will trigger the parent to refetch and recalculate all data
+        onPaymentSuccess();
         handleCloseDialog();
     } catch (error: any) {
         toast({ title: "Error", description: `Failed to record payment: ${error.message}`, variant: "destructive" });
