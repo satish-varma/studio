@@ -21,6 +21,7 @@ import {
   CalendarCheck,
   HandCoins,
   History,
+  LineChart,
 } from "lucide-react";
 import {
   SidebarMenu,
@@ -104,6 +105,7 @@ const navItems: NavItem[] = [
       { href: "/staff/attendance", label: "Attendance", roles: ['manager', 'admin'] },
       { href: "/staff/payroll", label: "Payroll", roles: ['manager', 'admin'], icon: IndianRupee },
       { href: "/staff/advances", label: "Salary Advances", roles: ['manager', 'admin'] },
+      { href: "/staff/reports", label: "Reports", roles: ['manager', 'admin'], icon: LineChart },
       { href: "/staff/activity-log", label: "Activity Log", roles: ['manager', 'admin'], icon: FileText },
     ]
   },
