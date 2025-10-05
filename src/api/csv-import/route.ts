@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { initializeApp, getApps, cert, App as AdminApp } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { getFirestore as getAdminFirestore, Timestamp, WriteBatch } from 'firebase-admin/firestore';
-import type { StockItem, FoodItemExpense, AppUser, FoodSaleTransaction } from '@/types';
+import type { StockItem, FoodItemExpense, AppUser, FoodSaleTransaction, Site, Stall } from '@/types';
 import Papa from 'papaparse';
 import { logFoodStallActivity } from '@/lib/foodStallLogger';
 import { hungerboxVendorMapping } from '@/lib/hungerbox-mapping';
@@ -212,7 +212,7 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
     const sitesMap = new Map(sitesSnapshot.docs.map(doc => [doc.data().name.toLowerCase(), doc.id]));
 
     const stallsSnapshot = await adminDb.collection('stalls').get();
-    const allStalls = stallsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const allStalls = stallsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as Stall }));
 
     // Step 2: Aggregate data from CSV
     const salesAggregation = new Map<string, {
@@ -379,3 +379,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `An unexpected error occurred: ${error.message}` }, { status: 500 });
   }
 }
+
+    
