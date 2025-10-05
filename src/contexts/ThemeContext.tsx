@@ -1,10 +1,11 @@
 
 "use client";
 
-import React, {
+import {
   createContext,
   useContext,
   useEffect,
+  useState,
   type ReactNode,
 } from "react";
 
@@ -39,7 +40,7 @@ export function ThemeProvider({
   enableSystem = true,
   ...props
 }: ThemeProviderProps) {
-  const [theme, setTheme] = React.useState<Theme>(() => {
+  const [theme, setTheme] = useState<Theme>(() => {
     if (typeof window === 'undefined') {
       return defaultTheme;
     }
