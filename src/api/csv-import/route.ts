@@ -217,7 +217,7 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
     const callingUser = await getAdminAuth().getUser(uid);
 
     for (const row of parsedData) {
-        const vendorId = row['vendor_id']?.trim(); // *** THE FIX ***
+        const vendorId = row['vendor_id']?.trim();
         if (!vendorId) {
             console.warn(`${LOG_PREFIX} Skipping row due to missing 'vendor_id'. Row:`, row);
             continue;
@@ -274,7 +274,7 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
                 stallId: stallId,
                 saleType: saleType,
                 hungerboxSales: actualValue,
-                upiSales: 0,
+                upiSales: 0, // Assuming UPI sales are not in this CSV
                 totalAmount: actualValue,
                 notes: `Imported via Hungerbox CSV on ${new Date().toLocaleDateString()}.`,
                 recordedByUid: callingUser.uid,
