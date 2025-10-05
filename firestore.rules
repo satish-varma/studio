@@ -1,3 +1,4 @@
+
 rules_version = '2';
 
 service cloud.firestore {
@@ -126,8 +127,8 @@ service cloud.firestore {
                        (isAdmin() ||
                         (isManagerRole() && isManagerOfSite(resource.data.siteId)) ||
                         (isStaffRole() && 
-                          ( (resource.data.stallId != null && isStaffAssignedTo(resource.data.siteId, resource.data.stallId)) ||
-                            (resource.data.stallId == null && isStaffAssignedToSiteOnly(resource.data.siteId))
+                          ( (resource.data.stallId != null && isStaffAssignedTo(request.resource.data.siteId, resource.data.stallId)) ||
+                            (resource.data.stallId == null && isStaffAssignedToSiteOnly(request.resource.data.siteId))
                           )
                         )
                        );
@@ -313,19 +314,20 @@ service cloud.firestore {
     }
 
     match /advances/{advanceId} {
-      // Helper function to get the siteId of the staff member receiving the advance
-      function getAdvanceStaffSiteId() {
-        return getUserData(request.resource.data.staffUid).defaultSiteId;
+      function getStaffMemberData(staffUid) {
+        return getUserData(staffUid);
+      }
+      function isStaffInSite(staffUid, siteId) {
+        let staffData = getStaffMemberData(staffUid);
+        return staffData != null && staffData.defaultSiteId == siteId;
       }
 
-      // Managers can create advance records for staff in their managed sites. Admins can do so for any site.
       allow create: if isSignedIn() &&
                       request.resource.data.recordedByUid == request.auth.uid &&
                       request.resource.data.siteId != null &&
                       (
                         isAdmin() ||
-                        // Manager must manage both the site of the record AND the staff member's assigned site.
-                        (isManagerRole() && isManagerOfSite(request.resource.data.siteId) && isManagerOfSite(getAdvanceStaffSiteId()))
+                        (isManagerRole() && isManagerOfSite(request.resource.data.siteId) && isStaffInSite(request.resource.data.staffUid, request.resource.data.siteId))
                       );
 
       allow read: if isSignedIn() &&
@@ -373,4 +375,3 @@ service cloud.firestore {
     }
   }
 }
-    
