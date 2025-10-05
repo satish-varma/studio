@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useMemo, useEffect, useCallback } from "react";
@@ -22,7 +21,7 @@ import { firebaseConfig, auth } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Info, DollarSign, Upload, Download, Building, PlusCircle, Mail, Trash2, ListFilter, Store, WalletCards } from "lucide-react";
+import { Loader2, Info, DollarSign, Upload, Download, Building, PlusCircle, Trash2, ListFilter, Store, WalletCards } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -87,7 +86,6 @@ export default function FoodSalesClientPage() {
   
   const [isExporting, setIsExporting] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState<null | 'foodSales'>(null);
-  const [isGmailImporting, setIsGmailImporting] = useState(false);
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -214,56 +212,6 @@ export default function FoodSalesClientPage() {
   }, [db, effectiveSiteId]);
   
   
-  const handleGmailImport = async () => {
-    if (!user || !activeSiteId || !activeStallId) {
-        toast({ title: "Context Required", description: "Please select a specific site and stall before importing from Gmail.", variant: "destructive"});
-        return;
-    }
-    
-    if (!db) {
-        toast({ title: "Database Error", description: "Cannot verify Gmail connection.", variant: "destructive" });
-        return;
-    }
-    const tokenSnap = await getDocs(query(collection(db, 'user_tokens'), where('uid', '==', user.uid)));
-
-    if (tokenSnap.empty) {
-        const authUrl = `/api/auth/google/initiate?uid=${user.uid}`;
-        const authWindow = window.open(authUrl, '_blank', 'width=500,height=600');
-        
-        const messageListener = async (event: MessageEvent) => {
-            if (event.origin !== window.location.origin) return;
-            if (event.data === 'auth_success') {
-                toast({ title: "Gmail Connected!", description: "Your account is connected. You can now try importing again." });
-                window.removeEventListener('message', messageListener);
-                authWindow?.close();
-            }
-        };
-        window.addEventListener('message', messageListener);
-        return;
-    }
-
-    setIsGmailImporting(true);
-    toast({ title: "Importing from Gmail...", description: "Checking for new Hungerbox sales emails. This may take a moment." });
-    
-    try {
-        if (!auth || !auth.currentUser) throw new Error("Firebase user not available for token retrieval.");
-        const idToken = await auth.currentUser.getIdToken(true);
-        const response = await fetch('/api/gmail-handler', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
-            body: JSON.stringify({ siteId: activeSiteId, stallId: activeStallId }),
-        });
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error || result.message);
-        toast({ title: "Import Complete", description: result.message, duration: 7000 });
-    } catch (error: any) {
-        toast({ title: "Gmail Import Failed", description: error.message, variant: "destructive", duration: 7000 });
-    } finally {
-        setIsGmailImporting(false);
-    }
-  };
-
-
   const handleDelete = async (sale: FoodSaleTransaction) => {
     if (!db || !user ) return;
     const docRef = doc(db, "foodSaleTransactions", sale.id);
@@ -472,7 +420,6 @@ export default function FoodSalesClientPage() {
               <Button variant={dateFilter === 'all_time' ? 'default' : 'outline'} onClick={() => setDateFilter('all_time')}>All Time</Button>
               <Button variant="outline" onClick={() => setShowImportDialog('foodSales')}><Upload className="mr-2 h-4 w-4" />Import Hungerbox Sales</Button>
               <Button variant="outline" onClick={handleExport} disabled={isExporting}>{isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Download className="mr-2 h-4 w-4" />}Export</Button>
-              <Button variant="outline" onClick={handleGmailImport} disabled={isGmailImporting}>{isGmailImporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Mail className="mr-2 h-4 w-4" />}Import from Gmail</Button>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                 {user?.role === 'admin' && (
@@ -545,5 +492,3 @@ export default function FoodSalesClientPage() {
     </div>
   );
 }
-
-    
