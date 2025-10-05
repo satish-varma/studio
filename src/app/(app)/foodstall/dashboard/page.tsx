@@ -10,7 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { getFirestore, collection, query, where, onSnapshot, Timestamp, QueryConstraint, getDocs } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
-import { startOfDay, endOfDay, subDays, startOfMonth, getDaysInMonth, endOfMonth, startOfWeek, endOfWeek, isValid } from "date-fns";
+import { startOfDay, endOfDay, subDays, startOfMonth, getDaysInMonth, endOfMonth, startOfWeek, endOfWeek, isValid, subMonths } from "date-fns";
 import type { FoodItemExpense, FoodSaleTransaction, StaffAttendance, Holiday, StaffDetails, AppUser, SalaryPayment, Site } from "@/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -137,7 +137,7 @@ export default function FoodStallDashboardPage() {
         case 'today': from = startOfDay(now); break;
         case 'this_week': from = startOfWeek(now); break;
         case 'this_month': from = startOfMonth(now); break;
-        case 'last_month': from = startOfMonth(subDays(startOfMonth(now), 1)); to = endOfMonth(subDays(startOfMonth(now), 1)); break;
+        case 'last_month': from = startOfMonth(subMonths(now, 1)); to = endOfMonth(subMonths(now, 1)); break;
         case 'all_time': from = undefined; to = undefined; break;
         default: from = undefined; to = undefined;
     }

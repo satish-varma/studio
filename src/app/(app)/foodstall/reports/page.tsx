@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useMemo, useEffect, useCallback } from "react";
@@ -150,7 +149,6 @@ export default function FoodStallReportClientPage() {
 
       // --- Fetch Sales ---
       let salesQueryConstraints: QueryConstraint[] = [...baseSiteQuery];
-      // THE FIX: Only add date constraints if fromDate and toDate are not null.
       if (fromDate) salesQueryConstraints.push(where("saleDate", ">=", fromDate));
       if (toDate) salesQueryConstraints.push(where("saleDate", "<=", toDate));
       
