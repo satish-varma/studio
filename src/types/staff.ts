@@ -56,7 +56,8 @@ export interface SalaryAdvance {
   notes?: string;
   recordedByUid: string;
   recordedByName: string;
-  siteId: string;
+  siteId: string; // The site where the advance was recorded
+  staffSiteId: string; // The site the staff member belongs to
   forMonth: number; // 1-12
   forYear: number;
 }
@@ -64,7 +65,7 @@ export interface SalaryAdvance {
 export const salaryAdvanceFormSchema = z.object({
   amount: z.coerce.number().positive("Advance amount must be a positive number."),
   date: z.date({ required_error: "Date of advance is required."}),
-  forDate: z.date({ required_error: "The month this advance applies to is required."}),
+  forDate: z.string().min(1, { message: "The month this advance applies to is required."}),
   notes: z.string().optional(),
 });
 
@@ -92,3 +93,5 @@ export const salaryPaymentFormSchema = z.object({
 });
 
 export type SalaryPaymentFormValues = z.infer<typeof salaryPaymentFormSchema>;
+
+    

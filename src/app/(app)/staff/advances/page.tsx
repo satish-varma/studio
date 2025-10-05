@@ -87,7 +87,7 @@ export default function SalaryAdvanceClientPage() {
     defaultValues: {
       amount: undefined,
       date: new Date(),
-      forDate: startOfMonth(new Date()),
+      forDate: startOfMonth(new Date()).toISOString(),
       notes: "",
     },
   });
@@ -149,8 +149,8 @@ export default function SalaryAdvanceClientPage() {
 
   const handleAddAdvance = async (values: SalaryAdvanceFormValues) => {
     const staffMember = staffList.find(s => s.uid === selectedStaff);
-    if (!user || !staffMember) {
-        toast({ title: "Error", description: "Current user or selected staff is missing.", variant: "destructive"});
+    if (!user || !activeSiteId || !staffMember) {
+        toast({ title: "Error", description: "Current user context or selected staff is missing.", variant: "destructive"});
         return;
     }
 
@@ -162,21 +162,24 @@ export default function SalaryAdvanceClientPage() {
     try {
         const forDateObj = new Date(values.forDate);
         const advanceData = {
-            ...values,
             staffUid: staffMember.uid,
-            siteId: staffMember.defaultSiteId,
+            amount: values.amount,
             date: values.date.toISOString(),
+            notes: values.notes,
+            recordedByUid: user.uid,
+            recordedByName: user.displayName || user.email!,
+            siteId: activeSiteId, // The site context of the manager recording the advance
+            staffSiteId: staffMember.defaultSiteId, // The site the staff belongs to
             forMonth: forDateObj.getMonth() + 1,
             forYear: forDateObj.getFullYear(),
         };
-        delete (advanceData as any).forDate;
 
         const docRef = await addDoc(collection(db, "advances"), advanceData);
         
         await logStaffActivity(user, {
             type: 'SALARY_ADVANCE_GIVEN',
             relatedStaffUid: staffMember.uid,
-            siteId: staffMember.defaultSiteId,
+            siteId: activeSiteId,
             details: {
                 amount: values.amount,
                 notes: `Advance for ${format(forDateObj, 'MMM yyyy')} given to ${staffMember.displayName || staffMember.email} on ${format(values.date, 'PPP')}.`,
@@ -189,7 +192,7 @@ export default function SalaryAdvanceClientPage() {
         form.reset({
           amount: undefined,
           date: new Date(),
-          forDate: startOfMonth(new Date()),
+          forDate: startOfMonth(new Date()).toISOString(),
           notes: "",
         });
         setSelectedStaff("");
@@ -228,7 +231,7 @@ export default function SalaryAdvanceClientPage() {
                 form.reset({
                   amount: undefined,
                   date: new Date(),
-                  forDate: startOfMonth(new Date()),
+                  forDate: startOfMonth(new Date()).toISOString(),
                   notes: "",
                 });
                 setSelectedStaff("");
@@ -241,6 +244,7 @@ export default function SalaryAdvanceClientPage() {
                 <DialogContent>
                     <DialogHeader>
                         <DialogTitle>Record New Salary Advance</DialogTitle>
+                        <DialogDescription>Select the staff member and the month this advance applies to.</DialogDescription>
                     </DialogHeader>
                     <Form {...form}>
                         <form onSubmit={form.handleSubmit(handleAddAdvance)} className="space-y-4">
@@ -267,10 +271,7 @@ export default function SalaryAdvanceClientPage() {
                                 render={({ field }) => (
                                     <FormItem>
                                     <FormLabel>For Month *</FormLabel>
-                                    <Select
-                                        onValueChange={(value) => field.onChange(new Date(value))}
-                                        value={field.value ? field.value.toISOString() : ''}
-                                    >
+                                    <Select onValueChange={field.onChange} value={field.value}>
                                         <FormControl>
                                         <SelectTrigger>
                                             <SelectValue placeholder="Select the month..." />
@@ -336,3 +337,5 @@ export default function SalaryAdvanceClientPage() {
   );
 }
 
+
+    
