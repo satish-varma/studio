@@ -104,12 +104,12 @@ export default function StaffDashboardPage() {
         return false;
     }, []);
 
-    const calculateWorkingDays = useCallback((month: Date, holidays: Holiday[]) => {
+    const calculateWorkingDays = useCallback((month: Date, holidays: Holiday[], staff?: AppUser) => {
         const totalDays = getDaysInMonth(month);
         let workingDays = 0;
         for (let i = 1; i <= totalDays; i++) {
             const currentDate = new Date(month.getFullYear(), month.getMonth(), i);
-            if (!isHoliday(currentDate, holidays, null)) { // Check against global holidays for a general count
+            if (!isHoliday(currentDate, holidays, staff?.defaultSiteId)) { 
                 workingDays++;
             }
         }
@@ -139,19 +139,27 @@ export default function StaffDashboardPage() {
         }
         
         const todayStr = format(new Date(), 'yyyy-MM-dd');
-        const fromDate = dateRange?.from ? startOfDay(dateRange.from) : startOfMonth(new Date());
-        const toDate = dateRange?.to ? endOfDay(dateRange.to) : endOfMonth(new Date());
+        const fromDate = dateRange?.from ? startOfDay(dateRange.from) : undefined;
+        const toDate = dateRange?.to ? endOfDay(dateRange.to) : undefined;
 
         const fetchDependencies = async () => {
+            const advancesQueryConstraints = fromDate && toDate
+                ? [where("date", ">=", fromDate.toISOString()), where("date", "<=", toDate.toISOString())]
+                : [];
+            
+            const attendanceQueryConstraints = fromDate && toDate
+                ? [where("date", ">=", format(fromDate, 'yyyy-MM-dd')), where("date", "<=", format(toDate, 'yyyy-MM-dd'))]
+                : [];
+
             const [
                 advancesSnapshots, 
                 attendanceTodaySnapshots,
                 attendancePeriodSnapshots,
                 holidaysSnapshot
             ] = await Promise.all([
-                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "advances"), where("date", ">=", fromDate.toISOString()), where("date", "<=", toDate.toISOString()), where("staffUid", "in", batch))))),
+                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "advances"), ...advancesQueryConstraints, where("staffUid", "in", batch))))),
                 Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "staffAttendance"), where("date", "==", todayStr), where("staffUid", "in", batch))))),
-                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "staffAttendance"), where("date", ">=", format(fromDate, 'yyyy-MM-dd')), where("date", "<=", format(toDate, 'yyyy-MM-dd')), where("staffUid", "in", batch))))),
+                Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "staffAttendance"), ...attendanceQueryConstraints, where("staffUid", "in", batch))))),
                 getDocs(query(collection(db, "holidays")))
             ]);
             
@@ -197,7 +205,10 @@ export default function StaffDashboardPage() {
             activeStaffList.forEach(staff => {
                 const details = staffDetailsMap.get(staff.uid);
                 projectedSalary += details?.salary || 0;
-                const workingDaysInMonth = calculateWorkingDays(startOfMonth(fromDate), holidays);
+                
+                if (!fromDate) return; // Cannot calculate earned salary for "All Time"
+
+                const workingDaysInMonth = calculateWorkingDays(startOfMonth(fromDate), holidays, staff);
                 
                 const attendance = periodAttendanceMap.get(staff.uid);
                 if (details?.salary && attendance && workingDaysInMonth > 0) {
@@ -450,3 +461,5 @@ export default function StaffDashboardPage() {
         </div>
     );
 }
+
+    
