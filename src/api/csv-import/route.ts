@@ -259,9 +259,9 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
         const formattedDate = `${year}-${month}-${day}`; // "2025-09-15"
         const saleDate = new Date(`${formattedDate}T00:00:00.000Z`); // Create as UTC date
 
-        // CORRECTED: Use 'actual_val' as shown in the image data.
+        // CORRECTED: Use 'actual_value' as shown in the image data.
         const saleType = row['is_mrp']?.trim() === '1' ? 'MRP' : 'Non-MRP';
-        const actualValue = parseFloat(row['actual_val']) || 0;
+        const actualValue = parseFloat(row['actual_value']) || 0;
         const aggKey = `${formattedDate}_${stallId}_${saleType}`;
         
         const currentAgg = salesAggregation.get(aggKey);
