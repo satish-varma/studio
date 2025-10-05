@@ -218,9 +218,16 @@ async function handleFoodSalesImport(adminDb: ReturnType<typeof getAdminFirestor
     const sitesMap = new Map(sitesSnapshot.docs.map(doc => [doc.data().name.toLowerCase(), doc.id]));
     
     const stallsSnapshot = await adminDb.collection('stalls').get();
-    const allStalls = stallsSnapshot.docs.map(doc => {
-        const data = doc.data() as Omit<Stall, 'id'>;
-        return { id: doc.id, ...data };
+    const allStalls: Stall[] = stallsSnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+            id: doc.id,
+            name: data.name,
+            siteId: data.siteId,
+            stallType: data.stallType,
+            createdAt: data.createdAt,
+            updatedAt: data.updatedAt,
+        };
     });
 
     const salesAggregation = new Map<string, FoodSaleTransaction>();
@@ -382,5 +389,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `An unexpected error occurred: ${error.message}` }, { status: 500 });
   }
 }
-
-    
