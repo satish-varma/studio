@@ -55,7 +55,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 import { Loader2, Info, PlusCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { format, addMonths, subMonths } from "date-fns";
+import { format, addMonths, subMonths, startOfMonth } from "date-fns";
 import { logStaffActivity } from "@/lib/staffLogger";
 import { useUserManagement } from "@/hooks/use-user-management";
 import PageHeader from "@/components/shared/PageHeader";
@@ -87,7 +87,7 @@ export default function SalaryAdvanceClientPage() {
     defaultValues: {
       amount: undefined,
       date: new Date(),
-      forDate: new Date(),
+      forDate: startOfMonth(new Date()),
       notes: "",
     },
   });
@@ -95,7 +95,7 @@ export default function SalaryAdvanceClientPage() {
   const monthOptions = Array.from({ length: 5 }, (_, i) => {
     const date = addMonths(subMonths(new Date(), 2), i);
     return {
-      value: date.toISOString(),
+      value: startOfMonth(date).toISOString(),
       label: format(date, 'MMMM yyyy'),
     };
   });
@@ -113,7 +113,6 @@ export default function SalaryAdvanceClientPage() {
       return;
     }
   
-    // Determine the UIDs to query for based on the view (all sites or single site)
     const staffToQuery = staffList;
     if (staffToQuery.length === 0) {
       setAdvances([]);
@@ -123,7 +122,6 @@ export default function SalaryAdvanceClientPage() {
   
     const staffUids = staffToQuery.map(s => s.uid);
   
-    // Batch UIDs for 'in' query limitation (max 30 values per 'in' query)
     const uidsBatches: string[][] = [];
     for (let i = 0; i < staffUids.length; i += 30) {
       uidsBatches.push(staffUids.slice(i, i + 30));
@@ -134,7 +132,6 @@ export default function SalaryAdvanceClientPage() {
       return onSnapshot(advancesQuery, (snapshot) => {
         const batchAdvances = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SalaryAdvance));
         setAdvances(prev => {
-          // Filter out old advances for this batch and add new ones
           const otherAdvances = prev.filter(adv => !batch.includes(adv.staffUid));
           return [...otherAdvances, ...batchAdvances].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
         });
@@ -167,12 +164,11 @@ export default function SalaryAdvanceClientPage() {
         const advanceData = {
             ...values,
             staffUid: staffMember.uid,
-            siteId: staffMember.defaultSiteId, // Use staff's assigned site
+            siteId: staffMember.defaultSiteId,
             date: values.date.toISOString(),
-            forMonth: forDateObj.getMonth() + 1, // Store as 1-12
+            forMonth: forDateObj.getMonth() + 1,
             forYear: forDateObj.getFullYear(),
         };
-        // We don't want to save forDate to the database, so remove it
         delete (advanceData as any).forDate;
 
         const docRef = await addDoc(collection(db, "advances"), advanceData);
@@ -190,7 +186,12 @@ export default function SalaryAdvanceClientPage() {
 
         toast({ title: "Success", description: "Salary advance recorded." });
         setShowAddDialog(false);
-        form.reset();
+        form.reset({
+          amount: undefined,
+          date: new Date(),
+          forDate: startOfMonth(new Date()),
+          notes: "",
+        });
         setSelectedStaff("");
     } catch (error: any) {
         toast({ title: "Error", description: `Could not record advance: ${error.message}`, variant: "destructive" });
@@ -222,7 +223,18 @@ export default function SalaryAdvanceClientPage() {
                   {activeSiteId ? "Advances recorded for staff at this site." : "Advances for staff across all managed sites."}
                 </CardDescription>
             </div>
-            <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
+            <Dialog open={showAddDialog} onOpenChange={(open) => {
+              if(!open) {
+                form.reset({
+                  amount: undefined,
+                  date: new Date(),
+                  forDate: startOfMonth(new Date()),
+                  notes: "",
+                });
+                setSelectedStaff("");
+              }
+              setShowAddDialog(open);
+            }}>
                 <DialogTrigger asChild>
                     <Button disabled={staffList.length === 0}><PlusCircle className="mr-2 h-4 w-4" /> Record Advance</Button>
                 </DialogTrigger>
@@ -323,3 +335,4 @@ export default function SalaryAdvanceClientPage() {
     </Card>
   );
 }
+
