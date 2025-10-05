@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useMemo, useEffect, useCallback } from "react";
@@ -21,7 +22,7 @@ import { firebaseConfig, auth } from '@/lib/firebaseConfig';
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Info, DollarSign, Upload, Download, Building, PlusCircle, Trash2, ListFilter, Store, WalletCards } from "lucide-react";
+import { Loader2, Info, DollarSign, Upload, Download, Building, PlusCircle, Trash2, ListFilter, Store, WalletCards, FileUp } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -85,7 +86,7 @@ export default function FoodSalesClientPage() {
   const [totalWithDeductions, setTotalWithDeductions] = useState(0);
   
   const [isExporting, setIsExporting] = useState(false);
-  const [showImportDialog, setShowImportDialog] = useState<null | 'foodSales'>(null);
+  const [showHungerboxImportDialog, setShowHungerboxImportDialog] = useState(false);
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -418,7 +419,10 @@ export default function FoodSalesClientPage() {
               <Button variant={dateFilter === 'last_7_days' ? 'default' : 'outline'} onClick={() => setDateFilter('last_7_days')}>Last 7 Days</Button>
               <Button variant={dateFilter === 'this_month' ? 'default' : 'outline'} onClick={() => setDateFilter('this_month')}>This Month</Button>
               <Button variant={dateFilter === 'all_time' ? 'default' : 'outline'} onClick={() => setDateFilter('all_time')}>All Time</Button>
-              <Button variant="outline" onClick={() => setShowImportDialog('foodSales')}><Upload className="mr-2 h-4 w-4" />Import Hungerbox Sales</Button>
+              <Link href="/foodstall/sales/import">
+                 <Button variant="outline"><FileUp className="mr-2 h-4 w-4" />Import Sales</Button>
+              </Link>
+              <Button variant="outline" onClick={() => setShowHungerboxImportDialog(true)}><Upload className="mr-2 h-4 w-4" />Import Hungerbox Sales</Button>
               <Button variant="outline" onClick={handleExport} disabled={isExporting}>{isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Download className="mr-2 h-4 w-4" />}Export</Button>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
@@ -485,9 +489,10 @@ export default function FoodSalesClientPage() {
         />
       )}
       <CsvImportDialog
-        dataType={showImportDialog}
-        isOpen={showImportDialog !== null}
-        onClose={() => setShowImportDialog(null)}
+        dataType="foodSales"
+        isOpen={showHungerboxImportDialog}
+        onClose={() => setShowHungerboxImportDialog(false)}
+        isHungerbox={true}
       />
     </div>
   );

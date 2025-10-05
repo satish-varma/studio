@@ -17,9 +17,10 @@ interface CsvImportDialogProps {
   dataType: 'stock' | 'foodExpenses' | 'foodSales' | null;
   isOpen: boolean;
   onClose: () => void;
+  isHungerbox?: boolean; // New prop to differentiate Hungerbox import
 }
 
-export default function CsvImportDialog({ dataType, isOpen, onClose }: CsvImportDialogProps) {
+export default function CsvImportDialog({ dataType, isOpen, onClose, isHungerbox = false }: CsvImportDialogProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const { toast } = useToast();
@@ -99,19 +100,25 @@ export default function CsvImportDialog({ dataType, isOpen, onClose }: CsvImport
   };
   
   const getTitle = () => {
+      if (dataType === 'foodSales' && isHungerbox) {
+          return 'Import Hungerbox Sales';
+      }
       switch (dataType) {
           case 'stock': return 'Import Stock Items';
           case 'foodExpenses': return 'Import Food Expenses';
-          case 'foodSales': return 'Import Food Sales';
+          case 'foodSales': return 'Import Sales'; // Generic title
           default: return 'Import Data';
       }
   };
   
   const getDescription = () => {
+      if (dataType === 'foodSales' && isHungerbox) {
+          return 'Import Hungerbox sales data. Required columns: vendor_id, order_date, is_mrp, actual_value.';
+      }
       switch (dataType) {
           case 'stock': return 'Upload a CSV file to add or update stock items. The format must match the exported CSV file, including the "ID" column for updates.';
           case 'foodExpenses': return 'Upload a CSV of food expenses. Rows with an "Expense ID" will be updated; rows without one will be created as new expenses.';
-          case 'foodSales': return 'Import Hungerbox sales data. Required columns: vendor_id, order_date, is_mrp, actual_value.';
+          case 'foodSales': return 'Upload a generic sales CSV. See documentation for required columns (e.g., Sale Date, Site Name, Stall Name).';
           default: return 'Upload a CSV file.';
       }
   }
@@ -154,5 +161,3 @@ export default function CsvImportDialog({ dataType, isOpen, onClose }: CsvImport
     </Dialog>
   );
 }
-
-    
