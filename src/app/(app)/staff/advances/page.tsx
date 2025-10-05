@@ -85,6 +85,7 @@ export default function SalaryAdvanceClientPage() {
     defaultValues: {
       amount: undefined,
       date: new Date(),
+      forDate: new Date(),
       notes: "",
     },
   });
@@ -150,9 +151,12 @@ export default function SalaryAdvanceClientPage() {
             staffUid: staffMember.uid,
             siteId: staffMember.defaultSiteId, // Use staff's assigned site
             date: values.date.toISOString(),
-            recordedByUid: user.uid,
-            recordedByName: user.displayName || user.email,
+            forMonth: values.forDate.getMonth() + 1, // Store as 1-12
+            forYear: values.forDate.getFullYear(),
         };
+        // We don't want to save forDate to the database, so remove it
+        delete (advanceData as any).forDate;
+
         const docRef = await addDoc(collection(db, "advances"), advanceData);
         
         await logStaffActivity(user, {
@@ -161,7 +165,7 @@ export default function SalaryAdvanceClientPage() {
             siteId: staffMember.defaultSiteId,
             details: {
                 amount: values.amount,
-                notes: `Advance given to ${staffMember.displayName || staffMember.email} on ${format(values.date, 'PPP')}.`,
+                notes: `Advance for ${format(values.forDate, 'MMM yyyy')} given to ${staffMember.displayName || staffMember.email} on ${format(values.date, 'PPP')}.`,
                 relatedDocumentId: docRef.id,
             }
         });
@@ -178,16 +182,6 @@ export default function SalaryAdvanceClientPage() {
 
   if (authLoading || userManagementLoading) return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin" /></div>;
   
-  if (!activeSiteId && user?.role === 'manager') {
-    // This message is now informational, the page is functional
-    // return (
-    //     <Alert variant="default" className="border-primary/50 mb-4">
-    //         <Info className="h-4 w-4" /><AlertTitle>All Sites View</AlertTitle>
-    //         <AlertDescription>You are viewing advances for all staff across all your managed sites. Select a staff member to record a new advance for their assigned site.</AlertDescription>
-    //     </Alert>
-    // );
-  }
-
   return (
     <Card>
       <CardHeader>
@@ -209,8 +203,8 @@ export default function SalaryAdvanceClientPage() {
                     <Form {...form}>
                         <form onSubmit={form.handleSubmit(handleAddAdvance)} className="space-y-4">
                              <FormItem>
-                                 <FormLabel>Staff Member</FormLabel>
-                                 <Select value={selectedStaff} onValueChange={setSelectedStaff}>
+                                 <FormLabel>Staff Member *</FormLabel>
+                                 <Select value={selectedStaff} onValueChange={setSelectedStaff} required>
                                      <FormControl>
                                          <SelectTrigger>
                                              <SelectValue placeholder="Select staff..." />
@@ -223,11 +217,12 @@ export default function SalaryAdvanceClientPage() {
                                      </SelectContent>
                                  </Select>
                              </FormItem>
-                            <FormField name="amount" control={form.control} render={({ field }) => ( <FormItem><FormLabel>Amount (₹)</FormLabel><FormControl><Input type="number" {...field} value={field.value || ''} onChange={e => field.onChange(parseFloat(e.target.value) || 0)}/></FormControl><FormMessage /></FormItem> )}/>
-                            <FormField name="date" control={form.control} render={({ field }) => ( <FormItem><FormLabel>Date</FormLabel><DatePicker date={field.value} onDateChange={field.onChange} /></FormItem> )}/>
+                            <FormField name="amount" control={form.control} render={({ field }) => ( <FormItem><FormLabel>Amount (₹) *</FormLabel><FormControl><Input type="number" {...field} value={field.value || ''} onChange={e => field.onChange(parseFloat(e.target.value) || 0)}/></FormControl><FormMessage /></FormItem> )}/>
+                            <FormField name="date" control={form.control} render={({ field }) => ( <FormItem><FormLabel>Date Given *</FormLabel><DatePicker date={field.value} onDateChange={field.onChange} /></FormItem> )}/>
+                            <FormField name="forDate" control={form.control} render={({ field }) => ( <FormItem><FormLabel>For Month *</FormLabel><DatePicker date={field.value} onDateChange={field.onChange} /><FormDescription>Select any day in the month this advance applies to.</FormDescription></FormItem> )}/>
                             <FormField name="notes" control={form.control} render={({ field }) => ( <FormItem><FormLabel>Notes</FormLabel><FormControl><Textarea {...field} /></FormControl></FormItem> )}/>
                              <DialogFooter>
-                                <Button type="submit">Save Advance</Button>
+                                <Button type="submit" disabled={!selectedStaff}>Save Advance</Button>
                             </DialogFooter>
                         </form>
                     </Form>
@@ -245,7 +240,8 @@ export default function SalaryAdvanceClientPage() {
             <Table>
                 <TableHeader>
                     <TableRow>
-                        <TableHead>Date</TableHead>
+                        <TableHead>Date Given</TableHead>
+                        <TableHead>For Month</TableHead>
                         <TableHead>Staff Member</TableHead>
                         <TableHead>Recorded By</TableHead>
                         <TableHead className="text-right">Amount</TableHead>
@@ -256,6 +252,7 @@ export default function SalaryAdvanceClientPage() {
                     {advances.map(adv => (
                         <TableRow key={adv.id}>
                             <TableCell>{format(new Date(adv.date), 'PPP')}</TableCell>
+                            <TableCell>{format(new Date(adv.forYear, adv.forMonth - 1), 'MMM yyyy')}</TableCell>
                             <TableCell>{staffList.find(s => s.uid === adv.staffUid)?.displayName || adv.staffUid.substring(0,8)}</TableCell>
                             <TableCell>{adv.recordedByName || adv.recordedByUid.substring(0,8)}</TableCell>
                             <TableCell className="text-right font-medium">₹{adv.amount.toFixed(2)}</TableCell>

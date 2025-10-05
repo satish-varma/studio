@@ -75,7 +75,6 @@ export default function PayrollClientPage() {
     return allUsersForContext.filter(u => u.role === 'staff' || u.role === 'manager');
   }, [allUsersForContext]);
   
-  // State for fetched data
   const [monthlyAdvances, setMonthlyAdvances] = useState<Map<string, number>>(new Map());
   const [monthlyPayments, setMonthlyPayments] = useState<Map<string, number>>(new Map());
   const [monthlyHolidays, setMonthlyHolidays] = useState<Holiday[]>([]);
@@ -136,14 +135,11 @@ export default function PayrollClientPage() {
 
     const payrollMonthStart = startOfMonth(currentMonth);
     const payrollMonthEnd = endOfMonth(currentMonth);
-    const nextMonth = addMonths(currentMonth, 1);
     
-    const advancesStartDate = payrollMonthStart;
-    const advancesEndDate = new Date(nextMonth.getFullYear(), nextMonth.getMonth(), 15, 23, 59, 59);
-
     try {
         const [advancesSnapshots, paymentsSnapshots, holidaysSnapshot, attendanceSnapshots] = await Promise.all([
-            Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "advances"), where("staffUid", "in", batch), where("date", ">=", advancesStartDate.toISOString()), where("date", "<=", advancesEndDate.toISOString()))))),
+            // Query for advances FOR this payroll month
+            Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "advances"), where("staffUid", "in", batch), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear()))))),
             Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", batch), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear()))))),
             getDocs(query(collection(db, "holidays"), where("date", ">=", format(payrollMonthStart, 'yyyy-MM-dd')), where("date", "<=", format(payrollMonthEnd, 'yyyy-MM-dd')))),
             Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "staffAttendance"), where("staffUid", "in", batch), where("date", ">=", format(payrollMonthStart, 'yyyy-MM-dd')), where("date", "<=", format(payrollMonthEnd, 'yyyy-MM-dd')))))),
@@ -372,14 +368,14 @@ export default function PayrollClientPage() {
           </Card>
            <Card className="shadow-md">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Advances Paid</CardTitle>
+              <CardTitle className="text-sm font-medium">Total Advances (for {format(currentMonth, "MMM")})</CardTitle>
               <HandCoins className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-orange-600">
                 {loading ? <Skeleton className="h-8 w-28" /> : formatCurrency(totalAdvances)}
               </div>
-              <p className="text-xs text-muted-foreground">From {format(startOfMonth(currentMonth), 'MMM d')} to {format(addMonths(currentMonth, 1), 'MMM')} 15th</p>
+              <p className="text-xs text-muted-foreground">Advances applied to this month's payroll</p>
             </CardContent>
           </Card>
           <Card className="shadow-md">
@@ -404,5 +400,3 @@ export default function PayrollClientPage() {
     </div>
   );
 }
-
-    
