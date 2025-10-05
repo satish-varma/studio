@@ -3,9 +3,9 @@
 
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { ReportControls } from "@/components/reports/ReportControls";
-import type { FoodSaleTransaction, FoodItemExpense, AppUser } from "@/types";
+import type { FoodSaleTransaction, FoodItemExpense, AppUser, StaffDetails, Holiday, StaffAttendance, SalaryPayment } from "@/types";
 import type { DateRange } from "react-day-picker";
-import { subDays, startOfDay, endOfDay, isValid, format } from "date-fns";
+import { subDays, startOfDay, endOfDay, isValid, format, startOfMonth, getDaysInMonth, endOfMonth } from "date-fns";
 import {
     getFirestore,
     collection,
@@ -18,7 +18,7 @@ import {
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
-import { Loader2, Info, IndianRupee, ShoppingBag, TrendingUp, AlertTriangle, ListOrdered, Percent } from "lucide-react";
+import { Loader2, Info, IndianRupee, ShoppingBag, TrendingUp, AlertTriangle, ListOrdered, Percent, Users } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -30,6 +30,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import PageHeader from "@/components/shared/PageHeader";
+import { useUserManagement } from "@/hooks/use-user-management";
+
 
 const LOG_PREFIX = "[FoodStallReportClientPage]";
 
@@ -49,6 +51,7 @@ if (!getApps().length) {
 interface ReportSummaryData {
   totalSalesAmount: number;
   totalExpensesAmount: number;
+  totalSalaryExpense: number;
   netProfit: number;
   numberOfSales: number;
   numberOfExpenses: number;
@@ -75,10 +78,41 @@ export default function FoodStallReportClientPage() {
   const [topExpenseCategories, setTopExpenseCategories] = useState<TopExpenseCategory[]>([]);
   const [loadingReport, setLoadingReport] = useState(true);
   const [errorReport, setErrorReport] = useState<string | null>(null);
+  
+  const {
+    users: staffList,
+    staffDetails: staffDetailsMap,
+    loading: userManagementLoading,
+  } = useUserManagement();
+
+  const isHoliday = useCallback((date: Date, holidays: Holiday[], staffSiteId?: string | null) => {
+    const dayOfWeek = date.getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) { return true; }
+    const dateStr = date.toISOString().split('T')[0];
+    const isGlobalHoliday = holidays.some(h => h.date === dateStr && h.siteId === null);
+    if (isGlobalHoliday) return true;
+    if (staffSiteId) {
+      const isSiteHoliday = holidays.some(h => h.date === dateStr && h.siteId === staffSiteId);
+      if (isSiteHoliday) return true;
+    }
+    return false;
+  }, []);
+
+  const calculateWorkingDays = useCallback((start: Date, end: Date, holidays: Holiday[], staff?: AppUser) => {
+      let workingDays = 0;
+      let currentDate = new Date(start);
+      while(currentDate <= end) {
+          if (!isHoliday(currentDate, holidays, staff?.defaultSiteId)) {
+              workingDays++;
+          }
+          currentDate.setDate(currentDate.getDate() + 1);
+      }
+      return workingDays;
+  }, [isHoliday]);
+
 
   const fetchReportData = useCallback(async () => {
-    console.log(`${LOG_PREFIX} fetchReportData called. AuthLoading: ${authLoading}, User: ${!!user}`);
-    if (authLoading || !db) return;
+    if (authLoading || userManagementLoading || !db) return;
 
     if (!user || (user.role !== 'admin' && user.role !== 'manager')) {
       setErrorReport("Access Denied: You do not have permission to view reports.");
@@ -87,53 +121,39 @@ export default function FoodStallReportClientPage() {
     }
     
     const isAdminViewAll = user.role === 'admin' && !activeSiteId;
-
     if (!activeSiteId && !isAdminViewAll) {
       setErrorReport("Please select an active site to view the report.");
       setLoadingReport(false);
-      setSummaryData(null);
-      setTopExpenseCategories([]);
       return;
     }
-
     if (!dateRange?.from || !dateRange?.to || !isValid(dateRange.from) || !isValid(dateRange.to)) {
       setErrorReport("Please select a valid date range.");
       setLoadingReport(false);
-      setSummaryData(null);
-      setTopExpenseCategories([]);
       return;
     }
     
-    console.log(`${LOG_PREFIX} Starting report data fetch. Site: ${activeSiteId || 'All (Admin)'}, Stall: ${activeStallId || 'All'}, DateRange: ${dateRange.from.toISOString()} to ${dateRange.to.toISOString()}`);
     setLoadingReport(true);
     setErrorReport(null);
-    setSummaryData(null);
-    setTopExpenseCategories([]);
 
     try {
       const fromDate = Timestamp.fromDate(startOfDay(dateRange.from));
       const toDate = Timestamp.fromDate(endOfDay(dateRange.to));
 
-      // --- Fetch Sales ---
-      const salesCollectionRef = collection(db, "foodSaleTransactions");
-      let salesQueryConstraints: QueryConstraint[] = [
-        where("saleDate", ">=", fromDate),
-        where("saleDate", "<=", toDate),
-      ];
+      // --- Build base query constraints for site/stall ---
+      const baseSiteQuery: QueryConstraint[] = [];
       if (activeSiteId) {
-        salesQueryConstraints.push(where("siteId", "==", activeSiteId));
+        baseSiteQuery.push(where("siteId", "==", activeSiteId));
         if (activeStallId) {
-            salesQueryConstraints.push(where("stallId", "==", activeStallId));
+            baseSiteQuery.push(where("stallId", "==", activeStallId));
         }
       }
-      const salesQuery = query(salesCollectionRef, ...salesQueryConstraints);
+
+      // --- Fetch Sales ---
+      const salesQuery = query(collection(db, "foodSaleTransactions"), ...baseSiteQuery, where("saleDate", ">=", fromDate), where("saleDate", "<=", toDate));
       const salesSnapshot = await getDocs(salesQuery);
       const salesTransactions = salesSnapshot.docs.map(doc => doc.data() as FoodSaleTransaction);
       
-      let totalSalesAmount = 0;
-      let totalCommission = 0;
-      let totalHungerboxSales = 0;
-
+      let totalSalesAmount = 0; let totalCommission = 0; let totalHungerboxSales = 0;
       salesTransactions.forEach(sale => {
         totalSalesAmount += sale.totalAmount;
         const hungerboxAmount = sale.hungerboxSales || 0;
@@ -141,28 +161,14 @@ export default function FoodStallReportClientPage() {
         const commissionRate = sale.saleType === 'MRP' ? 0.08 : 0.18;
         totalCommission += hungerboxAmount * commissionRate;
       });
-      console.log(`${LOG_PREFIX} Fetched ${salesTransactions.length} sales transactions, total amount: ${totalSalesAmount}, commission: ${totalCommission}`);
-
 
       // --- Fetch Expenses ---
-      const expensesCollectionRef = collection(db, "foodItemExpenses");
-      let expensesQueryConstraints: QueryConstraint[] = [
-        where("purchaseDate", ">=", fromDate),
-        where("purchaseDate", "<=", toDate),
-      ];
-      if (activeSiteId) {
-        expensesQueryConstraints.push(where("siteId", "==", activeSiteId));
-        if (activeStallId) {
-            expensesQueryConstraints.push(where("stallId", "==", activeStallId));
-        }
-      }
-      const expensesQuery = query(expensesCollectionRef, ...expensesQueryConstraints);
+      const expensesQuery = query(collection(db, "foodItemExpenses"), ...baseSiteQuery, where("purchaseDate", ">=", fromDate), where("purchaseDate", "<=", toDate));
       const expensesSnapshot = await getDocs(expensesQuery);
       const expenseTransactions = expensesSnapshot.docs.map(doc => doc.data() as FoodItemExpense);
       
       const expenseCategoryAggregation = new Map<string, { totalCost: number; count: number }>();
       let totalExpensesAmount = 0;
-
       expenseTransactions.forEach(expense => {
         totalExpensesAmount += expense.totalCost;
         const existing = expenseCategoryAggregation.get(expense.category);
@@ -173,25 +179,61 @@ export default function FoodStallReportClientPage() {
           expenseCategoryAggregation.set(expense.category, { totalCost: expense.totalCost, count: 1 });
         }
       });
-      console.log(`${LOG_PREFIX} Fetched ${expenseTransactions.length} expense items, total amount: ${totalExpensesAmount}`);
-
-      const aggregatedCategories: TopExpenseCategory[] = Array.from(expenseCategoryAggregation.entries())
-        .map(([category, data]) => ({ category, ...data }));
-      const sortedTopCategories = aggregatedCategories
+      const sortedTopCategories = Array.from(expenseCategoryAggregation.entries())
+        .map(([category, data]) => ({ category, ...data }))
         .sort((a, b) => b.totalCost - a.totalCost)
         .slice(0, MAX_TOP_CATEGORIES);
-        
       setTopExpenseCategories(sortedTopCategories);
-      console.log(`${LOG_PREFIX} Aggregated top expense categories. Count: ${sortedTopCategories.length}`);
       
+      // --- Fetch and Calculate Salary Expense ---
+      let totalSalaryExpense = 0;
+      const relevantStaff = activeSiteId ? staffList.filter(s => s.defaultSiteId === activeSiteId) : staffList;
+      if (relevantStaff.length > 0) {
+        const uidsBatches: string[][] = [];
+        for (let i = 0; i < relevantStaff.length; i += 30) {
+            uidsBatches.push(relevantStaff.map(s => s.uid).slice(i, i + 30));
+        }
+
+        const monthOfStartDate = startOfMonth(dateRange.from);
+        const holidaysQuery = query(collection(db, "holidays"), where("date", ">=", format(monthOfStartDate, 'yyyy-MM-dd')), where("date", "<=", format(endOfMonth(dateRange.to), 'yyyy-MM-dd')));
+        
+        const attendancePromises = uidsBatches.map(batch => getDocs(query(collection(db, "staffAttendance"), 
+            where("staffUid", "in", batch), 
+            where("date", ">=", format(dateRange.from, 'yyyy-MM-dd')), 
+            where("date", "<=", format(dateRange.to, 'yyyy-MM-dd'))
+        )));
+
+        const [holidaysSnapshot, ...attendanceSnapshots] = await Promise.all([getDocs(holidaysQuery), ...attendancePromises]);
+        const holidays = holidaysSnapshot.docs.map(d => d.data() as Holiday);
+        const attendanceByStaff = new Map<string, { present: number, halfDay: number }>();
+        attendanceSnapshots.flat().forEach(snapshot => snapshot.forEach(doc => {
+            const att = doc.data() as StaffAttendance;
+            const current = attendanceByStaff.get(att.staffUid) || { present: 0, halfDay: 0 };
+            if (att.status === 'Present') current.present++;
+            if (att.status === 'Half-day') current.halfDay++;
+            attendanceByStaff.set(att.staffUid, current);
+        }));
+
+        relevantStaff.forEach(staff => {
+            const details = staffDetailsMap.get(staff.uid);
+            if (details?.salary) {
+                const monthWorkingDays = calculateWorkingDays(startOfMonth(dateRange.from), endOfMonth(dateRange.from), holidays, staff);
+                if (monthWorkingDays > 0) {
+                    const perDaySalary = details.salary / monthWorkingDays;
+                    const attendance = attendanceByStaff.get(staff.uid) || { present: 0, halfDay: 0 };
+                    const earnedDays = attendance.present + (attendance.halfDay * 0.5);
+                    totalSalaryExpense += earnedDays * perDaySalary;
+                }
+            }
+        });
+      }
+      
+      // --- Final Calculation ---
       setSummaryData({
-        totalSalesAmount,
-        totalExpensesAmount,
-        netProfit: totalSalesAmount - totalCommission - totalExpensesAmount,
-        numberOfSales: salesTransactions.length,
-        numberOfExpenses: expenseTransactions.length,
-        totalCommission,
-        totalHungerboxSales,
+        totalSalesAmount, totalExpensesAmount, totalSalaryExpense,
+        netProfit: totalSalesAmount - totalCommission - totalExpensesAmount - totalSalaryExpense,
+        numberOfSales: salesTransactions.length, numberOfExpenses: expenseTransactions.length,
+        totalCommission, totalHungerboxSales,
       });
 
     } catch (error: any) {
@@ -200,7 +242,7 @@ export default function FoodStallReportClientPage() {
     } finally {
       setLoadingReport(false);
     }
-  }, [user, activeSiteId, activeStallId, dateRange, authLoading, db]);
+  }, [user, activeSiteId, activeStallId, dateRange, authLoading, userManagementLoading, db, staffList, staffDetailsMap, calculateWorkingDays]);
 
   useEffect(() => {
     fetchReportData();
@@ -208,7 +250,6 @@ export default function FoodStallReportClientPage() {
 
   const pageHeaderDescription = useMemo(() => {
     if (!user) return "Analyze your food stall's financial performance.";
-    
     let desc = `Financial performance report for `;
     if (activeSite) {
         desc += `Site: "${activeSite.name}"`;
@@ -218,19 +259,19 @@ export default function FoodStallReportClientPage() {
     } else { // Manager with no site selected
         desc = "Manager: Select one of your managed sites to view its report.";
     }
-    desc += ".";
-    return desc;
+    return desc + ".";
   }, [user, activeSite, activeStall]);
   
   const summaryCards = summaryData ? [
     { title: "Gross Sales", value: `₹${summaryData.totalSalesAmount.toFixed(2)}`, icon: IndianRupee, color: "text-green-600", description: `Across ${summaryData.numberOfSales} sale days` },
     { title: "Aggregator Commission", value: `- ₹${summaryData.totalCommission.toFixed(2)}`, icon: Percent, color: "text-orange-500", description: `On ₹${summaryData.totalHungerboxSales.toFixed(2)} (HungerBox)` },
-    { title: "Total Expenses", value: `- ₹${summaryData.totalExpensesAmount.toFixed(2)}`, icon: ShoppingBag, color: "text-red-500", description: `From ${summaryData.numberOfExpenses} expense records` },
-    { title: "Net Profit", value: `₹${summaryData.netProfit.toFixed(2)}`, icon: TrendingUp, color: summaryData.netProfit >= 0 ? "text-accent" : "text-destructive", description: "Gross Sales - Commission - Expenses" },
+    { title: "Food & Material Expenses", value: `- ₹${summaryData.totalExpensesAmount.toFixed(2)}`, icon: ShoppingBag, color: "text-red-500", description: `From ${summaryData.numberOfExpenses} expense records` },
+    { title: "Staff Salary Expense", value: `- ₹${summaryData.totalSalaryExpense.toFixed(2)}`, icon: Users, color: "text-red-600", description: `Earned salary for this period` },
+    { title: "Net Profit", value: `₹${summaryData.netProfit.toFixed(2)}`, icon: TrendingUp, color: summaryData.netProfit >= 0 ? "text-accent" : "text-destructive", description: "Net Sales - Expenses - Salary" },
   ] : [];
 
 
-  if (authLoading) {
+  if (authLoading || userManagementLoading) {
     return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading user context...</p></div>;
   }
 
@@ -256,7 +297,7 @@ export default function FoodStallReportClientPage() {
         <Alert variant="default" className="border-primary/50"><Info className="h-4 w-4" /><AlertTitle>Site Selection Required</AlertTitle><AlertDescription>{pageHeaderDescription}</AlertDescription></Alert>
       ) : summaryData && (
         <>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
               {summaryCards.map((stat) => (
                 <Card key={stat.title} className="shadow-md hover:shadow-lg transition-shadow">
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 border-b">
