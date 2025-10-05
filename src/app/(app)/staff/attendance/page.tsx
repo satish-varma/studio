@@ -99,68 +99,73 @@ export default function StaffAttendanceClientPage() {
   useEffect(() => {
     const firstDay = startOfMonth(currentMonth);
     const lastDay = endOfMonth(currentMonth);
-
     const uids = allStaffForContext.map(s => s.uid);
-    setAttendance({}); // Reset attendance when staff list or month changes
 
-    if (uids.length > 0) {
-        const uidsBatches: string[][] = [];
-        for (let i = 0; i < uids.length; i += 30) {
-            uidsBatches.push(uids.slice(i, i + 30));
-        }
-        
-        const unsubscribers: (() => void)[] = [];
-
-        uidsBatches.forEach(batch => {
-            if (batch.length === 0) return;
-            const attendanceQuery = query(
-                collection(db, "staffAttendance"),
-                where("date", ">=", format(firstDay, 'yyyy-MM-dd')),
-                where("date", "<=", format(lastDay, 'yyyy-MM-dd')),
-                where("staffUid", "in", batch)
-            );
-            const unsubscribe = onSnapshot(attendanceQuery, (snapshot) => {
-                const batchAttendance: Record<string, Record<string, StaffAttendance>> = {};
-                snapshot.forEach(doc => {
-                    const data = doc.data() as StaffAttendance;
-                    if (!batchAttendance[data.staffUid]) batchAttendance[data.staffUid] = {};
-                    batchAttendance[data.staffUid][data.date] = data;
-                });
-                setAttendance(prev => ({...prev, ...batchAttendance}));
-            }, (err) => {
-              console.error("Error in attendance onSnapshot:", err);
-              toast({ title: "Real-time Error", description: "Could not sync attendance updates. Please refresh.", variant: "destructive" });
-            });
-            unsubscribers.push(unsubscribe);
-        });
-
-        return () => {
-          console.log("Cleaning up attendance listeners.");
-          unsubscribers.forEach(unsub => unsub());
-        };
+    if (uids.length === 0) {
+      setAttendance({});
+      return;
     }
-  }, [currentMonth, allStaffForContext, toast]);
 
-  useEffect(() => {
-    const firstDay = startOfMonth(currentMonth);
-    const lastDay = endOfMonth(currentMonth);
+    const uidsBatches: string[][] = [];
+    for (let i = 0; i < uids.length; i += 30) {
+        uidsBatches.push(uids.slice(i, i + 30));
+    }
+    
+    const unsubscribers: (() => void)[] = [];
+
+    uidsBatches.forEach(batch => {
+        if (batch.length === 0) return;
+        const attendanceQuery = query(
+            collection(db, "staffAttendance"),
+            where("date", ">=", format(firstDay, 'yyyy-MM-dd')),
+            where("date", "<=", format(lastDay, 'yyyy-MM-dd')),
+            where("staffUid", "in", batch)
+        );
+        const unsubscribe = onSnapshot(attendanceQuery, (snapshot) => {
+            const batchAttendance: Record<string, Record<string, StaffAttendance>> = {};
+            snapshot.docs.forEach(doc => {
+                const data = doc.data() as StaffAttendance;
+                if (!batchAttendance[data.staffUid]) batchAttendance[data.staffUid] = {};
+                batchAttendance[data.staffUid][data.date] = data;
+            });
+            setAttendance(prev => {
+                const newAttendanceState = { ...(prev || {}) };
+                snapshot.docChanges().forEach(change => {
+                  const data = change.doc.data() as StaffAttendance;
+                  if (!newAttendanceState[data.staffUid]) newAttendanceState[data.staffUid] = {};
+                  if (change.type === "removed") {
+                    delete newAttendanceState[data.staffUid][data.date];
+                  } else {
+                    newAttendanceState[data.staffUid][data.date] = data;
+                  }
+                });
+                return newAttendanceState;
+            });
+        }, (err) => {
+          console.error("Error in attendance onSnapshot:", err);
+          toast({ title: "Real-time Error", description: "Could not sync attendance updates. Please refresh.", variant: "destructive" });
+        });
+        unsubscribers.push(unsubscribe);
+    });
+
     const holidaysQuery = query(
         collection(db, "holidays"),
         where("date", ">=", format(firstDay, 'yyyy-MM-dd')),
         where("date", "<=", format(lastDay, 'yyyy-MM-dd'))
     );
-     const unsubscribeHolidays = onSnapshot(holidaysQuery, (snapshot) => {
-      const fetchedHolidays = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Holiday));
-      setHolidays(fetchedHolidays);
+    const unsubHolidays = onSnapshot(holidaysQuery, (snapshot) => {
+      setHolidays(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Holiday)));
     }, (err) => {
        console.error("Error in holidays onSnapshot:", err);
        toast({ title: "Real-time Error", description: "Could not sync holiday updates.", variant: "destructive" });
     });
+    unsubscribers.push(unsubHolidays);
+
     return () => {
-      console.log("Cleaning up holiday listeners.");
-      unsubscribeHolidays();
+      console.log("Cleaning up attendance listeners.");
+      unsubscribers.forEach(unsub => unsub());
     };
-  }, [currentMonth, toast]);
+  }, [currentMonth, allStaffForContext, toast]);
   
   const isHoliday = useCallback((date: Date, staffSiteId?: string | null) => {
     const dayOfWeek = date.getDay();
