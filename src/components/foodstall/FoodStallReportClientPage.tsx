@@ -2,10 +2,9 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback } from "react";
-import { ReportControls } from "@/components/reports/ReportControls";
-import type { FoodSaleTransaction, FoodItemExpense, AppUser } from "@/types";
+import type { FoodSaleTransaction, FoodItemExpense, AppUser, Site, Stall } from "@/types";
 import type { DateRange } from "react-day-picker";
-import { subDays, startOfDay, endOfDay, isValid, format } from "date-fns";
+import { subDays, startOfDay, endOfDay, isValid, format, startOfMonth, getDaysInMonth, endOfMonth, subMonths, startOfWeek, endOfWeek } from "date-fns";
 import {
     getFirestore,
     collection,
@@ -13,12 +12,14 @@ import {
     where,
     Timestamp,
     getDocs,
-    QueryConstraint
+    QueryConstraint,
+    onSnapshot,
+    orderBy
 } from "firebase/firestore";
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
-import { Loader2, Info, IndianRupee, ShoppingBag, TrendingUp, AlertTriangle, ListOrdered, Percent } from "lucide-react";
+import { Loader2, Info, IndianRupee, ShoppingBag, TrendingUp, AlertTriangle, ListOrdered, Percent, Users, Calendar as CalendarIcon, Building, Table as TableIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -30,6 +31,22 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import PageHeader from "@/components/shared/PageHeader";
+import { useUserManagement } from "@/hooks/use-user-management";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
+import { foodSaleTypes, type FoodSaleType } from "@/types/food";
+import FoodStallPivotReportClientPage from "@/components/foodstall/FoodStallPivotReportClientPage";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+
 
 const LOG_PREFIX = "[FoodStallReportClientPage]";
 
@@ -49,6 +66,7 @@ if (!getApps().length) {
 interface ReportSummaryData {
   totalSalesAmount: number;
   totalExpensesAmount: number;
+  totalSalaryExpense: number;
   netProfit: number;
   numberOfSales: number;
   numberOfExpenses: number;
@@ -65,75 +83,99 @@ interface TopExpenseCategory {
 const MAX_TOP_CATEGORIES = 10;
 
 export default function FoodStallReportClientPage() {
-  const { user, activeSiteId, activeStallId, loading: authLoading, activeSite, activeStall } = useAuth();
-  const [dateRange, setDateRange] = useState<DateRange | undefined>(() => {
-    const today = new Date();
-    return { from: subDays(startOfDay(today), 29), to: endOfDay(today) };
-  });
+  const { user, activeSiteId, loading: authLoading } = useAuth();
+  
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(() => ({ from: startOfMonth(new Date()), to: endOfDay(new Date()) }));
+  const [tempDateRange, setTempDateRange] = useState<DateRange | undefined>(dateRange);
+  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
 
+  const [siteFilter, setSiteFilter] = useState<string>('all');
+  const [stallFilter, setStallFilter] = useState<string>('all');
+  const [saleTypeFilter, setSaleTypeFilter] = useState<FoodSaleType | 'all'>('all');
+
+  const [stallsForSite, setStallsForSite] = useState<Stall[]>([]);
   const [summaryData, setSummaryData] = useState<ReportSummaryData | null>(null);
   const [topExpenseCategories, setTopExpenseCategories] = useState<TopExpenseCategory[]>([]);
   const [loadingReport, setLoadingReport] = useState(true);
   const [errorReport, setErrorReport] = useState<string | null>(null);
+  
+  const {
+    users: allStaff,
+    sites: allSites,
+    staffDetails: staffDetailsMap,
+    loading: userManagementLoading,
+  } = useUserManagement();
+
+  const effectiveSiteId = user?.role === 'admin' ? (siteFilter === 'all' ? null : siteFilter) : activeSiteId;
+
+  useEffect(() => {
+    if (effectiveSiteId && db) {
+        const q = query(collection(db, "stalls"), where("siteId", "==", effectiveSiteId), orderBy("name"));
+        const unsub = onSnapshot(q, (snapshot) => {
+            setStallsForSite(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Stall)));
+        });
+        return () => unsub();
+    } else {
+        setStallsForSite([]);
+    }
+  }, [effectiveSiteId]);
+
+  const isHoliday = useCallback((date: Date, holidays: Holiday[], staffSiteId?: string | null) => {
+    const dayOfWeek = date.getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) return true;
+    const dateStr = date.toISOString().split('T')[0];
+    const isGlobalHoliday = holidays.some(h => h.date === dateStr && h.siteId === null);
+    if (isGlobalHoliday) return true;
+    if (staffSiteId) {
+      const isSiteHoliday = holidays.some(h => h.date === dateStr && h.siteId === staffSiteId);
+      if (isSiteHoliday) return true;
+    }
+    return false;
+  }, []);
+
+  const calculateWorkingDays = useCallback((start: Date, end: Date, holidays: Holiday[], staff?: AppUser) => {
+      let workingDays = 0;
+      let currentDate = new Date(start);
+      while(currentDate <= end) {
+          if (!isHoliday(currentDate, holidays, staff?.defaultSiteId)) {
+              workingDays++;
+          }
+          currentDate.setDate(currentDate.getDate() + 1);
+      }
+      return workingDays;
+  }, [isHoliday]);
+
 
   const fetchReportData = useCallback(async () => {
-    console.log(`${LOG_PREFIX} fetchReportData called. AuthLoading: ${authLoading}, User: ${!!user}`);
-    if (authLoading || !db) return;
-
+    if (authLoading || userManagementLoading || !db) return;
     if (!user || (user.role !== 'admin' && user.role !== 'manager')) {
       setErrorReport("Access Denied: You do not have permission to view reports.");
       setLoadingReport(false);
       return;
     }
     
-    const isAdminViewAll = user.role === 'admin' && !activeSiteId;
-
-    if (!activeSiteId && !isAdminViewAll) {
-      setErrorReport("Please select an active site to view the report.");
-      setLoadingReport(false);
-      setSummaryData(null);
-      setTopExpenseCategories([]);
-      return;
-    }
-
-    if (!dateRange?.from || !dateRange?.to || !isValid(dateRange.from) || !isValid(dateRange.to)) {
-      setErrorReport("Please select a valid date range.");
-      setLoadingReport(false);
-      setSummaryData(null);
-      setTopExpenseCategories([]);
-      return;
-    }
-    
-    console.log(`${LOG_PREFIX} Starting report data fetch. Site: ${activeSiteId || 'All (Admin)'}, Stall: ${activeStallId || 'All'}, DateRange: ${dateRange.from.toISOString()} to ${dateRange.to.toISOString()}`);
     setLoadingReport(true);
     setErrorReport(null);
-    setSummaryData(null);
-    setTopExpenseCategories([]);
 
     try {
-      const fromDate = Timestamp.fromDate(startOfDay(dateRange.from));
-      const toDate = Timestamp.fromDate(endOfDay(dateRange.to));
+      const fromTimestamp = dateRange?.from ? Timestamp.fromDate(startOfDay(dateRange.from)) : null;
+      const toTimestamp = dateRange?.to ? Timestamp.fromDate(endOfDay(dateRange.to)) : null;
+
+      let baseQuery: QueryConstraint[] = [];
+      if (effectiveSiteId) baseQuery.push(where("siteId", "==", effectiveSiteId));
+      if (stallFilter !== 'all') baseQuery.push(where("stallId", "==", stallFilter));
 
       // --- Fetch Sales ---
-      const salesCollectionRef = collection(db, "foodSaleTransactions");
-      let salesQueryConstraints: QueryConstraint[] = [
-        where("saleDate", ">=", fromDate),
-        where("saleDate", "<=", toDate),
-      ];
-      if (activeSiteId) {
-        salesQueryConstraints.push(where("siteId", "==", activeSiteId));
-        if (activeStallId) {
-            salesQueryConstraints.push(where("stallId", "==", activeStallId));
-        }
-      }
-      const salesQuery = query(salesCollectionRef, ...salesQueryConstraints);
+      let salesQueryConstraints: QueryConstraint[] = [...baseQuery];
+      if (saleTypeFilter !== 'all') salesQueryConstraints.push(where("saleType", "==", saleTypeFilter));
+      if (fromTimestamp) salesQueryConstraints.push(where("saleDate", ">=", fromTimestamp));
+      if (toTimestamp) salesQueryConstraints.push(where("saleDate", "<=", toTimestamp));
+      
+      const salesQuery = query(collection(db, "foodSaleTransactions"), ...salesQueryConstraints);
       const salesSnapshot = await getDocs(salesQuery);
       const salesTransactions = salesSnapshot.docs.map(doc => doc.data() as FoodSaleTransaction);
       
-      let totalSalesAmount = 0;
-      let totalCommission = 0;
-      let totalHungerboxSales = 0;
-
+      let totalSalesAmount = 0; let totalCommission = 0; let totalHungerboxSales = 0;
       salesTransactions.forEach(sale => {
         totalSalesAmount += sale.totalAmount;
         const hungerboxAmount = sale.hungerboxSales || 0;
@@ -141,28 +183,17 @@ export default function FoodStallReportClientPage() {
         const commissionRate = sale.saleType === 'MRP' ? 0.08 : 0.18;
         totalCommission += hungerboxAmount * commissionRate;
       });
-      console.log(`${LOG_PREFIX} Fetched ${salesTransactions.length} sales transactions, total amount: ${totalSalesAmount}, commission: ${totalCommission}`);
-
 
       // --- Fetch Expenses ---
-      const expensesCollectionRef = collection(db, "foodItemExpenses");
-      let expensesQueryConstraints: QueryConstraint[] = [
-        where("purchaseDate", ">=", fromDate),
-        where("purchaseDate", "<=", toDate),
-      ];
-      if (activeSiteId) {
-        expensesQueryConstraints.push(where("siteId", "==", activeSiteId));
-        if (activeStallId) {
-            expensesQueryConstraints.push(where("stallId", "==", activeStallId));
-        }
-      }
-      const expensesQuery = query(expensesCollectionRef, ...expensesQueryConstraints);
+      let expensesQueryConstraints: QueryConstraint[] = [...baseQuery];
+      if (fromTimestamp) expensesQueryConstraints.push(where("purchaseDate", ">=", fromTimestamp));
+      if (toTimestamp) expensesQueryConstraints.push(where("purchaseDate", "<=", toTimestamp));
+      const expensesQuery = query(collection(db, "foodItemExpenses"), ...expensesQueryConstraints);
       const expensesSnapshot = await getDocs(expensesQuery);
       const expenseTransactions = expensesSnapshot.docs.map(doc => doc.data() as FoodItemExpense);
       
       const expenseCategoryAggregation = new Map<string, { totalCost: number; count: number }>();
       let totalExpensesAmount = 0;
-
       expenseTransactions.forEach(expense => {
         totalExpensesAmount += expense.totalCost;
         const existing = expenseCategoryAggregation.get(expense.category);
@@ -173,64 +204,127 @@ export default function FoodStallReportClientPage() {
           expenseCategoryAggregation.set(expense.category, { totalCost: expense.totalCost, count: 1 });
         }
       });
-      console.log(`${LOG_PREFIX} Fetched ${expenseTransactions.length} expense items, total amount: ${totalExpensesAmount}`);
-
-      const aggregatedCategories: TopExpenseCategory[] = Array.from(expenseCategoryAggregation.entries())
-        .map(([category, data]) => ({ category, ...data }));
-      const sortedTopCategories = aggregatedCategories
+      const sortedTopCategories = Array.from(expenseCategoryAggregation.entries())
+        .map(([category, data]) => ({ category, ...data }))
         .sort((a, b) => b.totalCost - a.totalCost)
         .slice(0, MAX_TOP_CATEGORIES);
-        
       setTopExpenseCategories(sortedTopCategories);
-      console.log(`${LOG_PREFIX} Aggregated top expense categories. Count: ${sortedTopCategories.length}`);
       
+      // --- Fetch and Calculate Salary Expense ---
+      let totalSalaryExpense = 0;
+      const relevantStaff = (effectiveSiteId ? allStaff.filter(s => s.defaultSiteId === effectiveSiteId || (s.role === 'manager' && s.managedSiteIds?.includes(effectiveSiteId))) : allStaff);
+
+      if (relevantStaff.length > 0) {
+          const uidsBatches: string[][] = [];
+          for (let i = 0; i < relevantStaff.length; i += 30) {
+              uidsBatches.push(relevantStaff.map(s => s.uid).slice(i, i + 30));
+          }
+
+          if (dateRange?.from && dateRange.to) { // Only calculate salary for specific date ranges
+            const monthOfStartDate = startOfMonth(dateRange.from);
+            const holidaysQuery = query(collection(db, "holidays"), where("date", ">=", format(monthOfStartDate, 'yyyy-MM-dd')), where("date", "<=", format(endOfMonth(dateRange.to), 'yyyy-MM-dd')));
+            
+            const attendancePromises = uidsBatches.map(batch => getDocs(query(collection(db, "staffAttendance"), 
+                where("staffUid", "in", batch), 
+                where("date", ">=", format(dateRange.from!, 'yyyy-MM-dd')), 
+                where("date", "<=", format(dateRange.to!, 'yyyy-MM-dd'))
+            )));
+
+            const [holidaysSnapshot, ...attendanceSnapshots] = await Promise.all([getDocs(holidaysQuery), ...attendancePromises]);
+            const holidays = holidaysSnapshot.docs.map(d => d.data() as Holiday);
+            const attendanceByStaff = new Map<string, { present: number, halfDay: number }>();
+            attendanceSnapshots.flat().forEach(snapshot => snapshot.forEach(doc => {
+                const att = doc.data() as StaffAttendance;
+                const current = attendanceByStaff.get(att.staffUid) || { present: 0, halfDay: 0 };
+                if (att.status === 'Present') current.present++;
+                if (att.status === 'Half-day') current.halfDay++;
+                attendanceByStaff.set(att.staffUid, current);
+            }));
+
+            relevantStaff.forEach(staff => {
+                const details = staffDetailsMap.get(staff.uid);
+                if (details?.salary) {
+                    const monthWorkingDays = calculateWorkingDays(startOfMonth(dateRange.from!), endOfMonth(dateRange.from!), holidays, staff);
+                    if (monthWorkingDays > 0) {
+                        const perDaySalary = details.salary / monthWorkingDays;
+                        const attendance = attendanceByStaff.get(staff.uid) || { present: 0, halfDay: 0 };
+                        const earnedDays = attendance.present + (attendance.halfDay * 0.5);
+                        totalSalaryExpense += earnedDays * perDaySalary;
+                    }
+                }
+            });
+        } else { // All Time: sum up all salary payments for the relevant staff
+          const paymentPromises = uidsBatches.map(batch => getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", batch))));
+          const paymentsSnapshots = await Promise.all(paymentPromises);
+          totalSalaryExpense = paymentsSnapshots.flat().reduce((sum, s) => sum + s.docs.reduce((docSum, doc) => docSum + (doc.data() as SalaryPayment).amountPaid, 0), 0);
+        }
+      }
+      
+      // --- Final Calculation ---
       setSummaryData({
-        totalSalesAmount,
-        totalExpensesAmount,
-        netProfit: totalSalesAmount - totalCommission - totalExpensesAmount,
-        numberOfSales: salesTransactions.length,
-        numberOfExpenses: expenseTransactions.length,
-        totalCommission,
-        totalHungerboxSales,
+        totalSalesAmount, totalExpensesAmount, totalSalaryExpense,
+        netProfit: totalSalesAmount - totalCommission - totalExpensesAmount - totalSalaryExpense,
+        numberOfSales: salesTransactions.length, numberOfExpenses: expenseTransactions.length,
+        totalCommission, totalHungerboxSales,
       });
 
     } catch (error: any) {
-      console.error(`${LOG_PREFIX} Error fetching report data:`, error.message, error.stack);
+      console.error(`${LOG_PREFIX} Error fetching report data:`, error);
       setErrorReport("Failed to load report data. " + error.message);
     } finally {
       setLoadingReport(false);
     }
-  }, [user, activeSiteId, activeStallId, dateRange, authLoading, db]);
+  }, [user, dateRange, authLoading, userManagementLoading, db, allStaff, staffDetailsMap, calculateWorkingDays, effectiveSiteId, stallFilter, saleTypeFilter]);
 
   useEffect(() => {
     fetchReportData();
   }, [fetchReportData]);
-
-  const pageHeaderDescription = useMemo(() => {
-    if (!user) return "Analyze your food stall's financial performance.";
-    
-    let desc = `Financial performance report for `;
-    if (activeSite) {
-        desc += `Site: "${activeSite.name}"`;
-        desc += activeStall ? ` (Stall: "${activeStall.name}")` : " (All Food Stalls in Site)";
-    } else if (user.role === 'admin') {
-        desc += "All Sites";
-    } else { // Manager with no site selected
-        desc = "Manager: Select one of your managed sites to view its report.";
+  
+  useEffect(() => {
+    if (siteFilter === 'all') {
+      setStallFilter('all');
     }
-    desc += ".";
-    return desc;
-  }, [user, activeSite, activeStall]);
+  }, [siteFilter]);
+
+  const datePresets = [
+    { label: "This Month", value: 'this_month' },
+    { label: "Last 7 Days", value: 'last_7_days' },
+    { label: "Last Month", value: 'last_month' },
+    { label: "Last 3 Months", value: 'last_3_months' },
+    { label: "All Time", value: 'all_time' },
+  ];
+  
+  const handleSetDatePreset = (preset: string) => {
+    const now = new Date();
+    let from: Date | undefined, to: Date | undefined = endOfDay(now);
+
+    switch (preset) {
+        case 'this_month': from = startOfMonth(now); break;
+        case 'last_7_days': from = startOfDay(subDays(now, 6)); break;
+        case 'last_month': from = startOfMonth(subMonths(now, 1)); to = endOfMonth(subMonths(now, 1)); break;
+        case 'last_3_months': from = startOfMonth(subMonths(now, 2)); break;
+        case 'all_time': from = undefined; to = undefined; break;
+        default: from = undefined; to = undefined;
+    }
+    setDateRange({ from, to });
+    setIsDatePickerOpen(false);
+  };
+  
+  const applyDateFilter = () => {
+    setDateRange(tempDateRange);
+    setIsDatePickerOpen(false);
+  };
   
   const summaryCards = summaryData ? [
     { title: "Gross Sales", value: `₹${summaryData.totalSalesAmount.toFixed(2)}`, icon: IndianRupee, color: "text-green-600", description: `Across ${summaryData.numberOfSales} sale days` },
     { title: "Aggregator Commission", value: `- ₹${summaryData.totalCommission.toFixed(2)}`, icon: Percent, color: "text-orange-500", description: `On ₹${summaryData.totalHungerboxSales.toFixed(2)} (HungerBox)` },
-    { title: "Total Expenses", value: `- ₹${summaryData.totalExpensesAmount.toFixed(2)}`, icon: ShoppingBag, color: "text-red-500", description: `From ${summaryData.numberOfExpenses} expense records` },
-    { title: "Net Profit", value: `₹${summaryData.netProfit.toFixed(2)}`, icon: TrendingUp, color: summaryData.netProfit >= 0 ? "text-accent" : "text-destructive", description: "Gross Sales - Commission - Expenses" },
+    { title: "Food & Material Expenses", value: `- ₹${summaryData.totalExpensesAmount.toFixed(2)}`, icon: ShoppingBag, color: "text-red-500", description: `From ${summaryData.numberOfExpenses} expense records` },
+    { title: "Staff Salary Expense", value: `- ₹${summaryData.totalSalaryExpense.toFixed(2)}`, icon: Users, color: "text-red-600", description: `Earned salary for period` },
+    { title: "Net Profit", value: `₹${summaryData.netProfit.toFixed(2)}`, icon: TrendingUp, color: summaryData.netProfit >= 0 ? "text-accent" : "text-destructive", description: "Net Sales - Expenses - Salary" },
   ] : [];
 
 
-  if (authLoading) {
+  if (authLoading || userManagementLoading) {
     return <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading user context...</p></div>;
   }
 
@@ -245,18 +339,104 @@ export default function FoodStallReportClientPage() {
 
   return (
     <div className="space-y-6">
-       <PageHeader title="Food Stall Financial Report" description="Analyze your food stall's performance with detailed sales, expense, and profit reports." />
-      <ReportControls dateRange={dateRange} onDateRangeChange={setDateRange} />
+       <PageHeader 
+        title="Food Stall Financial Report" 
+        description="Analyze your food stall's performance with detailed sales, expense, and profit reports."
+        actions={
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button variant="outline"><TableIcon className="mr-2 h-4 w-4"/> View Pivot Report</Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-7xl h-[90vh]">
+              <DialogHeader>
+                <DialogTitle>Sales Pivot Report</DialogTitle>
+              </DialogHeader>
+              <div className="overflow-auto">
+                <FoodStallPivotReportClientPage />
+              </div>
+            </DialogContent>
+          </Dialog>
+        }
+      />
+      <Card>
+          <CardHeader><CardTitle>Report Filters</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+              <div className="flex flex-wrap items-center gap-2">
+                {datePresets.map(({label, value}) => (
+                    <Button key={value} variant="outline" onClick={() => handleSetDatePreset(value)}>
+                        {label}
+                    </Button>
+                ))}
+                <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
+                    <PopoverTrigger asChild>
+                    <Button
+                        id="reportDateRange" variant={"outline"}
+                        className={cn("w-full sm:w-[280px] justify-start text-left font-normal bg-input", !dateRange && "text-muted-foreground")}
+                    >
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {dateRange?.from ? ( dateRange.to ? (
+                            <> {format(dateRange.from, "LLL dd, y")} - {format(dateRange.to, "LLL dd, y")} </>
+                        ) : ( format(dateRange.from, "LLL dd, y") )
+                        ) : ( <span>Pick a date range</span> )}
+                    </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0 flex" align="start">
+                        <div className="p-2 border-r">
+                            <div className="flex flex-col items-stretch gap-1">
+                                {datePresets.map(({label, value}) => (
+                                    <Button key={value} variant="ghost" className="justify-start" onClick={() => handleSetDatePreset(value)}>{label}</Button>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="p-2">
+                            <div className="flex justify-between items-center mb-2 px-2">
+                                <p className="text-sm font-medium">Start: <span className="font-normal text-muted-foreground">{tempDateRange?.from ? format(tempDateRange.from, 'PPP') : '...'}</span></p>
+                                <p className="text-sm font-medium">End: <span className="font-normal text-muted-foreground">{tempDateRange?.to ? format(tempDateRange.to, 'PPP') : '...'}</span></p>
+                            </div>
+                            <Calendar
+                                initialFocus mode="range" defaultMonth={tempDateRange?.from}
+                                selected={tempDateRange} onSelect={setTempDateRange} numberOfMonths={2}
+                                disabled={(date) => date > new Date() || date < new Date("2000-01-01")}
+                            />
+                            <div className="flex justify-end gap-2 pt-2 border-t mt-2">
+                                <Button variant="ghost" onClick={() => setIsDatePickerOpen(false)}>Close</Button>
+                                <Button onClick={applyDateFilter}>Apply</Button>
+                            </div>
+                        </div>
+                    </PopoverContent>
+                </Popover>
+            </div>
+             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {user.role === 'admin' && (
+                    <Select value={siteFilter} onValueChange={setSiteFilter}>
+                        <SelectTrigger className="bg-input"><Building className="mr-2 h-4 w-4 text-muted-foreground"/><SelectValue placeholder="All Sites" /></SelectTrigger>
+                        <SelectContent><SelectItem value="all">All Sites</SelectItem>{allSites.map(site => <SelectItem key={site.id} value={site.id}>{site.name}</SelectItem>)}</SelectContent>
+                    </Select>
+                )}
+                {effectiveSiteId && (
+                     <Select value={stallFilter} onValueChange={setStallFilter}>
+                        <SelectTrigger className="bg-input" disabled={stallsForSite.length === 0}><Building className="mr-2 h-4 w-4 text-muted-foreground"/><SelectValue placeholder="All Stalls" /></SelectTrigger>
+                        <SelectContent><SelectItem value="all">All Stalls</SelectItem>{stallsForSite.map(stall => <SelectItem key={stall.id} value={stall.id}>{stall.name}</SelectItem>)}</SelectContent>
+                    </Select>
+                )}
+                <Select value={saleTypeFilter} onValueChange={(v) => setSaleTypeFilter(v as any)}>
+                    <SelectTrigger className="bg-input"><ListOrdered className="mr-2 h-4 w-4 text-muted-foreground"/><SelectValue placeholder="All Sale Types" /></SelectTrigger>
+                    <SelectContent><SelectItem value="all">All Sale Types</SelectItem>{foodSaleTypes.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+                </Select>
+            </div>
+          </CardContent>
+      </Card>
+
 
       {loadingReport ? (
         <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading report data...</p></div>
       ) : errorReport ? (
         <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error Loading Report</AlertTitle><AlertDescription>{errorReport}</AlertDescription></Alert>
       ) : !activeSiteId && user.role !== 'admin' ? (
-        <Alert variant="default" className="border-primary/50"><Info className="h-4 w-4" /><AlertTitle>Site Selection Required</AlertTitle><AlertDescription>{pageHeaderDescription}</AlertDescription></Alert>
+        <Alert variant="default" className="border-primary/50"><Info className="h-4 w-4" /><AlertTitle>Site Selection Required</AlertTitle><AlertDescription>Please select a site to view the report.</AlertDescription></Alert>
       ) : summaryData && (
         <>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
               {summaryCards.map((stat) => (
                 <Card key={stat.title} className="shadow-md hover:shadow-lg transition-shadow">
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 border-b">
