@@ -113,14 +113,16 @@ export default function FoodStallPivotReportClientPage() {
   const [pivotData, setPivotData] = useState<PivotData | null>(null);
 
   const fetchAndProcessData = useCallback(async () => {
-    if (!db || !dateRange?.from || !user) return;
+    if (!db || !user) return;
     if (user.role !== 'admin' && user.role !== 'manager') return;
 
     setLoadingReport(true);
-    let salesQueryConstraints: QueryConstraint[] = [
-      where('saleDate', '>=', Timestamp.fromDate(dateRange.from)),
-      where('saleDate', '<=', Timestamp.fromDate(endOfDay(dateRange.to || dateRange.from))),
-    ];
+    let salesQueryConstraints: QueryConstraint[] = [];
+
+    if (dateRange?.from) {
+      salesQueryConstraints.push(where('saleDate', '>=', Timestamp.fromDate(dateRange.from)));
+      salesQueryConstraints.push(where('saleDate', '<=', Timestamp.fromDate(endOfDay(dateRange.to || dateRange.from))));
+    }
 
     if (siteFilter !== 'all') {
       salesQueryConstraints.push(where('siteId', '==', siteFilter));
@@ -146,16 +148,18 @@ export default function FoodStallPivotReportClientPage() {
         sales = sales.filter(sale => user.managedSiteIds!.includes(sale.siteId));
       }
       
-      const datesInRange = eachDayOfInterval({
+      const datesInRange = dateRange?.from ? eachDayOfInterval({
         start: dateRange.from,
         end: dateRange.to || dateRange.from,
-      }).map(d => format(d, 'yyyy-MM-dd'));
+      }).map(d => format(d, 'yyyy-MM-dd')) : [];
 
       const salesByDateAndStall: { [date: string]: { [stallId: string]: number } } = {};
       const relevantStallIds = new Set<string>();
+      const dynamicDates = new Set<string>();
 
       sales.forEach((sale) => {
         const dateStr = format((sale.saleDate as Timestamp).toDate(), 'yyyy-MM-dd');
+        if (!dateRange?.from) dynamicDates.add(dateStr); // For 'All Time'
         if (!salesByDateAndStall[dateStr]) {
           salesByDateAndStall[dateStr] = {};
         }
@@ -171,7 +175,9 @@ export default function FoodStallPivotReportClientPage() {
         }))
         .sort((a, b) => a.name.localeCompare(b.name));
 
-      const rows = datesInRange.map((dateStr) => {
+      const finalDates = dateRange?.from ? datesInRange : Array.from(dynamicDates).sort();
+
+      const rows = finalDates.map((dateStr) => {
         let rowTotal = 0;
         const row: PivotData['rows'][0] = { date: dateStr, grandTotal: 0 };
         columns.forEach((col) => {
@@ -225,7 +231,7 @@ export default function FoodStallPivotReportClientPage() {
         default: from = undefined; to = undefined;
     }
     setTempDateRange({ from, to });
-    setDateRange({ from, to });
+    setDateRange({ from, to }); // Apply immediately
     setIsDatePickerOpen(false);
   };
 
@@ -254,7 +260,7 @@ export default function FoodStallPivotReportClientPage() {
                 ))}
                  <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
                     <PopoverTrigger asChild>
-                        <Button id="pivotDateRange" variant={'outline'} className={cn("w-full sm:w-auto min-w-[280px]", !dateRange && "text-muted-foreground")}>
+                        <Button id="pivotDateRange" variant={'outline'} className={cn("w-full sm:w-auto min-w-[280px]", !dateRange?.from && "text-muted-foreground")}>
                             <CalendarIcon className="mr-2 h-4 w-4" />
                             {dateRange?.from ? (dateRange.to ? (<> {format(dateRange.from, "LLL dd, y")} - {format(dateRange.to, "LLL dd, y")} </>) : (format(dateRange.from, "LLL dd, y"))) : (<span>Pick a date range</span>)}
                         </Button>
