@@ -1,3 +1,4 @@
+
 "use client";
 
 import Link from "next/link";
@@ -21,7 +22,6 @@ import {
   HandCoins,
   History,
   LineChart,
-  Table,
 } from "lucide-react";
 import {
   SidebarMenu,
@@ -89,7 +89,6 @@ const navItems: NavItem[] = [
       { href: "/foodstall/sales", label: "Sales Summaries", roles: ['staff', 'manager', 'admin'] },
       { href: "/foodstall/expenses", label: "Expense History", roles: ['staff', 'manager', 'admin'] },
       { href: "/foodstall/reports", label: "Reports", roles: ['manager', 'admin'] },
-      { href: "/foodstall/reports/pivot", label: "Pivot Report", roles: ['manager', 'admin'], icon: Table },
       { href: "/foodstall/activity-log", label: "Activity Log", roles: ['admin'] },
     ]
   },

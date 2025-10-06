@@ -1,7 +1,8 @@
+
 "use client";
 
 import { useState, useMemo, useEffect, useCallback } from "react";
-import type { FoodSaleTransaction, FoodItemExpense, AppUser, StaffDetails, Holiday, StaffAttendance, SalaryPayment, Site, Stall } from "@/types";
+import type { FoodSaleTransaction, FoodItemExpense, AppUser, StaffDetails, Holiday, StaffAttendance, SalaryPayment, Site } from "@/types";
 import type { DateRange } from "react-day-picker";
 import { subDays, startOfDay, endOfDay, isValid, format, startOfMonth, getDaysInMonth, endOfMonth, subMonths, startOfWeek, endOfWeek } from "date-fns";
 import {
@@ -18,7 +19,7 @@ import {
 import { getApps, initializeApp, getApp } from 'firebase/app';
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
-import { Loader2, Info, IndianRupee, ShoppingBag, TrendingUp, AlertTriangle, ListOrdered, Percent, Users, Calendar as CalendarIcon, Building, Store } from "lucide-react";
+import { Loader2, Info, IndianRupee, ShoppingBag, TrendingUp, AlertTriangle, ListOrdered, Percent, Users, Calendar as CalendarIcon, Building, Table as TableIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -37,6 +38,14 @@ import { Calendar } from "@/components/ui/calendar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { foodSaleTypes, type FoodSaleType } from "@/types/food";
+import FoodStallPivotReportClientPage from "@/components/foodstall/FoodStallPivotReportClientPage";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 
 
 const LOG_PREFIX = "[FoodStallReportClientPage]";
@@ -330,7 +339,25 @@ export default function FoodStallReportClientPage() {
 
   return (
     <div className="space-y-6">
-       <PageHeader title="Food Stall Financial Report" description="Analyze your food stall's performance with detailed sales, expense, and profit reports." />
+       <PageHeader 
+        title="Food Stall Financial Report" 
+        description="Analyze your food stall's performance with detailed sales, expense, and profit reports."
+        actions={
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button variant="outline"><TableIcon className="mr-2 h-4 w-4"/> View Pivot Report</Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-7xl h-[90vh]">
+              <DialogHeader>
+                <DialogTitle>Sales Pivot Report</DialogTitle>
+              </DialogHeader>
+              <div className="overflow-auto">
+                <FoodStallPivotReportClientPage />
+              </div>
+            </DialogContent>
+          </Dialog>
+        }
+      />
       <Card>
           <CardHeader><CardTitle>Report Filters</CardTitle></CardHeader>
           <CardContent className="space-y-4">
@@ -388,7 +415,7 @@ export default function FoodStallReportClientPage() {
                 )}
                 {effectiveSiteId && (
                      <Select value={stallFilter} onValueChange={setStallFilter}>
-                        <SelectTrigger className="bg-input" disabled={stallsForSite.length === 0}><Store className="mr-2 h-4 w-4 text-muted-foreground"/><SelectValue placeholder="All Stalls" /></SelectTrigger>
+                        <SelectTrigger className="bg-input" disabled={stallsForSite.length === 0}><Building className="mr-2 h-4 w-4 text-muted-foreground"/><SelectValue placeholder="All Stalls" /></SelectTrigger>
                         <SelectContent><SelectItem value="all">All Stalls</SelectItem>{stallsForSite.map(stall => <SelectItem key={stall.id} value={stall.id}>{stall.name}</SelectItem>)}</SelectContent>
                     </Select>
                 )}
