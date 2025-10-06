@@ -45,6 +45,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  TableFooter
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import {
@@ -256,17 +257,19 @@ export default function FoodStallPivotReportClientPage() {
                     </TableRow>
                     ))}
                 </TableBody>
-                <TableRow className="font-bold bg-muted/50">
-                    <TableHead className="sticky left-0 bg-muted/50 z-10">Grand Total</TableHead>
-                    {pivotData.columns.map(col => (
-                        <TableCell key={col.id} className="text-right">
-                           {(pivotData.columnTotals[col.id] || 0).toFixed(2)}
+                <TableFooter>
+                    <TableRow className="font-bold bg-muted/50">
+                        <TableHead className="sticky left-0 bg-muted/50 z-10">Grand Total</TableHead>
+                        {pivotData.columns.map(col => (
+                            <TableCell key={col.id} className="text-right">
+                               {(pivotData.columnTotals[col.id] || 0).toFixed(2)}
+                            </TableCell>
+                        ))}
+                        <TableCell className="text-right sticky right-0 bg-muted/50 z-10">
+                            {pivotData.columnTotals.grandTotal.toFixed(2)}
                         </TableCell>
-                    ))}
-                    <TableCell className="text-right sticky right-0 bg-muted/50 z-10">
-                        {pivotData.columnTotals.grandTotal.toFixed(2)}
-                    </TableCell>
-                </TableRow>
+                    </TableRow>
+                </TableFooter>
                 </Table>
             </CardContent>
         </Card>
