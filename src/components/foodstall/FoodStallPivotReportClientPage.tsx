@@ -13,6 +13,7 @@ import {
   parse,
   startOfWeek,
   endOfWeek,
+  endOfMonth,
 } from 'date-fns';
 import {
   getFirestore,
