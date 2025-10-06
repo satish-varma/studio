@@ -11,6 +11,8 @@ import {
   format,
   isEqual,
   parse,
+  startOfWeek,
+  endOfWeek,
 } from 'date-fns';
 import {
   getFirestore,
@@ -30,6 +32,7 @@ import {
   Info,
   Building,
   Calendar as CalendarIcon,
+  ListOrdered,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
@@ -37,6 +40,7 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  CardDescription,
 } from '@/components/ui/card';
 import {
   Table,
@@ -45,7 +49,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-  TableFooter
+  TableFooter,
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import {
@@ -62,9 +66,9 @@ import {
 } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
-import type { FoodSaleTransaction, Site, Stall } from '@/types';
+import type { FoodSaleTransaction, Site, Stall, FoodSaleType } from '@/types';
 import { useUserManagement } from '@/hooks/use-user-management';
-import { DatePicker } from '../ui/date-picker';
+import { foodSaleTypes } from '@/types/food';
 
 let db: ReturnType<typeof getFirestore> | undefined;
 if (!getApps().length) {
@@ -99,7 +103,11 @@ export default function FoodStallPivotReportClientPage() {
     from: startOfMonth(new Date()),
     to: endOfDay(new Date()),
   }));
+  const [tempDateRange, setTempDateRange] = useState<DateRange | undefined>(dateRange);
+  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+  
   const [siteFilter, setSiteFilter] = useState<string>('all');
+  const [saleTypeFilter, setSaleTypeFilter] = useState<FoodSaleType | 'all'>('all');
   const [loadingReport, setLoadingReport] = useState(true);
   const [pivotData, setPivotData] = useState<PivotData | null>(null);
 
@@ -120,6 +128,11 @@ export default function FoodStallPivotReportClientPage() {
          salesQueryConstraints.push(where('siteId', 'in', user.managedSiteIds));
       }
     }
+    
+    if (saleTypeFilter !== 'all') {
+      salesQueryConstraints.push(where('saleType', '==', saleTypeFilter));
+    }
+
 
     try {
       const salesQuery = query(collection(db, 'foodSaleTransactions'), ...salesQueryConstraints);
@@ -128,7 +141,6 @@ export default function FoodStallPivotReportClientPage() {
         (doc) => ({ id: doc.id, ...(doc.data() as Omit<FoodSaleTransaction, 'id'>) })
       );
 
-      // Manual filter for managers with many sites
       if (user.role === 'manager' && user.managedSiteIds && user.managedSiteIds.length > 30) {
         sales = sales.filter(sale => user.managedSiteIds!.includes(sale.siteId));
       }
@@ -154,7 +166,7 @@ export default function FoodStallPivotReportClientPage() {
         .filter((stall) => relevantStallIds.has(stall.id))
         .map((stall) => ({
             id: stall.id,
-            name: `${sites.find(s => s.id === stall.siteId)?.name || 'Unknown Site'} | ${stall.name}`
+            name: `${sites.find(s => s.id === stall.siteId)?.name || '...'} | ${stall.name}`
         }))
         .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -168,7 +180,7 @@ export default function FoodStallPivotReportClientPage() {
         });
         row.grandTotal = rowTotal;
         return row;
-      }).filter(row => row.grandTotal > 0); // Only show rows with sales
+      }).filter(row => row.grandTotal > 0);
 
       const columnTotals: PivotData['columnTotals'] = { grandTotal: 0 };
       columns.forEach(col => {
@@ -184,11 +196,38 @@ export default function FoodStallPivotReportClientPage() {
     } finally {
       setLoadingReport(false);
     }
-  }, [dateRange, siteFilter, user, sites, stalls]);
+  }, [dateRange, siteFilter, saleTypeFilter, user, sites, stalls]);
 
   useEffect(() => {
     fetchAndProcessData();
   }, [fetchAndProcessData]);
+  
+  const applyDateFilter = () => {
+    setDateRange(tempDateRange);
+    setIsDatePickerOpen(false);
+  };
+  
+  const datePresets = [
+    { label: "This Month", value: 'this_month' },
+    { label: "Last Month", value: 'last_month' },
+    { label: "All Time", value: 'all_time' },
+  ];
+  
+  const handleSetDatePreset = (preset: string) => {
+    const now = new Date();
+    let from: Date | undefined, to: Date | undefined = endOfDay(now);
+
+    switch (preset) {
+        case 'this_month': from = startOfMonth(now); to = endOfMonth(now); break;
+        case 'last_month': from = startOfMonth(subMonths(now, 1)); to = endOfMonth(subMonths(now, 1)); break;
+        case 'all_time': from = undefined; to = undefined; break;
+        default: from = undefined; to = undefined;
+    }
+    setTempDateRange({ from, to });
+    setDateRange({ from, to });
+    setIsDatePickerOpen(false);
+  };
+
 
   if (authLoading || userManagementLoading) {
     return (
@@ -203,24 +242,40 @@ export default function FoodStallPivotReportClientPage() {
       <Card>
         <CardHeader>
           <CardTitle>Filters</CardTitle>
+          <CardDescription>Select a date range and filters to analyze sales data.</CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col sm:flex-row gap-4">
-          <DatePicker
-            date={dateRange?.from}
-            onDateChange={(d) => setDateRange({ from: d, to: dateRange?.to })}
-            className="w-full sm:w-auto"
-          />
-           <DatePicker
-            date={dateRange?.to}
-            onDateChange={(d) => setDateRange({ from: dateRange?.from, to: d })}
-            className="w-full sm:w-auto"
-          />
-          {user?.role === 'admin' && (
-             <Select value={siteFilter} onValueChange={setSiteFilter}>
-                <SelectTrigger className="w-full sm:w-[220px] bg-input"><Building className="mr-2 h-4 w-4 text-muted-foreground"/><SelectValue placeholder="All Sites" /></SelectTrigger>
-                <SelectContent><SelectItem value="all">All Sites</SelectItem>{sites.map(site => <SelectItem key={site.id} value={site.id}>{site.name}</SelectItem>)}</SelectContent>
-            </Select>
-          )}
+        <CardContent className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+                 {datePresets.map(({ label, value }) => (
+                    <Button key={value} variant="outline" onClick={() => handleSetDatePreset(value)}>
+                        {label}
+                    </Button>
+                ))}
+                 <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
+                    <PopoverTrigger asChild>
+                        <Button id="pivotDateRange" variant={'outline'} className={cn("w-full sm:w-auto min-w-[280px]", !dateRange && "text-muted-foreground")}>
+                            <CalendarIcon className="mr-2 h-4 w-4" />
+                            {dateRange?.from ? (dateRange.to ? (<> {format(dateRange.from, "LLL dd, y")} - {format(dateRange.to, "LLL dd, y")} </>) : (format(dateRange.from, "LLL dd, y"))) : (<span>Pick a date range</span>)}
+                        </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar initialFocus mode="range" defaultMonth={tempDateRange?.from} selected={tempDateRange} onSelect={setTempDateRange} numberOfMonths={2}/>
+                        <div className="flex justify-end gap-2 pt-2 border-t mt-2 p-2"> <Button variant="ghost" onClick={() => setIsDatePickerOpen(false)}>Close</Button> <Button onClick={applyDateFilter}>Apply</Button> </div>
+                    </PopoverContent>
+                </Popover>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {user?.role === 'admin' && (
+                    <Select value={siteFilter} onValueChange={setSiteFilter}>
+                        <SelectTrigger className="bg-input"><Building className="mr-2 h-4 w-4 text-muted-foreground"/><SelectValue placeholder="All Sites" /></SelectTrigger>
+                        <SelectContent><SelectItem value="all">All Sites</SelectItem>{sites.map(site => <SelectItem key={site.id} value={site.id}>{site.name}</SelectItem>)}</SelectContent>
+                    </Select>
+                )}
+                 <Select value={saleTypeFilter} onValueChange={(v) => setSaleTypeFilter(v as any)}>
+                    <SelectTrigger className="bg-input"><ListOrdered className="mr-2 h-4 w-4 text-muted-foreground"/><SelectValue placeholder="All Sale Types" /></SelectTrigger>
+                    <SelectContent><SelectItem value="all">All Sale Types</SelectItem>{foodSaleTypes.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+                </Select>
+            </div>
         </CardContent>
       </Card>
 
