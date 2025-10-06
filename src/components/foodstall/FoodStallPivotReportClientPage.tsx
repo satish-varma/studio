@@ -63,6 +63,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import type { FoodSaleTransaction, Site, Stall } from '@/types';
 import { useUserManagement } from '@/hooks/use-user-management';
+import { DatePicker } from '../ui/date-picker';
 
 let db: ReturnType<typeof getFirestore> | undefined;
 if (!getApps().length) {
