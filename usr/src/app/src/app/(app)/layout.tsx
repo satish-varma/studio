@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useEffect } from 'react';
@@ -12,7 +11,6 @@ import {
   SidebarHeader,
   SidebarContent,
   SidebarFooter,
-  SidebarInset,
 } from "@/components/ui/sidebar";
 import { AppSidebarNav } from "@/components/layout/AppSidebarNav";
 import { AppHeaderContent } from "@/components/layout/AppHeaderContent";
