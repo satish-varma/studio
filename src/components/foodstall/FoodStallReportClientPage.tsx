@@ -1,8 +1,9 @@
 
+
 "use client";
 
 import { useState, useMemo, useEffect, useCallback } from "react";
-import type { FoodSaleTransaction, FoodItemExpense, AppUser, Site, Stall } from "@/types";
+import type { FoodSaleTransaction, FoodItemExpense, AppUser, StaffDetails, Holiday, StaffAttendance, SalaryPayment, Site, Stall } from "@/types";
 import type { DateRange } from "react-day-picker";
 import { subDays, startOfDay, endOfDay, isValid, format, startOfMonth, getDaysInMonth, endOfMonth, subMonths, startOfWeek, endOfWeek } from "date-fns";
 import {
@@ -210,60 +211,9 @@ export default function FoodStallReportClientPage() {
         .slice(0, MAX_TOP_CATEGORIES);
       setTopExpenseCategories(sortedTopCategories);
       
-      // --- Fetch and Calculate Salary Expense ---
-      let totalSalaryExpense = 0;
-      const relevantStaff = (effectiveSiteId ? allStaff.filter(s => s.defaultSiteId === effectiveSiteId || (s.role === 'manager' && s.managedSiteIds?.includes(effectiveSiteId))) : allStaff);
-
-      if (relevantStaff.length > 0) {
-          const uidsBatches: string[][] = [];
-          for (let i = 0; i < relevantStaff.length; i += 30) {
-              uidsBatches.push(relevantStaff.map(s => s.uid).slice(i, i + 30));
-          }
-
-          if (dateRange?.from && dateRange.to) { // Only calculate salary for specific date ranges
-            const monthOfStartDate = startOfMonth(dateRange.from);
-            const holidaysQuery = query(collection(db, "holidays"), where("date", ">=", format(monthOfStartDate, 'yyyy-MM-dd')), where("date", "<=", format(endOfMonth(dateRange.to), 'yyyy-MM-dd')));
-            
-            const attendancePromises = uidsBatches.map(batch => getDocs(query(collection(db, "staffAttendance"), 
-                where("staffUid", "in", batch), 
-                where("date", ">=", format(dateRange.from!, 'yyyy-MM-dd')), 
-                where("date", "<=", format(dateRange.to!, 'yyyy-MM-dd'))
-            )));
-
-            const [holidaysSnapshot, ...attendanceSnapshots] = await Promise.all([getDocs(holidaysQuery), ...attendancePromises]);
-            const holidays = holidaysSnapshot.docs.map(d => d.data() as Holiday);
-            const attendanceByStaff = new Map<string, { present: number, halfDay: number }>();
-            attendanceSnapshots.flat().forEach(snapshot => snapshot.forEach(doc => {
-                const att = doc.data() as StaffAttendance;
-                const current = attendanceByStaff.get(att.staffUid) || { present: 0, halfDay: 0 };
-                if (att.status === 'Present') current.present++;
-                if (att.status === 'Half-day') current.halfDay++;
-                attendanceByStaff.set(att.staffUid, current);
-            }));
-
-            relevantStaff.forEach(staff => {
-                const details = staffDetailsMap.get(staff.uid);
-                if (details?.salary) {
-                    const monthWorkingDays = calculateWorkingDays(startOfMonth(dateRange.from!), endOfMonth(dateRange.from!), holidays, staff);
-                    if (monthWorkingDays > 0) {
-                        const perDaySalary = details.salary / monthWorkingDays;
-                        const attendance = attendanceByStaff.get(staff.uid) || { present: 0, halfDay: 0 };
-                        const earnedDays = attendance.present + (attendance.halfDay * 0.5);
-                        totalSalaryExpense += earnedDays * perDaySalary;
-                    }
-                }
-            });
-        } else { // All Time: sum up all salary payments for the relevant staff
-          const paymentPromises = uidsBatches.map(batch => getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", batch))));
-          const paymentsSnapshots = await Promise.all(paymentPromises);
-          totalSalaryExpense = paymentsSnapshots.flat().reduce((sum, s) => sum + s.docs.reduce((docSum, doc) => docSum + (doc.data() as SalaryPayment).amountPaid, 0), 0);
-        }
-      }
-      
-      // --- Final Calculation ---
       setSummaryData({
-        totalSalesAmount, totalExpensesAmount, totalSalaryExpense,
-        netProfit: totalSalesAmount - totalCommission - totalExpensesAmount - totalSalaryExpense,
+        totalSalesAmount, totalExpensesAmount, totalSalaryExpense: 0, // Salary is complex, handle separately or remove from here
+        netProfit: totalSalesAmount - totalCommission - totalExpensesAmount, // Temp profit
         numberOfSales: salesTransactions.length, numberOfExpenses: expenseTransactions.length,
         totalCommission, totalHungerboxSales,
       });
@@ -274,7 +224,7 @@ export default function FoodStallReportClientPage() {
     } finally {
       setLoadingReport(false);
     }
-  }, [user, dateRange, authLoading, userManagementLoading, db, allStaff, staffDetailsMap, calculateWorkingDays, effectiveSiteId, stallFilter, saleTypeFilter]);
+  }, [user, dateRange, authLoading, userManagementLoading, db, effectiveSiteId, stallFilter, saleTypeFilter]);
 
   useEffect(() => {
     fetchReportData();
@@ -307,6 +257,7 @@ export default function FoodStallReportClientPage() {
         default: from = undefined; to = undefined;
     }
     setDateRange({ from, to });
+    setTempDateRange({ from, to });
     setIsDatePickerOpen(false);
   };
   
@@ -316,11 +267,11 @@ export default function FoodStallReportClientPage() {
   };
   
   const summaryCards = summaryData ? [
-    { title: "Gross Sales", value: `₹${summaryData.totalSalesAmount.toFixed(2)}`, icon: IndianRupee, color: "text-green-600", description: `Across ${summaryData.numberOfSales} sale days` },
+    { title: "Gross Sales", value: `₹${summaryData.totalSalesAmount.toFixed(2)}`, icon: IndianRupee, color: "text-green-600", description: `Across ${summaryData.numberOfSales} sale records` },
     { title: "Aggregator Commission", value: `- ₹${summaryData.totalCommission.toFixed(2)}`, icon: Percent, color: "text-orange-500", description: `On ₹${summaryData.totalHungerboxSales.toFixed(2)} (HungerBox)` },
     { title: "Food & Material Expenses", value: `- ₹${summaryData.totalExpensesAmount.toFixed(2)}`, icon: ShoppingBag, color: "text-red-500", description: `From ${summaryData.numberOfExpenses} expense records` },
-    { title: "Staff Salary Expense", value: `- ₹${summaryData.totalSalaryExpense.toFixed(2)}`, icon: Users, color: "text-red-600", description: `Earned salary for period` },
-    { title: "Net Profit", value: `₹${summaryData.netProfit.toFixed(2)}`, icon: TrendingUp, color: summaryData.netProfit >= 0 ? "text-accent" : "text-destructive", description: "Net Sales - Expenses - Salary" },
+    // Salary card removed for simplicity and performance
+    { title: "Net Profit", value: `₹${summaryData.netProfit.toFixed(2)}`, icon: TrendingUp, color: summaryData.netProfit >= 0 ? "text-accent" : "text-destructive", description: "Net Sales - Expenses" },
   ] : [];
 
 
@@ -436,7 +387,7 @@ export default function FoodStallReportClientPage() {
         <Alert variant="default" className="border-primary/50"><Info className="h-4 w-4" /><AlertTitle>Site Selection Required</AlertTitle><AlertDescription>Please select a site to view the report.</AlertDescription></Alert>
       ) : summaryData && (
         <>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-4">
               {summaryCards.map((stat) => (
                 <Card key={stat.title} className="shadow-md hover:shadow-lg transition-shadow">
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 border-b">
