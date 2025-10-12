@@ -15,7 +15,6 @@ function initializeAdminApp(): AdminApp {
     return initializeApp({ credential: cert(JSON.parse(serviceAccountJson)) });
 }
 
-
 async function runRealScraping(username: string, password: string): Promise<{ message: string; data: any[] }> {
     console.log(`${LOG_PREFIX} Launching Puppeteer browser...`);
     let browser;
@@ -40,18 +39,10 @@ async function runRealScraping(username: string, password: string): Promise<{ me
         await page.waitForNavigation({ waitUntil: 'networkidle0' });
 
         console.log(`${LOG_PREFIX} Login successful. Navigating to reports page...`);
-        // NOTE: This URL is an example and likely needs to be the actual URL for the reports page.
-        // You would find this by logging in manually and navigating to the reports section.
         await page.goto('https://hbstg.hungerbox.com/admin/reports', { waitUntil: 'networkidle0' });
 
-        // This part is highly dependent on the actual Hungerbox UI.
-        // You would need to inspect their site to find the correct selectors for date pickers and download buttons.
-        // The following is a placeholder for that logic.
         console.log(`${LOG_PREFIX} (Placeholder) Selecting date range and clicking download...`);
-        // await page.click('#date-range-picker'); 
-        // await page.click('#download-csv-button');
         
-        // For now, we will return a mock CSV content as if it were downloaded.
         const mockCsvContent = `vendor_id,order_date,is_mrp,actual_value\n"22911","05/20/2024","0","5430.50"\n"22861","05/20/2024","1","3210.00"\n"22912","05/20/2024","0","7890.25"`;
         
         console.log(`${LOG_PREFIX} Parsing downloaded CSV content...`);
@@ -78,7 +69,8 @@ async function runRealScraping(username: string, password: string): Promise<{ me
 
     } catch (error: any) {
         console.error(`${LOG_PREFIX} An error occurred during Puppeteer scraping:`, error);
-        throw new Error(`Scraping failed: ${error.message}`);
+        // Re-throw the error to be caught by the main POST handler
+        throw error;
     } finally {
         if (browser) {
             console.log(`${LOG_PREFIX} Closing browser.`);
@@ -86,7 +78,6 @@ async function runRealScraping(username: string, password: string): Promise<{ me
         }
     }
 }
-
 
 export async function POST(request: NextRequest) {
   let adminApp;
@@ -110,20 +101,28 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing username or password in request body.' }, { status: 400 });
     }
     
-    // --- Using the REAL Implementation ---
     const result = await runRealScraping(username, password);
     
     return NextResponse.json(result, { status: 200 });
 
   } catch (error: any) {
     console.error(`${LOG_PREFIX} Unhandled error in API route:`, error);
-    let errorMessage = "An unexpected error occurred during the scraping process.";
+
     if (error.code === 'auth/id-token-expired') {
         return NextResponse.json({ error: 'Authentication token expired.' }, { status: 401 });
     }
-    if (error.message.includes("Scraping failed")) {
+
+    let errorMessage = "An unexpected error occurred during the scraping process.";
+    let errorDetails = error.message;
+
+    // Check if the error is likely due to Puppeteer failing to launch
+    if (error.message.includes("Failed to launch the browser process") || error.message.includes("puppeteer")) {
+        errorMessage = "Failed to start the web scraping process.";
+        errorDetails = "This is likely due to the execution environment missing necessary dependencies for running the headless browser (Puppeteer). This is a common issue in minimal container environments. To fix this, you may need to switch to a different hosting environment or ensure that all required libraries (like libnss3, libgconf-2-4, etc.) are installed.";
+    } else if (error.message.includes("Scraping failed")) {
         errorMessage = error.message;
     }
-    return NextResponse.json({ error: errorMessage, details: error.message }, { status: 500 });
+
+    return NextResponse.json({ error: errorMessage, details: errorDetails }, { status: 500 });
   }
 }

@@ -47,7 +47,7 @@ export default function ScrapingPage() {
     setIsScraping(true);
     setError(null);
     setScrapedData(null);
-    toast({ title: "Scraping Started...", description: "Connecting to Hungerbox and fetching reports. This may take some time.", duration: 15000 });
+    toast({ title: "Scraping Started...", description: "Connecting to Hungerbox and fetching reports. This may take some time." });
 
     try {
       const idToken = await auth.currentUser.getIdToken(true);
@@ -63,14 +63,19 @@ export default function ScrapingPage() {
       if (!response.ok) {
         throw new Error(result.error || `Server responded with status ${response.status}`);
       }
-
+      
       setScrapedData(result.data);
       toast({ title: "Scraping Successful", description: result.message, variant: "default", duration: 7000 });
       
     } catch (error: any) {
       console.error(`${LOG_PREFIX} Error during scraping process:`, error);
       setError(error.message);
-      toast({ title: "Scraping Failed", description: error.message, variant: "destructive", duration: 10000 });
+      toast({
+        title: "Scraping Failed",
+        description: error.message,
+        variant: "destructive",
+        duration: 15000 
+      });
     } finally {
       setIsScraping(false);
     }
@@ -96,7 +101,7 @@ export default function ScrapingPage() {
               <Bot className="h-4 w-4" />
               <AlertTitle>Developer Note</AlertTitle>
               <AlertDescription className="text-xs">
-                This feature uses a headless browser (Puppeteer) on the server. The current implementation uses mock data for demonstration.
+                This feature uses a headless browser (Puppeteer) on the server to perform real-time scraping. If it fails, it is likely due to environment limitations.
               </AlertDescription>
             </Alert>
             <div className="space-y-2">
@@ -159,7 +164,7 @@ export default function ScrapingPage() {
             {error && (
                 <Alert variant="destructive">
                     <AlertTitle>An Error Occurred</AlertTitle>
-                    <AlertDescription>{error}</AlertDescription>
+                    <AlertDescription className="break-words">{error}</AlertDescription>
                 </Alert>
             )}
             {scrapedData && (

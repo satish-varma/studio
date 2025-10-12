@@ -27,12 +27,7 @@ const nextConfig: NextConfig = {
       }
     ],
   },
-  experimental: {
-    // This allows the Next.js dev server to access files outside the project root,
-    // which can be necessary in some cloud development environments.
-    serverComponentsExternalPackages: ['sharp', 'onnxruntime-node'],
-    serverFilesTraceIncludes: ['/usr/src/app/.next/standalone/src/lib/worker.js'],
-  },
+  serverExternalPackages: ['sharp', 'onnxruntime-node'],
 };
 
 export default nextConfig;
