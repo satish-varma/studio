@@ -15,18 +15,20 @@ function initializeAdminApp(): AdminApp {
     return initializeApp({ credential: cert(JSON.parse(serviceAccountJson)) });
 }
 
-async function runRealScraping(username: string, password: string): Promise<{ message: string; data: any[] }> {
+// Updated function to return a result object instead of throwing
+async function runRealScraping(username: string, password: string): Promise<{ success: boolean; message: string; data?: any[]; error?: string }> {
     console.log(`${LOG_PREFIX} Launching Puppeteer browser...`);
     let browser;
     try {
-        browser = await puppeteer.launch({ 
+        browser = await puppeteer.launch({
             headless: true, // Run in the background
             args: ['--no-sandbox', '--disable-setuid-sandbox'] // Necessary for many hosting environments
         });
         const page = await browser.newPage();
 
         console.log(`${LOG_PREFIX} Navigating to Hungerbox login page...`);
-        await page.goto('https://hbstg.hungerbox.com/login', { waitUntil: 'networkidle0' });
+        // Updated URL to the correct admin login page
+        await page.goto('https://admin.hungerbox.com/', { waitUntil: 'networkidle0' });
 
         console.log(`${LOG_PREFIX} Entering credentials...`);
         await page.type('#email', username);
@@ -38,11 +40,16 @@ async function runRealScraping(username: string, password: string): Promise<{ me
         console.log(`${LOG_PREFIX} Waiting for navigation after login...`);
         await page.waitForNavigation({ waitUntil: 'networkidle0' });
 
-        console.log(`${LOG_PREFIX} Login successful. Navigating to reports page...`);
-        await page.goto('https://hbstg.hungerbox.com/admin/reports', { waitUntil: 'networkidle0' });
-
-        console.log(`${LOG_PREFIX} (Placeholder) Selecting date range and clicking download...`);
+        const currentUrl = page.url();
+        if (currentUrl.includes('login') || currentUrl.includes('auth')) {
+            console.error(`${LOG_PREFIX} Login failed. Page is still on a login-related URL: ${currentUrl}`);
+            throw new Error("Login failed. Please check your credentials or the website structure.");
+        }
         
+        console.log(`${LOG_PREFIX} Login successful. Current URL: ${currentUrl}`);
+        console.log(`${LOG_PREFIX} (Placeholder) Navigating to reports page and downloading...`);
+        
+        // This part remains a placeholder as real report downloading is complex
         const mockCsvContent = `vendor_id,order_date,is_mrp,actual_value\n"22911","05/20/2024","0","5430.50"\n"22861","05/20/2024","1","3210.00"\n"22912","05/20/2024","0","7890.25"`;
         
         console.log(`${LOG_PREFIX} Parsing downloaded CSV content...`);
@@ -63,14 +70,19 @@ async function runRealScraping(username: string, password: string): Promise<{ me
         const finalData = Object.values(aggregatedResults);
 
         return {
+            success: true,
             message: `Successfully scraped and processed data. ${finalData.length} records aggregated.`,
             data: finalData
         };
 
     } catch (error: any) {
-        console.error(`${LOG_PREFIX} An error occurred during Puppeteer scraping:`, error);
-        // Re-throw the error to be caught by the main POST handler
-        throw error;
+        console.error(`${LOG_PREFIX} An error occurred during Puppeteer scraping:`, error.message);
+        // Return a failure object instead of throwing
+        return {
+            success: false,
+            message: "An error occurred during the scraping process.",
+            error: error.message || 'Unknown scraping error'
+        };
     } finally {
         if (browser) {
             console.log(`${LOG_PREFIX} Closing browser.`);
@@ -101,28 +113,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing username or password in request body.' }, { status: 400 });
     }
     
+    // Call the updated scraping function
     const result = await runRealScraping(username, password);
     
-    return NextResponse.json(result, { status: 200 });
+    // Check the result and return appropriate JSON response
+    if (result.success) {
+        return NextResponse.json({ message: result.message, data: result.data }, { status: 200 });
+    } else {
+        return NextResponse.json({ error: result.message, details: result.error }, { status: 500 });
+    }
 
   } catch (error: any) {
     console.error(`${LOG_PREFIX} Unhandled error in API route:`, error);
-
     if (error.code === 'auth/id-token-expired') {
         return NextResponse.json({ error: 'Authentication token expired.' }, { status: 401 });
     }
-
-    let errorMessage = "An unexpected error occurred during the scraping process.";
-    let errorDetails = error.message;
-
-    // Check if the error is likely due to Puppeteer failing to launch
-    if (error.message.includes("Failed to launch the browser process") || error.message.includes("puppeteer")) {
-        errorMessage = "Failed to start the web scraping process.";
-        errorDetails = "This is likely due to the execution environment missing necessary dependencies for running the headless browser (Puppeteer). This is a common issue in minimal container environments. To fix this, you may need to switch to a different hosting environment or ensure that all required libraries (like libnss3, libgconf-2-4, etc.) are installed.";
-    } else if (error.message.includes("Scraping failed")) {
-        errorMessage = error.message;
-    }
-
-    return NextResponse.json({ error: errorMessage, details: errorDetails }, { status: 500 });
+    return NextResponse.json({ error: "An unexpected server error occurred.", details: error.message }, { status: 500 });
   }
 }
