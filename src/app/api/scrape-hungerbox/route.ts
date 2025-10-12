@@ -92,15 +92,17 @@ async function runRealScraping(username: string, password: string): Promise<{ su
 }
 
 export async function POST(request: NextRequest) {
-  let adminApp;
-  try {
-    adminApp = initializeAdminApp();
-  } catch (e: any) {
-    return NextResponse.json({ error: 'Server Configuration Error.', details: e.message }, { status: 500 });
-  }
-  const adminAuth = getAdminAuth(adminApp);
-  
-  try {
+  try { // Comprehensive try...catch block starts here
+    let adminApp;
+    try {
+      adminApp = initializeAdminApp();
+    } catch (e: any) {
+      // This specific initialization error should be caught and returned as JSON
+      console.error(`${LOG_PREFIX} Critical server configuration error:`, e.message);
+      return NextResponse.json({ error: 'Server Configuration Error.', details: e.message }, { status: 500 });
+    }
+    const adminAuth = getAdminAuth(adminApp);
+    
     const authorization = request.headers.get('Authorization');
     if (!authorization?.startsWith('Bearer ')) {
       return NextResponse.json({ error: 'Unauthorized: Missing token.' }, { status: 401 });
@@ -113,21 +115,29 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing username or password in request body.' }, { status: 400 });
     }
     
-    // Call the updated scraping function
     const result = await runRealScraping(username, password);
     
-    // Check the result and return appropriate JSON response
     if (result.success) {
         return NextResponse.json({ message: result.message, data: result.data }, { status: 200 });
     } else {
+        // Now returns a proper JSON response for scraping failures
         return NextResponse.json({ error: result.message, details: result.error }, { status: 500 });
     }
 
-  } catch (error: any) {
+  } catch (error: any) { // This will catch any other unhandled errors (e.g., auth verification, JSON parsing)
     console.error(`${LOG_PREFIX} Unhandled error in API route:`, error);
+    let errorMessage = "An unexpected server error occurred.";
+    let errorDetails = error.message;
+    let statusCode = 500;
+
     if (error.code === 'auth/id-token-expired') {
-        return NextResponse.json({ error: 'Authentication token expired.' }, { status: 401 });
+        errorMessage = 'Authentication token expired.';
+        statusCode = 401;
+    } else if (error instanceof SyntaxError) {
+        errorMessage = 'Invalid JSON in request body.';
+        statusCode = 400;
     }
-    return NextResponse.json({ error: "An unexpected server error occurred.", details: error.message }, { status: 500 });
+    
+    return NextResponse.json({ error: errorMessage, details: errorDetails }, { status: statusCode });
   }
 }
