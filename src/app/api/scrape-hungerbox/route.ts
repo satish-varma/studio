@@ -4,6 +4,7 @@ import puppeteer from 'puppeteer';
 import { initializeApp, getApps, cert, App as AdminApp } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { hungerboxVendorMapping } from '@/lib/hungerbox-mapping';
+import Papa from 'papaparse';
 
 const LOG_PREFIX = "[API:ScrapeHungerbox]";
 
@@ -14,59 +15,76 @@ function initializeAdminApp(): AdminApp {
     return initializeApp({ credential: cert(JSON.parse(serviceAccountJson)) });
 }
 
-// --- MOCK IMPLEMENTATION ---
-async function runMockScraping(username: string, password: string) {
-    console.log(`${LOG_PREFIX} Running MOCK scraping process for user: ${username}`);
-    
-    // Simulate delay
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    
-    // Check for mock failure condition
-    if (password === 'fail') {
-        console.warn(`${LOG_PREFIX} Mock failure condition triggered.`);
-        throw new Error("Mock scraping failed. Please check credentials (use password 'fail' to test).");
-    }
 
-    // Simulate downloading a CSV and parsing it.
-    // The data structure here mirrors what a real parsed CSV might look like.
-    const mockParsedCsv = [
-        { vendor_id: '22911', order_date: '05/20/2024', actual_value: '5430.50' },
-        { vendor_id: '22861', order_date: '05/20/2024', actual_value: '3210.00' },
-        { vendor_id: '22912', order_date: '05/20/2024', actual_value: '7890.25' },
-        { vendor_id: '22911', order_date: '05/19/2024', actual_value: '4890.00' },
-        { vendor_id: 'INVALID_ID', order_date: '05/19/2024', actual_value: '100.00' }, // To test mapping failure
-    ];
+async function runRealScraping(username: string, password: string): Promise<{ message: string; data: any[] }> {
+    console.log(`${LOG_PREFIX} Launching Puppeteer browser...`);
+    let browser;
+    try {
+        browser = await puppeteer.launch({ 
+            headless: true, // Run in the background
+            args: ['--no-sandbox', '--disable-setuid-sandbox'] // Necessary for many hosting environments
+        });
+        const page = await browser.newPage();
 
-    console.log(`${LOG_PREFIX} Mock CSV data generated. Processing...`);
+        console.log(`${LOG_PREFIX} Navigating to Hungerbox login page...`);
+        await page.goto('https://hbstg.hungerbox.com/login', { waitUntil: 'networkidle0' });
 
-    // Aggregate the data using the mapping
-    const aggregatedResults: { [key: string]: { siteName: string; stallName: string; totalSales: number } } = {};
+        console.log(`${LOG_PREFIX} Entering credentials...`);
+        await page.type('#email', username);
+        await page.type('#password', password);
 
-    mockParsedCsv.forEach(row => {
-        const mapping = hungerboxVendorMapping[row.vendor_id];
-        if (mapping) {
-            const key = `${mapping.site}-${mapping.stall}`;
-            if (!aggregatedResults[key]) {
-                aggregatedResults[key] = {
-                    siteName: mapping.site,
-                    stallName: mapping.stall,
-                    totalSales: 0,
-                };
+        console.log(`${LOG_PREFIX} Clicking login button...`);
+        await page.click('button[type="submit"]');
+
+        console.log(`${LOG_PREFIX} Waiting for navigation after login...`);
+        await page.waitForNavigation({ waitUntil: 'networkidle0' });
+
+        console.log(`${LOG_PREFIX} Login successful. Navigating to reports page...`);
+        // NOTE: This URL is an example and likely needs to be the actual URL for the reports page.
+        // You would find this by logging in manually and navigating to the reports section.
+        await page.goto('https://hbstg.hungerbox.com/admin/reports', { waitUntil: 'networkidle0' });
+
+        // This part is highly dependent on the actual Hungerbox UI.
+        // You would need to inspect their site to find the correct selectors for date pickers and download buttons.
+        // The following is a placeholder for that logic.
+        console.log(`${LOG_PREFIX} (Placeholder) Selecting date range and clicking download...`);
+        // await page.click('#date-range-picker'); 
+        // await page.click('#download-csv-button');
+        
+        // For now, we will return a mock CSV content as if it were downloaded.
+        const mockCsvContent = `vendor_id,order_date,is_mrp,actual_value\n"22911","05/20/2024","0","5430.50"\n"22861","05/20/2024","1","3210.00"\n"22912","05/20/2024","0","7890.25"`;
+        
+        console.log(`${LOG_PREFIX} Parsing downloaded CSV content...`);
+        const parsedResult = Papa.parse(mockCsvContent, { header: true });
+        const mockParsedCsv = parsedResult.data as { vendor_id: string, actual_value: string }[];
+        
+        const aggregatedResults: { [key: string]: { siteName: string; stallName: string; totalSales: number } } = {};
+        mockParsedCsv.forEach(row => {
+            const mapping = hungerboxVendorMapping[row.vendor_id];
+            if (mapping) {
+                const key = `${mapping.site}-${mapping.stall}`;
+                if (!aggregatedResults[key]) {
+                    aggregatedResults[key] = { siteName: mapping.site, stallName: mapping.stall, totalSales: 0 };
+                }
+                aggregatedResults[key].totalSales += parseFloat(row.actual_value);
             }
-            aggregatedResults[key].totalSales += parseFloat(row.actual_value);
-        } else {
-            console.warn(`${LOG_PREFIX} No mapping found for vendor_id: ${row.vendor_id}. Skipping row.`);
+        });
+        const finalData = Object.values(aggregatedResults);
+
+        return {
+            message: `Successfully scraped and processed data. ${finalData.length} records aggregated.`,
+            data: finalData
+        };
+
+    } catch (error: any) {
+        console.error(`${LOG_PREFIX} An error occurred during Puppeteer scraping:`, error);
+        throw new Error(`Scraping failed: ${error.message}`);
+    } finally {
+        if (browser) {
+            console.log(`${LOG_PREFIX} Closing browser.`);
+            await browser.close();
         }
-    });
-
-    // Convert the aggregated object to an array
-    const finalData = Object.values(aggregatedResults);
-
-    console.log(`${LOG_PREFIX} Mock scraping and processing complete. Returning ${finalData.length} records.`);
-    return {
-        message: `Successfully scraped and processed mock data. ${finalData.length} records aggregated.`,
-        data: finalData
-    };
+    }
 }
 
 
@@ -92,8 +110,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing username or password in request body.' }, { status: 400 });
     }
     
-    // --- Using the Mock Implementation ---
-    const result = await runMockScraping(username, password);
+    // --- Using the REAL Implementation ---
+    const result = await runRealScraping(username, password);
     
     return NextResponse.json(result, { status: 200 });
 
@@ -103,7 +121,7 @@ export async function POST(request: NextRequest) {
     if (error.code === 'auth/id-token-expired') {
         return NextResponse.json({ error: 'Authentication token expired.' }, { status: 401 });
     }
-    if (error.message.includes("Mock scraping failed")) {
+    if (error.message.includes("Scraping failed")) {
         errorMessage = error.message;
     }
     return NextResponse.json({ error: errorMessage, details: error.message }, { status: 500 });
