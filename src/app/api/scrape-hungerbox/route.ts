@@ -43,7 +43,12 @@ async function runRealScraping(username: string, password: string): Promise<{ su
         const currentUrl = page.url();
         if (currentUrl.includes('login') || currentUrl.includes('auth')) {
             console.error(`${LOG_PREFIX} Login failed. Page is still on a login-related URL: ${currentUrl}`);
-            throw new Error("Login failed. Please check your credentials or the website structure.");
+            // This is now a returned error, not a thrown one.
+            return {
+                success: false,
+                message: "Login failed. Please check your credentials or the website structure.",
+                error: "After submitting credentials, the page was still on a login URL."
+            };
         }
         
         console.log(`${LOG_PREFIX} Login successful. Current URL: ${currentUrl}`);
@@ -92,12 +97,11 @@ async function runRealScraping(username: string, password: string): Promise<{ su
 }
 
 export async function POST(request: NextRequest) {
-  try { // Comprehensive try...catch block starts here
+  try {
     let adminApp;
     try {
       adminApp = initializeAdminApp();
     } catch (e: any) {
-      // This specific initialization error should be caught and returned as JSON
       console.error(`${LOG_PREFIX} Critical server configuration error:`, e.message);
       return NextResponse.json({ error: 'Server Configuration Error.', details: e.message }, { status: 500 });
     }
@@ -120,11 +124,10 @@ export async function POST(request: NextRequest) {
     if (result.success) {
         return NextResponse.json({ message: result.message, data: result.data }, { status: 200 });
     } else {
-        // Now returns a proper JSON response for scraping failures
         return NextResponse.json({ error: result.message, details: result.error }, { status: 500 });
     }
 
-  } catch (error: any) { // This will catch any other unhandled errors (e.g., auth verification, JSON parsing)
+  } catch (error: any) {
     console.error(`${LOG_PREFIX} Unhandled error in API route:`, error);
     let errorMessage = "An unexpected server error occurred.";
     let errorDetails = error.message;
