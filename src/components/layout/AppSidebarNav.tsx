@@ -22,6 +22,7 @@ import {
   HandCoins,
   History,
   LineChart,
+  Bot
 } from "lucide-react";
 import {
   SidebarMenu,
@@ -107,6 +108,13 @@ const navItems: NavItem[] = [
       { href: "/staff/reports", label: "Reports", roles: ['manager', 'admin'], icon: LineChart },
       { href: "/staff/activity-log", label: "Activity Log", roles: ['manager', 'admin'], icon: FileText },
     ]
+  },
+
+  {
+    href: "/scraping",
+    label: "Web Scraping",
+    icon: Bot,
+    roles: ['admin'],
   },
 
   {
