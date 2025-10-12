@@ -1,4 +1,3 @@
-
 // This file contains the mapping from Hungerbox's internal vendor IDs
 // to the Site and Stall names used within the StallSync application.
 
