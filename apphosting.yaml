@@ -5,3 +5,12 @@ runConfig:
   # Increase this value if you'd like to automatically spin up
   # more instances in response to increased traffic.
   maxInstances: 1
+# Add the packages required for puppeteer to run.
+# https://pptr.dev/troubleshooting#running-puppeteer-on-debian
+aptGet:
+  - libgobject-2.0-0
+  - libgdk-pixbuf2.0-0
+  - libatk-bridge2.0-0
+  - libgbm-dev
+  - libnss3
+  - libx11-xcb1
