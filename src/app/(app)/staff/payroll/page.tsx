@@ -17,7 +17,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Info, ChevronLeft, ChevronRight, Filter, IndianRupee, HandCoins, CalendarDays, Wallet, Building } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { format, startOfMonth, endOfMonth, subMonths, addMonths, isAfter, isBefore, max, min, startOfDay, getDate } from "date-fns";
+import { format, startOfMonth, endOfMonth, subMonths, addMonths, isAfter, isBefore, max, min, startOfDay, getDate, eachMonthOfInterval, getMonth } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { PayrollTable } from "@/components/staff/PayrollTable";
 import { useUserManagement } from "@/hooks/use-user-management";
@@ -58,20 +58,20 @@ export default function PayrollClientPage() {
   
   const {
     users: allUsersForContext,
-    sites, // Now using sites from the hook
+    sites,
     staffDetails: staffDetailsMap,
     loading: userManagementLoading,
     error: userManagementError,
+    getHistoricalSalary
   } = useUserManagement();
 
   const [payrollData, setPayrollData] = useState<PayrollData[]>([]);
   const [loadingPayrollCalcs, setLoadingPayrollCalcs] = useState(true);
   const [currentMonth, setCurrentMonth] = useState(startOfMonth(new Date()));
   const [statusFilter, setStatusFilter] = useState<UserStatus | 'all'>('active');
-  const [siteFilter, setSiteFilter] = useState<string>('all'); // New state for site filter
+  const [siteFilter, setSiteFilter] = useState<string>('all');
 
   const staffList = useMemo(() => {
-    // This hook now correctly returns all users for admin, or users from managed sites for manager
     return allUsersForContext.filter(u => u.role === 'staff' || u.role === 'manager');
   }, [allUsersForContext]);
   
@@ -121,11 +121,9 @@ export default function PayrollClientPage() {
   
   const refetchData = useCallback(async () => {
     if (userManagementLoading || staffList.length === 0 || !db) {
-        console.log(`${LOG_PREFIX} refetchData skipped. Loading: ${userManagementLoading}, StaffCount: ${staffList.length}`);
+        setLoadingPayrollCalcs(false);
         return;
     }
-    console.log(`${LOG_PREFIX} refetchData triggered.`);
-
     setLoadingPayrollCalcs(true);
 
     const uids = staffList.map(s => s.uid);
@@ -139,7 +137,6 @@ export default function PayrollClientPage() {
     
     try {
         const [advancesSnapshots, paymentsSnapshots, holidaysSnapshot, attendanceSnapshots] = await Promise.all([
-            // Query for advances FOR this payroll month
             Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "advances"), where("staffUid", "in", batch), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear()))))),
             Promise.all(uidsBatches.map(batch => getDocs(query(collection(db, "salaryPayments"), where("staffUid", "in", batch), where("forMonth", "==", currentMonth.getMonth() + 1), where("forYear", "==", currentMonth.getFullYear()))))),
             getDocs(query(collection(db, "holidays"), where("date", ">=", format(payrollMonthStart, 'yyyy-MM-dd')), where("date", "<=", format(payrollMonthEnd, 'yyyy-MM-dd')))),
@@ -176,18 +173,15 @@ export default function PayrollClientPage() {
         console.error(`${LOG_PREFIX} Error in refetchData:`, error);
         toast({ title: "Error Refetching Payroll Data", description: error.message, variant: "destructive"});
     }
-  }, [staffList, currentMonth, toast, userManagementLoading, db]);
+  }, [staffList, currentMonth, toast, userManagementLoading]);
 
   // Effect to re-calculate payroll whenever any data changes
   useEffect(() => {
-    if (userManagementLoading || staffList.length === 0) {
-      if(!userManagementLoading) setLoadingPayrollCalcs(false);
-      return;
-    }
+    if (userManagementLoading) return;
     setLoadingPayrollCalcs(true);
     const newPayrollData = staffList.map(u => {
       const details = staffDetailsMap.get(u.uid) || null;
-      const salary = details?.salary || 0;
+      const salary = getHistoricalSalary(u.uid, currentMonth);
       const advances = monthlyAdvances.get(u.uid) || 0;
       const paidAmount = monthlyPayments.get(u.uid) || 0;
       
@@ -195,7 +189,7 @@ export default function PayrollClientPage() {
       const attendance = monthlyAttendance.get(u.uid) || { present: 0, halfDay: 0 };
       const presentDays = attendance.present + (attendance.halfDay * 0.5);
       
-      const perDaySalary = workingDays > 0 ? salary / workingDays : 0;
+      const perDaySalary = workingDays > 0 ? (salary || 0) / workingDays : 0;
       const earnedSalary = perDaySalary * presentDays;
       
       const netPayable = earnedSalary - advances;
@@ -209,7 +203,7 @@ export default function PayrollClientPage() {
     
     setPayrollData(newPayrollData);
     setLoadingPayrollCalcs(false);
-  }, [staffList, staffDetailsMap, monthlyAdvances, monthlyPayments, monthlyHolidays, monthlyAttendance, currentMonth, calculateWorkingDaysForEmployee, userManagementLoading]);
+  }, [staffList, staffDetailsMap, monthlyAdvances, monthlyPayments, monthlyHolidays, monthlyAttendance, currentMonth, calculateWorkingDaysForEmployee, userManagementLoading, getHistoricalSalary]);
 
   // Initial and month-change data fetch
   useEffect(() => {
@@ -248,13 +242,14 @@ export default function PayrollClientPage() {
         if (details?.exitDate && isBefore(new Date(details.exitDate), monthStart)) {
             return acc;
         }
+        const historicalSalary = getHistoricalSalary(item.user.uid, currentMonth) || 0;
         if(item.user.role === 'manager' && siteFilter !== 'all') {
             const managedCount = item.user.managedSiteIds?.length || 1;
-            return acc + ((details?.salary || 0) / managedCount);
+            return acc + (historicalSalary / managedCount);
         }
-        return acc + (details?.salary || 0);
+        return acc + historicalSalary;
     }, 0);
-  }, [filteredPayrollData, currentMonth, siteFilter]);
+  }, [filteredPayrollData, currentMonth, siteFilter, getHistoricalSalary]);
 
   const totalNetPayable = useMemo(() => {
     return filteredPayrollData.reduce((acc, item) => {
@@ -401,3 +396,5 @@ export default function PayrollClientPage() {
     </div>
   );
 }
+
+    

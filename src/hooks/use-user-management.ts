@@ -22,8 +22,9 @@ import { getAuth } from "firebase/auth";
 import { firebaseConfig } from '@/lib/firebaseConfig';
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import type { AppUser, UserRole, Site, Stall, UserStatus, StaffDetails } from "@/types";
+import type { AppUser, UserRole, Site, Stall, UserStatus, StaffDetails, SalaryHistory } from "@/types";
 import { logStaffActivity } from "@/lib/staffLogger";
+import { parseISO, isWithinInterval, startOfMonth } from 'date-fns';
 
 const LOG_PREFIX = "[useUserManagement]";
 
@@ -45,6 +46,8 @@ export function useUserManagement() {
   const [staffDetails, setStaffDetails] = useState<Map<string, StaffDetails>>(new Map());
   const [sites, setSites] = useState<Site[]>([]);
   const [stalls, setStalls] = useState<Stall[]>([]);
+  const [salaryHistories, setSalaryHistories] = useState<Map<string, SalaryHistory[]>>(new Map());
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -62,82 +65,92 @@ export function useUserManagement() {
     }
 
     setLoading(true);
-    let userUnsubscriber: (() => void) | null = null;
     
-    // Admins see all users. Managers see all users to correctly filter later.
-    const usersQuery = query(collection(db, "users"), orderBy("displayName", "asc"));
-    userUnsubscriber = onSnapshot(usersQuery, (snapshot) => {
-        let allUsers = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser));
-        
-        // ** THE FIX IS HERE **
-        // The filtering responsibility is moved to the component that uses the hook.
-        // This hook should provide all users relevant to the user's role without being
-        // constrained by the *currently active* site, which could be "All Sites" for an admin.
-        if (currentUser.role === 'manager') {
-            const managedSiteIds = currentUser.managedSiteIds || [];
-            // For managers, we pre-filter to only staff within their managed sites.
-            const filteredUsers = allUsers.filter(u => 
-                (u.role === 'staff' || u.role === 'manager') && 
-                u.defaultSiteId && 
-                managedSiteIds.includes(u.defaultSiteId)
-            );
-            setUsers(filteredUsers);
-        } else { // Admin
-            setUsers(allUsers);
-        }
+    // Admins see all users. Managers see only users in their managed sites.
+    const usersQuery = currentUser.role === 'admin'
+      ? query(collection(db, "users"), orderBy("displayName", "asc"))
+      : query(collection(db, "users"), where("defaultSiteId", "in", currentUser.managedSiteIds && currentUser.managedSiteIds.length > 0 ? currentUser.managedSiteIds : ['placeholder-for-empty-array']));
+
+    const unsubUsers = onSnapshot(usersQuery, (snapshot) => {
+      const fetchedUsers = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser));
+      setUsers(fetchedUsers);
     }, (err) => {
-        console.error(`${LOG_PREFIX} Error fetching users:`, err);
-        setError("Failed to load users list.");
+      console.error(`${LOG_PREFIX} Error fetching users:`, err);
+      setError("Failed to load users list.");
     });
-
-
-    const sitesQuery = query(collection(db, "sites"), orderBy("name", "asc"));
-    const stallsQuery = query(collection(db, "stalls"), orderBy("name", "asc"));
-    const staffDetailsQuery = query(collection(db, "staffDetails"));
-
-    const unsubSites = onSnapshot(sitesQuery, (snapshot) => {
+    
+    const unsubSites = onSnapshot(query(collection(db, "sites"), orderBy("name", "asc")), (snapshot) => {
       setSites(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Site)));
-    }, (err) => {
-      console.error(`${LOG_PREFIX} Error fetching sites:`, err);
-      setError("Failed to load sites list.");
     });
 
-    const unsubStalls = onSnapshot(stallsQuery, (snapshot) => {
+    const unsubStalls = onSnapshot(query(collection(db, "stalls"), orderBy("name", "asc")), (snapshot) => {
       setStalls(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Stall)));
-    }, (err) => {
-      console.error(`${LOG_PREFIX} Error fetching stalls:`, err);
-      setError("Failed to load stalls list.");
     });
-    
-    const unsubStaffDetails = onSnapshot(staffDetailsQuery, (snapshot) => {
-        const newDetailsMap = new Map<string, StaffDetails>();
-        snapshot.forEach(doc => newDetailsMap.set(doc.id, doc.data() as StaffDetails));
-        setStaffDetails(newDetailsMap);
-    }, (err) => {
-        console.error(`${LOG_PREFIX} Error fetching staff details:`, err);
-        setError("Failed to load staff details.");
+
+    const unsubStaffDetails = onSnapshot(query(collection(db, "staffDetails")), (snapshot) => {
+      const newDetailsMap = new Map<string, StaffDetails>();
+      snapshot.forEach(doc => newDetailsMap.set(doc.id, doc.data() as StaffDetails));
+      setStaffDetails(newDetailsMap);
+    });
+
+    const unsubSalaryHistory = onSnapshot(query(collection(db, "salaryHistory"), orderBy("effectiveDate", "desc")), (snapshot) => {
+        const histories = new Map<string, SalaryHistory[]>();
+        snapshot.forEach(doc => {
+            const historyItem = { id: doc.id, ...doc.data() } as SalaryHistory;
+            const userHistory = histories.get(historyItem.staffUid) || [];
+            userHistory.push(historyItem);
+            histories.set(historyItem.staffUid, userHistory);
+        });
+        setSalaryHistories(histories);
     });
 
     Promise.all([
-      new Promise(resolve => onSnapshot(usersQuery, () => resolve(true))),
-      new Promise(resolve => onSnapshot(sitesQuery, () => resolve(true))),
-      new Promise(resolve => onSnapshot(stallsQuery, () => resolve(true))),
-      new Promise(resolve => onSnapshot(staffDetailsQuery, () => resolve(true))),
+        getDocs(usersQuery),
+        getDocs(query(collection(db, "sites"))),
+        getDocs(query(collection(db, "stalls"))),
+        getDocs(query(collection(db, "staffDetails"))),
+        getDocs(query(collection(db, "salaryHistory"))),
     ]).then(() => {
         setLoading(false);
     }).catch(err => {
+        console.error(`${LOG_PREFIX} Error loading initial data:`, err);
         setError("Error loading initial data.");
         setLoading(false);
     });
 
     return () => {
-      if (userUnsubscriber) userUnsubscriber();
+      unsubUsers();
       unsubSites();
       unsubStalls();
       unsubStaffDetails();
+      unsubSalaryHistory();
     };
   }, [currentUser, authLoading]);
 
+  const getHistoricalSalary = useCallback((staffUid: string, forDate: Date): number | null => {
+    const history = salaryHistories.get(staffUid);
+    const details = staffDetailsMap.get(staffUid);
+
+    // Find the most recent salary change that is on or before the given date
+    const applicableSalaryRecord = history?.find(record => 
+        !isAfter(parseISO(record.effectiveDate), forDate)
+    );
+
+    if (applicableSalaryRecord) {
+        return applicableSalaryRecord.newSalary;
+    }
+    
+    // If no historical salary is applicable, check if the joining date is after the given date.
+    // If so, they weren't employed, so salary is 0.
+    if (details?.joiningDate && isAfter(parseISO(details.joiningDate), forDate)) {
+        return 0;
+    }
+    
+    // Otherwise, return their current base salary.
+    return details?.salary || null;
+
+  }, [salaryHistories, staffDetailsMap]);
+  
   const handleCreateUserFirestoreDoc = useCallback(async (uid: string, newUserData: Omit<AppUser, 'createdAt' | 'uid'>): Promise<boolean> => {
     if (!currentUser || currentUser.role !== 'admin') {
       toast({ title: "Permission Denied", description: "Only admins can create users.", variant: "destructive" });
@@ -247,7 +260,7 @@ export function useUserManagement() {
       if (newStatus === 'inactive' && exitDate) {
         detailsUpdate.exitDate = exitDate.toISOString();
       } else if (newStatus === 'active') {
-        detailsUpdate.exitDate = null; // Clear exit date on reactivation
+        detailsUpdate.exitDate = null;
       }
       if (Object.keys(detailsUpdate).length > 0) {
         await setDoc(detailsDocRef, detailsUpdate, { merge: true });
@@ -332,8 +345,10 @@ export function useUserManagement() {
     sites,
     stalls,
     staffDetails,
+    salaryHistories,
     loading: authLoading || loading,
     error,
+    getHistoricalSalary,
     handleCreateUserFirestoreDoc,
     handleRoleChange,
     handleDeleteUser,
@@ -344,3 +359,5 @@ export function useUserManagement() {
     handleBatchUpdateStaffDetails,
   };
 }
+
+    
