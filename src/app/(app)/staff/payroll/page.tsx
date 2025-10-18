@@ -17,7 +17,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Info, ChevronLeft, ChevronRight, Filter, IndianRupee, HandCoins, CalendarDays, Wallet, Building } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { format, startOfMonth, endOfMonth, subMonths, addMonths, isAfter, isBefore, max, min, startOfDay, getDate, eachMonthOfInterval, getMonth } from "date-fns";
+import { format, startOfMonth, endOfMonth, subMonths, addMonths, isAfter, isBefore, max, min, startOfDay, getDate } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { PayrollTable } from "@/components/staff/PayrollTable";
 import { useUserManagement } from "@/hooks/use-user-management";
@@ -181,7 +181,7 @@ export default function PayrollClientPage() {
     setLoadingPayrollCalcs(true);
     const newPayrollData = staffList.map(u => {
       const details = staffDetailsMap.get(u.uid) || null;
-      const salary = getHistoricalSalary(u.uid, currentMonth);
+      const salary = getHistoricalSalary(u.uid, currentMonth) || 0;
       const advances = monthlyAdvances.get(u.uid) || 0;
       const paidAmount = monthlyPayments.get(u.uid) || 0;
       
@@ -396,5 +396,3 @@ export default function PayrollClientPage() {
     </div>
   );
 }
-
-    

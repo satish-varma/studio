@@ -24,7 +24,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import type { AppUser, UserRole, Site, Stall, UserStatus, StaffDetails, SalaryHistory } from "@/types";
 import { logStaffActivity } from "@/lib/staffLogger";
-import { parseISO, isWithinInterval, startOfMonth } from 'date-fns';
+import { parseISO, isAfter, startOfMonth } from 'date-fns';
 
 const LOG_PREFIX = "[useUserManagement]";
 
@@ -66,34 +66,39 @@ export function useUserManagement() {
 
     setLoading(true);
     
-    // Admins see all users. Managers see only users in their managed sites.
-    const usersQuery = currentUser.role === 'admin'
-      ? query(collection(db, "users"), orderBy("displayName", "asc"))
-      : query(collection(db, "users"), where("defaultSiteId", "in", currentUser.managedSiteIds && currentUser.managedSiteIds.length > 0 ? currentUser.managedSiteIds : ['placeholder-for-empty-array']));
+    const usersQuery = query(collection(db, "users"), orderBy("displayName", "asc"));
+    const sitesQuery = query(collection(db, "sites"), orderBy("name", "asc"));
+    const stallsQuery = query(collection(db, "stalls"), orderBy("name", "asc"));
+    const staffDetailsQuery = query(collection(db, "staffDetails"));
+    const salaryHistoryQuery = query(collection(db, "salaryHistory"), orderBy("effectiveDate", "desc"));
 
     const unsubUsers = onSnapshot(usersQuery, (snapshot) => {
-      const fetchedUsers = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser));
+      let fetchedUsers = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as AppUser));
+      // For managers, filter to only users within their managed sites
+      if (currentUser.role === 'manager' && currentUser.managedSiteIds && currentUser.managedSiteIds.length > 0) {
+        fetchedUsers = fetchedUsers.filter(u => 
+          (u.role === 'staff' && u.defaultSiteId && currentUser.managedSiteIds!.includes(u.defaultSiteId)) ||
+          (u.role === 'manager' && u.managedSiteIds?.some(msid => currentUser.managedSiteIds!.includes(msid)))
+        );
+      }
       setUsers(fetchedUsers);
     }, (err) => {
       console.error(`${LOG_PREFIX} Error fetching users:`, err);
       setError("Failed to load users list.");
     });
-    
-    const unsubSites = onSnapshot(query(collection(db, "sites"), orderBy("name", "asc")), (snapshot) => {
+
+    const unsubSites = onSnapshot(sitesQuery, (snapshot) => {
       setSites(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Site)));
     });
-
-    const unsubStalls = onSnapshot(query(collection(db, "stalls"), orderBy("name", "asc")), (snapshot) => {
+    const unsubStalls = onSnapshot(stallsQuery, (snapshot) => {
       setStalls(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Stall)));
     });
-
-    const unsubStaffDetails = onSnapshot(query(collection(db, "staffDetails")), (snapshot) => {
+    const unsubStaffDetails = onSnapshot(staffDetailsQuery, (snapshot) => {
       const newDetailsMap = new Map<string, StaffDetails>();
       snapshot.forEach(doc => newDetailsMap.set(doc.id, doc.data() as StaffDetails));
       setStaffDetails(newDetailsMap);
     });
-
-    const unsubSalaryHistory = onSnapshot(query(collection(db, "salaryHistory"), orderBy("effectiveDate", "desc")), (snapshot) => {
+    const unsubSalaryHistory = onSnapshot(salaryHistoryQuery, (snapshot) => {
         const histories = new Map<string, SalaryHistory[]>();
         snapshot.forEach(doc => {
             const historyItem = { id: doc.id, ...doc.data() } as SalaryHistory;
@@ -105,11 +110,11 @@ export function useUserManagement() {
     });
 
     Promise.all([
-        getDocs(usersQuery),
-        getDocs(query(collection(db, "sites"))),
-        getDocs(query(collection(db, "stalls"))),
-        getDocs(query(collection(db, "staffDetails"))),
-        getDocs(query(collection(db, "salaryHistory"))),
+      new Promise(resolve => onSnapshot(usersQuery, () => resolve(true))),
+      new Promise(resolve => onSnapshot(sitesQuery, () => resolve(true))),
+      new Promise(resolve => onSnapshot(stallsQuery, () => resolve(true))),
+      new Promise(resolve => onSnapshot(staffDetailsQuery, () => resolve(true))),
+      new Promise(resolve => onSnapshot(salaryHistoryQuery, () => resolve(true))),
     ]).then(() => {
         setLoading(false);
     }).catch(err => {
@@ -119,38 +124,31 @@ export function useUserManagement() {
     });
 
     return () => {
-      unsubUsers();
-      unsubSites();
-      unsubStalls();
-      unsubStaffDetails();
-      unsubSalaryHistory();
+      unsubUsers(); unsubSites(); unsubStalls();
+      unsubStaffDetails(); unsubSalaryHistory();
     };
   }, [currentUser, authLoading]);
 
   const getHistoricalSalary = useCallback((staffUid: string, forDate: Date): number | null => {
     const history = salaryHistories.get(staffUid);
     const details = staffDetailsMap.get(staffUid);
+    const checkDate = startOfMonth(forDate);
 
-    // Find the most recent salary change that is on or before the given date
     const applicableSalaryRecord = history?.find(record => 
-        !isAfter(parseISO(record.effectiveDate), forDate)
+        !isAfter(parseISO(record.effectiveDate), checkDate)
     );
 
     if (applicableSalaryRecord) {
         return applicableSalaryRecord.newSalary;
     }
     
-    // If no historical salary is applicable, check if the joining date is after the given date.
-    // If so, they weren't employed, so salary is 0.
-    if (details?.joiningDate && isAfter(parseISO(details.joiningDate), forDate)) {
+    if (details?.joiningDate && isAfter(parseISO(details.joiningDate), checkDate)) {
         return 0;
     }
     
-    // Otherwise, return their current base salary.
     return details?.salary || null;
-
   }, [salaryHistories, staffDetailsMap]);
-  
+
   const handleCreateUserFirestoreDoc = useCallback(async (uid: string, newUserData: Omit<AppUser, 'createdAt' | 'uid'>): Promise<boolean> => {
     if (!currentUser || currentUser.role !== 'admin') {
       toast({ title: "Permission Denied", description: "Only admins can create users.", variant: "destructive" });
@@ -174,7 +172,7 @@ export function useUserManagement() {
     const userDocRef = doc(db, "users", userId);
     try {
       const updates: Record<string, any> = { role: newRole };
-      if (newRole === 'staff') updates.managedSiteIds = null;
+      if (newRole === 'staff') updates.managedSiteIds = [];
       if (newRole === 'manager') {
         updates.defaultSiteId = null;
         updates.defaultStallId = null;
@@ -182,7 +180,7 @@ export function useUserManagement() {
       if (newRole === 'admin') {
         updates.defaultSiteId = null;
         updates.defaultStallId = null;
-        updates.managedSiteIds = null;
+        updates.managedSiteIds = [];
       }
       await updateDoc(userDocRef, updates);
       toast({ title: "Role Updated", description: "User role has been successfully changed." });
@@ -359,5 +357,3 @@ export function useUserManagement() {
     handleBatchUpdateStaffDetails,
   };
 }
-
-    
