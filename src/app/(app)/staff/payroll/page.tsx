@@ -66,7 +66,7 @@ export default function PayrollClientPage() {
 
   const [payrollData, setPayrollData] = useState<PayrollData[]>([]);
   const [loadingPayrollCalcs, setLoadingPayrollCalcs] = useState(true);
-  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [currentMonth, setCurrentMonth] = useState(startOfMonth(new Date()));
   const [statusFilter, setStatusFilter] = useState<UserStatus | 'all'>('active');
   const [siteFilter, setSiteFilter] = useState<string>('all'); // New state for site filter
 
@@ -75,6 +75,7 @@ export default function PayrollClientPage() {
     return allUsersForContext.filter(u => u.role === 'staff' || u.role === 'manager');
   }, [allUsersForContext]);
   
+
   const [monthlyAdvances, setMonthlyAdvances] = useState<Map<string, number>>(new Map());
   const [monthlyPayments, setMonthlyPayments] = useState<Map<string, number>>(new Map());
   const [monthlyHolidays, setMonthlyHolidays] = useState<Holiday[]>([]);
@@ -82,7 +83,7 @@ export default function PayrollClientPage() {
   
   const handlePrevMonth = () => setCurrentMonth(prev => subMonths(prev, 1));
   const handleNextMonth = () => setCurrentMonth(prev => addMonths(prev, 1));
-  const handleGoToCurrentMonth = () => setCurrentMonth(new Date());
+  const handleGoToCurrentMonth = () => setCurrentMonth(startOfMonth(new Date()));
 
   const calculateWorkingDaysForEmployee = useCallback((month: Date, holidays: Holiday[], staff: AppUser, details: StaffDetails | null) => {
     const monthStart = startOfMonth(month);
@@ -400,3 +401,5 @@ export default function PayrollClientPage() {
     </div>
   );
 }
+
+    

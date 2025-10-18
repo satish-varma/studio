@@ -128,6 +128,7 @@ export default function SalaryAdvanceClientPage() {
     }
   
     const unsubscribers = uidsBatches.map(batch => {
+      if (batch.length === 0) return () => {};
       const advancesQuery = query(collection(db, "advances"), where("staffUid", "in", batch), orderBy("date", "desc"));
       return onSnapshot(advancesQuery, (snapshot) => {
         const batchAdvances = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SalaryAdvance));
@@ -169,7 +170,7 @@ export default function SalaryAdvanceClientPage() {
             recordedByUid: user.uid,
             recordedByName: user.displayName || user.email!,
             siteId: activeSiteId, // The site context of the manager recording the advance
-            staffSiteId: staffMember.defaultSiteId, // The site the staff belongs to
+            staffSiteId: staffMember.defaultSiteId, // The site the staff member belongs to
             forMonth: forDateObj.getMonth() + 1,
             forYear: forDateObj.getFullYear(),
         };
@@ -336,6 +337,5 @@ export default function SalaryAdvanceClientPage() {
     </Card>
   );
 }
-
 
     
