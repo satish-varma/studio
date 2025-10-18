@@ -131,7 +131,7 @@ export function useUserManagement() {
 
   const getHistoricalSalary = useCallback((staffUid: string, forDate: Date): number | null => {
     const history = salaryHistories.get(staffUid);
-    const details = staffDetailsMap.get(staffUid);
+    const details = staffDetails.get(staffUid);
     const checkDate = startOfMonth(forDate);
 
     const applicableSalaryRecord = history?.find(record => 
@@ -147,7 +147,7 @@ export function useUserManagement() {
     }
     
     return details?.salary || null;
-  }, [salaryHistories, staffDetailsMap]);
+  }, [salaryHistories, staffDetails]);
 
   const handleCreateUserFirestoreDoc = useCallback(async (uid: string, newUserData: Omit<AppUser, 'createdAt' | 'uid'>): Promise<boolean> => {
     if (!currentUser || currentUser.role !== 'admin') {
