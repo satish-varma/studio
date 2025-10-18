@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
@@ -34,6 +35,9 @@ import { Calendar } from "@/components/ui/calendar";
 import { cn } from "@/lib/utils";
 import { useUserManagement } from "@/hooks/use-user-management";
 import type { DateRange } from "react-day-picker";
+import { errorEmitter } from "@/lib/error-emitter";
+import { FirestorePermissionError } from "@/lib/errors";
+
 
 const LOG_PREFIX = "[StaffAttendanceClientPage]";
 
@@ -236,11 +240,29 @@ export default function StaffAttendanceClientPage() {
     
     const docRef = doc(db, "staffAttendance", docId);
     
-    try {
-      if (newStatus === null) {
-        await deleteDoc(docRef);
-      } else {
-        await setDoc(docRef, {
+    if (newStatus === null) {
+      deleteDoc(docRef)
+        .then(() => {
+            logStaffActivity(user, {
+                type: 'ATTENDANCE_MARKED',
+                relatedStaffUid: staff.uid,
+                siteId: siteIdForAttendance,
+                details: {
+                    date: dateStr,
+                    status: 'Cleared',
+                    notes: `Attendance for ${staff.displayName || staff.email} on ${dateStr} set to Cleared`
+                }
+            });
+        })
+        .catch(async (serverError) => {
+            const permissionError = new FirestorePermissionError({
+                path: docRef.path,
+                operation: 'delete',
+            });
+            errorEmitter.emit('permission-error', permissionError);
+        });
+    } else {
+        const attendanceData = {
             staffUid: staff.uid,
             date: dateStr,
             status: newStatus,
@@ -248,25 +270,32 @@ export default function StaffAttendanceClientPage() {
             recordedByUid: user.uid,
             recordedByName: user.displayName || user.email,
             updatedAt: new Date().toISOString(),
-        }, { merge: true });
-      }
+        };
 
-      await logStaffActivity(user, {
-        type: 'ATTENDANCE_MARKED',
-        relatedStaffUid: staff.uid,
-        siteId: siteIdForAttendance,
-        details: {
-            date: dateStr,
-            status: newStatus || 'Cleared',
-            notes: `Attendance for ${staff.displayName || staff.email} on ${dateStr} set to ${newStatus || 'Cleared'}`
-        }
-      });
-
-    } catch(error: any) {
-      console.error("Error saving attendance:", error);
-      toast({ title: "Save Failed", description: `Failed to save status for ${staff.displayName}.`, variant: "destructive"});
+        setDoc(docRef, attendanceData, { merge: true })
+          .then(() => {
+              logStaffActivity(user, {
+                type: 'ATTENDANCE_MARKED',
+                relatedStaffUid: staff.uid,
+                siteId: siteIdForAttendance,
+                details: {
+                    date: dateStr,
+                    status: newStatus,
+                    notes: `Attendance for ${staff.displayName || staff.email} on ${dateStr} set to ${newStatus}`
+                }
+              });
+          })
+          .catch(async (serverError) => {
+              const permissionError = new FirestorePermissionError({
+                  path: docRef.path,
+                  operation: 'create', // Or 'update' depending on your logic
+                  requestResourceData: attendanceData,
+              });
+              errorEmitter.emit('permission-error', permissionError);
+          });
     }
-  }, [user, attendance, isHoliday, toast, staffDetailsMap, activeSiteId]);
+
+  }, [user, attendance, isHoliday, toast, staffDetailsMap]);
 
   const processBulkAction = async (action: (batch: ReturnType<typeof writeBatch>, staff: AppUser, date: Date) => { valid: boolean; status?: AttendanceStatus }) => {
     if (!user) {
@@ -543,5 +572,3 @@ export default function StaffAttendanceClientPage() {
     </div>
   );
 }
-
-    
