@@ -190,18 +190,10 @@ export default function StaffAttendanceClientPage() {
   const handleStatusChange = useCallback(async (staff: AppUser, date: Date) => {
     if (!user) return;
     
+    // The site ID for the attendance record is ALWAYS the staff member's own default site.
     const siteIdForAttendance: string | null = staff.defaultSiteId;
     
-    if (staff.role === 'manager' && !siteIdForAttendance) {
-        toast({
-            title: "Action Required",
-            description: `Managers must be assigned to at least one site to have their attendance tracked.`,
-            variant: "destructive",
-            duration: 7000
-        });
-        return;
-    }
-    if (staff.role === 'staff' && !siteIdForAttendance) {
+    if (!siteIdForAttendance) {
         toast({
             title: "Site Assignment Required",
             description: `${staff.displayName} is not assigned to a site. Attendance cannot be marked.`,
@@ -210,7 +202,6 @@ export default function StaffAttendanceClientPage() {
         });
         return;
     }
-
 
     const holidayInfo = isHoliday(date, siteIdForAttendance);
     if (holidayInfo.holiday) {
@@ -268,7 +259,7 @@ export default function StaffAttendanceClientPage() {
             status: newStatus,
             siteId: siteIdForAttendance,
             recordedByUid: user.uid,
-            recordedByName: user.displayName || user.email,
+            recordedByName: user.displayName || user.email!,
             updatedAt: new Date().toISOString(),
         };
 
@@ -370,8 +361,9 @@ export default function StaffAttendanceClientPage() {
       const docRef = doc(db, "staffAttendance", docId);
       batch.set(docRef, {
         staffUid: staff.uid, date: format(date, 'yyyy-MM-dd'), status,
-        siteId: staff.defaultSiteId, recordedByUid: user!.uid,
-        recordedByName: user!.displayName || user!.email, updatedAt: new Date().toISOString(),
+        siteId: staff.defaultSiteId!, // Use the staff's own site ID
+        recordedByUid: user!.uid,
+        recordedByName: user!.displayName || user!.email!, updatedAt: new Date().toISOString(),
       }, { merge: true });
       return { valid: true, status };
     });
@@ -434,8 +426,9 @@ export default function StaffAttendanceClientPage() {
         const docRef = doc(db, "staffAttendance", docId);
         batch.set(docRef, {
           staffUid: staff.uid, date: todayStr, status: 'Present',
-          siteId: staff.defaultSiteId, recordedByUid: user.uid,
-          recordedByName: user.displayName || user.email, updatedAt: new Date().toISOString(),
+          siteId: staff.defaultSiteId!,
+          recordedByUid: user.uid,
+          recordedByName: user.displayName || user.email!, updatedAt: new Date().toISOString(),
         }, { merge: true });
       });
 
