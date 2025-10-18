@@ -202,7 +202,7 @@ export default function PayrollClientPage() {
 
       return {
           user: u, details, advances, netPayable, paidAmount,
-          isPaid: paidAmount >= netPayable && netPayable > 0,
+          isPaid: paidAmount >= netPayable,
           workingDays, presentDays, earnedSalary,
       };
     }).sort((a,b) => (a.user.displayName || "").localeCompare(b.user.displayName || ""));
@@ -401,5 +401,3 @@ export default function PayrollClientPage() {
     </div>
   );
 }
-
-    
