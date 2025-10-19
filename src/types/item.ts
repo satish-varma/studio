@@ -1,13 +1,14 @@
+
 import * as z from "zod";
 
 export const stockItemSchema = z.object({
   name: z.string().min(2, { message: "Item name must be at least 2 characters." }),
   category: z.string().min(2, { message: "Category must be at least 2 characters." }),
-  description: z.string().optional(),
+  description: z.string().optional(), // Added description field
   quantity: z.coerce.number().int().min(0, { message: "Quantity cannot be negative." }),
   unit: z.string().min(1, { message: "Unit is required (e.g., pcs, kg, ltr)." }),
   price: z.coerce.number().min(0.00, { message: "Selling price must be a non-negative value." }),
-  costPrice: z.coerce.number().min(0, { message: "Cost price must be a non-negative value." }).optional().default(0),
+  costPrice: z.coerce.number().min(0.00, { message: "Cost price must be a non-negative value." }).optional(),
   lowStockThreshold: z.coerce.number().int().min(0, { message: "Low stock threshold cannot be negative." }),
   imageUrl: z.string().url({ message: "Please enter a valid URL for the image." }).optional().or(z.literal('')),
   siteId: z.string().nullable().optional(),

@@ -158,7 +158,7 @@ export default function ItemForm({ initialData, itemId, sitesMap = {}, stallsMap
         quantity: newQuantity,
         unit: values.unit,
         price: Number(values.price),
-        costPrice: values.costPrice, 
+        costPrice: values.costPrice ?? 0,
         lowStockThreshold: Number(values.lowStockThreshold),
         imageUrl: values.imageUrl || "",
         lastUpdated: new Date().toISOString(),
