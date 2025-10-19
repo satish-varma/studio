@@ -3,7 +3,7 @@
 
 import type { ReactNode } from 'react';
 import { AppHeaderContent } from '@/components/layout/AppHeaderContent';
-import { motion } from 'framer-motion';
+import { motion, type Transition } from 'framer-motion';
 import { usePathname } from 'next/navigation';
 
 // This layout file ensures that all pages under /foodstall share a common structure.
@@ -20,7 +20,7 @@ export default function FoodStallLayout({
     out: { opacity: 0, y: -10 },
   };
 
-  const pageTransition = {
+  const pageTransition: Transition = {
     type: "tween",
     ease: "anticipate",
     duration: 0.4,

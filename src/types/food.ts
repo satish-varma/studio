@@ -142,10 +142,10 @@ export type FoodSaleType = (typeof foodSaleTypes)[number];
 // Refactored to a flat structure for easier CSV mapping and form handling.
 export const foodSaleTransactionFormSchema = z.object({
   saleDate: z.date({ required_error: "Sale date is required." }),
-  saleType: z.enum(foodSaleTypes).default("Non-MRP"),
-  hungerboxSales: z.coerce.number().min(0).default(0),
-  upiSales: z.coerce.number().min(0).default(0),
-  totalAmount: z.coerce.number().min(0),
+  saleType: z.enum(foodSaleTypes, { required_error: "Sale type is required." }),
+  hungerboxSales: z.coerce.number().min(0, "Sales must be a positive number."),
+  upiSales: z.coerce.number().min(0, "Sales must be a positive number."),
+  totalAmount: z.coerce.number().min(0, "Total amount must be a positive number."),
   notes: z.string().optional().nullable(),
 });
 

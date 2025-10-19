@@ -5,7 +5,7 @@ import { useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { Loader2, LogOut } from 'lucide-react'; 
-import { motion } from "framer-motion";
+import { motion, type Transition } from "framer-motion";
 import { 
   SidebarProvider, 
   Sidebar, 
@@ -49,7 +49,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     out: { opacity: 0, y: -10 },
   };
 
-  const pageTransition = {
+  const pageTransition: Transition = {
     type: "tween",
     ease: "anticipate",
     duration: 0.4,

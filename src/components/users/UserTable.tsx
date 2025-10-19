@@ -205,7 +205,7 @@ export function UserTable({
                 const managedCount = user.managedSiteIds?.length || 0;
                 if (managedCount === 0) {
                     siteAssignmentDisplay = (
-                        <Button variant="outline" size="xs" onClick={() => openManageSitesDialog(user)}>Assign Sites</Button>
+                        <Button variant="outline" size="sm" onClick={() => openManageSitesDialog(user)}>Assign Sites</Button>
                     );
                 } else {
                     const firstSiteName = user.managedSiteIds?.[0] ? sites.find(s => s.id === user.managedSiteIds![0])?.name || user.managedSiteIds[0].substring(0,6) : '';
