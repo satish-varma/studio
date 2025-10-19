@@ -51,7 +51,7 @@ const createUserFormSchema = z.object({
   role: z.enum(['staff', 'manager', 'admin'], { required_error: "Role is required." }),
   defaultSiteId: z.string().nullable().optional(),
   defaultStallId: z.string().nullable().optional(),
-  managedSiteIds: z.array(z.string()).optional().default([]),
+  managedSiteIds: z.array(z.string()).optional(),
 }).refine(data => {
     // Only validate passwords if password field is not undefined (i.e., has been touched)
     if (data.password !== undefined) {
@@ -362,7 +362,7 @@ export default function CreateUserDialog({ isOpen, onClose, onCreateUserFirestor
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 text-muted-foreground"
+                            className="absolute right-1 top-1/2 h-7 w-4 -translate-y-1/2 text-muted-foreground"
                             onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                             tabIndex={-1}
                             aria-label={showConfirmPassword ? "Hide confirm password" : "Show confirm password"}

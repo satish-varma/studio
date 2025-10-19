@@ -48,7 +48,7 @@ export function DashboardSalesChart({ salesChartData }: DashboardSalesChartProps
           cursor={false}
           content={<ChartTooltipContent
             indicator="dot"
-            formatter={(value, name, props) => (
+            formatter={(value: number, name: string, props: any) => (
                 <div className="flex flex-col gap-0.5">
                     <span className="font-medium text-foreground">{format(new Date(props.payload.date), "MMM d, yyyy")}</span>
                     <span className="text-muted-foreground">Sales: <span className="font-semibold text-foreground">₹{Number(value).toFixed(2)}</span></span>
