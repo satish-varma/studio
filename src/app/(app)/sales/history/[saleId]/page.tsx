@@ -40,6 +40,7 @@ export default function SaleDetailsPage() {
   const printableComponentRef = useRef<HTMLDivElement>(null);
 
   const handlePrint = useReactToPrint({
+    // @ts-ignore
     content: () => printableComponentRef.current,
     documentTitle: `Receipt-Sale-${saleId?.substring(0,8) || 'details'}`,
     onBeforeGetContent: () => {

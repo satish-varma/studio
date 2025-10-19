@@ -8,7 +8,7 @@ export const stockItemSchema = z.object({
   quantity: z.coerce.number().int().min(0, { message: "Quantity cannot be negative." }),
   unit: z.string().min(1, { message: "Unit is required (e.g., pcs, kg, ltr)." }),
   price: z.coerce.number().min(0.00, { message: "Selling price must be a non-negative value." }),
-  costPrice: z.coerce.number().min(0.00, { message: "Cost price must be a non-negative value." }).optional().default(0),
+  costPrice: z.coerce.number().min(0, { message: "Cost price must be a non-negative value." }).optional().default(0),
   lowStockThreshold: z.coerce.number().int().min(0, { message: "Low stock threshold cannot be negative." }),
   imageUrl: z.string().url({ message: "Please enter a valid URL for the image." }).optional().or(z.literal('')),
   siteId: z.string().nullable().optional(),
